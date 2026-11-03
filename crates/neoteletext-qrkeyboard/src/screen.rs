@@ -4,6 +4,7 @@
 
 use std::collections::VecDeque;
 use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use neoteletext_web::url::Url;
@@ -101,6 +102,11 @@ pub struct Screen {
     socket_address: Url,
     secret: Secret,
     socket: Option<WebSocket>,
+    /// A reconnection under way on a thread of its own, which hands back
+    /// the socket, or why it failed, and wakes the wait (REQ-INT-009): the
+    /// handshake may take [`RESPONSE_TIMEOUT`](net::RESPONSE_TIMEOUT), and
+    /// the waiting thread must answer a wake meanwhile.
+    opening: Option<mpsc::Receiver<Result<WebSocket, Error>>>,
     pairing: Option<Pairing>,
     channel: Option<(Sealer, Opener)>,
     /// A frame from the phone has proved it holds the pairing secret: a
@@ -119,6 +125,21 @@ pub struct Screen {
     /// What ends a wait: the relay socket's reader and every [`Waker`].
     wakes: mpsc::Receiver<Wake>,
     wake_sender: mpsc::Sender<Wake>,
+}
+
+/// Opens the instance's WebSocket and sends the owner's `auth`, its first
+/// message; the socket's bytes wake the wait through `wake_sender`.
+fn open(
+    address: &Url,
+    owner: &str,
+    proxy: Option<&neoteletext_web::proxy::Proxy>,
+    wake_sender: &mpsc::Sender<Wake>,
+) -> Result<WebSocket, Error> {
+    let waker = Waker::new(wake_sender.clone(), Wake::Network);
+    let mut socket = WebSocket::connect(address, None, proxy, Some(waker))?;
+    let auth = Value::object(&[("t", Value::string("auth")), ("owner", Value::string(owner))]);
+    socket.send_text(&auth.text())?;
+    Ok(socket)
 }
 
 fn is_code(code: &str) -> bool {
@@ -198,6 +219,7 @@ impl Screen {
             socket_address,
             secret,
             socket: None,
+            opening: None,
             pairing: None,
             channel: None,
             authenticated: false,
@@ -218,13 +240,30 @@ impl Screen {
     }
 
     fn connect(&mut self) -> Result<(), Error> {
-        let waker = Waker::new(self.wake_sender.clone(), Wake::Network);
-        let mut socket = WebSocket::connect(&self.socket_address, None, self.proxy.as_ref(), Some(waker))?;
-        let auth = Value::object(&[("t", Value::string("auth")), ("owner", Value::string(&self.owner))]);
-        socket.send_text(&auth.text())?;
+        let socket = open(&self.socket_address, &self.owner, self.proxy.as_ref(), &self.wake_sender)?;
         self.socket = Some(socket);
         self.reconnect_at = None;
         Ok(())
+    }
+
+    /// Starts a reconnection on a thread of its own, so that the wait keeps
+    /// sleeping on its wakes while the relay takes its time (REQ-INT-009).
+    /// The thread hands back the socket, or why it failed, then wakes the
+    /// wait. A screen that has gone, or finished, has dropped the receiver,
+    /// so the socket that arrives late is dropped, and closed, there.
+    fn start_opening(&mut self) {
+        let (handed, opening) = mpsc::channel();
+        let address = self.socket_address;
+        let owner = self.owner.clone();
+        let proxy = self.proxy.clone();
+        let wake_sender = self.wake_sender.clone();
+        self.opening = Some(opening);
+        thread::spawn(move || {
+            let opened = open(&address, &owner, proxy.as_ref(), &wake_sender);
+            if handed.send(opened).is_ok() {
+                Waker::new(wake_sender, Wake::Network).wake();
+            }
+        });
     }
 
     /// The QR's address, the code and the PIN.
@@ -269,6 +308,9 @@ impl Screen {
     /// When the relay cannot be told; the session is closed here anyway.
     pub fn finish(&mut self) -> Result<(), Error> {
         self.finished = true;
+        // An opening still under way is abandoned: its socket is dropped,
+        // and so closed, when it arrives.
+        self.opening = None;
         if let Some(mut socket) = self.socket.take() {
             socket.close();
         }

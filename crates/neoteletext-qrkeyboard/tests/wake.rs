@@ -11,7 +11,7 @@
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used, reason = "a test")]
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -52,9 +52,9 @@ fn read_head(reader: &mut BufReader<TcpStream>) -> Vec<String> {
     }
 }
 
-/// The relay: answers `POST /i` with an instance on its own WebSocket,
-/// accepts that WebSocket, and then sends each text it is given.
-fn relay(listener: &TcpListener, texts: &mpsc::Receiver<String>) {
+/// Answers the screen's `POST /i` with an instance on the relay's own
+/// WebSocket.
+fn answer_instance(listener: &TcpListener) {
     let port = listener.local_addr().unwrap().port();
     let (stream, _) = listener.accept().unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -70,8 +70,11 @@ fn relay(listener: &TcpListener, texts: &mpsc::Receiver<String>) {
     let answer = format!(r#"{{"code":"{CODE}","ownerToken":"owner","relay":"ws://127.0.0.1:{port}/s"}}"#);
     let mut stream = stream;
     write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len()).unwrap();
-    drop(stream);
+}
 
+/// Accepts the screen's WebSocket and answers its handshake; the frames the
+/// screen sends (its auth) are read and dropped by a thread of their own.
+fn accept_websocket(listener: &TcpListener) -> TcpStream {
     let (stream, _) = listener.accept().unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let key = read_head(&mut reader)
@@ -88,16 +91,38 @@ fn relay(listener: &TcpListener, texts: &mpsc::Receiver<String>) {
         String::from_utf8_lossy(&accept_for(key.as_bytes()))
     )
     .unwrap();
-    // The screen's frames (its auth) are read and dropped.
     thread::spawn(move || {
         let mut sink = [0_u8; 1024];
         while reader.read(&mut sink).is_ok_and(|count| count > 0) {}
     });
+    stream
+}
+
+/// The relay: answers `POST /i` with an instance on its own WebSocket,
+/// accepts that WebSocket, and then sends each text it is given.
+fn relay(listener: &TcpListener, texts: &mpsc::Receiver<String>) {
+    answer_instance(listener);
+    let mut stream = accept_websocket(listener);
     for text in texts {
         let mut frame = vec![FIN_TEXT, u8::try_from(text.len()).unwrap()];
         frame.extend_from_slice(text.as_bytes());
         stream.write_all(&frame).unwrap();
     }
+}
+
+/// A relay that drops the screen's WebSocket as soon as it is open, then
+/// accepts the screen's next connection and never answers its handshake,
+/// as a relay that is restarting or overloaded may. It reports when it holds
+/// that connection, and holds it until `release` ends.
+fn dropping_relay(listener: &TcpListener, holding: &mpsc::Sender<()>, release: &mpsc::Receiver<()>) {
+    answer_instance(listener);
+    let first = accept_websocket(listener);
+    first.shutdown(Shutdown::Both).unwrap();
+    drop(first);
+    let (second, _) = listener.accept().unwrap();
+    holding.send(()).unwrap();
+    let _ = release.recv();
+    drop(second);
 }
 
 /// A screen on a played relay, and the sender of what the relay says.
@@ -181,4 +206,38 @@ fn a_wait_nothing_ends_lasts_its_limit_and_reports_nothing() {
     let took = started.elapsed();
     assert!(events.is_empty(), "{events:?}");
     assert!(took >= QUIET && took < QUIET + OVERRUN, "{took:?}");
+}
+
+// REQ-199 (REQ-INT-009): a wake ends the wait at once even while the screen
+// is reconnecting to a relay that dropped it and does not answer the new
+// handshake. The opening of the connection must not hold up the wait: before
+// the fix it blocked the waiting thread for the handshake's 15-second limit.
+#[test]
+fn a_waker_ends_the_wait_while_the_screen_reconnects() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (holding, held) = mpsc::channel();
+    let (release, released) = mpsc::channel::<()>();
+    thread::spawn(move || dropping_relay(&listener, &holding, &released));
+    let config =
+        ScreenConfig { name: "reconnect test".into(), layout: Layout::Terminal, pin: false, rejoin_seconds: None };
+    let mut screen = Screen::create(&format!("http://127.0.0.1:{port}"), config, None).unwrap();
+    let waker = screen.waker();
+    let (woke_at, woke) = mpsc::channel();
+    thread::spawn(move || {
+        // The relay holds the screen's second connection: the screen is
+        // reconnecting, and the handshake will never be answered.
+        held.recv().unwrap();
+        thread::sleep(ASLEEP);
+        woke_at.send(Instant::now()).unwrap();
+        waker.wake();
+    });
+    let events = screen.wait(Some(LIMIT)).unwrap();
+    let ended = Instant::now();
+    let woken = woke.recv_timeout(LIMIT).expect("the relay never saw the screen reconnect");
+    let late = ended.saturating_duration_since(woken);
+    println!("woken {late:?} after the wake, during a reconnection");
+    drop(release);
+    assert!(events.is_empty(), "{events:?}");
+    assert!(late < OVERRUN, "the wait went on {late:?} after the wake: the reconnection held it up");
 }
