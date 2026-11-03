@@ -1118,3 +1118,25 @@ fn a_stored_page_keeps_what_was_received() {
     assert_eq!(page.receptions, 2);
     assert_eq!(page.errors, 1);
 }
+
+/// REQ-136 (REQ-FSM-004), REQ-142, DEC-2368: C8 is raised by the page
+/// machine's own row, Partial with a C8 header, so the trace shows it.
+#[test]
+fn c8_is_raised_by_the_page_machine() {
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let config = Config { trace: true, ..Config::default() };
+    let mut decoder = Decoder::new(&mut slots, config);
+    let mut events = Vec::new();
+    feed(&mut decoder, &[header(1, 0x01, 0, crate::consts::C8_UPDATE)], &mut events);
+    let raised: Vec<(&str, &str, &str, &str)> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Trace(entry) if entry.event == "update indicator" => {
+                Some((entry.from, entry.event, entry.action, entry.to))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(raised, [("Partial", "update indicator", "raise update indicator", "Partial")]);
+    assert!(events.contains(&Event::UpdateIndicator(key(0x101, 0))));
+}

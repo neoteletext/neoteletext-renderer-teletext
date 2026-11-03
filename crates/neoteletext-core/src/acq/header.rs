@@ -4,7 +4,7 @@
 
 use super::{Decoder, Event, ROLLING_BYTES, Route};
 use crate::consts::{C4_ERASE, C8_UPDATE, C9_INTERRUPTED, HEADER_DISPLAY_BYTES, HEADER_DISPLAY_COLUMN, MAGAZINES};
-use crate::fsm::{MagazineEvent, MagazineState, PageKey};
+use crate::fsm::{MagazineEvent, MagazineState, PageEvent, PageKey};
 use crate::packet::Header;
 use crate::types::{ControlBits, Instant, PageAddress, PageNumber};
 
@@ -81,11 +81,13 @@ impl Decoder<'_> {
     fn header_store(&mut self, header: &Header, now: Instant, events: &mut dyn FnMut(Event)) {
         let index = header.magazine.index();
         let Some(control) = header.control else { return };
-        let Some(MagazineState::Receiving(key)) = self.magazines.get(index).copied() else { return };
+        let Some(MagazineState::Receiving(_)) = self.magazines.get(index).copied() else { return };
         let Some(slot) = self.receiving_slot.get(index).copied().flatten() else { return };
         self.store_header(slot, &header.display, control, now);
+        // The page machine raises it, as its table says (REQ-FSM-004,
+        // DEC-2368): the header has just made the page Partial.
         if control.has(C8_UPDATE) {
-            events(Event::UpdateIndicator(key));
+            self.page_event(slot, PageEvent::UpdateIndicator, now, events);
         }
     }
 

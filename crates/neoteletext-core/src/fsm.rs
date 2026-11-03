@@ -249,13 +249,15 @@ pub const fn page_transition(state: PageState, event: PageEvent) -> (PageState, 
         (S::Partial, E::ReceptionEnded) => (S::Complete, A::Completed),
         (S::Complete | S::Stale, E::ReceptionStarted { erase: false }) => (S::Partial, A::MergeAndStart),
         (S::Complete | S::Stale, E::ReceptionStarted { erase: true }) => (S::Partial, A::Erase),
-        (S::Complete, E::UpdateIndicator) => (S::Complete, A::UpdateIndicator),
+        // A header with C8 is seen as it starts a reception, so the page is
+        // Partial by then (DEC-2368).
+        (S::Partial, E::UpdateIndicator) => (S::Partial, A::UpdateIndicator),
         (S::Complete, E::NotReceived) => (S::Stale, A::Stale),
         (S::Empty | S::Partial | S::Complete | S::Stale, E::Evicted) => (S::Empty, A::Release),
         // Combinations the table does not list change nothing.
         (S::Empty, E::RowStored(_) | E::ReceptionEnded | E::UpdateIndicator | E::NotReceived) => (S::Empty, A::None),
-        (S::Partial, E::ReceptionStarted { .. } | E::UpdateIndicator | E::NotReceived) => (S::Partial, A::None),
-        (S::Complete, E::RowStored(_) | E::ReceptionEnded) => (S::Complete, A::None),
+        (S::Partial, E::ReceptionStarted { .. } | E::NotReceived) => (S::Partial, A::None),
+        (S::Complete, E::RowStored(_) | E::ReceptionEnded | E::UpdateIndicator) => (S::Complete, A::None),
         (S::Stale, E::RowStored(_) | E::ReceptionEnded | E::UpdateIndicator | E::NotReceived) => (S::Stale, A::None),
     }
 }
