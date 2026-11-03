@@ -101,8 +101,9 @@ impl VoiceSink for Recorder {
     }
 }
 
-/// A DATA record holding `blocks` of `sound` from `first`, framed.
-#[cfg(feature = "pcm16")]
+/// A DATA record holding `blocks` of `sound` from `first`, framed. Every
+/// build of these tests uses it: they need `encode`, which brings IMA
+/// ADPCM, whose sink tests send records of their own.
 fn data_record(sound: &Sound, first: u16, blocks: &[u8]) -> Vec<u8> {
     let mut body = vec![sound.handle];
     body.extend_from_slice(&sound.generation.to_be_bytes());
