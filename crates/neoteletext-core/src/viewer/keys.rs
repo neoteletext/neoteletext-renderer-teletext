@@ -70,9 +70,16 @@ impl Viewer {
                     Action::None
                 }
             }
+            // REQ-286 (Annex H.4): Index follows the page's index link; on
+            // a page with no links at all it requests the initial page; an
+            // absent index link on a page with coloured links leaves the
+            // key without effect. An index link to another service stays in
+            // this service, at its initial page (DEC-2198).
             Key::Index => match links.index {
                 Some(target) if target.service.is_none() => self.select(target.address, target.subcode, true),
-                _ => self.select(initial, SubCode::ANY, true),
+                Some(_) => self.select(initial, SubCode::ANY, true),
+                None if links.no_coloured_links() => self.select(initial, SubCode::ANY, true),
+                None => Action::None,
             },
             Key::Home => self.select(initial, SubCode::ANY, true),
             Key::NextPage | Key::PreviousPage => {

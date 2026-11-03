@@ -298,8 +298,8 @@ fn a_key_needs_its_own_prompt_shown() {
 /// coloured keys follow links in the same service at once, and links to a
 /// confirmed service at once; a key without a link does nothing; an
 /// unconfirmed link asks only while the page is displayed. Index follows
-/// the page's index link in the service, and otherwise, like Home,
-/// requests the initial page.
+/// the page's index link in the service; with none it requests the
+/// initial page only on a page with no links at all (REQ-286).
 #[test]
 fn coloured_index_and_home_keys() {
     let mut slots = std::vec![StoredPage::EMPTY; 2];
@@ -332,15 +332,21 @@ fn coloured_index_and_home_keys() {
     assert_eq!(&viewer.status(decoder.store())[..1], b"P", "the indicator is cleared");
     assert_eq!(viewer.key(Key::Index, &unconfirmed), Action::Request(page(0x199), SubCode::ANY));
     assert_eq!(viewer.key(Key::Home, &unconfirmed), Action::Request(page(0x100), SubCode::ANY));
-    // Without an index link, or with one to another service, Index stays
-    // in the service and requests the initial page.
-    for index in [None, Some(away)] {
-        let links = PageLinks { index, ..links };
+    // REQ-286: with an index link to another service, Index stays in the
+    // service and requests the initial page (DEC-2198); on a page with no
+    // links at all it requests the initial page; with coloured links and
+    // no index link it does nothing.
+    let none = PageLinks::default();
+    for (links, expected) in [
+        (PageLinks { index: Some(away), ..links }, Action::Request(page(0x100), SubCode::ANY)),
+        (none, Action::Request(page(0x100), SubCode::ANY)),
+        (PageLinks { index: None, ..links }, Action::None),
+    ] {
         viewer.key(Key::Digit(5), &unconfirmed);
         viewer.key(Key::Digit(0), &unconfirmed);
         viewer.key(Key::Digit(0), &unconfirmed);
         let keys = context(&links, decoder.store(), &config, &no);
-        assert_eq!(viewer.key(Key::Index, &keys), Action::Request(page(0x100), SubCode::ANY), "{index:?}");
+        assert_eq!(viewer.key(Key::Index, &keys), expected, "{links:?}");
     }
 }
 
