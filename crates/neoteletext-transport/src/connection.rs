@@ -31,7 +31,7 @@ pub struct Connection {
 
 /// A connection's reader thread: passes on what the socket gives, waking
 /// the owner each time, until the socket ends or nothing takes the bytes.
-fn read_socket(mut socket: TcpStream, chunks: &SyncSender<Vec<u8>>, read_bytes: usize, wake: &impl Fn()) {
+fn read_socket(mut socket: TcpStream, chunks: SyncSender<Vec<u8>>, read_bytes: usize, wake: &impl Fn()) {
     let mut buffer = vec![0_u8; read_bytes];
     loop {
         let count = match socket.read(&mut buffer) {
@@ -47,7 +47,10 @@ fn read_socket(mut socket: TcpStream, chunks: &SyncSender<Vec<u8>>, read_bytes: 
         wake();
     }
     // The owner sees the end as the channel's: this thread's sender is the
-    // only one.
+    // only one, so it is dropped before the wake. Woken while it was still
+    // held, an owner that looked at once found the channel open and empty,
+    // slept again, and was never woken for the end.
+    drop(chunks);
     wake();
 }
 
@@ -117,7 +120,7 @@ impl Connection {
         socket.set_read_timeout(None)?;
         let reader = socket.try_clone()?;
         let (sender, chunks) = mpsc::sync_channel(READS_AHEAD);
-        std::thread::spawn(move || read_socket(reader, &sender, read_bytes, &wake));
+        std::thread::spawn(move || read_socket(reader, sender, read_bytes, &wake));
         Ok(Self { socket, tls, chunks, pending: first.into() })
     }
 

@@ -110,6 +110,30 @@ fn the_end_of_the_socket_closes_the_connection_and_wakes_its_owner() {
     assert_eq!(wakes.load(Ordering::SeqCst), 1);
 }
 
+// REQ-199 (REQ-INT-009), decisions DEC-630 and DEC-621: an owner woken by the
+// socket's end sees the end at once, without waiting, when its wake comes.
+// The reader thread used to wake its owner while it still held the channel's
+// sender, so an owner quick enough to look in that moment saw nothing, went
+// back to sleep, and was never woken again: the qrkeyboard screen slept to
+// its limit and never reconnected. Here the wake holds the reader thread
+// until the owner has looked, so that moment is certain, not a race.
+#[test]
+fn an_owner_woken_by_the_end_of_the_socket_sees_it_without_waiting() {
+    let (socket, peer) = socket_pair();
+    let (woke, woken) = std::sync::mpsc::channel();
+    let (looked, look) = std::sync::mpsc::channel::<()>();
+    let mut connection = Connection::start(socket, None, Vec::new(), READ_BYTES, move || {
+        woke.send(()).unwrap();
+        let _ = look.recv();
+    })
+    .unwrap();
+    drop(peer);
+    woken.recv_timeout(LIMIT).expect("the end of the socket woke the owner");
+    let seen = connection.take(&mut [0_u8; 8], None, write_records).unwrap();
+    drop(looked);
+    assert_eq!(seen, Received::Closed);
+}
+
 /// A peer that sends far more than the owner takes fills the reader
 /// thread's channel, and then the operating system's buffer: the thread
 /// holds no more than its bound.
