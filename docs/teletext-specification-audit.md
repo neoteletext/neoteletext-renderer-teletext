@@ -14,7 +14,7 @@ Reviewed the packet/ECC, acquisition, character-set, Level 1, Level 1.5, enhance
 
 - `~/devel/teletext-reference/teletext-standards/EN_300_706_v1.2.1_Enhanced_Teletext.pdf`: packet protection, presentation, active position, Font Style and transmission sequencing.
 - `~/devel/teletext-reference/teletext-fonts/manufacturers/philips/datasheets/saa5050/SAA5050-55_Teletext_Character_Generator_Philips.pdf`: character generator behavior, flash and rounding.
-- `~/devel/teletext-reference/teletext-fonts/manufacturers/philips/datasheets/saa5246a/ (the SAA5246A handbook)`: receiver and page-memory context.
+- `~/devel/teletext-reference/teletext-fonts/manufacturers/philips/datasheets/saa5246a/PHILIPS-SAA5246A-INTEGRATED-VIP-TELETEXT-(IVT1.0)-HANDBOOK.PDF`: receiver and page-memory context.
 
 Other manufacturers' ICs were not individually audited. The software's named behavior baselines are SAA5050 and SAA5246A. This assessment does not establish electrical, register, bus or cycle equivalence to either device. Web forms and service-link extensions are project features, not evidence of broadcast teletext conformance.
 
