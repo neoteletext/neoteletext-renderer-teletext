@@ -27,3 +27,6 @@ pub(super) const COMBINING_MARKS: [Option<char>; 17] = [
 pub(super) fn diacritic_combining(mark: u8) -> Option<char> {
     COMBINING_MARKS.get(usize::from(mark)).copied().flatten()
 }
+
+#[cfg(test)]
+mod tests;

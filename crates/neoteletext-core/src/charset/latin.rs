@@ -117,3 +117,6 @@ pub(super) fn national_char(option: NationalOption, code: u8) -> Option<char> {
     let position = NATIONAL_POSITIONS.iter().position(|&candidate| candidate == code)?;
     national_subset(option).get(position).copied()
 }
+
+#[cfg(test)]
+mod tests;

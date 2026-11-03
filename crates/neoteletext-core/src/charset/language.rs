@@ -257,3 +257,7 @@ pub fn region_for_iso_639_2(code: [u8; 3]) -> u8 {
         .and_then(|(_, tag)| language(tag))
         .map_or(0, |found| found.standard.unwrap_or(found.value) >> DESIGNATION_GROUP_SHIFT)
 }
+
+// Its one test reads the table of the extended sets.
+#[cfg(all(test, feature = "extended-sets"))]
+mod tests;

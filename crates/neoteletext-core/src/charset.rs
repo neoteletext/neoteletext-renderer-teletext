@@ -489,5 +489,8 @@ pub fn latin_text<const N: usize>(codes: &[u8; N]) -> [char; N] {
     codes.map(|code| to_unicode(CharRef::new(latin, code)).base)
 }
 
+// The builders the tests of the character sets' modules share; the table
+// builders keep the layout of the tables they hold.
 #[cfg(test)]
-mod tests;
+#[rustfmt::skip]
+mod test_tables;

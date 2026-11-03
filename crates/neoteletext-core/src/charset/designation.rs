@@ -162,3 +162,6 @@ pub(super) fn second_g0(value: u8) -> Option<G0> {
     // value; only the G2 column is absent (clause 15.3).
     table_32_entry(value).map(|(g0, _)| g0)
 }
+
+#[cfg(test)]
+mod tests;

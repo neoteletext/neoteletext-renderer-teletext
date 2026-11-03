@@ -205,3 +205,6 @@ pub fn render_screen(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

@@ -169,3 +169,6 @@ pub fn palette_colour(index: usize, flash_visible: bool, reveal: bool) -> u8 {
     }
     PALETTE_TRANSPARENT
 }
+
+#[cfg(test)]
+mod tests;

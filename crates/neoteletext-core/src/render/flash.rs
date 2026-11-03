@@ -130,3 +130,6 @@ pub fn flash_visible(now: Instant, config: &Config) -> bool {
     }
     now.0.checked_rem(period).unwrap_or(0) < config.flash_shown_us
 }
+
+#[cfg(test)]
+mod tests;

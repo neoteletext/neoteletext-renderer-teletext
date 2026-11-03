@@ -142,3 +142,6 @@ impl ChangeTracker {
         self.primed = false;
     }
 }
+
+#[cfg(test)]
+mod tests;

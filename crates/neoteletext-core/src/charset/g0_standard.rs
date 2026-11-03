@@ -109,3 +109,6 @@ pub(super) const HEBREW_G0: CodeTable = [
     '\u{05E0}', '\u{05E1}', '\u{05E2}', '\u{05E3}', '\u{05E4}', '\u{05E5}', '\u{05E6}',
     '\u{05E7}', '\u{05E8}', '\u{05E9}', '\u{05EA}', '\u{20AA}', '‖', '¾', '÷', '■', //
 ];
+
+#[cfg(test)]
+mod tests;

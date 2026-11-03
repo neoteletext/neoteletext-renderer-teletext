@@ -249,3 +249,6 @@ pub fn cell_line(
     };
     CellLine { mask, foreground, background }
 }
+
+#[cfg(test)]
+mod tests;

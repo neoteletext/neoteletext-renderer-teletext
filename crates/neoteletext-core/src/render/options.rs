@@ -84,3 +84,6 @@ impl RenderOptions {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

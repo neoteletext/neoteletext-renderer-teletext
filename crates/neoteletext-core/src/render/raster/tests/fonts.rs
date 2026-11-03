@@ -9,7 +9,7 @@
     reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
 )]
 
-// The module is compiled for tests only (see `render/tests.rs`); the attribute
+// The module is compiled for tests only (see `render/raster/tests.rs`); the attribute
 // also marks this file as test code for `cargo xtask check-layers`.
 #[cfg(test)]
 use super::*;

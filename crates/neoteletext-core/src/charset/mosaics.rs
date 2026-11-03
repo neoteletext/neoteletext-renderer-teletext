@@ -44,3 +44,6 @@ pub(super) fn mosaic_unicode(pattern: u8, separated: bool) -> char {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

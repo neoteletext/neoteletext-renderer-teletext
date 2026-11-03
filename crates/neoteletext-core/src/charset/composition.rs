@@ -404,3 +404,6 @@ const DOT_BELOW: char = '\u{0323}';
 pub(super) fn without_dot_below(letter: char) -> Option<char> {
     COMPOSITIONS.iter().find(|&&(_, mark, composed)| composed == letter && mark == DOT_BELOW).map(|&(base, ..)| base)
 }
+
+#[cfg(test)]
+mod tests;

@@ -95,3 +95,6 @@ pub(super) const ARMENIAN_G2: CodeTable = {
     table[0x65 - 0x20] = '\u{055C}';
     table
 };
+
+#[cfg(test)]
+mod tests;

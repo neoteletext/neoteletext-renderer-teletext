@@ -35,3 +35,6 @@ pub(super) const G3: CodeTable = [
     '\u{1FB63}', '\u{1FB64}', '\u{1FB65}', '\u{1FB66}', '\u{1FB67}', '\u{1FB6E}', '\u{1FB6F}',
     ' ', ' ', //
 ];
+
+#[cfg(test)]
+mod tests;

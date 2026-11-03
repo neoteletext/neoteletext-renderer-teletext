@@ -104,3 +104,6 @@ pub(super) fn base_unicode(set: CharSet, code: u8) -> char {
         CharSet::G3 => lookup(&G3, code),
     }
 }
+
+#[cfg(test)]
+mod tests;
