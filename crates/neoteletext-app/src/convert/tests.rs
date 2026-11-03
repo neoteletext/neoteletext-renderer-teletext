@@ -26,6 +26,54 @@ fn session_of(packets: &[Packet]) -> Session {
     session
 }
 
+/// REQ-473 (REQ-TST-020), REQ-INP-016: the authored stream's display pages,
+/// written as edit.tf addresses as `neottx convert --to edittf` writes them,
+/// read back and encoded as packets, decode to the same pages: their keys,
+/// cells, X/26 enhancements and control bits. edit.tf carries a page's rows,
+/// its X/26 packets, its links and its header fields, and no page function,
+/// so the stream's enhancement pages (its Magazine Organization Table and
+/// object pages), which would come back as display pages, are not written.
+#[test]
+fn authored_stream_converts_to_edittf_and_back() {
+    let stream = streams::stream().unwrap();
+    let first = session_of(&stream.packets());
+    let shown: Vec<_> = first.pages().iter().map(|page| (page.key.address, page.key.subcode)).collect();
+    let files = session_page_files(&first, None);
+    let mut text = Vec::new();
+    for page in files.iter().filter(|page| shown.contains(&(page.address, page.subcode))) {
+        text.extend_from_slice(EDITTF_ADDRESS_PREFIX);
+        neoteletext_formats::edittf::write(page, &mut |bytes| text.extend_from_slice(bytes));
+        text.push(b'\n');
+    }
+    let mut reader =
+        AutoReader::new(AutoConfig { format: Some(Format::EditTf), encode_pages: true, ..AutoConfig::default() });
+    let (mut packets, mut faults) = (Vec::new(), Vec::new());
+    let mut collect = |item: Item<'_>| match item {
+        Item::Packet { packet, .. } => packets.push(packet),
+        Item::Diagnostic(diagnostic) => faults.push(format!("{diagnostic:?}")),
+        _ => {}
+    };
+    reader.feed(&text, &mut collect);
+    reader.finish(&mut collect);
+    assert_eq!(faults, Vec::<String>::new());
+    let second = session_of(&packets);
+    let enhanced =
+        |session: &Session| session.pages().into_iter().filter(|page| page.enhancements_present != 0).count();
+    let (left, right) = (first.pages(), second.pages());
+    assert_eq!(
+        left.iter().map(|page| page.key).collect::<Vec<_>>(),
+        right.iter().map(|page| page.key).collect::<Vec<_>>()
+    );
+    assert!(left.len() >= 27);
+    assert!(enhanced(&first) > 0, "some pages carry X/26, so the enhancements are checked");
+    for (a, b) in left.iter().zip(&right) {
+        let name = a.key.address.mpp();
+        assert_eq!(a.cells, b.cells, "{name:X}");
+        assert_eq!((a.enhancements, a.enhancements_present), (b.enhancements, b.enhancements_present), "{name:X}");
+        assert_eq!(a.control, b.control, "{name:X}");
+    }
+}
+
 /// REQ-INP-023 and REQ-TST-020: the authored stream (REQ-TST-024),
 /// converted from T42 to TTI and read back, gives the same stores:
 /// display pages with their packets 26 to 28, enhancement pages as
