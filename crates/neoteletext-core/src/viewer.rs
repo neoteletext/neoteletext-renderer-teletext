@@ -97,6 +97,11 @@ pub enum Action {
     FollowService(LinkTarget),
     /// Ask for confirmation of a link to another service.
     ConfirmService(LinkTarget),
+    /// Back or Forward reached an entry of another service of the session
+    /// (REQ-NAV-010): the port opens that service again, by the number it
+    /// gave it in [`Viewer::followed`], and asks it for the entry's page.
+    /// The viewer is already on that service and page.
+    ReturnTo(HistoryEntry),
 }
 
 /// Events from the decoder that drive the viewer.
@@ -337,6 +342,23 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
         self.service = service;
     }
 
+    /// The service the viewer is showing, as the port numbered it.
+    #[must_use]
+    pub const fn service(&self) -> u8 {
+        self.service
+    }
+
+    /// The port followed a link to another service, which it numbers
+    /// `service` in its table of the services opened this session, and
+    /// asked it for `address`: the viewer goes on in that service, and the
+    /// page is one visit of the history, which keeps the pages before it so
+    /// that Back returns across the link (REQ-NAV-010). The port fetches
+    /// the page with the link, so nothing more is asked of it.
+    pub fn followed(&mut self, service: u8, address: PageAddress, subcode: SubCode) {
+        self.service = service;
+        let _ = self.select(address, subcode, true);
+    }
+
     /// The history.
     #[must_use]
     pub const fn history(&self) -> &History<HISTORY> {
@@ -368,6 +390,13 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
         let action = self.select(address, subcode, false);
         self.history.replace_current(HistoryEntry { service: self.service, address, subcode });
         action
+    }
+
+    /// Goes to `address` because the channel's program sent the viewer
+    /// there (DOC-1960, REQ-1502): a visit of the history, as a link is
+    /// (REQ-NAV-010), from whatever the viewer was doing.
+    pub fn go_to(&mut self, address: PageAddress, subcode: SubCode) -> Action {
+        self.run(ViewerInput::Redirect(address, subcode))
     }
 
     /// Handles a decoder event (REQ-FSM-005).
@@ -425,7 +454,15 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
             ViewerAction::Select(address, subcode) => self.select(address, subcode, true),
             ViewerAction::MoveInHistory { forward, entry } => {
                 let _ = if forward { self.history.forward() } else { self.history.back() };
-                self.select(entry.address, entry.subcode, false)
+                let request = self.select(entry.address, entry.subcode, false);
+                if entry.service == self.service {
+                    request
+                } else {
+                    // REQ-NAV-010: an entry records its service, and going
+                    // back to it goes back to that service.
+                    self.service = entry.service;
+                    Action::ReturnTo(entry)
+                }
             }
             ViewerAction::ShowSubPage(subcode) => {
                 self.subcode = subcode;

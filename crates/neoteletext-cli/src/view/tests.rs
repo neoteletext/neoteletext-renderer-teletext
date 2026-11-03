@@ -837,3 +837,90 @@ fn every_function_of_the_interactive_viewer_has_its_key() {
     assert_eq!(key(KeyCode::Right), Some(Key::NextSubPage));
     assert_eq!(key(KeyCode::Left), Some(Key::PreviousSubPage));
 }
+
+/// A source of a service linking to others that records the links followed
+/// and the services reopened, numbering the services as `Live` does.
+#[derive(Default)]
+struct Travelling {
+    linked: Vec<neoteletext_app::pipe::ServiceEntry>,
+    followed: Vec<(u8, u16)>,
+    reopened: Vec<(u8, u16)>,
+}
+
+impl neoteletext_app::source::Source for Travelling {
+    fn poll(
+        &mut self,
+        _session: &mut neoteletext_app::session::Session,
+        _now: neoteletext_core::types::Instant,
+    ) -> bool {
+        true
+    }
+
+    fn linked_service(&self, service: u8) -> Option<neoteletext_app::pipe::ServiceEntry> {
+        self.linked.get(usize::from(service)).cloned()
+    }
+
+    fn follow(
+        &mut self,
+        service: u8,
+        page: neoteletext_core::types::PageAddress,
+        _subcode: neoteletext_core::types::SubCode,
+    ) -> Option<u8> {
+        self.followed.push((service, page.mpp()));
+        u8::try_from(self.followed.len()).ok()
+    }
+
+    fn reopen(
+        &mut self,
+        number: u8,
+        page: neoteletext_core::types::PageAddress,
+        _subcode: neoteletext_core::types::SubCode,
+    ) {
+        self.reopened.push((number, page.mpp()));
+    }
+}
+
+/// REQ-295 (REQ-NAV-010): following a link to another service keeps the
+/// viewer and its history; Back then returns to the first service and its
+/// page, by the number the session gave it, and Forward goes on again to
+/// the service followed, both without asking (REQ-288); a page the
+/// channel's program sends the viewer to is a visit Back returns from.
+#[test]
+fn back_returns_across_a_link_to_another_service_and_forward_goes_on() {
+    use neoteletext_core::nav::{HistoryEntry, LinkTarget};
+    use neoteletext_core::types::{PageAddress, SubCode};
+    use neoteletext_core::viewer::Action;
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut source =
+        Travelling { linked: vec![linked("weather", "Weather", "https://weather.example")], ..Travelling::default() };
+    let mut state = view_state(&session);
+    state.act(&mut session, &mut source);
+    type_number(&mut state, &mut source, &session, None, &"200".chars().map(KeyCode::Char).collect::<Vec<_>>());
+    state.act(&mut session, &mut source);
+    state.action = Action::FollowService(LinkTarget { address: page(0x301), subcode: SubCode::ANY, service: Some(0) });
+    state.act(&mut session, &mut source);
+    assert_eq!(source.followed, [(0, 0x301)]);
+    assert_eq!((state.viewer.service(), state.viewer.requested().0), (1, page(0x301)));
+    // The channel's program sends the viewer to 302 of the service followed.
+    state.typing.redirected(0x302, SubCode::ANY.value(), None);
+    let (requested, subcode) = state.viewer.requested();
+    assert!(state.typing_turn(&mut session, &mut source, requested, subcode));
+    assert_eq!(state.viewer.requested().0, page(0x302));
+    let config = neoteletext_core::config::Config::default();
+    let shown = super::Shown { page: None, extras: None, config: &config, now: neoteletext_core::types::Instant(0) };
+    let mut press = |state: &mut super::ViewState, code, modifiers| {
+        let _ = state.key(KeyEvent::new(code, modifiers), &mut source, &session, &shown, 0);
+        let action = state.action;
+        state.act(&mut neoteletext_app::session::Session::new(config, 8), &mut source);
+        action
+    };
+    assert_eq!(press(&mut state, KeyCode::Backspace, KeyModifiers::NONE), Action::Request(page(0x301), SubCode::ANY));
+    let first = HistoryEntry { service: 0, address: page(0x200), subcode: SubCode::ANY };
+    assert_eq!(press(&mut state, KeyCode::Backspace, KeyModifiers::NONE), Action::ReturnTo(first));
+    assert_eq!(state.prompt, None, "no question");
+    let again = HistoryEntry { service: 1, address: page(0x301), subcode: SubCode::ANY };
+    assert_eq!(press(&mut state, KeyCode::Right, KeyModifiers::ALT), Action::ReturnTo(again));
+    assert_eq!(source.reopened, [(0, 0x200), (1, 0x301)]);
+    assert_eq!((state.viewer.service(), state.viewer.requested().0), (1, page(0x301)));
+}

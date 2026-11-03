@@ -23,6 +23,12 @@ pub const MAX_LIST_ROWS: usize = 64;
 pub const MAX_LIST_VERSION: usize = 16;
 /// The most pages an index record holds: it is one magazine's.
 pub const MAX_INDEX_PAGES: usize = neoteletext_core::limits::PAGE_NUMBERS_PER_MAGAZINE;
+/// The most services a session opens (REQ-NAV-010): the service opened
+/// first and one for each link followed to another service. The fetcher and
+/// the decoder each number them in the order they were opened, from 0, and
+/// a history entry names its service by that number, which fits the core's
+/// `u8`; a link followed beyond it is refused.
+pub const MAX_SESSION_SERVICES: usize = 1 << u8::BITS;
 /// The most sub-codes of one record of a live list: a page's every sub-page.
 pub const MAX_LIVE_LIST: usize = neoteletext_core::limits::MAX_SUBPAGES;
 
@@ -69,8 +75,19 @@ pub enum Frame {
     Notice(Notice),
     /// Decoder to fetcher: request a page (`0xMPP`, sub-code or 0xFFFF).
     Request(u16, u16),
-    /// Decoder to fetcher: follow a link to another service.
+    /// Decoder to fetcher: follow a link to another service, by its short
+    /// name in the open descriptor, to page `0xMPP` at a sub-code or 0xFFFF.
+    /// Each one the fetcher takes while the session has fewer than
+    /// [`MAX_SESSION_SERVICES`] gives the next number of the session's
+    /// services, even when the name is unknown, so that the two processes
+    /// number them alike.
     Follow(String, u16, u16),
+    /// Decoder to fetcher: open again the session's service of this number
+    /// (see [`Frame::Follow`]) and fetch its page `0xMPP` at a sub-code or
+    /// 0xFFFF, where Back or Forward returned to it (REQ-NAV-010). The
+    /// decoder names a number, never an address: only the fetcher holds
+    /// the addresses, and only those it opened.
+    Reopen(u8, u16, u16),
     /// Decoder to fetcher: fetch this part of page `0xMPP`'s list of
     /// sub-pages (REQ-1888), answered by [`Notice::SubPages`] or
     /// [`Notice::SubPagesMissing`].

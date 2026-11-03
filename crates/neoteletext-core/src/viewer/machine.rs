@@ -102,6 +102,9 @@ pub enum ViewerInput {
     Forward(Option<HistoryEntry>),
     /// A sub-page chosen by the port (`show_subpage`).
     ChooseSubPage(SubCode),
+    /// A page the channel's program sent the viewer to (`go_to`; DOC-1960,
+    /// REQ-1502).
+    Redirect(PageAddress, SubCode),
 }
 
 /// What a transition does, applied by [`Viewer`](super::Viewer).
@@ -254,6 +257,29 @@ pub fn viewer_transition(machine: ViewerMachine, input: ViewerInput) -> (ViewerM
             I::ChooseSubPage(_),
         ) => unchanged,
 
+        // A page the channel's program sends the viewer to (DOC-1960): from
+        // any state, as the viewer's own selection would be, a visit of the
+        // history (REQ-NAV-010), ending any entry or question.
+        (
+            S::Starting
+            | S::Entering1
+            | S::Entering2
+            | S::EnteringSubPage
+            | S::Searching
+            | S::Displaying
+            | S::Holding
+            | S::ConfirmingLink(_),
+            I::Redirect(address, subcode),
+        ) => (
+            ViewerMachine {
+                state: S::Searching,
+                entry: PageEntry::EMPTY,
+                subpage_entry: SubPageEntry::EMPTY,
+                ..machine
+            },
+            A::Select(address, subcode),
+        ),
+
         // Hold.
         (S::Displaying, I::Hold) => (machine.with_state(S::Holding), A::StopUpdates),
         (S::Holding, I::Hold) => (machine.with_state(S::Displaying), A::ApplyUpdates),
@@ -382,9 +408,10 @@ const INPUT_NAMES: [&str; INPUT_KINDS] = [
     "back",
     "forward",
     "sub-page chosen",
+    "page redirect",
 ];
 /// How many kinds of input the machine has.
-const INPUT_KINDS: usize = 19;
+const INPUT_KINDS: usize = 20;
 
 /// The names of the actions for the transition trace, by [`action_code`].
 const ACTION_NAMES: [&str; ACTION_KINDS] = [
@@ -437,6 +464,7 @@ pub(super) const fn input_code(input: ViewerInput) -> u8 {
         ViewerInput::Back(_) => 16,
         ViewerInput::Forward(_) => 17,
         ViewerInput::ChooseSubPage(_) => 18,
+        ViewerInput::Redirect(..) => 19,
     }
 }
 

@@ -12,6 +12,7 @@ use std::time::Instant as StdInstant;
 
 mod decoder_link;
 mod font;
+mod services;
 mod transport;
 mod wakes;
 mod web;

@@ -42,10 +42,11 @@ const LIVE_LIST_COMPLETE: u8 = b'z';
 const LIVE_LIST_REFUSED: u8 = b'!';
 const LINKS: u8 = b'H';
 const FONT: u8 = b'#';
+const REOPEN: u8 = b'<';
 
 /// Every kind a frame may have. A kind written by [`write`] and missing here
 /// fails `every_frame_written_has_a_listed_kind`, so none is added unlisted.
-pub(super) const KINDS: [u8; 33] = [
+pub(super) const KINDS: [u8; 34] = [
     PACKET,
     TTI,
     T42,
@@ -79,6 +80,7 @@ pub(super) const KINDS: [u8; 33] = [
     LIVE_LIST_REFUSED,
     LINKS,
     FONT,
+    REOPEN,
 ];
 
 /// Kinds once used and never to be used again, so that an old peer's frame
@@ -249,6 +251,9 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
             let mut buffer = [mpp.to_be_bytes(), sub.to_be_bytes()].concat();
             put_string(&mut buffer, service);
             put(out, FOLLOW, &buffer)
+        }
+        Frame::Reopen(service, mpp, sub) => {
+            put(out, REOPEN, &[[*service].as_slice(), &mpp.to_be_bytes(), &sub.to_be_bytes()].concat())
         }
         Frame::Notice(Notice::RedirectToOtherChannel(address)) => put(out, REDIRECT, address.as_bytes()),
         Frame::Notice(Notice::PageRedirect(mpp, sub, query)) => {
@@ -425,6 +430,11 @@ pub fn read(input: &mut dyn Read) -> io::Result<Option<Frame>> {
             let service = cursor.string()?;
             cursor.end()?;
             Frame::Follow(service, mpp, sub)
+        }
+        REOPEN => {
+            let (service, mpp, sub) = (cursor.byte()?, cursor.u16()?, cursor.u16()?);
+            cursor.end()?;
+            Frame::Reopen(service, mpp, sub)
         }
         kind => notice_frame(kind, &payload)?,
     };

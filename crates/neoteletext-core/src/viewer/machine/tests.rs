@@ -91,6 +91,15 @@ fn viewer_table_rows() {
         row(at(state), I::ChooseSubPage(SubCode::new(2)), A::ShowSubPage(SubCode::new(2)), S::Searching);
     }
 
+    // A page the channel's program sends the viewer to (DOC-1960), from
+    // every state, ending a page number's entry.
+    let redirect = I::Redirect(page(0x301), SubCode::new(2));
+    for state in [S::Starting, S::Searching, S::Displaying, S::Holding, S::ConfirmingLink(0)] {
+        row(at(state), redirect, A::Select(page(0x301), SubCode::new(2)), S::Searching);
+    }
+    let (redirected, _) = viewer_transition(after(&[I::Event(E::Started), I::Digit(2)]), redirect);
+    assert_eq!((redirected.state, redirected.entry), (S::Searching, PageEntry::EMPTY));
+
     // Searching: page present, header received.
     row(at(S::Searching), I::Event(E::PagePresent), A::ShowPage, S::Displaying);
     row(at(S::Searching), I::Event(E::HeaderReceived), A::RollHeader, S::Searching);
@@ -211,6 +220,7 @@ fn viewer_trace_names_are_distinct() {
         I::Back(None),
         I::Forward(None),
         I::ChooseSubPage(SubCode::ANY),
+        I::Redirect(page(0x100), SubCode::ANY),
     ];
     let actions = [
         A::None,

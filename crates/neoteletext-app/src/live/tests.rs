@@ -315,3 +315,34 @@ fn how_a_page_came_follows_its_latest_arrival() {
     assert_eq!(live.came_unencrypted(page), Some(true));
     assert_eq!(live.came_unencrypted(other), None);
 }
+
+// Verifies REQ-295 (REQ-NAV-010): each link followed takes the session's next
+// number, the first service being 0, as the fetcher counts them; a link to a
+// name the descriptor does not hold is not followed and takes none; a return
+// names the number, never an address; and the numbers stop at the bound the
+// fetcher keeps.
+#[test]
+fn followed_services_are_numbered_and_reopened_by_number() {
+    let kept = Kept::default();
+    let (sender, frames) = mpsc::channel();
+    let mut live = routed(frames, Box::new(kept.clone()));
+    let mut session = Session::new(neoteletext_core::config::Config::default(), 8);
+    let weather = pipe::ServiceEntry { short_name: "weather".into(), ..pipe::ServiceEntry::default() };
+    sender.send(Frame::Notice(Notice::Service(vec![weather]))).unwrap();
+    live.poll(&mut session, Instant(0));
+    let page = PageAddress::from_mpp(0x301).unwrap();
+    assert_eq!(live.follow(0, page, SubCode::ANY), Some(1));
+    assert_eq!(live.follow(1, page, SubCode::ANY), None, "no such linked service");
+    assert_eq!(live.follow(0, page, SubCode::new(2)), Some(2));
+    live.reopen(0, PageAddress::from_mpp(0x100).unwrap(), SubCode::ANY);
+    assert_eq!(
+        kept_frames(&kept),
+        [
+            Frame::Follow("weather".into(), 0x301, u16::MAX),
+            Frame::Follow("weather".into(), 0x301, 2),
+            Frame::Reopen(0, 0x100, u16::MAX),
+        ]
+    );
+    while live.follow(0, page, SubCode::ANY).is_some() {}
+    assert_eq!(live.session_services, pipe::MAX_SESSION_SERVICES);
+}

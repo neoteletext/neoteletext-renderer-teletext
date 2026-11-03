@@ -13,14 +13,17 @@ pub(super) fn send(frame: &Frame) -> std::io::Result<()> {
 }
 
 /// Reads the requests sent to the fetcher: page requests, parts of a page's
-/// list of sub-pages, links to other services and keys. Anything else is dropped. The loop is woken by each,
+/// list of sub-pages, links to other services, returns to a service of the
+/// session and keys. Anything else is dropped. The loop is woken by each,
 /// and by the pipe's end.
 pub(super) fn requests(wake: Sender<Wake>) {
     std::thread::spawn(move || {
         let mut input = std::io::stdin().lock();
         while let Ok(Some(frame)) = pipe::read(&mut input) {
-            let wanted =
-                matches!(frame, Frame::Request(..) | Frame::SubPages(..) | Frame::Follow(..) | Frame::Input(_));
+            let wanted = matches!(
+                frame,
+                Frame::Request(..) | Frame::SubPages(..) | Frame::Follow(..) | Frame::Reopen(..) | Frame::Input(_)
+            );
             if wanted && wake.send(Wake::Request(frame)).is_err() {
                 return;
             }
