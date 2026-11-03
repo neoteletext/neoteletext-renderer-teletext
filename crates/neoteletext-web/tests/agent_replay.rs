@@ -2598,3 +2598,29 @@ fn a_static_channel_after_a_live_one_makes_its_requests() {
     let paths = paths(&mut harness, "site.example:80");
     assert_eq!(&paths[2..], ["/news/channel.ttx", "/news/index.t42", "/news/100.tti"]);
 }
+
+// Verifies REQ-508 (REQ-WEB-019) and RFC 9110 section 8.8: when the file a
+// page answered from has gone and the other is tried, the request for the
+// other file carries none of the first file's validators.
+#[test]
+fn the_second_file_of_a_page_carries_no_validators_of_the_first() {
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", not_found());
+    harness.replay().reply("site.example:80", not_found());
+    harness.open_channel("http://site.example/news/");
+    harness
+        .replay()
+        .reply("site.example:80", tti_response(&["ETag: \"tti-1\"", "Last-Modified: Mon, 02 Nov 2026 10:00:00 GMT"]));
+    harness.fetch(0x100);
+    harness.replay().reply("site.example:80", not_found());
+    harness.replay().reply("site.example:80", ok("application/x-teletext-t42", &packet()));
+    harness.advance(60 * SECOND);
+    harness.fetch(0x100);
+    let requests = harness.replay().requests_to("site.example:80");
+    let [.., tti_again, t42] = requests.as_slice() else { panic!("{} requests", requests.len()) };
+    assert_eq!(request_path(tti_again), "/news/100.tti");
+    assert_eq!(header_value(tti_again, "If-None-Match").as_deref(), Some("\"tti-1\""), "the file's own validator");
+    assert_eq!(request_path(t42), "/news/100.t42");
+    assert_eq!(header_value(t42, "If-None-Match"), None);
+    assert_eq!(header_value(t42, "If-Modified-Since"), None);
+}
