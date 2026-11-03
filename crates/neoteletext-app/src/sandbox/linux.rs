@@ -3,7 +3,8 @@
 
 use super::Policy;
 use landlock::{
-    ABI, Access, AccessFs, AccessNet, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
+    ABI, Access, AccessFs, AccessNet, LandlockStatus, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
+    RulesetStatus,
 };
 use seccompiler::{
     BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule, TargetArch,
@@ -13,7 +14,16 @@ use std::collections::BTreeMap;
 /// The newest Landlock ABI used: version 4 adds TCP restrictions.
 const LANDLOCK_ABI: ABI = ABI::V4;
 
-fn landlock(policy: Policy<'_>) -> Result<(), String> {
+/// Whether Landlock restricted TCP: what the kernel applied of the ruleset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Network {
+    /// Landlock's network rules (ABI 4 and later) are in force.
+    Restricted,
+    /// The kernel's Landlock has no network rules, or the policy allows the network.
+    Unrestricted,
+}
+
+fn landlock(policy: Policy<'_>) -> Result<Network, String> {
     let mut ruleset = Ruleset::default().handle_access(AccessFs::from_all(LANDLOCK_ABI)).map_err(|e| e.to_string())?;
     if !policy.network {
         ruleset = ruleset.handle_access(AccessNet::from_all(LANDLOCK_ABI)).map_err(|e| e.to_string())?;
@@ -30,8 +40,16 @@ fn landlock(policy: Policy<'_>) -> Result<(), String> {
             created.add_rule(PathBeneath::new(fd, AccessFs::from_all(LANDLOCK_ABI))).map_err(|e| e.to_string())?;
     }
     let status = created.restrict_self().map_err(|e| e.to_string())?;
+    // A kernel older than the newest ABI enforces part of the ruleset: its
+    // file rules always, its TCP rules only from ABI 4 (DEC-2351).
+    let network = match status.landlock {
+        LandlockStatus::Available { effective_abi, .. } if !policy.network && effective_abi >= ABI::V4 => {
+            Network::Restricted
+        }
+        _ => Network::Unrestricted,
+    };
     match status.ruleset {
-        RulesetStatus::FullyEnforced | RulesetStatus::PartiallyEnforced => Ok(()),
+        RulesetStatus::FullyEnforced | RulesetStatus::PartiallyEnforced => Ok(network),
         RulesetStatus::NotEnforced => Err("Landlock is not supported by this kernel".to_string()),
     }
 }
@@ -56,8 +74,17 @@ fn number(syscall: libc::c_long) -> i64 {
     i64::from(syscall)
 }
 
-fn seccomp(policy: Policy<'_>) -> Result<(), String> {
+fn seccomp(policy: Policy<'_>, network: Network) -> Result<(), String> {
     let Some(arch) = target_arch() else {
+        // REQ-SEC-017: a sandbox that cannot keep a process with no network
+        // rights off the network is not applied, so the program refuses
+        // unless told to continue (DEC-2351).
+        if !policy.network && network == Network::Unrestricted {
+            return Err(
+                "no seccomp filter exists for this architecture, and this kernel's Landlock cannot restrict the network"
+                    .to_string(),
+            );
+        }
         eprintln!(
             "neottx: note: no seccomp filter exists for this architecture; only the Landlock sandbox applies (REQ-SEC-017)"
         );
@@ -99,7 +126,8 @@ fn seccomp(policy: Policy<'_>) -> Result<(), String> {
 }
 
 pub(super) fn apply(policy: Policy<'_>) -> Result<(), String> {
-    landlock(policy)
+    let network = landlock(policy)
         .map_err(|e| format!("cannot apply the Landlock sandbox: {e} (use --no-sandbox to run without it)"))?;
-    seccomp(policy).map_err(|e| format!("cannot apply the seccomp sandbox: {e} (use --no-sandbox to run without it)"))
+    seccomp(policy, network)
+        .map_err(|e| format!("cannot apply the seccomp sandbox: {e} (use --no-sandbox to run without it)"))
 }
