@@ -1265,3 +1265,91 @@ fn every_row_of_table_b1_replaces_what_it_says() {
     assert_eq!(transmit(erase | C12, 3, &[1]), [1, 2, 3, 4, 5, 6, 7, 8], "C4 with C12 erases nothing");
     assert_eq!(transmit(erase, 4, &[2]), [2], "C4 C8 alone erases");
 }
+
+/// The most slots, entries and pool slots one packet of `stream` visits, in
+/// a store of `pages` slots and an enhancement store of `sub_pages` entries
+/// and `packets` pool slots.
+fn most_visits(stream: &[Packet], pages: usize, sub_pages: usize, packets: usize) -> usize {
+    let mut slots = std::vec![StoredPage::EMPTY; pages];
+    let mut memory = EnhancementMemory::new(sub_pages, packets);
+    let mut decoder = Decoder::with_enhancement_store(&mut slots, memory.store(), Config::default());
+    let mut most = 0;
+    decoder.store().take_visits();
+    decoder.enhancement_store().take_visits();
+    for (time, packet) in (0u64..).zip(stream) {
+        decoder.push(packet, &PacketMeta::default(), Instant(time * 1000), &mut |_| {});
+        let visits = decoder.store().take_visits() + decoder.enhancement_store().take_visits();
+        most = most.max(visits);
+    }
+    most
+}
+
+/// A stream that fills every store past its capacity, so that every header
+/// searches, allocates and evicts: display pages of every magazine, and
+/// Magazine Organization Table sub-pages, each with rows, `rounds` of each.
+fn filling_stream(rounds: usize) -> Vec<Packet> {
+    let mut stream = Vec::new();
+    for round in 0..rounds {
+        let magazine = (round % 8 + 1) as u8;
+        let tens = (round / 8 % 10) as u8;
+        let units = (round / 80 % 10) as u8;
+        stream.push(header(magazine, tens << 4 | units, 0, 0));
+        stream.extend((1..=3).map(|row| encode::row(mag(magazine), row, &text(b"WORST CASE"))));
+        stream.push(header(magazine, 0xFE, (round % 0x7F) as u16, 0));
+        stream.extend((1..=3).map(|row| object_row(magazine, row, row)));
+    }
+    stream
+}
+
+/// A stream that makes the enhancement pool run out while its directory is
+/// full of sub-pages holding no packet: `entries` Magazine Organization
+/// Table sub-pages of magazine 2 sent as headers alone, then one of
+/// magazine 1 with more rows than the pool has slots. Making room for
+/// each row past the pool's size must not search the pool once for every
+/// entry that holds nothing.
+fn starving_stream(entries: usize, rows: u8) -> Vec<Packet> {
+    let mut stream = Vec::new();
+    for subcode in 0..entries {
+        stream.push(header(2, 0xFE, subcode as u16, 0));
+    }
+    stream.push(header(2, 0x00, 0, 0));
+    stream.push(header(1, 0xFE, 0, 0));
+    stream.extend((1..=rows).map(|row| object_row(1, row, row % 3 + 1)));
+    stream.push(header(1, 0x00, 0, 0));
+    stream
+}
+
+/// REQ-425 (REQ-SEC-012): the work for one packet has a fixed bound, linear
+/// in the capacities of the stores, which are fixed for a build: at most
+/// four passes over the page store's slots, five over the enhancement
+/// store's directory and two over its pool (one search, and one more after
+/// a single eviction), for any packet. The bound is
+/// checked with each capacity grown alone and all together, on a stream
+/// that fills them all and on one that leaves the pool full while the
+/// directory holds sub-pages with no packets, so a search that grew faster
+/// than linearly, or as the product of two capacities, fails it; and it is
+/// near the least that holds, so a doubled pass fails it too. Before this
+/// test, making room in a full pool searched the whole pool once for every
+/// sub-page evicted, though one with no packets freed nothing: for 64
+/// entries and a pool of 16, 1,440 visits for one packet (seen
+/// failing on that code).
+#[test]
+fn the_work_for_one_packet_is_bounded_by_the_store_size() {
+    /// Passes over each part of the stores one packet may make.
+    const PAGE_PASSES: usize = 4;
+    const DIRECTORY_PASSES: usize = 5;
+    const POOL_PASSES: usize = 2;
+    let sizes = [(8, 4, 16), (64, 32, 128), (256, 128, 512), (8, 64, 16), (8, 4, 512), (256, 4, 16), (8, 1, 512)];
+    for (pages, sub_pages, packets) in sizes {
+        let bound = PAGE_PASSES * pages + DIRECTORY_PASSES * sub_pages + POOL_PASSES * packets;
+        let rounds = 4 * pages.max(sub_pages).max(packets);
+        for (name, stream) in [("filling", filling_stream(rounds)), ("starving", starving_stream(sub_pages, 24))] {
+            let most = most_visits(&stream, pages, sub_pages, packets);
+            std::println!("{name}: {pages} slots, {sub_pages} entries, {packets} pool slots: {most} of {bound}");
+            assert!(
+                most <= bound,
+                "{name}: {most} visits for one packet, over {bound} ({pages}, {sub_pages}, {packets})"
+            );
+        }
+    }
+}

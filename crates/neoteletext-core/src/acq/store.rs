@@ -18,6 +18,10 @@ use crate::types::{PageAddress, SubCode};
 #[derive(Debug)]
 pub struct PageStore<'a> {
     pages: &'a mut [StoredPage],
+    /// Slots visited since the count was last taken: the measure of the
+    /// work bound of REQ-425 (REQ-SEC-012), kept by test builds only.
+    #[cfg(test)]
+    visits: core::cell::Cell<usize>,
 }
 
 /// The listed sub-codes of one page in ascending order
@@ -58,20 +62,38 @@ impl<'a> PageStore<'a> {
         for page in pages.iter_mut() {
             *page = StoredPage::EMPTY;
         }
-        Self { pages }
+        Self {
+            pages,
+            #[cfg(test)]
+            visits: core::cell::Cell::new(0),
+        }
     }
 
     /// All slots.
     #[must_use]
     pub fn pages(&self) -> &[StoredPage] {
+        self.slots()
+    }
+
+    /// Every slot, for a pass over the store; a test build counts each as
+    /// visited (REQ-425).
+    fn slots(&self) -> &[StoredPage] {
+        #[cfg(test)]
+        self.visits.set(self.visits.get().saturating_add(self.pages.len()));
         self.pages
+    }
+
+    /// The slots visited since the last call, and the count restarted.
+    #[cfg(test)]
+    pub(super) fn take_visits(&self) -> usize {
+        self.visits.replace(0)
     }
 
     /// The slot holding a page and sub-code. The key is the magazine, the
     /// page number and all thirteen bits of the sub-code (REQ-NUM-006).
     #[must_use]
     pub fn find(&self, key: PageKey) -> Option<usize> {
-        self.pages.iter().position(|page| page.state != PageState::Empty && page.key == key)
+        self.slots().iter().position(|page| page.state != PageState::Empty && page.key == key)
     }
 
     /// The most recently received sub-page of an address (REQ-NAV-005's
@@ -86,7 +108,7 @@ impl<'a> PageStore<'a> {
 
     /// The slot of [`Self::latest`].
     fn latest_slot(&self, address: PageAddress) -> Option<usize> {
-        self.pages
+        self.slots()
             .iter()
             .enumerate()
             .filter(|(_, page)| page.state != PageState::Empty && page.key.address == address)
@@ -107,6 +129,8 @@ impl<'a> PageStore<'a> {
     /// The page in a slot.
     #[must_use]
     pub fn slot(&self, index: usize) -> Option<&StoredPage> {
+        #[cfg(test)]
+        self.visits.set(self.visits.get().saturating_add(1));
         self.pages.get(index)
     }
 
@@ -119,39 +143,39 @@ impl<'a> PageStore<'a> {
     /// held but the last sub-code yielded.
     #[must_use]
     pub fn subcodes(&self, address: PageAddress) -> SubCodes<'_> {
-        SubCodes { pages: self.pages, address, after: None }
+        SubCodes { pages: self.slots(), address, after: None }
     }
 
     /// How many sub-pages of an address [`PageStore::subcodes`] lists.
     #[must_use]
     pub fn subpage_count(&self, address: PageAddress) -> usize {
-        listed(self.pages, address).count()
+        listed(self.slots(), address).count()
     }
 
     /// The lowest listed sub-code of an address.
     #[must_use]
     pub fn first_subpage(&self, address: PageAddress) -> Option<SubCode> {
-        listed(self.pages, address).min()
+        listed(self.slots(), address).min()
     }
 
     /// The highest listed sub-code of an address.
     #[must_use]
     pub fn last_subpage(&self, address: PageAddress) -> Option<SubCode> {
-        listed(self.pages, address).max()
+        listed(self.slots(), address).max()
     }
 
     /// The lowest listed sub-code of an address above `after`, or `None`
     /// when `after` is the highest.
     #[must_use]
     pub fn next_subpage(&self, address: PageAddress, after: SubCode) -> Option<SubCode> {
-        listed(self.pages, address).filter(|&subcode| subcode > after).min()
+        listed(self.slots(), address).filter(|&subcode| subcode > after).min()
     }
 
     /// The highest listed sub-code of an address below `before`, or `None`
     /// when `before` is the lowest.
     #[must_use]
     pub fn previous_subpage(&self, address: PageAddress, before: SubCode) -> Option<SubCode> {
-        listed(self.pages, address).filter(|&subcode| subcode < before).max()
+        listed(self.slots(), address).filter(|&subcode| subcode < before).max()
     }
 
     /// The place of a listed sub-code among its page's, from 1 in
@@ -160,7 +184,7 @@ impl<'a> PageStore<'a> {
     pub fn subpage_place(&self, address: PageAddress, subcode: SubCode) -> Option<usize> {
         let mut found = false;
         let mut below = 0usize;
-        for listed in listed(self.pages, address) {
+        for listed in listed(self.slots(), address) {
             if listed == subcode {
                 found = true;
             } else if listed < subcode {
@@ -173,7 +197,7 @@ impl<'a> PageStore<'a> {
     /// True when any sub-page of an address is stored.
     #[must_use]
     pub fn contains(&self, address: PageAddress) -> bool {
-        self.pages.iter().any(|page| page.state != PageState::Empty && page.key.address == address)
+        self.slots().iter().any(|page| page.state != PageState::Empty && page.key.address == address)
     }
 
     /// True when a display page is stored at an address: one the viewer may
@@ -181,7 +205,7 @@ impl<'a> PageStore<'a> {
     /// (REQ-NUM-027, REQ-NUM-028).
     #[must_use]
     pub fn has_display_page(&self, address: PageAddress) -> bool {
-        self.pages.iter().any(|page| page.key.address == address && page.is_display_page())
+        self.slots().iter().any(|page| page.key.address == address && page.is_display_page())
     }
 
     /// Finds or allocates a slot for a page, evicting the least recently
@@ -198,12 +222,12 @@ impl<'a> PageStore<'a> {
         if let Some(index) = self.find(key) {
             return Some((index, false));
         }
-        if let Some(index) = self.pages.iter().position(|page| page.state == PageState::Empty) {
+        if let Some(index) = self.slots().iter().position(|page| page.state == PageState::Empty) {
             return Some((index, false));
         }
         let kept = shown.filter(|&address| address != key.address).and_then(|address| self.latest_slot(address));
         let victim = self
-            .pages
+            .slots()
             .iter()
             .enumerate()
             .filter(|&(index, _)| !busy.contains(&Some(index)) && kept != Some(index))

@@ -222,6 +222,11 @@ pub(super) enum Stored {
 pub struct EnhancementStore<'a> {
     sub_pages: &'a mut [EnhancementSubPage],
     packets: &'a mut [EnhancementPacket],
+    /// Directory entries and pool slots visited since the count was last
+    /// taken: the measure of the work bound of REQ-425 (REQ-SEC-012), kept
+    /// by test builds only.
+    #[cfg(test)]
+    visits: core::cell::Cell<usize>,
     next_free: usize,
 }
 
@@ -235,7 +240,30 @@ impl<'a> EnhancementStore<'a> {
     pub fn new(sub_pages: &'a mut [EnhancementSubPage], packets: &'a mut [EnhancementPacket]) -> Self {
         sub_pages.fill(EnhancementSubPage::EMPTY);
         packets.fill(EnhancementPacket::EMPTY);
-        Self { sub_pages, packets, next_free: 0 }
+        Self {
+            sub_pages,
+            packets,
+            next_free: 0,
+            #[cfg(test)]
+            visits: core::cell::Cell::new(0),
+        }
+    }
+
+    /// Counts `count` entries or slots as visited by a pass (REQ-425); does
+    /// nothing outside test builds.
+    #[cfg_attr(not(test), allow(clippy::unused_self, reason = "it counts only in test builds"))]
+    fn visit(&self, count: usize) {
+        #[cfg(test)]
+        self.visits.set(self.visits.get().saturating_add(count));
+        #[cfg(not(test))]
+        let _ = count;
+    }
+
+    /// The entries and slots visited since the last call, and the count
+    /// restarted.
+    #[cfg(test)]
+    pub(super) fn take_visits(&self) -> usize {
+        self.visits.replace(0)
     }
 
     /// True when the store can keep anything.
@@ -253,6 +281,7 @@ impl<'a> EnhancementStore<'a> {
     /// The stored sub-page with a key.
     #[must_use]
     pub fn get(&self, key: EnhancementKey) -> Option<EnhancementPage<'_>> {
+        self.visit(self.sub_pages.len());
         lookup(self.sub_pages, self.packets, key)
     }
 
@@ -270,6 +299,7 @@ impl<'a> EnhancementStore<'a> {
     /// and not only provisionally.
     #[must_use]
     pub fn contains_address(&self, address: PageAddress) -> bool {
+        self.visit(self.sub_pages.len());
         self.sub_pages.iter().any(|entry| entry.used && !entry.provisional && entry.key.address == address)
     }
 
@@ -294,6 +324,7 @@ impl<'a> EnhancementStore<'a> {
     /// Makes every stored sub-page of an address an enhancement page: a link
     /// has named it.
     pub(super) fn confirm_address(&mut self, address: PageAddress) {
+        self.visit(self.sub_pages.len());
         for entry in self.sub_pages.iter_mut().filter(|entry| entry.used && entry.key.address == address) {
             entry.provisional = false;
         }
@@ -335,14 +366,20 @@ impl<'a> EnhancementStore<'a> {
     /// provisionally, then of those not being received (`busy`). A
     /// provisional sub-page making room takes only another not being
     /// received; one that is not takes a provisional one in reception too,
-    /// which [`Decoder`](super::Decoder) then stops receiving.
-    fn victim(&self, busy: &[Option<usize>], for_provisional: bool) -> Option<usize> {
+    /// which [`Decoder`](super::Decoder) then stops receiving. With
+    /// `holding_packets`, only an entry that holds a packet is taken: making
+    /// room in the pool evicts one that frees a slot, so one eviction is
+    /// always enough and a packet's work stays linear in the store's size
+    /// (REQ-425).
+    fn victim(&self, busy: &[Option<usize>], for_provisional: bool, holding_packets: bool) -> Option<usize> {
+        self.visit(self.sub_pages.len());
         self.sub_pages
             .iter()
             .enumerate()
             .filter(|(index, entry)| {
                 let free_to_go = !busy.contains(&Some(*index)) || (entry.provisional && !for_provisional);
-                entry.used && free_to_go && (entry.provisional || !for_provisional)
+                let frees = !holding_packets || entry.received != 0;
+                entry.used && free_to_go && frees && (entry.provisional || !for_provisional)
             })
             .min_by_key(|(_, entry)| (!entry.provisional, entry.last_received))
             .map(|(index, _)| index)
@@ -371,14 +408,16 @@ impl<'a> EnhancementStore<'a> {
         busy: &[Option<usize>],
     ) -> Option<usize> {
         let key = EnhancementKey::new(address, subcode);
+        self.visit(self.sub_pages.len());
         let found = self.sub_pages.iter().position(|entry| entry.used && entry.key == key);
         let index = if let Some(index) = found {
             index
         } else {
+            self.visit(self.sub_pages.len());
             let index = if let Some(index) = self.sub_pages.iter().position(|entry| !entry.used) {
                 index
             } else {
-                let victim = self.victim(busy, provisional)?;
+                let victim = self.victim(busy, provisional, false)?;
                 self.evict(victim);
                 victim
             };
@@ -411,11 +450,12 @@ impl<'a> EnhancementStore<'a> {
         Some(index)
     }
 
-    /// A free pool slot, evicting sub-pages other than `busy` ones
-    /// ([`Self::victim`]) until one is free.
+    /// A free pool slot, evicting sub-pages other than `busy` ones that hold
+    /// packets ([`Self::victim`]) until one is free.
     fn free_slot(&mut self, busy: &[Option<usize>], for_provisional: bool) -> Option<usize> {
         loop {
             let length = self.packets.len();
+            self.visit(length);
             let found = (0..length)
                 .map(|offset| self.next_free.saturating_add(offset).checked_rem(length).unwrap_or(0))
                 .find(|&slot| self.packets.get(slot).is_some_and(|packet| packet.owner == FREE));
@@ -423,7 +463,7 @@ impl<'a> EnhancementStore<'a> {
                 self.next_free = slot.saturating_add(1);
                 return Some(slot);
             }
-            let victim = self.victim(busy, for_provisional)?;
+            let victim = self.victim(busy, for_provisional, true)?;
             self.evict(victim);
         }
     }
