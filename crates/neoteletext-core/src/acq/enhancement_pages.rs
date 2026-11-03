@@ -9,7 +9,7 @@ use crate::consts::{
     PAGE_FUNCTION_BASIC, PAGE_MOT,
 };
 use crate::fsm::{MagazineState, PageEvent, PageKey};
-use crate::limits::{PAGE_MIP, is_reserved_page};
+use crate::limits::{PAGE_BTT, PAGE_MIP, is_reserved_page};
 use crate::packet::{PageFormat, mot_object_link};
 use crate::types::{ControlBits, Instant, PageAddress};
 
@@ -132,8 +132,10 @@ impl Decoder<'_> {
     ///
     /// A reserved page number (mFD, mFE, mFF, 1BE, 1F0) is never a display
     /// page: it is read only as the function it is reserved for, so it never
-    /// goes to the page store (Annex A.10; REQ-NUM-008, REQ-NUM-010). The
-    /// MOT and the MIP go to the enhancement store, as the tables they are.
+    /// goes to the page store, whatever the diagnostic setting (Annex A.10;
+    /// REQ-NUM-008, REQ-NUM-010, DEC-2341). The MOT, the MIP and the Basic
+    /// TOP Table go to the enhancement store, as the tables they are
+    /// (REQ-NUM-028).
     ///
     /// At Levels 2.5 and 3.5 a page nothing has named yet may still turn out
     /// to be an enhancement page, once a link or its own X/28 arrives
@@ -142,7 +144,9 @@ impl Decoder<'_> {
     /// any page with no stored copy, is kept as received too, provisionally
     /// (DEC-2119).
     pub(super) fn route(&self, address: PageAddress) -> Route {
-        let table = address.page.0 == PAGE_MOT || address.page.0 == PAGE_MIP;
+        // The Basic TOP Table is a data page of magazine 1 alone (clause
+        // 11.2.2): kept as received, never shown, like the MOT and the MIP.
+        let table = address.page.0 == PAGE_MOT || address.page.0 == PAGE_MIP || address.mpp() == PAGE_BTT;
         let enabled = self.enhancement.is_enabled();
         let enhancement = enabled
             && (table || self.enhancement.contains_address(address) || self.named.as_slice().contains(&address));

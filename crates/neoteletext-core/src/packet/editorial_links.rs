@@ -2,7 +2,7 @@
 //! 6-byte page reference it shares with packet 8/30 (Figure 12).
 
 use super::{Packet, nibble};
-use crate::consts::{LINK_NULL_PAGE, LINK_NULL_SUBCODE, MAGAZINE_MASK};
+use crate::consts::{DATA_BYTES, DATA_START, LINK_NULL_PAGE, LINK_NULL_SUBCODE, MAGAZINE_MASK, PACKET_BYTES};
 use crate::limits::sub_code;
 use crate::types::{Magazine, PageNumber, SubCode};
 
@@ -50,10 +50,10 @@ pub(super) fn page_reference(packet: &Packet, start: usize) -> Option<(PageNumbe
 }
 
 /// Index of link 0 (packet byte 7) and the bytes per link.
-const LINK_START: usize = 3;
-const LINK_BYTES: usize = 6;
+pub(super) const LINK_START: usize = 3;
+pub(super) const LINK_BYTES: usize = 6;
 /// Index of the link control byte (packet byte 43).
-const LINK_CONTROL: usize = 39;
+pub(super) const LINK_CONTROL: usize = 39;
 /// Data bit 4 of the link control byte: display row 24 (Table 14). Only
 /// this bit is read; the reserved bits beside it are ignored (REQ-PKT-009).
 const LINK_CONTROL_ROW_24: u8 = 0x8;
@@ -77,6 +77,20 @@ pub(super) fn decode_links(packet: &Packet, magazine: Magazine) -> Links {
     let display_row_24 = nibble(packet, LINK_CONTROL).is_some_and(|control| control & LINK_CONTROL_ROW_24 != 0);
     let checksum_bytes = [packet.byte(LINK_CHECKSUM), packet.byte(LINK_CHECKSUM.saturating_add(1))];
     Links { magazine, links, display_row_24, checksum_bytes }
+}
+
+/// Decodes the six links of a packet X/27/1 to X/27/3 from its 40 stored
+/// data bytes (clause 9.6.1: the same coding as X/27/0, DEC-2344). Bytes 43
+/// to 45 are reserved in these packets, so the link control and checksum
+/// of the result mean nothing and are cleared.
+#[must_use]
+pub fn decode_links_from_data(bytes: &[u8; DATA_BYTES], magazine: Magazine) -> Links {
+    let mut packet = Packet { bytes: [0; PACKET_BYTES] };
+    if let Some(data) = packet.bytes.get_mut(DATA_START..) {
+        data.copy_from_slice(bytes);
+    }
+    let links = decode_links(&packet, magazine);
+    Links { display_row_24: false, checksum_bytes: [0; 2], ..links }
 }
 
 /// The encoder of X/27/0: the inverse of [`decode_links`].

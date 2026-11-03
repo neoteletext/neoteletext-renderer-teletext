@@ -8,14 +8,24 @@ use crate::limits::DECIMAL_DIGIT_MAX;
 
 /// The base of the place's digits.
 const DECIMAL_BASE: usize = DECIMAL_DIGIT_MAX as usize + 1;
-/// The highest place shown as "P100/nn": two digits.
-const TWO_DIGIT_PLACE: usize = DECIMAL_BASE * DECIMAL_BASE - 1;
-/// The highest place shown as "100/nnn", the "P" given up for a third
-/// digit.
-const THREE_DIGIT_PLACE: usize = DECIMAL_BASE * DECIMAL_BASE * DECIMAL_BASE - 1;
-/// Shown for a place of four digits, which seven columns cannot hold
-/// beside the page number (STANDARD-LIMITS.md question 2, open).
-const PLACE_TOO_WIDE: &[u8; 3] = b"+++";
+/// The highest number shown after the whole page number, "P100/nn": two
+/// digits.
+const TWO_DIGITS: usize = DECIMAL_BASE * DECIMAL_BASE - 1;
+/// The highest number shown as "100/nnn", the "P" given up for a third
+/// digit; above it the page number is given up too, "P/nnnn" (DEC-2349).
+const THREE_DIGITS: usize = DECIMAL_BASE * DECIMAL_BASE * DECIMAL_BASE - 1;
+/// Separates the page number from a chosen sub-page's place (DEC-2349).
+const PLACE_SEPARATOR: u8 = b'/';
+/// Separates the page number from the count of a rotating page's stored
+/// sub-pages (DEC-2349).
+const COUNT_SEPARATOR: u8 = b'+';
+/// Marks a page not recently received (REQ-NAV-006), in place of the
+/// separator, or alone after the page number.
+const STALE_MARK: u8 = b'?';
+/// Where the stale mark stands when no separator is shown.
+const STALE_COLUMN: usize = 5;
+/// The fewest stored sub-pages whose count is shown.
+const COUNTED_FROM: usize = 2;
 
 impl Viewer {
     /// Row 0 columns 0 to 6 (decision E.10, REQ-SEC-005).
@@ -31,6 +41,13 @@ impl Viewer {
                 *slot = byte;
             }
         };
+        if self.state == ViewerState::EnteringSubPage {
+            // "P/01--": the sub-code's digits as entered (DEC-2363), in the
+            // form a four-digit place takes (DEC-2349).
+            write(&mut status, 0, b"P/");
+            write(&mut status, 2, &self.subpage_entry.display());
+            return status;
+        }
         if self.confirming() {
             write(&mut status, 0, &[ALPHA_YELLOW]);
             write(&mut status, 1, b"LEAVE?");
@@ -38,28 +55,41 @@ impl Viewer {
         }
         match self.indicator {
             SecurityIndicator::None => {
-                write(&mut status, 0, b"P");
-                write(&mut status, 1, &digits);
-                if !self.subcode.is_any() {
-                    // A specific sub-page: its place among the stored
-                    // sub-pages (REQ-NAV-005), "P100/12", counted by the
-                    // store. A place of three digits gives up the "P"
-                    // ("100/123"); one of four does not fit seven columns,
-                    // and shows "100/+++" until the owner chooses
-                    // (an rdm to-do).
-                    let place = store.subpage_place(self.requested, self.subcode).unwrap_or(0);
-                    if place <= TWO_DIGIT_PLACE {
-                        write(&mut status, 4, b"/");
-                        write(&mut status, 5, &decimal_digits::<2>(place));
-                    } else {
+                // DEC-2349: a chosen sub-page shows its place among those
+                // stored, a rotating page with sub-pages their count, both
+                // counted by the store (decision E.122); "?" stands in the
+                // separator's place on a stale page.
+                let entering = matches!(self.state, ViewerState::Entering1 | ViewerState::Entering2);
+                let number = if entering {
+                    None
+                } else if self.subcode.is_any() {
+                    let count = store.subpage_count(self.requested);
+                    (count >= COUNTED_FROM).then_some((COUNT_SEPARATOR, count))
+                } else {
+                    Some((PLACE_SEPARATOR, store.subpage_place(self.requested, self.subcode).unwrap_or(0)))
+                };
+                if let Some((separator, value)) = number {
+                    let separator = if self.stale { STALE_MARK } else { separator };
+                    if value <= TWO_DIGITS {
+                        write(&mut status, 0, b"P");
+                        write(&mut status, 1, &digits);
+                        write(&mut status, 4, &[separator]);
+                        write(&mut status, 5, &decimal_digits::<2>(value));
+                    } else if value <= THREE_DIGITS {
                         write(&mut status, 0, &digits);
-                        write(&mut status, 3, b"/");
-                        let shown =
-                            if place <= THREE_DIGIT_PLACE { decimal_digits::<3>(place) } else { *PLACE_TOO_WIDE };
-                        write(&mut status, 4, &shown);
+                        write(&mut status, 3, &[separator]);
+                        write(&mut status, 4, &decimal_digits::<3>(value));
+                    } else {
+                        write(&mut status, 0, b"P");
+                        write(&mut status, 1, &[separator]);
+                        write(&mut status, 2, &decimal_digits::<4>(value));
                     }
-                } else if self.stale {
-                    write(&mut status, 5, b"?");
+                } else {
+                    write(&mut status, 0, b"P");
+                    write(&mut status, 1, &digits);
+                    if self.stale {
+                        write(&mut status, STALE_COLUMN, &[STALE_MARK]);
+                    }
                 }
             }
             SecurityIndicator::Unencrypted => {

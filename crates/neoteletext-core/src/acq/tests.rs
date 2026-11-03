@@ -1118,3 +1118,150 @@ fn a_stored_page_keeps_what_was_received() {
     assert_eq!(page.receptions, 2);
     assert_eq!(page.errors, 1);
 }
+
+/// REQ-136 (REQ-FSM-004), REQ-142, DEC-2368: C8 is raised by the page
+/// machine's own row, Partial with a C8 header, so the trace shows it.
+#[test]
+fn c8_is_raised_by_the_page_machine() {
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let config = Config { trace: true, ..Config::default() };
+    let mut decoder = Decoder::new(&mut slots, config);
+    let mut events = Vec::new();
+    feed(&mut decoder, &[header(1, 0x01, 0, crate::consts::C8_UPDATE)], &mut events);
+    let raised: Vec<(&str, &str, &str, &str)> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Trace(entry) if entry.event == "update indicator" => {
+                Some((entry.from, entry.event, entry.action, entry.to))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(raised, [("Partial", "update indicator", "raise update indicator", "Partial")]);
+    assert!(events.contains(&Event::UpdateIndicator(key(0x101, 0))));
+}
+
+/// DEC-622 (decision E.98), decision E.19, REQ-FSM-004: the decoder says
+/// when it next needs a tick, the moment a page in reception times out or
+/// a complete page goes stale; ticking just before that does nothing, and
+/// ticking then does the work.
+#[test]
+fn the_decoder_says_when_it_next_needs_a_tick() {
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let config = Config::default();
+    let timeout = config.page_completion_timeout_us;
+    let stale_after = config.stale_after_us;
+    let mut decoder = Decoder::new(&mut slots, config);
+    assert_eq!(decoder.next_tick(), None, "nothing pending");
+    let mut events = Vec::new();
+    decoder.push(&header(1, 0x00, 0, 0), &PacketMeta::default(), Instant(5000), &mut |e| events.push(e));
+    let due = decoder.next_tick().unwrap();
+    assert_eq!(due, Instant(5000 + timeout + 1), "page 100 in reception times out");
+    events.clear();
+    decoder.tick(Instant(due.0 - 1), &mut |e| events.push(e));
+    assert!(!events.iter().any(|event| matches!(event, Event::PageCompleted(_))));
+    decoder.tick(due, &mut |e| events.push(e));
+    assert!(events.contains(&Event::PageCompleted(key(0x100, 0))));
+    let last_received = decoder.store().latest(PageAddress::from_mpp(0x100).unwrap()).unwrap().last_received;
+    let due = decoder.next_tick().unwrap();
+    assert_eq!(due, Instant(last_received.0 + stale_after + 1), "page 100 goes stale");
+    events.clear();
+    decoder.tick(Instant(due.0 - 1), &mut |e| events.push(e));
+    assert_eq!(events, []);
+    decoder.tick(due, &mut |e| events.push(e));
+    assert!(events.contains(&Event::PageStale(key(0x100, 0))));
+    assert_eq!(decoder.next_tick(), None, "a stale page waits for nothing");
+}
+
+/// REQ-27, REQ-29 (REQ-ARCH-005, REQ-ARCH-007): one flipped bit in a
+/// Hamming 8/4 byte and in a Hamming 24/18 triplet counts one correction
+/// each and raises nothing; two flipped bits count one failure each and
+/// raise a damage event naming the page in reception; a row with bad
+/// parity raises one with its count; the header event carries the
+/// sub-code.
+#[test]
+fn corrections_failures_and_damage_are_reported() {
+    use crate::consts::DATA_START;
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let mut decoder = Decoder::new(&mut slots, Config::default());
+    let mut events = Vec::new();
+    let mut corrected_header = header(1, 0x23, 0x0005, 0);
+    corrected_header.bytes[DATA_START] ^= 0b0000_0001;
+    let format = PageFormat { function: 0, coding: 0 };
+    let mut corrected_triplet = encode::page_enhancement(mag(1), 0, format, &PresentationFields::default());
+    corrected_triplet.bytes[DATA_START + 1] ^= 0b0000_0100;
+    feed(&mut decoder, &[corrected_header, corrected_triplet], &mut events);
+    let stats = *decoder.statistics();
+    assert_eq!(
+        (stats.hamming84_corrected, stats.hamming84_failures, stats.hamming2418_corrected, stats.hamming2418_failures),
+        (1, 0, 1, 0)
+    );
+    assert!(!events.iter().any(|event| matches!(event, Event::Damaged { .. })));
+    assert!(events.contains(&Event::HeaderReceived {
+        magazine: mag(1),
+        page: Some(PageNumber(0x23)),
+        subcode: Some(SubCode::new(0x0005)),
+    }));
+    decoder.reset_statistics();
+    events.clear();
+    let mut failed_triplet = encode::page_enhancement(mag(1), 0, format, &PresentationFields::default());
+    failed_triplet.bytes[DATA_START + 1] ^= 0b0000_0110;
+    let mut bad_parity = encode::row(mag(1), 1, &text(b"ROW"));
+    bad_parity.bytes[DATA_START] ^= 0x80;
+    feed(&mut decoder, &[failed_triplet, bad_parity], &mut events);
+    let stats = *decoder.statistics();
+    assert_eq!((stats.hamming2418_corrected, stats.hamming2418_failures, stats.parity_failures), (0, 1, 1));
+    let damaged: Vec<Event> = events.iter().copied().filter(|event| matches!(event, Event::Damaged { .. })).collect();
+    let page = Some(key(0x123, 0x0005));
+    assert_eq!(
+        damaged,
+        [
+            Event::Damaged { magazine: mag(1), page, damage: Damage { hamming2418_failures: 1, ..Damage::default() } },
+            Event::Damaged { magazine: mag(1), page, damage: Damage { parity_failures: 1, ..Damage::default() } },
+        ]
+    );
+    // A double error in a header's sub-code byte is a Hamming 8/4 failure.
+    decoder.reset_statistics();
+    events.clear();
+    let mut failed_header = header(2, 0x00, 0, 0);
+    failed_header.bytes[DATA_START + 2] ^= 0b0000_0011;
+    feed(&mut decoder, &[failed_header], &mut events);
+    assert_eq!(decoder.statistics().hamming84_failures, 1);
+    assert!(
+        events.iter().any(|event| matches!(event, Event::Damaged { damage: Damage { hamming84_failures: 1, .. }, .. }))
+    );
+}
+
+/// REQ-21 (REQ-ACQ-021), EN 300 706 Annex B.6, Table B.1: every row of the
+/// table through the replacement of an enhancement page's packets. Only a
+/// full page's complete transmission or first fragment with C4 erases the
+/// old version; a partial page (C13) or a continued fragment (C12)
+/// replaces only the packets it carries, also when C4 is set with them.
+#[test]
+fn every_row_of_table_b1_replaces_what_it_says() {
+    use crate::consts::{C8_UPDATE, C12, C13};
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let mut memory = EnhancementMemory::new(8, 100);
+    let mut decoder = Decoder::with_enhancement_store(&mut slots, memory.store(), Config::default());
+    let mut events = Vec::new();
+    // The MOT, page 1FE, sub-page S1 = 0; S2 is bits 4 to 6 of the sub-code.
+    let s2 = |n: u16| n << 4;
+    let mut transmit = |control: u16, update: u16, rows: &[u8]| {
+        let mut packets = std::vec![header(1, 0xFE, s2(update), control)];
+        packets.extend(rows.iter().map(|&row| encode::row(mag(1), row, &object_bytes(row))));
+        packets.push(header(1, 0x00, 0, 0));
+        feed(&mut decoder, &packets, &mut events);
+        let table = decoder.enhancement_lookup().magazine_organization_table(mag(1)).unwrap();
+        (1..=8u8).filter(|&row| table.row(row).is_some()).collect::<Vec<u8>>()
+    };
+    let erase = C4_ERASE | C8_UPDATE;
+    assert_eq!(transmit(erase, 1, &[1, 2]), [1, 2], "C4 C8: full page, changes, erase old");
+    assert_eq!(transmit(0, 1, &[3]), [1, 2, 3], "no flags: no changes since last");
+    assert_eq!(transmit(C12, 1, &[4]), [1, 2, 3, 4], "C12: further fragment, no changes");
+    assert_eq!(transmit(C8_UPDATE | C12, 1, &[5]), [1, 2, 3, 4, 5], "C8 C12: further fragment, changes");
+    assert_eq!(transmit(C8_UPDATE | C13, 2, &[6]), [1, 2, 3, 4, 5, 6], "C8 C13: partial page");
+    assert_eq!(transmit(C8_UPDATE | C12 | C13, 2, &[7]), [1, 2, 3, 4, 5, 6, 7], "C8 C12 C13: partial fragment");
+    assert_eq!(transmit(erase | C13, 3, &[8]), [1, 2, 3, 4, 5, 6, 7, 8], "C4 with C13 erases nothing");
+    assert_eq!(transmit(erase | C12, 3, &[1]), [1, 2, 3, 4, 5, 6, 7, 8], "C4 with C12 erases nothing");
+    assert_eq!(transmit(erase, 4, &[2]), [2], "C4 C8 alone erases");
+}

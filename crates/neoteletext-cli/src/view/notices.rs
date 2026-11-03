@@ -5,25 +5,48 @@ use super::ViewState;
 use crate::clock::now_ms;
 use neoteletext_app::interact::message_row;
 use neoteletext_app::pipe::Notice;
+use neoteletext_app::session::Session;
 use neoteletext_app::source::Source;
 use neoteletext_core::types::PageAddress;
 use neoteletext_core::viewer::{SecurityIndicator, Viewer, ViewerEvent};
 
 impl ViewState {
+    /// A new initial page (REQ-SVC-004): the Index and Home keys' target
+    /// from now on, and the page shown when the viewer is still where it
+    /// started, has no history, and the address opened named no page.
+    fn adopt_initial(&mut self, address: PageAddress) {
+        let untouched = self.viewer.requested().0 == self.initial
+            && !self.viewer.history().can_go_back()
+            && !core::mem::take(&mut self.named);
+        self.initial = address;
+        if untouched && address != self.viewer.requested().0 {
+            self.viewer = Viewer::new(address);
+            self.action = self.viewer.event(ViewerEvent::Started);
+        }
+    }
+
+    /// Takes the initial page of packet 8/30 when a live source's service
+    /// data gains or changes one (REQ-SVC-004, EN 300 706 clause 9.8.1),
+    /// as a channel's own initial page is taken; a channel's descriptor,
+    /// once it has named one, stands over it (DEC-2410).
+    pub(super) fn follow_service_initial(&mut self, session: &Session) {
+        if self.initial_from_channel {
+            return;
+        }
+        let Some((address, _)) = session.service().and_then(|info| info.initial_page) else { return };
+        if address != self.initial {
+            self.adopt_initial(address);
+        }
+    }
+
     /// Acts on one of the source's notices.
     pub(super) fn take_notice(&mut self, notice: Notice, source: &mut dyn Source) {
         match notice {
             Notice::Unencrypted => self.viewer.set_indicator(SecurityIndicator::Unencrypted),
             Notice::InitialPage(mpp) => {
                 if let Some(address) = PageAddress::from_mpp(mpp) {
-                    let untouched = self.viewer.requested().0 == self.initial
-                        && !self.viewer.history().can_go_back()
-                        && !core::mem::take(&mut self.named);
-                    self.initial = address;
-                    if untouched && address != self.viewer.requested().0 {
-                        self.viewer = Viewer::new(address);
-                        self.action = self.viewer.event(ViewerEvent::Started);
-                    }
+                    self.initial_from_channel = true;
+                    self.adopt_initial(address);
                 }
             }
             Notice::Service(_) => self.confirmed_services.clear(),

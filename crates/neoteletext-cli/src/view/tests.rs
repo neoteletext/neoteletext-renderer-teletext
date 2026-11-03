@@ -293,3 +293,124 @@ fn after_leaving_keys_stop_and_focus_goes() {
     );
     assert_eq!(typing.stamp(), None, "no key goes");
 }
+
+/// REQ-290, DEC-2363: `s` is the sub-page key, and digits stay page digits.
+#[test]
+fn s_is_the_sub_page_key() {
+    use neoteletext_core::viewer::Key;
+    let key = |code| super::keys::map_key(KeyEvent::new(code, KeyModifiers::NONE));
+    assert_eq!(key(KeyCode::Char('s')), Some(Key::SubPage));
+    assert_eq!(key(KeyCode::Char('7')), Some(Key::Digit(7)));
+}
+
+/// A packet 8/30 format 1 naming `mpp` as the initial page: it shares
+/// X/27/0's page reference (Figure 12), with an absolute magazine.
+fn service_packet(mpp: u16) -> neoteletext_core::packet::Packet {
+    use neoteletext_core::consts::{PACKET_SERVICE, SERVICE_MAGAZINE};
+    use neoteletext_core::packet::encode;
+    use neoteletext_core::types::{Magazine, PageAddress, SubCode};
+    let target = PageAddress::from_mpp(mpp).unwrap();
+    let here = Magazine::new(SERVICE_MAGAZINE).unwrap();
+    // Link 0's magazine is written relative to the packet's, which 8/30
+    // reads as absolute: give the bits the target's magazine has.
+    let relative = Magazine::from_bits(target.magazine.bits() ^ here.bits());
+    let links = [Some((relative, target.page, SubCode::ANY)), None, None, None, None, None];
+    let mut packet = encode::links(Magazine::from_bits(0), &links, true, 0);
+    packet.bytes[..2].copy_from_slice(&encode::address(here, PACKET_SERVICE).bytes[..2]);
+    packet
+}
+
+fn view_state(session: &neoteletext_app::session::Session) -> super::ViewState {
+    let opening = neoteletext_app::input::Opening { page: None, parameters: String::new() };
+    super::ViewState::new(session, StdInstant::now(), opening)
+}
+
+/// REQ-458 (REQ-SVC-004), DEC-2410: an 8/30 that arrives on a live source
+/// after the view started moves an untouched viewer to its initial page
+/// and makes it the Index and Home keys' target; a viewer the user has
+/// moved stays, with only the target changed; a channel's own initial
+/// page stands over 8/30.
+#[test]
+fn a_late_8_30_gives_the_initial_page() {
+    use neoteletext_core::packet::PacketMeta;
+    use neoteletext_core::types::{PageAddress, SubCode};
+    use neoteletext_core::viewer::{Viewer, ViewerEvent};
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut state = view_state(&session);
+    assert_eq!((state.initial, state.viewer.requested().0), (page(0x100), page(0x100)));
+    session.push(&service_packet(0x200), &PacketMeta::default());
+    state.follow_service_initial(&session);
+    assert_eq!((state.initial, state.viewer.requested()), (page(0x200), (page(0x200), SubCode::ANY)));
+    // The user has moved: only the target changes.
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut state = view_state(&session);
+    state.viewer = Viewer::new(page(0x300));
+    let _ = state.viewer.event(ViewerEvent::Started);
+    session.push(&service_packet(0x200), &PacketMeta::default());
+    state.follow_service_initial(&session);
+    assert_eq!((state.initial, state.viewer.requested().0), (page(0x200), page(0x300)));
+    // A channel's descriptor named its initial page: 8/30 does not move it.
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut state = view_state(&session);
+    let mut recorded = Recorded::default();
+    state.take_notice(neoteletext_app::pipe::Notice::InitialPage(0x150), &mut recorded);
+    session.push(&service_packet(0x200), &PacketMeta::default());
+    state.follow_service_initial(&session);
+    assert_eq!((state.initial, state.viewer.requested().0), (page(0x150), page(0x150)));
+}
+
+/// REQ-245, REQ-292: the terminal text zooms as the picture does: the top
+/// half's rows 0 to 11 each on two lines then row 12 once, the bottom
+/// half's rows 12 to 23 then row 24, which leaves row 24 off the screen at
+/// the top half; with no zoom the text is as it was.
+#[test]
+fn the_text_output_zooms_as_the_picture_does() {
+    use neoteletext_core::level1::Zoom;
+    let text: String = (0..25).map(|row| format!("row {row}")).collect::<Vec<_>>().join("\n") + "\n";
+    let lines = |zoom| super::zoomed_text(&text, zoom).lines().map(str::to_owned).collect::<Vec<_>>();
+    let expect = |first: usize| {
+        let mut rows: Vec<String> =
+            (first..first + 12).flat_map(|row| [format!("row {row}"), format!("row {row}")]).collect();
+        rows.push(format!("row {}", first + 12));
+        rows
+    };
+    assert_eq!(lines(Zoom::Top), expect(0));
+    assert_eq!(lines(Zoom::Bottom), expect(12));
+    assert!(!lines(Zoom::Top).contains(&"row 24".to_owned()), "row 24 is off the screen");
+    assert_eq!(super::zoomed_text(&text, Zoom::Off), text);
+}
+
+/// REQ-142 (REQ-FSM-010), TODO-1111: with `-vv` the viewer writes the
+/// machines' transitions to standard error when it is not the terminal,
+/// keeps none from turn to turn, and when it is the terminal drops them
+/// and says so at the end.
+#[test]
+fn the_viewer_writes_the_trace_where_it_does_not_spoil_the_page() {
+    use neoteletext_core::config::Config;
+    use neoteletext_core::packet::{PacketMeta, encode};
+    use neoteletext_core::types::{ControlBits, Magazine, PageNumber, SubCode};
+    let header =
+        encode::header(Magazine::new(1).unwrap(), PageNumber(0), SubCode::new(0), ControlBits(0), &[0x20; 32]).unwrap();
+    let traced = Config { trace: true, ..Config::default() };
+    let mut session = neoteletext_app::session::Session::new(traced, 8);
+    let mut state = view_state(&session);
+    session.push(&header, &PacketMeta::default());
+    let mut written = Vec::new();
+    state.write_trace(&mut session, &mut written, false);
+    let text = String::from_utf8(written).unwrap();
+    assert!(text.lines().any(|line| line.starts_with("neottx: Trace(")), "{text}");
+    assert!(session.trace.is_empty(), "nothing is kept");
+    session.push(&header, &PacketMeta::default());
+    let mut written = Vec::new();
+    state.write_trace(&mut session, &mut written, true);
+    assert_eq!((written.len(), session.trace.len()), (0, 0));
+    assert!(state.into_messages().iter().any(|message| message.contains("2>trace.txt")));
+    // Without -vv nothing is kept or written.
+    let mut session = neoteletext_app::session::Session::new(Config::default(), 8);
+    let mut state = view_state(&session);
+    session.push(&header, &PacketMeta::default());
+    let mut written = Vec::new();
+    state.write_trace(&mut session, &mut written, false);
+    assert_eq!(written, b"");
+}

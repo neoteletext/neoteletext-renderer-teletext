@@ -18,7 +18,8 @@ use neoteletext_app::source::Source;
 use neoteletext_core::acq::{EnhancementReport, StoredPage};
 use neoteletext_core::config::Config;
 use neoteletext_core::consts::COLUMNS;
-use neoteletext_core::level1::Grid;
+use neoteletext_core::level1::{Grid, Zoom};
+use neoteletext_core::render::ZOOM_ROWS;
 use neoteletext_core::service::initial_page;
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 use neoteletext_core::viewer::{Action, Viewer, ViewerEvent};
@@ -40,21 +41,34 @@ mod turn;
 mod typing;
 
 /// What the viewer keeps from one turn of its loop to the next.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a separate fact of the viewer's session, set and read apart"
+)]
 struct ViewState {
     start: StdInstant,
     initial: PageAddress,
     // The address opened named a page, which the channel's initial page,
     // when it comes, does not replace (REQ-1693 item 1).
     named: bool,
+    // The channel's descriptor gave the initial page, which then stands
+    // over packet 8/30's (DEC-2410).
+    initial_from_channel: bool,
     viewer: Viewer,
     messages: Vec<String>,
     live: bool,
     grid: Grid,
-    last_drawn: Option<(Grid, Option<Frame>, bool)>,
+    last_drawn: Option<(Grid, Option<Frame>, bool, Zoom)>,
     action: Action,
     prompt: Option<[u8; COLUMNS]>,
     confirmed_services: HashSet<u8>,
     typing: Typing,
+    // The reception of the page whose walk was last traced (REQ-FSM-010).
+    traced: Option<(neoteletext_core::fsm::PageKey, Instant)>,
+    // The walk's trace entries of this turn, written with the decoder's.
+    walk_trace: Vec<neoteletext_core::acq::Event>,
+    // The trace could not be written, as standard error is the terminal.
+    trace_withheld: bool,
     // The report of the last grid built. The page and store stay borrowed
     // until the key is handled, so it is recorded at the start of the next
     // pass, when nothing borrows the decoder.
@@ -85,6 +99,7 @@ impl ViewState {
             start,
             initial,
             named: opening.page.is_some(),
+            initial_from_channel: false,
             viewer,
             messages: Vec::new(),
             live: true,
@@ -94,13 +109,43 @@ impl ViewState {
             prompt: None,
             confirmed_services: HashSet::new(),
             typing,
+            traced: None,
+            walk_trace: Vec::new(),
+            trace_withheld: false,
             unrecorded: None,
         }
     }
 
     /// The messages the source gave, for after the terminal is restored.
-    fn into_messages(self) -> Vec<String> {
+    fn into_messages(mut self) -> Vec<String> {
+        if self.trace_withheld {
+            self.messages.push(
+                "the trace of -vv was not written while the viewer held the terminal; \
+                 redirect standard error, as in `neottx view -vv INPUT 2>trace.txt`"
+                    .to_owned(),
+            );
+        }
         self.messages
+    }
+
+    /// Writes the trace kept this turn, the decoder's and the walk's, as
+    /// the other commands print it with `-vv` (REQ-FSM-010): to `out`,
+    /// standard error, when it is not the terminal the viewer draws on,
+    /// where its lines would spoil the page; otherwise it is dropped, and
+    /// the viewer says so when it ends. Nothing is kept from turn to turn.
+    fn write_trace(&mut self, session: &mut Session, out: &mut dyn Write, out_is_terminal: bool) {
+        session.trace.append(&mut self.walk_trace);
+        if session.trace.is_empty() {
+            return;
+        }
+        if out_is_terminal {
+            self.trace_withheld = true;
+            session.trace.clear();
+            return;
+        }
+        for event in session.trace.drain(..) {
+            let _ = writeln!(out, "neottx: {event:?}");
+        }
     }
 }
 
@@ -174,11 +219,33 @@ fn draw(
             out.write_all(iterm2_inline(&encoded, raster.width, raster.height).as_bytes())?;
         }
         Display::Text => {
-            let text = ansi(grid, frame.options.reveal, mosaics, depth).replace('\n', "\r\n");
+            let text = zoomed_text(&ansi(grid, frame.options.reveal, mosaics, depth), frame.zoom).replace('\n', "\r\n");
             out.write_all(text.as_bytes())?;
         }
     }
     out.flush()
+}
+
+/// The terminal text of a page at a page zoom (REQ-L1-020), row by row as
+/// `render_line` draws the picture: each row of the half shown on two
+/// lines, since a text cell cannot be split, then the first row after the
+/// half once, where the picture shows its upper half.
+fn zoomed_text(text: &str, zoom: Zoom) -> String {
+    let first = match zoom {
+        Zoom::Off => return text.to_owned(),
+        Zoom::Top => 0,
+        Zoom::Bottom => ZOOM_ROWS,
+    };
+    let rows: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len().saturating_mul(2));
+    for row in rows.iter().skip(first).take(ZOOM_ROWS) {
+        out.push_str(row);
+        out.push_str(row);
+    }
+    if let Some(row) = rows.get(first.saturating_add(ZOOM_ROWS)) {
+        out.push_str(row);
+    }
+    out
 }
 
 #[cfg(test)]

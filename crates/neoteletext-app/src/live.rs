@@ -238,7 +238,11 @@ impl Source for Live {
                 Frame::Request(..) | Frame::Follow(..) | Frame::Input(_) => {}
             }
         }
-        session.tick(now);
+        // The decoder is ticked when it says it has work due (decision
+        // E.98), not on every poll.
+        if session.decoder().next_tick().is_some_and(|due| now >= due) {
+            session.tick(now);
+        }
         // The page on screen is asked for again before it would go stale,
         // and more often while offline, so that it is the first page
         // checked when the network returns (REQ-WEB-009). The web module's

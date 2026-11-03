@@ -103,13 +103,13 @@ fn stored_order_steps_to_stored_pages() {
     let mut slots = std::vec![StoredPage::EMPTY; 8];
     let mut decoder = Decoder::new(&mut slots, Config::default());
     receive(&mut decoder, &[0x1A0]);
-    assert_eq!(step_stored(page(0x100), true, decoder.store()), page(0x101), "only a hexadecimal page");
-    assert_eq!(step_stored(page(0x100), false, decoder.store()), page(0x899));
+    assert_eq!(step_stored(page(0x100), true, false, decoder.store()), page(0x101), "only a hexadecimal page");
+    assert_eq!(step_stored(page(0x100), false, false, decoder.store()), page(0x899));
     receive(&mut decoder, &[0x150, 0x300]);
-    assert_eq!(step_stored(page(0x100), true, decoder.store()), page(0x150));
-    assert_eq!(step_stored(page(0x150), true, decoder.store()), page(0x300));
-    assert_eq!(step_stored(page(0x300), true, decoder.store()), page(0x150), "wraps through 899");
-    assert_eq!(step_stored(page(0x150), false, decoder.store()), page(0x300), "wraps through 100");
+    assert_eq!(step_stored(page(0x100), true, false, decoder.store()), page(0x150));
+    assert_eq!(step_stored(page(0x150), true, false, decoder.store()), page(0x300));
+    assert_eq!(step_stored(page(0x300), true, false, decoder.store()), page(0x150), "wraps through 899");
+    assert_eq!(step_stored(page(0x150), false, false, decoder.store()), page(0x300), "wraps through 100");
 }
 
 /// REQ-NAV-001: a value above 9 is never a digit; hexadecimal page numbers
@@ -140,4 +140,51 @@ fn history_ignores_repeats_and_can_be_wiped() {
     history.wipe();
     assert_eq!((history.current(), history.can_go_back(), history.can_go_forward()), (None, false, false));
     assert_eq!(history.forward(), None);
+}
+
+/// REQ-17 (REQ-ACQ-017), REQ-ACQ-013: navigation skips hexadecimal pages
+/// unless the diagnostic setting is on; with it on, it steps through every
+/// page number that is not reserved, in either step order, and the viewer's
+/// keys follow the setting.
+#[test]
+fn the_diagnostic_setting_lets_navigation_reach_hexadecimal_pages() {
+    use crate::config::StepOrder;
+    use crate::viewer::{Action, Key, KeyContext, Viewer, ViewerEvent};
+    assert_eq!(step_numerical(page(0x109), true, false), page(0x110));
+    assert_eq!(step_numerical(page(0x109), true, true), page(0x10A));
+    assert_eq!(step_numerical(page(0x1FC), true, true), page(0x200), "1FD to 1FF are reserved");
+    assert_eq!(step_numerical(page(0x1BD), true, true), page(0x1BF), "1BE is reserved");
+    assert_eq!(step_numerical(page(0x1EF), true, true), page(0x1F1), "1F0 is reserved");
+    assert_eq!(step_numerical(page(0x100), false, true), page(0x8FC), "wraps back past 8FD to 8FF");
+    assert_eq!(step_numerical(page(0x8FC), true, true), page(0x100), "wraps forward");
+    let mut slots = std::vec![StoredPage::EMPTY; 8];
+    let config = Config { store_hexadecimal_pages: true, step_order: StepOrder::Stored, ..Config::default() };
+    let mut decoder = Decoder::new(&mut slots, config);
+    let filling = (1..=8u16).map(|magazine| magazine << 8 | u16::from(PAGE_TIME_FILLING));
+    for (index, mpp) in [0x150u16, 0x1A0, 0x300].into_iter().chain(filling).enumerate() {
+        let address = page(mpp);
+        let display = [with_odd_parity(b' '); 32];
+        let header = encode::header(address.magazine, address.page, SubCode::new(0), ControlBits(0), &display).unwrap();
+        decoder.push(&header, &PacketMeta::default(), Instant(index as u64 * 1000), &mut |_| {});
+    }
+    assert_eq!(step_stored(page(0x150), true, false, decoder.store()), page(0x300));
+    assert_eq!(step_stored(page(0x150), true, true, decoder.store()), page(0x1A0));
+    for (setting, expected) in [(false, 0x300), (true, 0x1A0)] {
+        let config = Config { store_hexadecimal_pages: setting, ..config };
+        let links = PageLinks::default();
+        let no = |_: u8| false;
+        let context = KeyContext {
+            links: &links,
+            store: decoder.store(),
+            initial: page(0x100),
+            config: &config,
+            now: Instant(0),
+            confirmed: &no,
+            prompts_shown: [true; 4],
+        };
+        let mut viewer = Viewer::new(page(0x150));
+        viewer.event(ViewerEvent::Started);
+        viewer.event(ViewerEvent::PagePresent);
+        assert_eq!(viewer.key(Key::NextPage, &context), Action::Request(page(expected), SubCode::ANY), "{setting}");
+    }
 }

@@ -17,6 +17,7 @@ use neoteletext_core::level1::Grid;
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 use neoteletext_core::viewer::{Action, Viewer, ViewerEvent};
 use neoteletext_input::event::Stamp;
+use std::io::IsTerminal;
 use std::sync::mpsc;
 
 impl ViewState {
@@ -38,9 +39,13 @@ impl ViewState {
             if self.live {
                 self.live = source.poll(session, now);
             }
+            let stderr = std::io::stderr();
+            let to_terminal = stderr.is_terminal();
+            self.write_trace(session, &mut stderr.lock(), to_terminal);
             for notice in source.notices() {
                 self.take_notice(notice, source);
             }
+            self.follow_service_initial(session);
             let config: Config = *session.decoder().config();
             self.act(session, source);
             let (requested, subcode) = self.viewer.requested();
@@ -55,8 +60,8 @@ impl ViewState {
             self.compose(session, requested, &shown);
             let reveal = self.viewer.reveal(now);
             // Images change with the flash phase; text flashes by itself.
-            let frame = Frame::at(&config, reveal, now);
-            let state = (self.grid, (display == Display::Iterm2).then_some(frame), reveal);
+            let frame = Frame { zoom: self.viewer.zoom(), ..Frame::at(&config, reveal, now) };
+            let state = (self.grid, (display == Display::Iterm2).then_some(frame), reveal, frame.zoom);
             if self.last_drawn.as_ref() != Some(&state) {
                 paint(&self.grid, frame)?;
                 self.last_drawn = Some(state);

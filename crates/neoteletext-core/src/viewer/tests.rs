@@ -298,8 +298,8 @@ fn a_key_needs_its_own_prompt_shown() {
 /// coloured keys follow links in the same service at once, and links to a
 /// confirmed service at once; a key without a link does nothing; an
 /// unconfirmed link asks only while the page is displayed. Index follows
-/// the page's index link in the service, and otherwise, like Home,
-/// requests the initial page.
+/// the page's index link in the service; with none it requests the
+/// initial page only on a page with no links at all (REQ-286).
 #[test]
 fn coloured_index_and_home_keys() {
     let mut slots = std::vec![StoredPage::EMPTY; 2];
@@ -332,15 +332,21 @@ fn coloured_index_and_home_keys() {
     assert_eq!(&viewer.status(decoder.store())[..1], b"P", "the indicator is cleared");
     assert_eq!(viewer.key(Key::Index, &unconfirmed), Action::Request(page(0x199), SubCode::ANY));
     assert_eq!(viewer.key(Key::Home, &unconfirmed), Action::Request(page(0x100), SubCode::ANY));
-    // Without an index link, or with one to another service, Index stays
-    // in the service and requests the initial page.
-    for index in [None, Some(away)] {
-        let links = PageLinks { index, ..links };
+    // REQ-286: with an index link to another service, Index stays in the
+    // service and requests the initial page (DEC-2198); on a page with no
+    // links at all it requests the initial page; with coloured links and
+    // no index link it does nothing.
+    let none = PageLinks::default();
+    for (links, expected) in [
+        (PageLinks { index: Some(away), ..links }, Action::Request(page(0x100), SubCode::ANY)),
+        (none, Action::Request(page(0x100), SubCode::ANY)),
+        (PageLinks { index: None, ..links }, Action::None),
+    ] {
         viewer.key(Key::Digit(5), &unconfirmed);
         viewer.key(Key::Digit(0), &unconfirmed);
         viewer.key(Key::Digit(0), &unconfirmed);
         let keys = context(&links, decoder.store(), &config, &no);
-        assert_eq!(viewer.key(Key::Index, &keys), Action::Request(page(0x100), SubCode::ANY), "{index:?}");
+        assert_eq!(viewer.key(Key::Index, &keys), expected, "{links:?}");
     }
 }
 
@@ -422,4 +428,105 @@ fn sub_page_stepping_and_numbering() {
     let links = PageLinks { index: Some(target), ..PageLinks::default() };
     viewer.key(Key::Index, &context(&links, decoder.store(), &config, &no));
     assert_eq!(&viewer.status(decoder.store()), b"P100/00");
+}
+
+/// REQ-290, REQ-137, DEC-2349: the status area shows a chosen sub-page's
+/// place after "/", a rotating page's count of stored sub-pages after "+",
+/// and "?" in place of either separator while the page is stale, so a
+/// stale chosen sub-page is marked too.
+#[test]
+fn the_status_area_shows_place_count_and_staleness() {
+    let mut slots = std::vec![StoredPage::EMPTY; 8];
+    let mut decoder = Decoder::new(&mut slots, Config::default());
+    receive(&mut decoder, &[(0x100, 0x0005), (0x100, 0x0001), (0x100, 0x0002)]);
+    let config = Config::default();
+    let links = PageLinks::default();
+    let no = |_| false;
+    let keys = context(&links, decoder.store(), &config, &no);
+    let mut viewer = displaying();
+    assert_eq!(&viewer.status(decoder.store()), b"P100+03", "three stored, rotating");
+    viewer.event(ViewerEvent::PageStale);
+    assert_eq!(&viewer.status(decoder.store()), b"P100?03");
+    viewer.event(ViewerEvent::PageUpdated);
+    viewer.key(Key::NextSubPage, &keys);
+    viewer.event(ViewerEvent::PagePresent);
+    assert_eq!(&viewer.status(decoder.store()), b"P100/03");
+    viewer.event(ViewerEvent::PageStale);
+    assert_eq!(&viewer.status(decoder.store()), b"P100?03", "a stale chosen sub-page is marked");
+}
+
+/// REQ-290, REQ-315, REQ-137, DEC-2363: the sub-page key makes the next
+/// four digits a decimal sub-code of the page shown: 0001, 0079, 0100 and
+/// 3979 are requested; a digit above 3 for S4 or above 7 for S2 is refused
+/// with the digits before it kept; 0000 cannot be completed and 3F7E cannot
+/// be keyed; any other key leaves entry, requesting nothing.
+#[test]
+fn the_sub_page_key_enters_a_decimal_sub_code() {
+    let mut slots = std::vec![StoredPage::EMPTY; 2];
+    let decoder = Decoder::new(&mut slots, Config::default());
+    let config = Config::default();
+    let links = PageLinks::default();
+    let no = |_| false;
+    let keys = context(&links, decoder.store(), &config, &no);
+    let mut viewer = displaying();
+    let enter = |viewer: &mut Viewer, digits: &[u8]| {
+        assert_eq!(viewer.key(Key::SubPage, &keys), Action::None);
+        assert_eq!(viewer.state(), ViewerState::EnteringSubPage);
+        let mut last = Action::None;
+        for &digit in digits {
+            last = viewer.key(Key::Digit(digit), &keys);
+        }
+        (last, viewer.state(), viewer.status(decoder.store()))
+    };
+    for (digits, code) in
+        [([0, 0, 0, 1], 0x0001), ([0, 0, 7, 9], 0x0079), ([0, 1, 0, 0], 0x0100), ([3, 9, 7, 9], 0x3979)]
+    {
+        let (action, state, _) = enter(&mut viewer, &digits);
+        assert_eq!(action, Action::Request(page(0x100), SubCode::new(code)), "{digits:?}");
+        assert_eq!(state, ViewerState::Displaying);
+    }
+    // S4 above 3 and S2 above 7 are refused; the digits before stay.
+    let (action, state, status) = enter(&mut viewer, &[4, 1, 2, 8]);
+    assert_eq!((action, state, &status), (Action::None, ViewerState::EnteringSubPage, b"P/12-- "));
+    assert_eq!(viewer.key(Key::Digit(5), &keys), Action::None);
+    assert_eq!(viewer.key(Key::Digit(6), &keys), Action::Request(page(0x100), SubCode::new(0x1256)));
+    // 0000 is not a decimal sub-code: the fourth 0 is refused.
+    let (action, _, status) = enter(&mut viewer, &[0, 0, 0, 0]);
+    assert_eq!((action, &status), (Action::None, b"P/000- "));
+    assert_eq!(viewer.key(Key::Digit(2), &keys), Action::Request(page(0x100), SubCode::new(0x0002)));
+    // 3F7E has hexadecimal digits, which no key gives; any other key leaves.
+    let (action, _, _) = enter(&mut viewer, &[3]);
+    assert_eq!(action, Action::None);
+    assert_eq!(viewer.key(Key::NextPage, &keys), Action::None, "leaves entry and requests nothing");
+    assert_eq!(viewer.state(), ViewerState::Displaying);
+    assert_eq!(viewer.requested(), (page(0x100), SubCode::new(0x0002)));
+}
+
+/// REQ-245 (REQ-L1-020): boxed display is a viewer setting the composed
+/// grid carries, on any page; off, a page's own C5 and C6 decide.
+#[test]
+fn boxed_display_is_a_viewer_setting() {
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let mut decoder = Decoder::new(&mut slots, Config::default());
+    receive(&mut decoder, &[(0x100, 0x0000)]);
+    let config = Config::default();
+    let magazine = MagazineData::default();
+    let rolling = [SPACE; HEADER_DISPLAY_BYTES];
+    let compose = ComposeContext {
+        magazine: &magazine,
+        config: &config,
+        rolling_header: &rolling,
+        store: decoder.store(),
+        row24: None,
+        lookup: decoder.enhancement_lookup(),
+    };
+    let page = decoder.store().latest(page(0x100));
+    let mut viewer = displaying();
+    let mut grid = Grid::EMPTY;
+    let _ = viewer.compose(&mut grid, page, &compose);
+    assert!(!grid.boxed_mode);
+    viewer.set_boxed(true);
+    assert!(viewer.boxed());
+    let _ = viewer.compose(&mut grid, page, &compose);
+    assert!(grid.boxed_mode);
 }

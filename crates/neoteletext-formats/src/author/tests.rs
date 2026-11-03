@@ -381,3 +381,66 @@ fn font_style_refuses_more_than_seven_rows() {
         0b111_0010
     );
 }
+
+/// REQ-320 (REQ-NUM-022), REQ-324 (REQ-NUM-026): the MIP writer gives page
+/// mFD the sub-code nnXs with S1 = 0 and the update indicator, each page
+/// its code, and each counted code its thirteen-bit count; the engine's
+/// reader reads them all back.
+#[test]
+fn a_magazine_inventory_page_is_written_and_read_back() {
+    use neoteletext_core::acq::{Decoder, EnhancementPacket, EnhancementStore, EnhancementSubPage, StoredPage};
+    use neoteletext_core::config::Config;
+    use neoteletext_core::packet::{PacketMeta, PageCode};
+    use neoteletext_core::types::{Instant, PageAddress, PageNumber};
+    let magazine = Magazine::new(2).unwrap();
+    let mut mip = Mip::new(magazine);
+    mip.update_indicator(3);
+    let pages = [(0x23, 0x79, None), (0x40, 0x50, Some(300)), (0x41, 0x51, Some(5000)), (0x42, 0x0A, None)];
+    for (page, code, count) in pages {
+        mip.page(PageNumber(page), PageCode(code), count).unwrap();
+    }
+    assert!(mip.page(PageNumber(0x43), PageCode(0x50), Some(5000)).is_err(), "50 counts below 2^12");
+    assert!(mip.page(PageNumber(0x43), PageCode(0x01), Some(1)).is_err(), "01 carries no count");
+    let page = mip.build().unwrap();
+    assert_eq!(page.address, PageAddress::from_mpp(0x2FD).unwrap());
+    let subcode = page.subcode.value();
+    assert_eq!(neoteletext_core::limits::enhancement_sub_page(subcode), 0);
+    assert_eq!(neoteletext_core::limits::enhancement_update(subcode), 3);
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let mut sub_pages = std::vec![EnhancementSubPage::EMPTY; 8];
+    let mut packets = std::vec![EnhancementPacket::EMPTY; 100];
+    let store = EnhancementStore::new(&mut sub_pages, &mut packets);
+    let mut decoder = Decoder::with_enhancement_store(&mut slots, store, Config::default());
+    let mut stream = packets_of(&page);
+    stream.push(
+        encode::header(magazine, PageNumber(0xFF), SubCode::new(0), ControlBits::default(), &[0x20; 32]).unwrap(),
+    );
+    for (index, packet) in stream.iter().enumerate() {
+        decoder.push(packet, &PacketMeta::default(), Instant(index as u64 * 1000), &mut |_| {});
+    }
+    for (page, code, count) in pages {
+        let address = PageAddress { magazine, page: PageNumber(page) };
+        assert_eq!(decoder.inventory_code(address), Some(PageCode(code)), "{page:02X}");
+        let expected = count.or_else(|| PageCode(code).sub_pages_in_code());
+        assert_eq!(decoder.inventory_sub_pages(address), expected, "{page:02X}");
+    }
+}
+
+/// REQ-320 (REQ-NUM-022), EN 300 706 Annex B.6, Table B.1: the update
+/// indicator S2 of an enhancement page goes from N to N + 1 at each change,
+/// modulo 8 since S2 has three bits; the writers carry it so for the MOT
+/// and the MIP alike.
+#[test]
+fn the_update_indicator_counts_modulo_8() {
+    use neoteletext_core::limits::enhancement_update;
+    let magazine = Magazine::new(1).unwrap();
+    for change in 0..20u8 {
+        let mut mot = Mot::new(magazine);
+        mot.update_indicator(change);
+        let mut mip = Mip::new(magazine);
+        mip.update_indicator(change);
+        let expected = change % 8;
+        assert_eq!(enhancement_update(mot.build().unwrap().subcode.value()), expected, "MOT {change}");
+        assert_eq!(enhancement_update(mip.build().unwrap().subcode.value()), expected, "MIP {change}");
+    }
+}

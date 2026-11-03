@@ -31,6 +31,7 @@ mod inventory;
 mod magazine_table;
 mod object_pages;
 mod page_data;
+mod protection;
 mod service_data;
 mod triplet_fields;
 mod triplets;
@@ -42,7 +43,7 @@ use service_data::decode_service;
 use triplets::{triplet_values, triplets};
 
 pub use compositional_links::CompositionalLink;
-pub use editorial_links::{Link, Links};
+pub use editorial_links::{Link, Links, decode_links_from_data};
 pub use function::TripletFunction;
 pub use header::Header;
 pub use inventory::{InventoryFunction, PageCode, mip_position, page_code, sub_page_count};
@@ -54,6 +55,7 @@ pub use object_pages::{ObjectPacket, TripletLocation, triplet_location};
 pub use page_data::{
     PageEnhancement, PageFormat, TripletValues, page_enhancement, page_function, presentation_fields, stream_bits,
 };
+pub use protection::{Protection, protection};
 pub use service_data::ServicePacket;
 pub use triplet_fields::{ColourData, DisplayAttributes, ObjectKind, ObjectNumber, ObjectSource, ObjectUsage};
 pub use triplets::{Enhancement, Triplet, Triplets};

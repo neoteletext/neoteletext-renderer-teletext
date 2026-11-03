@@ -3,9 +3,10 @@
 use crate::acq::{PageStore, StoredPage};
 use crate::consts::{FIRST_PAGE, LAST_PAGE, LINK_NULL_PAGE, MAGAZINE_ZERO_MEANS};
 use crate::limits::{
-    DECIMAL_DIGIT_MAX, KEYABLE_PAGES, MPP_MAGAZINE_SHIFT, PAGE_DIGIT_MAX, PAGE_TENS_SHIFT, S2_MASK, S4_MASK,
-    SUBCODE_DIGITS, decimal_sub_code,
+    DECIMAL_DIGIT_MAX, KEYABLE_PAGES, MPP_MAGAZINE_SHIFT, PAGE_DIGIT_MAX, PAGE_NUMBERS, PAGE_TENS_SHIFT, S2_MASK,
+    S4_MASK, SUBCODE_DIGITS, decimal_sub_code, is_reserved_page,
 };
+use crate::packet::Link;
 use crate::types::{FixedVec, PageAddress, PageNumber, SubCode};
 
 /// A link target: a page, a sub-code (3F7F for any), and the service it
@@ -40,14 +41,7 @@ impl PageLinks {
     #[must_use]
     pub fn from_page(page: &StoredPage) -> Self {
         let Some(links) = page.links else { return Self::default() };
-        // REQ-NUM-018: page number FF names no page; the null address
-        // XFF:3F7F is already no link (REQ-PKT-005).
-        let target = |index: usize| {
-            links.links.get(index).copied().flatten().filter(|link| link.page.0 != LINK_NULL_PAGE).and_then(|link| {
-                let mpp = (u16::from(link.magazine.number()) << 8) | u16::from(link.page.0);
-                PageAddress::from_mpp(mpp).map(|address| LinkTarget { address, subcode: link.subcode, service: None })
-            })
-        };
+        let target = |index: usize| link_target(links.links.get(index).copied().flatten());
         Self { keys: [target(0), target(1), target(2), target(3)], index: target(X27_INDEX_LINK) }
     }
 
@@ -56,6 +50,19 @@ impl PageLinks {
     pub fn no_coloured_links(&self) -> bool {
         self.keys.iter().all(Option::is_none)
     }
+}
+
+/// What an editorial link of X/27/0 to X/27/3 names (clause 9.6.1;
+/// REQ-NUM-007, REQ-NUM-018, DEC-2344), the one rule for every kind: the
+/// null address XFF:3F7F is no link at all, so its key is disabled (the
+/// decoder gives `None`, REQ-PKT-005); page number FF names no page; a
+/// sub-code of 3F7F names the page with no particular sub-page
+/// (`SubCode::ANY`).
+#[must_use]
+pub fn link_target(link: Option<Link>) -> Option<LinkTarget> {
+    let link = link.filter(|link| link.page.0 != LINK_NULL_PAGE)?;
+    let mpp = (u16::from(link.magazine.number()) << MPP_MAGAZINE_SHIFT) | u16::from(link.page.0);
+    PageAddress::from_mpp(mpp).map(|address| LinkTarget { address, subcode: link.subcode, service: None })
 }
 
 /// The page after `address` in numerical order; 899 wraps to 100
@@ -115,20 +122,63 @@ fn step(address: PageAddress, forward: bool) -> PageAddress {
     decimal(next).or_else(|| PageAddress::from_mpp(FIRST_PAGE)).unwrap_or(address)
 }
 
+/// The index of page 8FF when every page number is counted from 100.
+const LAST_PAGE_INDEX: u16 = (PAGE_NUMBERS - 1) as u16;
+
+/// The page after (or before) `address` among every page number that is
+/// not reserved, hexadecimal ones included, in the order 100 to 1FF, 200
+/// to 8FF, wrapping: navigation under the diagnostic setting of
+/// REQ-ACQ-013 (REQ-ACQ-017). Reserved numbers are never offered
+/// (REQ-NUM-010).
+#[must_use]
+pub fn step_any(address: PageAddress, forward: bool) -> PageAddress {
+    let count = PAGE_NUMBERS as u16;
+    let index = |address: PageAddress| {
+        (u16::from(address.magazine.number().saturating_sub(1)) << MPP_MAGAZINE_SHIFT) | u16::from(address.page.0)
+    };
+    let mut at = index(address);
+    for _ in 0..count {
+        at = if forward {
+            if at >= LAST_PAGE_INDEX { 0 } else { at.saturating_add(1) }
+        } else {
+            at.checked_sub(1).unwrap_or(LAST_PAGE_INDEX)
+        };
+        let mpp = at.wrapping_add(1 << MPP_MAGAZINE_SHIFT);
+        let magazine = (mpp >> MPP_MAGAZINE_SHIFT) as u8;
+        if !is_reserved_page(magazine, mpp as u8)
+            && let Some(candidate) = PageAddress::from_mpp(mpp)
+        {
+            return candidate;
+        }
+    }
+    address
+}
+
+/// The next or previous page in numerical order: decimal pages only, or
+/// every unreserved number when `hexadecimal` (the diagnostic setting of
+/// REQ-ACQ-013, REQ-ACQ-017).
+#[must_use]
+pub fn step_numerical(address: PageAddress, forward: bool, hexadecimal: bool) -> PageAddress {
+    if hexadecimal { step_any(address, forward) } else { step(address, forward) }
+}
+
 /// The next or previous display page present in the store (REQ-NAV-002),
 /// or the numerical neighbour when none is stored. A data page, by its
 /// page function or its MIP code, is not offered (REQ-NUM-027,
-/// REQ-NUM-028). Bounded: at most 800 steps.
+/// REQ-NUM-028). Hexadecimal pages are offered only when `hexadecimal`,
+/// the diagnostic setting of REQ-ACQ-013 (REQ-ACQ-017). Bounded: at most
+/// 800 steps, or 2,048 with hexadecimal pages.
 #[must_use]
-pub fn step_stored(address: PageAddress, forward: bool, store: &PageStore<'_>) -> PageAddress {
+pub fn step_stored(address: PageAddress, forward: bool, hexadecimal: bool, store: &PageStore<'_>) -> PageAddress {
+    let steps = if hexadecimal { PAGE_NUMBERS as u16 } else { PAGE_COUNT };
     let mut candidate = address;
-    for _ in 0..PAGE_COUNT {
-        candidate = step(candidate, forward);
+    for _ in 0..steps {
+        candidate = step_numerical(candidate, forward, hexadecimal);
         if store.has_display_page(candidate) {
             return candidate;
         }
     }
-    step(address, forward)
+    step_numerical(address, forward, hexadecimal)
 }
 
 /// Three-digit page entry (REQ-NAV-001).
@@ -242,14 +292,32 @@ impl SubPageEntry {
         if let Some(slot) = self.digits.get_mut(position) {
             *slot = digit;
         }
-        self.count = self.count.saturating_add(1);
-        if usize::from(self.count) < SUBCODE_DIGITS {
+        let count = self.count.saturating_add(1);
+        if usize::from(count) < SUBCODE_DIGITS {
+            self.count = count;
             return SubPageEntryResult::Partial;
         }
-        let digits = self.digits;
-        self.clear();
-        decimal_sub_code(digits)
-            .map_or(SubPageEntryResult::Rejected, |code| SubPageEntryResult::Complete(SubCode::new(code)))
+        // The fourth digit completes a sub-code, or is refused with the
+        // three before it kept, as for 0000, which is not a decimal
+        // sub-code (REQ-NUM-017).
+        match decimal_sub_code(self.digits) {
+            Some(code) => {
+                self.clear();
+                SubPageEntryResult::Complete(SubCode::new(code))
+            }
+            None => SubPageEntryResult::Rejected,
+        }
+    }
+
+    /// The digits entered so far, for the status area, with `-` for each
+    /// still to come.
+    #[must_use]
+    pub fn display(&self) -> [u8; SUBCODE_DIGITS] {
+        let mut out = [b'-'; SUBCODE_DIGITS];
+        for (slot, &digit) in out.iter_mut().zip(self.digits.iter()).take(usize::from(self.count)) {
+            *slot = b'0'.saturating_add(digit);
+        }
+        out
     }
 }
 

@@ -156,7 +156,7 @@ pub fn render_line(
 }
 
 /// Rows in each half of a zoomed page (REQ-L1-020).
-const ZOOM_ROWS: usize = 12;
+pub const ZOOM_ROWS: usize = 12;
 
 /// Renders every row, or only changed rows, into a whole-screen framebuffer
 /// (REQ-RND-022), the reference caller of REQ-RND-021. `rows` is a bitmask

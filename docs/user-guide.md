@@ -148,6 +148,7 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 | `h` or Home | Initial page. |
 | Up or `+`, Down or `-` | Next and previous page. |
 | Right and Left | Next and previous sub-page. |
+| `s`, then four digits | Show that sub-page, keyed as on a television: 0001 to 3979, the third digit 0 to 7 and the first 0 to 3 (REQ-NUM-017). A digit that cannot belong is ignored, and any other key leaves the entry. |
 | Alt+Left or Backspace, Alt+Right | Back and forward through the history. |
 | `?` | Reveal concealed text. |
 | `H` | Hold the page, so that new receptions do not update it. |
@@ -157,11 +158,20 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 
 A link to another service asks for confirmation: press the same key again.
 
+With `-vv` the viewer writes the state machines' transitions, as the other commands do, to standard error; since the page is drawn on the terminal, standard error must be redirected for them to be written (`neottx view -vv INPUT 2>trace.txt`). The walk of a page's presentation level is traced once for each reception of the page shown. Without the redirection the trace is dropped, and the viewer says so when it ends.
+
 On a channel that takes input (its descriptor's `push` says `"input": true`), the viewer greets the channel when its WebSocket opens, and once the channel answers, every key goes to it, as a terminal's keys go to its host: digits, Escape and Ctrl+C included. Printable keys go as text and the rest as key events, with Shift, Control and Alt. The channel decides what they mean; videotex channels take `*nnn#` for a page, `#` for the next and `*#` for the one before. A paste goes to the channel as one paste, and the terminal's focus as the channel's, where the terminal reports them; in a terminal with the Kitty keyboard protocol, releases and repeats go too, and in any other a key goes as a press alone. The channel is told the page or sub-page selected whenever it changes, whatever the focus, and every input event is stamped with the page and sub-code the viewer is drawing. Keys stop going when the terminal loses the focus or after Ctrl+], which leaves the keys to the viewer and gives them back: the channel is told the focus went, with a lost release of each key held where the terminal reports releases. A channel that does not answer within 10 seconds is said not to take input. See DOC-1781 of `neoteletext-common/PROTOCOL.html`.
 
 Row 0 columns 0 to 7 always belong to the receiver: they show the page number being searched for and the security indicators, which a page cannot forge (REQ-SEC-005).
 
-When a particular sub-page is shown, the status area gives its place among the page's stored sub-pages, counted from 1 (REQ-NAV-005, decision E.130): `P100/12` for a place up to 99; `100/123`, without the `P`, for a place of three digits; and `100/+++` for a place of four digits, which the seven columns cannot hold beside the page number. A page may have up to 3,199 sub-pages (area NUM). Right and Left step through them; sub-page numbers cannot yet be typed.
+The status area in row 0's first seven columns shows the page number, and (DEC-2349):
+- on a page whose sub-pages rotate, how many are stored, after `+`: `P100+12`;
+- on a sub-page chosen with Left, Right or a link, its place among those stored, after `/`: `P100/03`;
+- `?` in place of the `+` or `/` when the page has not been received again for a while (`P100?03`), or after the number (`P100 ?`).
+
+A place or count of three digits gives up the `P` (`100/123`), and one of four digits gives up the page number (`P/8190`), whose header still shows it.
+
+A page may have up to 3,199 sub-pages (area NUM). Right and Left step through those stored, and the sub-page key followed by four digits asks for one by its number (DEC-2363).
 
 ## Checking a channel
 
@@ -218,7 +228,7 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `page_completion_timeout_us` | E.19 | 100 ms |
 | `row24` | E.23 | Annex H |
 | `framing_tolerance` | E.24: accept one wrong framing-code bit | On |
-| `store_hexadecimal_pages` | REQ-ACQ-013 | Off |
+| `store_hexadecimal_pages` | REQ-ACQ-013: also store pages with a hexadecimal digit, for diagnostics; never the reserved numbers mFD, mFE, mFF, 1BE and 1F0, whose tables are kept as received apart from the pages (DEC-2341) | Off |
 | `stale_after_us` | REQ-ACQ-012 | 60 s |
 | `reveal`, `momentary_reveal_us` | REQ-NAV-007 | Latched; 160 ms |
 | `step_order` | REQ-NAV-002 | Numerical |

@@ -17,8 +17,17 @@ pub struct Statistics {
     pub address_failures: u32,
     /// Uncorrectable designation codes.
     pub designation_failures: u32,
-    /// Triplets that failed Hamming 24/18.
-    pub triplet_failures: u32,
+    /// Hamming 8/4 bytes corrected, in every packet's protected bytes
+    /// ([`crate::packet::protection`]).
+    pub hamming84_corrected: u32,
+    /// Hamming 8/4 bytes that could not be decoded, wherever they are; the
+    /// address and designation failures that discarded a packet are among
+    /// them, and also counted on their own above.
+    pub hamming84_failures: u32,
+    /// Hamming 24/18 triplets corrected.
+    pub hamming2418_corrected: u32,
+    /// Hamming 24/18 triplets that could not be decoded.
+    pub hamming2418_failures: u32,
     /// Bytes that failed parity.
     pub parity_failures: u32,
     /// Rows discarded with no page in progress, or out of sequence.

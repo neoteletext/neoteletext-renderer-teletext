@@ -59,6 +59,12 @@ pub const C11_SERIAL: u16 = 1 << 11;
 pub const C12: u16 = 1 << 12;
 /// National option character subset bit C13.
 pub const C13: u16 = 1 << 13;
+/// On an enhancement page C12 means a second or further fragment of a
+/// transmission (EN 300 706 Annex B.6 item 7, Table B.1).
+pub const ENHANCEMENT_CONTINUED_FRAGMENT: u16 = C12;
+/// On an enhancement page C13 means a partial page: the header and the
+/// changed packets only (Annex B.6 item 6, Table B.1).
+pub const ENHANCEMENT_PARTIAL_PAGE: u16 = C13;
 /// National option character subset bit C14.
 pub const C14: u16 = 1 << 14;
 /// All control bits C4 to C14.

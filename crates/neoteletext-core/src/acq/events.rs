@@ -5,7 +5,7 @@ use super::EnhancementKey;
 use crate::fsm::PageKey;
 use crate::packet::PacketError;
 use crate::trace::TraceEntry;
-use crate::types::{Magazine, PageNumber, PresentationFields};
+use crate::types::{Magazine, PageNumber, PresentationFields, SubCode};
 
 /// The magazine data of one magazine (REQ-ACQ-009, REQ-ACQ-018): the most
 /// recent packet of each designation code, each replacing the last.
@@ -28,6 +28,17 @@ pub enum Discard {
     OtherMagazine,
 }
 
+/// The damage found in one packet (REQ-ARCH-005).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Damage {
+    /// Hamming 8/4 bytes that could not be decoded.
+    pub hamming84_failures: u16,
+    /// Hamming 24/18 triplets that could not be decoded.
+    pub hamming2418_failures: u16,
+    /// Bytes that failed their parity check.
+    pub parity_failures: u16,
+}
+
 /// An event raised by the decoder (REQ-ARCH-005).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event {
@@ -37,6 +48,8 @@ pub enum Event {
         magazine: Magazine,
         /// Its page number, if decodable.
         page: Option<PageNumber>,
+        /// Its sub-code, if decodable (REQ-ARCH-005).
+        subcode: Option<SubCode>,
     },
     /// A page reception started.
     PageStarted(PageKey),
@@ -66,6 +79,17 @@ pub enum Event {
     EnhancementPageChanged(EnhancementKey),
     /// A packet was discarded.
     Discarded(Discard),
+    /// A packet was kept with damage its protection could not correct
+    /// (REQ-ARCH-005): uncorrectable Hamming bytes or triplets, or bytes
+    /// that failed parity. One event a packet at most.
+    Damaged {
+        /// The packet's magazine.
+        magazine: Magazine,
+        /// The page its magazine is receiving, if any.
+        page: Option<PageKey>,
+        /// What was found in this packet.
+        damage: Damage,
+    },
     /// A state machine transition (REQ-FSM-010).
     Trace(TraceEntry),
 }

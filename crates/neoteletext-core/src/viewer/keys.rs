@@ -6,7 +6,7 @@ use super::{Action, Key, KeyContext, Viewer, ViewerState};
 use crate::acq::PageStore;
 use crate::config::{RevealStyle, StepOrder};
 use crate::level1::Zoom;
-use crate::nav::{EntryResult, PageLinks, next_page, previous_page, step_stored};
+use crate::nav::{EntryResult, PageLinks, SubPageEntryResult, step_numerical, step_stored};
 use crate::types::{Instant, SubCode};
 
 impl Viewer {
@@ -17,6 +17,9 @@ impl Viewer {
         let KeyContext { links, store, initial, config, now, confirmed, prompts_shown } = *context;
         if let ViewerState::ConfirmingLink(waiting) = self.state {
             return self.answer_confirmation(key, waiting, links);
+        }
+        if self.state == ViewerState::EnteringSubPage {
+            return self.subpage_digit(key);
         }
         match key {
             Key::Digit(digit) if self.state != ViewerState::Holding => self.digit(digit),
@@ -51,6 +54,12 @@ impl Viewer {
                 Action::None
             }
             _ if !matches!(self.state, ViewerState::Displaying | ViewerState::Searching) => Action::None,
+            Key::SubPage => {
+                self.before_subpage_entry = self.state;
+                self.subpage_entry.clear();
+                self.state = ViewerState::EnteringSubPage;
+                Action::None
+            }
             // REQ-SEC-024: a link may be followed only while its prompt is
             // shown whole in row 24.
             Key::Red | Key::Green | Key::Yellow | Key::Cyan => {
@@ -61,12 +70,21 @@ impl Viewer {
                     Action::None
                 }
             }
+            // REQ-286 (Annex H.4): Index follows the page's index link; on
+            // a page with no links at all it requests the initial page; an
+            // absent index link on a page with coloured links leaves the
+            // key without effect. An index link to another service stays in
+            // this service, at its initial page (DEC-2198).
             Key::Index => match links.index {
                 Some(target) if target.service.is_none() => self.select(target.address, target.subcode, true),
-                _ => self.select(initial, SubCode::ANY, true),
+                Some(_) => self.select(initial, SubCode::ANY, true),
+                None if links.no_coloured_links() => self.select(initial, SubCode::ANY, true),
+                None => Action::None,
             },
             Key::Home => self.select(initial, SubCode::ANY, true),
-            Key::NextPage | Key::PreviousPage => self.step_page(key == Key::NextPage, config.step_order, store),
+            Key::NextPage | Key::PreviousPage => {
+                self.step_page(key == Key::NextPage, config.step_order, config.store_hexadecimal_pages, store)
+            }
             Key::NextSubPage | Key::PreviousSubPage => self.step_subpage(key == Key::NextSubPage, store),
             Key::Back => match self.history.back() {
                 Some(entry) => self.select(entry.address, entry.subcode, false),
@@ -76,6 +94,24 @@ impl Viewer {
                 Some(entry) => self.select(entry.address, entry.subcode, false),
                 None => Action::None,
             },
+        }
+    }
+
+    /// A key during sub-page entry (DEC-2363): a digit the entry accepts is
+    /// kept and one it refuses is ignored, the fourth completes the
+    /// sub-code and shows that sub-page, and any other key leaves entry
+    /// with nothing requested.
+    fn subpage_digit(&mut self, key: Key) -> Action {
+        let Key::Digit(digit) = key else {
+            self.state = self.before_subpage_entry;
+            return Action::None;
+        };
+        match self.subpage_entry.push(digit) {
+            SubPageEntryResult::Rejected | SubPageEntryResult::Partial => Action::None,
+            SubPageEntryResult::Complete(subcode) => {
+                self.state = self.before_subpage_entry;
+                self.show_subpage(subcode)
+            }
         }
     }
 
@@ -117,11 +153,12 @@ impl Viewer {
     }
 
     /// Next or previous page, in the configured step order.
-    fn step_page(&mut self, forward: bool, step_order: StepOrder, store: &PageStore<'_>) -> Action {
+    fn step_page(&mut self, forward: bool, step_order: StepOrder, hexadecimal: bool, store: &PageStore<'_>) -> Action {
+        // REQ-ACQ-017: hexadecimal pages are stepped to only under the
+        // diagnostic setting of REQ-ACQ-013.
         let target = match step_order {
-            StepOrder::Numerical if forward => next_page(self.requested),
-            StepOrder::Numerical => previous_page(self.requested),
-            StepOrder::Stored => step_stored(self.requested, forward, store),
+            StepOrder::Numerical => step_numerical(self.requested, forward, hexadecimal),
+            StepOrder::Stored => step_stored(self.requested, forward, hexadecimal, store),
         };
         self.select(target, SubCode::ANY, true)
     }

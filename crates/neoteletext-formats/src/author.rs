@@ -18,6 +18,7 @@
 //! The authored test stream of REQ-TST-024 is in [`streams`].
 
 mod display;
+mod mip;
 mod mot;
 mod objects;
 pub mod streams;
@@ -43,6 +44,7 @@ use neoteletext_core::types::{
 pub use display::{
     DisplayPage, LinkFunction, PAGE_TRIPLETS, VALID_BOTH, VALID_LEVEL_25, VALID_LEVEL_35, link, no_link,
 };
+pub use mip::Mip;
 pub use mot::{Mot, MotLevel, object_link};
 pub use objects::{ObjectPage, pointer_place, public_number};
 pub use triplets::{FlashMode, FlashRate, FontStyle, LocalObject, ObjectRef, RowScope, Triplets, row_address};

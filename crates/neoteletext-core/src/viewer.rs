@@ -6,7 +6,7 @@ use crate::acq::{EnhancementLookup, MagazineData, PageStore};
 use crate::config::Config;
 use crate::consts::{FASTEXT_KEYS, HEADER_DISPLAY_BYTES};
 use crate::level1::Zoom;
-use crate::nav::{History, HistoryEntry, LinkTarget, PageEntry, PageLinks};
+use crate::nav::{History, HistoryEntry, LinkTarget, PageEntry, PageLinks, SubPageEntry};
 use crate::types::{Instant, PageAddress, SubCode};
 
 mod keys;
@@ -48,6 +48,9 @@ pub enum Key {
     Mix,
     /// Page zoom.
     Zoom,
+    /// Sub-page entry: the next four digits are a sub-code (REQ-NAV-005,
+    /// REQ-NUM-017, DEC-2363).
+    SubPage,
     /// Back in history.
     Back,
     /// Forward in history.
@@ -63,6 +66,9 @@ pub enum ViewerState {
     Entering1,
     /// Two digits entered.
     Entering2,
+    /// Sub-page digits are being entered for the page shown (REQ-NAV-005,
+    /// DEC-2363).
+    EnteringSubPage,
     /// The requested page is not yet stored.
     Searching,
     /// The requested page is shown.
@@ -154,16 +160,23 @@ pub struct ComposeContext<'a> {
 pub const HISTORY_ENTRIES: usize = 32;
 
 /// The viewer.
+// Reveal, mix, boxed display and staleness are separate settings and facts
+// of the viewer (REQ-NAV-007, REQ-L1-020), each set and read alone.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug)]
 pub struct Viewer {
     state: ViewerState,
     requested: PageAddress,
     subcode: SubCode,
     entry: PageEntry,
+    subpage_entry: SubPageEntry,
+    /// The state sub-page entry returns to: Displaying or Searching.
+    before_subpage_entry: ViewerState,
     history: History<HISTORY_ENTRIES>,
     reveal: bool,
     reveal_until: Option<Instant>,
     mix: bool,
+    boxed: bool,
     zoom: Zoom,
     stale: bool,
     indicator: SecurityIndicator,
@@ -179,10 +192,13 @@ impl Viewer {
             requested: initial,
             subcode: SubCode::ANY,
             entry: PageEntry::default(),
+            subpage_entry: SubPageEntry::default(),
+            before_subpage_entry: ViewerState::Displaying,
             history: History::new(),
             reveal: false,
             reveal_until: None,
             mix: false,
+            boxed: false,
             zoom: Zoom::Off,
             stale: false,
             indicator: SecurityIndicator::None,
@@ -218,6 +234,19 @@ impl Viewer {
     #[must_use]
     pub const fn mix(&self) -> bool {
         self.mix
+    }
+
+    /// Boxed display (REQ-L1-020): only the page's boxed areas are shown,
+    /// as on a newsflash or subtitle page, whatever the page's C5 and C6
+    /// say; a port turns it on to show subtitles over a picture.
+    #[must_use]
+    pub const fn boxed(&self) -> bool {
+        self.boxed
+    }
+
+    /// Turns boxed display on or off.
+    pub fn set_boxed(&mut self, boxed: bool) {
+        self.boxed = boxed;
     }
 
     /// Sets the security indicator (from the web module's events).

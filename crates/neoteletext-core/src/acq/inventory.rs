@@ -28,14 +28,15 @@ impl Decoder<'_> {
     }
 
     /// How a page's sub-code is read, by its MIP code: a page not
-    /// following the sub-code rules keeps its latest version only
-    /// (REQ-NUM-021), and a data page by its code is not a display page
+    /// following the sub-code rules, or any other page Table 24 gives one
+    /// page of storage, keeps its latest version only (REQ-NUM-021,
+    /// DEC-2338), and a data page by its code is not a display page
     /// (REQ-NUM-022, REQ-NUM-024, REQ-NUM-028). With no MIP, every page is
     /// a display page until its page function says otherwise (REQ-NUM-002,
     /// REQ-NUM-027).
     pub(super) fn numbering(&self, address: PageAddress) -> Numbering {
         self.inventory_code(address).map_or(Numbering::SubPages, |code| match code.function() {
-            InventoryFunction::NotFollowingRules => Numbering::LatestOnly,
+            _ if code.one_page_of_storage() => Numbering::LatestOnly,
             InventoryFunction::DataBroadcasting
             | InventoryFunction::Drcs
             | InventoryFunction::Object

@@ -396,7 +396,7 @@ fn top_pages_are_not_offered_as_display_pages() {
         assert!(decoder.enhancement_store().contains_address(address(0x101)));
         let store = decoder.store();
         assert!(store.contains(address(0x102)), "the MIP's TOP page is stored as the data page it is");
-        assert_eq!(step_stored(address(0x100), true, store), address(0x103));
+        assert_eq!(step_stored(address(0x100), true, false, store), address(0x103));
         assert_eq!(store.subpage_count(address(0x102)), 0);
         assert_eq!(store.subpage_count(address(0x103)), 1);
     });
@@ -503,10 +503,15 @@ fn a_page_of_8190_sub_pages_is_held_and_stepped() {
         // From the rotating display, the latest (3F7E) steps on to the first.
         assert_eq!(viewer.key(Key::NextSubPage, &context), Action::Request(address(0x100), SubCode::new(0x0001)));
         assert_eq!(&viewer.status(store), b"P100/01");
-        for &expected in &codes[1..] {
+        // DEC-2349: every place to 8,190 is shown whole, giving up the "P"
+        // at three digits and the page number at four.
+        let shown = [(99, &b"P100/99"[..]), (100, b"100/100"), (999, b"100/999"), (1000, b"P/1000"), (8190, b"P/8190")];
+        for (place, &expected) in (2..).zip(&codes[1..]) {
             assert_eq!(viewer.key(Key::NextSubPage, &context), Action::Request(address(0x100), SubCode::new(expected)));
+            if let Some((_, text)) = shown.iter().find(|(at, _)| *at == place) {
+                assert_eq!(&viewer.status(store)[..text.len()], *text, "place {place}");
+            }
         }
-        assert_eq!(&viewer.status(store), b"100/+++", "place 8,190 does not fit");
         assert_eq!(
             viewer.key(Key::NextSubPage, &context),
             Action::Request(address(0x100), SubCode::new(0x0001)),
@@ -558,5 +563,110 @@ fn the_sub_codes_at_each_end_are_received() {
         feed(&mut decoder, &stream);
         let stored = decoder.store().get(address(PAGE), SubCode::ANY).map(|page| page.key.subcode.value());
         assert_eq!(stored, Some(subcode), "{subcode:04X}");
+    }
+}
+
+/// REQ-NUM-021, DEC-2338: every MIP code that Table 24 gives one page of
+/// storage (01, 70 to 7A, 7C, 7D, 7F, 81, F9) keeps its latest version
+/// only, as code 79 does; a code with sub-pages (4F, 7B) still lists them.
+#[test]
+fn every_code_of_one_page_of_storage_keeps_its_latest_version() {
+    let single = [0x01, 0x70, 0x73, 0x77, 0x78, 0x79, 0x7A, 0x7C, 0x7D, 0x7F, 0x81, 0xF9];
+    let times = [0x0001, 0x0002, 0x0003].map(|code| header(0x150, code));
+    for code in (0..=u8::MAX).filter(|code| single.contains(code) || [0x4F, 0x7B].contains(code)) {
+        assert_eq!(PageCode(code).one_page_of_storage(), single.contains(&code), "{code:02X}");
+        with_decoder(8, |decoder| {
+            let mut stream = mip_packets(1, &[(0x50, code)], &[]);
+            stream.extend(times.iter().copied());
+            stream.extend(filling());
+            feed(decoder, &stream);
+            let expected: &[u16] = if single.contains(&code) { &[] } else { &[0x0001, 0x0002, 0x0003] };
+            assert_eq!(listed(decoder, 0x150), expected, "{code:02X}");
+            assert_eq!(decoder.store().latest(address(0x150)).unwrap().key.subcode.value(), 0x0003, "{code:02X}");
+        });
+    }
+    let all_single: Vec<u8> = (0..=u8::MAX).filter(|&code| PageCode(code).one_page_of_storage()).collect();
+    let mut expected = single.to_vec();
+    expected.extend([0x71, 0x72, 0x74, 0x75, 0x76]);
+    expected.sort_unstable();
+    assert_eq!(all_single, expected);
+}
+
+/// REQ-NUM-028, REQ-NUM-010, DEC-2341: the Basic TOP Table, page 1F0, is
+/// kept as received in the enhancement store, where a reader of TOP finds
+/// it, and never reaches the page store or a list of display pages, with or
+/// without the diagnostic setting that stores hexadecimal pages.
+#[test]
+fn the_basic_top_table_is_kept_as_the_data_page_it_is() {
+    for diagnostic in [false, true] {
+        let mut pages = vec![StoredPage::EMPTY; 8];
+        let mut sub_pages = vec![EnhancementSubPage::EMPTY; 16];
+        let mut packets = vec![EnhancementPacket::EMPTY; 400];
+        let store = EnhancementStore::new(&mut sub_pages, &mut packets);
+        let config = Config { store_hexadecimal_pages: diagnostic, ..Config::default() };
+        let mut decoder = Decoder::with_enhancement_store(&mut pages, store, config);
+        let btt = address(0x1F0);
+        let row = [hamming84_encode(0x5); DATA_BYTES];
+        let mut stream = vec![header(0x1F0, 0), encode::row(btt.magazine, 1, &row)];
+        stream.extend(filling());
+        feed(&mut decoder, &stream);
+        let table = decoder.enhancement_lookup().basic_top_table();
+        assert_eq!(table.and_then(|table| table.row(1).copied()), Some(row), "diagnostic {diagnostic}");
+        assert!(!decoder.store().contains(btt), "diagnostic {diagnostic}");
+        assert_eq!(decoder.store().subpage_count(btt), 0, "diagnostic {diagnostic}");
+    }
+}
+
+/// REQ-NUM-027: a page function given by X/28/4 (Table 10, as clause
+/// 9.4.2.1) decides how the page is read, as X/28/0's does: a page whose
+/// X/28/4 names the Basic TOP Table function is not a display page.
+#[test]
+fn a_page_function_in_x_28_4_is_honoured() {
+    with_decoder(8, |decoder| {
+        let format = PageFormat { function: PAGE_FUNCTION_BTT, coding: 0 };
+        let level35 = encode::page_enhancement(address(0x150).magazine, 4, format, &PresentationFields::default());
+        let mut stream = vec![header(0x150, 0), level35, header(0x151, 0)];
+        stream.extend(filling());
+        feed(decoder, &stream);
+        assert_eq!(step_stored(address(0x149), true, false, decoder.store()), address(0x151));
+        assert_eq!(decoder.store().subpage_count(address(0x150)), 0);
+    });
+}
+
+/// REQ-305, REQ-316 (REQ-NUM-007, REQ-NUM-018), DEC-2344: every editorial link, of X/27/0 and
+/// of X/27/1 to X/27/3 alike, gives an ordinary target, sub-code 3F7F as
+/// any sub-page, page FF as no page and XFF:3F7F as no link, through one
+/// rule; a relative magazine bit complements the packet's magazine.
+#[test]
+fn every_kind_of_editorial_link_has_the_same_meanings() {
+    let magazine = Magazine::new(1).unwrap();
+    let other = Magazine::new(3).unwrap();
+    let links = [
+        Some((magazine, PageNumber(0x23), SubCode::new(0x0004))),
+        Some((magazine, PageNumber(0x45), SubCode::ANY)),
+        Some((magazine, PageNumber(0xFF), SubCode::new(0x0001))),
+        None,
+        Some((other, PageNumber(0x67), SubCode::new(0x3F7E))),
+        Some((magazine, PageNumber(0xFF), SubCode::ANY)),
+    ];
+    let expected =
+        [Some((0x123, 0x0004)), Some((0x145, SubCode::ANY.value())), None, None, Some((0x367, 0x3F7E)), None];
+    for designation in 0..=3u8 {
+        let mut packet = encode::links(magazine, &links, true, 0);
+        packet.bytes[neoteletext_core::consts::DATA_START] = hamming84_encode(designation);
+        with_decoder(8, |decoder| {
+            let mut stream = vec![header(0x100, 0), packet];
+            stream.extend(filling());
+            feed(decoder, &stream);
+            let page = decoder.store().get(address(0x100), SubCode::ANY).unwrap();
+            let decoded = page.editorial_links(designation).expect("received");
+            let targets = decoded.links.map(|link| {
+                neoteletext_core::nav::link_target(link).map(|target| (target.address.mpp(), target.subcode.value()))
+            });
+            assert_eq!(targets, expected, "X/27/{designation}");
+            for absent in (0..=3u8).filter(|&other| other != designation) {
+                assert_eq!(page.editorial_links(absent), None, "X/27/{absent} was not sent");
+            }
+        });
     }
 }

@@ -46,12 +46,15 @@ pub fn list(options: &Options) -> Result<(), Failure> {
     let stats = session.decoder().statistics();
     let _ = writeln!(
         out,
-        "\n{} page(s); packets per magazine 1-8: {:?}; address failures {}; parity failures {}; triplet failures {}; discarded {}",
+        "\n{} page(s); packets per magazine 1-8: {:?}; address failures {}; parity failures {}; Hamming 8/4 corrected {}, failed {}; Hamming 24/18 corrected {}, failed {}; discarded {}",
         page_count,
         [1, 2, 3, 4, 5, 6, 7, 0].map(|m| stats.per_magazine.get(m).copied().unwrap_or(0)),
         stats.address_failures,
         stats.parity_failures,
-        stats.triplet_failures,
+        stats.hamming84_corrected,
+        stats.hamming84_failures,
+        stats.hamming2418_corrected,
+        stats.hamming2418_failures,
         stats.discarded
     );
     if enhanced {

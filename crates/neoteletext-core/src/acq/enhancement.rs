@@ -14,9 +14,10 @@
 
 use super::MagazineData;
 use crate::consts::{
-    C4_ERASE, DATA_BYTES, DESIGNATION_CODES, ENHANCEMENT_SUBPAGE_PACKETS, MAGAZINES, PACKET_ROW_25, PAGE_MOT,
+    C4_ERASE, DATA_BYTES, DESIGNATION_CODES, ENHANCEMENT_CONTINUED_FRAGMENT, ENHANCEMENT_PARTIAL_PAGE,
+    ENHANCEMENT_SUBPAGE_PACKETS, MAGAZINES, PACKET_ROW_25, PAGE_MOT,
 };
-use crate::limits::{PAGE_MIP, enhancement_last_packet, enhancement_sub_page, enhancement_update};
+use crate::limits::{PAGE_BTT, PAGE_MIP, enhancement_last_packet, enhancement_sub_page, enhancement_update};
 use crate::packet::PageFormat;
 use crate::types::{ControlBits, Instant, Magazine, PageAddress, PageNumber, SubCode};
 
@@ -133,6 +134,20 @@ impl<'s> EnhancementPage<'s> {
     #[must_use]
     pub const fn control(&self) -> ControlBits {
         self.entry.control
+    }
+
+    /// True when the latest header marks a second or further fragment (C12,
+    /// Annex B.6 item 7).
+    #[must_use]
+    pub const fn is_continued_fragment(&self) -> bool {
+        self.entry.control.has(ENHANCEMENT_CONTINUED_FRAGMENT)
+    }
+
+    /// True when the latest header marks a partial page (C13, Annex B.6
+    /// item 6).
+    #[must_use]
+    pub const fn is_partial_page(&self) -> bool {
+        self.entry.control.has(ENHANCEMENT_PARTIAL_PAGE)
     }
 
     /// The last packet number of an uninterrupted transmission, from S4 and
@@ -372,7 +387,12 @@ impl<'a> EnhancementStore<'a> {
             }
             index
         };
-        if control.has(C4_ERASE) {
+        // Table B.1: only a full page's complete transmission or first
+        // fragment erases the old page; a continued fragment (C12) or a
+        // partial page (C13) replaces only the packets it carries, even
+        // with C4 set, a combination the table does not list (REQ-ACQ-021).
+        let continues = control.has(ENHANCEMENT_CONTINUED_FRAGMENT) || control.has(ENHANCEMENT_PARTIAL_PAGE);
+        if control.has(C4_ERASE) && !continues {
             self.release_packets(index);
             if let Some(entry) = self.sub_pages.get_mut(index) {
                 entry.format = None;
@@ -504,6 +524,14 @@ impl<'s> EnhancementLookup<'s> {
     #[must_use]
     pub fn magazine_inventory_page(&self, magazine: Magazine) -> Option<EnhancementPage<'s>> {
         self.sub_page(magazine, PageNumber(PAGE_MIP), 0)
+    }
+
+    /// The Basic TOP Table: page 1F0, sub-page S1 = 0 (clause 11.2.2;
+    /// REQ-NUM-028), kept as received for a reader of TOP.
+    #[must_use]
+    pub fn basic_top_table(&self) -> Option<EnhancementPage<'s>> {
+        let address = PageAddress::from_mpp(PAGE_BTT)?;
+        self.sub_page(address.magazine, address.page, 0)
     }
 
     /// The stored M/29 packets of a magazine (REQ-ACQ-018).

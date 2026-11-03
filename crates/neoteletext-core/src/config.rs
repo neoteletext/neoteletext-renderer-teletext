@@ -146,6 +146,10 @@ pub struct Config {
     /// Accept a framing code with one wrong bit (decision E.24).
     pub framing_tolerance: bool,
     /// Store pages with hexadecimal numbers, for diagnostics (REQ-ACQ-013).
+    /// The reserved numbers (mFD, mFE, mFF, 1BE, 1F0) are never stored as
+    /// pages, whatever this says (REQ-NUM-010, DEC-2341): the MOT, the MIP
+    /// and the Basic TOP Table are kept as received in the enhancement
+    /// store, where a tool reads their bytes.
     pub store_hexadecimal_pages: bool,
     /// Microseconds after which a page not received again is stale
     /// (REQ-ACQ-012, REQ-FSM-004).
