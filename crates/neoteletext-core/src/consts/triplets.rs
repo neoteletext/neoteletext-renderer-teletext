@@ -44,14 +44,40 @@ pub const CONTROL_WIDTH_MASK: u8 = 0x3F;
 pub const CONTROL_JOINED: u8 = 0x40;
 /// Column mode 00110: Programme Delivery Control.
 pub const MODE_COLUMN_PDC: u8 = 0x06;
-/// Column mode 01010: reserved. It was NeoTeletext's pointer-area triplet
-/// from 27 to 28 October 2026 (decision E.128), withdrawn by decision E.133
-/// (REQ-RCH-037): reserved again, as Table 29 has it.
+/// Column mode 01010: reserved by Table 29. NeoTeletext gives it to the
+/// row set triplet, [`MODE_ROW_SET`] (DEC-2179); its earlier use, the
+/// pointer-area triplet of decision E.128, was withdrawn by decision E.133.
 pub const MODE_COLUMN_RESERVED_3: u8 = 0x0A;
 /// Column mode 01010, reserved in Table 29, is NeoTeletext's row set
 /// triplet (DEC-2179, REQ-2180): from its column to the next one or the
 /// row's end, the row's own codes are read in the set its data designates.
 pub const MODE_ROW_SET: u8 = MODE_COLUMN_RESERVED_3;
+// DEC-2179, REQ-2180: column mode 01010 has one meaning, the row set
+// triplet. Every other column mode of Table 29 must differ from it, so that
+// no second use of the value (such as the withdrawn pointer area) returns
+// unnoticed.
+const _: () = assert!(
+    !matches!(
+        MODE_ROW_SET,
+        MODE_FOREGROUND_COLOUR
+            | MODE_G1
+            | MODE_G3_LEVEL_15
+            | MODE_BACKGROUND_COLOUR
+            | MODE_COLUMN_RESERVED_1
+            | MODE_CONTROL
+            | MODE_COLUMN_PDC
+            | MODE_ADDITIONAL_FLASH
+            | MODE_MODIFIED_DESIGNATION
+            | MODE_G0_LEVEL_25
+            | MODE_G3_LEVEL_25
+            | MODE_DISPLAY_ATTRIBUTES
+            | MODE_DRCS_CHARACTER
+            | MODE_FONT_STYLE
+            | MODE_G2
+            | MODE_G0_NO_DIACRITIC
+    ),
+    "column mode 01010 is the row set triplet alone (DEC-2179)"
+);
 /// Column mode 01011: G3 character at Level 2.5, ignored at 1.5.
 pub const MODE_G3_LEVEL_25: u8 = 0x0B;
 /// Column mode 01111: G2 character.

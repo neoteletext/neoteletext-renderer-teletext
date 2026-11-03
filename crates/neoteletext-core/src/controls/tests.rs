@@ -10,7 +10,7 @@
 #[cfg(test)]
 use super::*;
 
-use crate::consts::{MODE_COLUMN_RESERVED_3, MODE_TERMINATION, ROW_ADDRESS_BASE, TRIPLETS_PER_PACKET};
+use crate::consts::{MODE_ROW_SET, MODE_TERMINATION, ROW_ADDRESS_BASE, TRIPLETS_PER_PACKET};
 use crate::level1::Grid;
 use crate::packet::Triplet;
 use std::vec::Vec;
@@ -149,27 +149,29 @@ fn the_control_triplet_is_reserved_column_mode_00101() {
     ));
 }
 
-/// REQ-INT-120 (withdrawn), REQ-RCH-037, decision E.133: column mode 01010, a pointer area from
-/// decision E.128, is reserved again, as EN 300 706 Table 29 has it: its
-/// triplets declare nothing and are not counted as dropped, whatever they
-/// hold, and a control beside them stays.
+/// REQ-2180, DEC-2179: column mode 01010 is NeoTeletext's row set triplet,
+/// not a control (the pointer area of decision E.128 was withdrawn by
+/// decision E.133, REQ-RCH-037). Its triplets declare no control and are
+/// not counted as dropped, whatever they hold, and a control beside them
+/// stays.
 #[test]
-fn column_mode_01010_is_reserved_again() {
-    let reserved = |column: u8, data: u8| Triplet { address: column, mode: MODE_COLUMN_RESERVED_3, data };
+fn column_mode_01010_is_the_row_set_triplet_and_no_control() {
+    assert_eq!(MODE_ROW_SET, 0b01010, "the row set triplet keeps column mode 01010");
+    let row_set = |column: u8, data: u8| Triplet { address: column, mode: MODE_ROW_SET, data };
     let page = page_with(&[
         row(5),
         control(2, 10, false),
-        reserved(0, 40),
-        reserved(4, 4),
+        row_set(0, 40),
+        row_set(4, 4),
         row(6),
-        reserved(0, CONTROL_JOINED),
-        reserved(0, 0),
+        row_set(0, CONTROL_JOINED),
+        row_set(0, 0),
     ]);
     let found = controls(&page);
     assert_eq!(list(&found), [(5, 2, 10, 1)], "the control stays, and nothing else is one");
-    assert_eq!(found.dropped, 0, "a reserved triplet is not a control dropped");
+    assert_eq!(found.dropped, 0, "a row set triplet is not a control dropped");
     assert!(matches!(
-        reserved(4, 4).function(),
-        TripletFunction::ReservedColumn { column: 4, mode: MODE_COLUMN_RESERVED_3, data: 4 }
+        row_set(4, 4).function(),
+        TripletFunction::ReservedColumn { column: 4, mode: MODE_ROW_SET, data: 4 }
     ));
 }

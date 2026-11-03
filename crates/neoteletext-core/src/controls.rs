@@ -12,10 +12,11 @@
 //! on (REQ-L25-003). D6 set joins the run to the control on the row above
 //! at the same column and width, so a control may be a rectangle.
 //!
-//! Column mode 01010 was a pointer area until 28 October 2026 (decision
-//! E.128); with every move over the page sent (decision E.133, REQ-RCH-037)
-//! it asks for nothing, and is reserved again, as Table 29 has it
-//! (REQ-INT-120, withdrawn).
+//! Controls use column mode 00101 only. Column mode 01010 was a pointer
+//! area until 28 October 2026 (decision E.128, withdrawn by decision E.133,
+//! REQ-RCH-037; REQ-INT-120 withdrawn); it is now NeoTeletext's row set
+//! triplet (DEC-2179, REQ-2180, `consts::MODE_ROW_SET`), which the
+//! enhancement processor reads, and it declares no control.
 
 use crate::acq::StoredPage;
 use crate::consts::{
