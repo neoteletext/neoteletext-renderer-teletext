@@ -159,12 +159,14 @@ pub struct ComposeContext<'a> {
 /// History capacity (REQ-NAV-010 default).
 pub const HISTORY_ENTRIES: usize = 32;
 
-/// The viewer.
+/// The viewer, with a history of `HISTORY` entries, 32 unless the port
+/// says otherwise (REQ-NAV-010): held inside the viewer, whose memory the
+/// port provides, as it does every other part of the viewer.
 // Reveal, mix, boxed display and staleness are separate settings and facts
 // of the viewer (REQ-NAV-007, REQ-L1-020), each set and read alone.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug)]
-pub struct Viewer {
+pub struct Viewer<const HISTORY: usize = HISTORY_ENTRIES> {
     state: ViewerState,
     requested: PageAddress,
     subcode: SubCode,
@@ -172,7 +174,7 @@ pub struct Viewer {
     subpage_entry: SubPageEntry,
     /// The state sub-page entry returns to: Displaying or Searching.
     before_subpage_entry: ViewerState,
-    history: History<HISTORY_ENTRIES>,
+    history: History<HISTORY>,
     reveal: bool,
     reveal_until: Option<Instant>,
     mix: bool,
@@ -184,9 +186,19 @@ pub struct Viewer {
 }
 
 impl Viewer {
-    /// A viewer that will start on `initial`.
+    /// A viewer that will start on `initial`, with the default history of
+    /// [`HISTORY_ENTRIES`].
     #[must_use]
     pub fn new(initial: PageAddress) -> Self {
+        Self::with_history(initial)
+    }
+}
+
+impl<const HISTORY: usize> Viewer<HISTORY> {
+    /// A viewer that will start on `initial`, keeping `HISTORY` entries of
+    /// history, the oldest dropped when it is full (REQ-NAV-010).
+    #[must_use]
+    pub fn with_history(initial: PageAddress) -> Self {
         Self {
             state: ViewerState::Starting,
             requested: initial,
@@ -269,7 +281,7 @@ impl Viewer {
 
     /// The history.
     #[must_use]
-    pub const fn history(&self) -> &History<HISTORY_ENTRIES> {
+    pub const fn history(&self) -> &History<HISTORY> {
         &self.history
     }
 

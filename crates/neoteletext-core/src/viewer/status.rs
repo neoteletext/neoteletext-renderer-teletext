@@ -27,7 +27,7 @@ const STALE_COLUMN: usize = 5;
 /// The fewest stored sub-pages whose count is shown.
 const COUNTED_FROM: usize = 2;
 
-impl Viewer {
+impl<const HISTORY: usize> Viewer<HISTORY> {
     /// Row 0 columns 0 to 6 (decision E.10, REQ-SEC-005).
     #[must_use]
     pub fn status(&self, store: &PageStore<'_>) -> [u8; STATUS_COLUMNS] {

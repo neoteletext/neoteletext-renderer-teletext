@@ -9,7 +9,7 @@ use crate::level1::Zoom;
 use crate::nav::{EntryResult, PageLinks, SubPageEntryResult, step_numerical, step_stored};
 use crate::types::{Instant, SubCode};
 
-impl Viewer {
+impl<const HISTORY: usize> Viewer<HISTORY> {
     /// Handles a key (REQ-FSM-005). `links` are the links of the page shown
     /// (from X/27/0 or the TTI Link Extension); `confirmed` says whether
     /// another service's origin has been confirmed this session.

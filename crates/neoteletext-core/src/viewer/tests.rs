@@ -532,3 +532,26 @@ fn boxed_display_is_a_viewer_setting() {
     let _ = viewer.compose(&mut grid, page, &compose);
     assert!(grid.boxed_mode);
 }
+
+/// REQ-295 (REQ-NAV-010): a port gives the viewer the size of its history;
+/// one of three entries drops its oldest at the fourth page, and Back stops
+/// at the oldest it keeps.
+#[test]
+fn a_viewer_keeps_the_history_its_port_gives_it() {
+    let mut slots = std::vec![StoredPage::EMPTY; 2];
+    let decoder = Decoder::new(&mut slots, Config::default());
+    let config = Config::default();
+    let links = PageLinks::default();
+    let no = |_| false;
+    let keys = context(&links, decoder.store(), &config, &no);
+    let mut viewer: Viewer<3> = Viewer::with_history(page(0x100));
+    let _ = viewer.event(ViewerEvent::Started);
+    for digits in [[2, 0, 0], [3, 0, 0], [4, 0, 0]] {
+        for digit in digits {
+            viewer.key(Key::Digit(digit), &keys);
+        }
+    }
+    assert_eq!(viewer.key(Key::Back, &keys), Action::Request(page(0x300), SubCode::ANY));
+    assert_eq!(viewer.key(Key::Back, &keys), Action::Request(page(0x200), SubCode::ANY));
+    assert_eq!(viewer.key(Key::Back, &keys), Action::None, "100, the oldest, was dropped");
+}

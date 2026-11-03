@@ -8,7 +8,7 @@ use crate::compose::{compose_level, compose_level_traced};
 use crate::level1::{DisplayOptions, Grid, build_grid};
 use crate::trace::TraceSink;
 
-impl Viewer {
+impl<const HISTORY: usize> Viewer<HISTORY> {
     /// Builds the grid the viewer shows (REQ-ARCH-006): Level 1, then the
     /// pass of the presentation level, with the receiver's status area,
     /// rolling header and row 24. While holding it leaves the grid alone.
