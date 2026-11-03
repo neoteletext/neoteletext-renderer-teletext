@@ -29,6 +29,7 @@ This is the threat model REQ-SEC-002 requires. Security overrides every other re
 | Page content into the grid (L3) | 1 | Trust | Row 0 columns 0 to 7 cannot be written by any page route (REQ-SEC-005, E.5 (j)). |
 | Output to the terminal (L5) | 1 | Terminal | Allow-listed characters only; only our own fixed escape sequences; image data encoded from pixels (REQ-SEC-010, REQ-RND-029). |
 | Untrusted bytes into the web user agent (L7) | 1, 2 | Host, network, cookies | Strict address parser, minimal user agent profile, strict HTTP framing, no compression, size and time limits, policy checks on every connection and redirect (REQ-WEB-014 to 016, REQ-SEC-006 to 011). |
+| A web page read by discovery, and a font fetched from an address (`Input::FetchResource`) | 1, 2 | Host, cookies, trust | One `GET` on a connection of its own, with no cookie and no bound session's header sent and no `Set-Cookie` kept, redirects checked for the local network and downgrade; discovery reads only `Link` fields and `<link>` elements in the first 8,192 bytes by bounded readers, fuzzed (`discovery_header`, `discovery_element`), and checks every target before reporting it (REQ-2476); a font is taken only as a font's media type, within the core's bound, and its SHA-256 is the port's to check (REQ-123). |
 | Plain HTTP connections | 2 | Cookies, trust | Unencrypted marker in the status area, `Secure` cookies never sent, no downgrade (REQ-SEC-007, REQ-SEC-008). |
 | A page's form lines | 1 | Trust | None to protect: the TTI Form Extension is withdrawn (decision E.126), and its lines are unknown commands, ignored with a diagnostic (REQ-INP-013). A channel asks for text over the input protocol instead (area INT). |
 | Links | 1 | Trust | Receiver-drawn link row, other services marked and confirmed (REQ-SEC-024, REQ-NAV-011, REQ-NAV-012). |
@@ -62,7 +63,7 @@ Checked on 3 November 2026.
 | REQ-SEC-018 privilege separation | Done for every live input (`zxnet:`, `wss://`, `http://`, `https://`). On Linux both processes sandbox themselves: the fetcher may use the network and read only the resolver files (IMPLEMENTATION-LOG.md decision 28); the decoder has no network. The pipe's frames are fuzzed. |
 | REQ-SEC-024 links | A coloured key follows a link only while its own prompt is shown whole (`Grid::prompts_shown`, DEC-2115). |
 | REQ-SEC-014 supply chain | Lockfiles, pinned toolchain and tools; `cargo-deny` and `cargo-machete` in the full gate. Open: a schedule for new advisories, Espressif's toolchain checked by checksum (TODO-2092); the bill of materials, release signing and reproducible builds wait until the owner is ready for releases. |
-| REQ-TST-040 fuzzing | 32 targets in `fuzz/fuzz_targets/`, each run in the full gate for `NEOTELETEXT_FUZZ_SECONDS` (20 by default) after every input that ever found a fault is replayed. Open: targets for the qrkeyboard client's readers (TODO-2093), and longer runs on a schedule (TODO-1742). |
+| REQ-TST-040 fuzzing | 44 targets in `fuzz/fuzz_targets/`, each run in the full gate for `NEOTELETEXT_FUZZ_SECONDS` (20 by default) after every input that ever found a fault is replayed. Open: targets for the qrkeyboard client's readers (TODO-2093), and longer runs on a schedule (TODO-1742). |
 
 ## Review record
 

@@ -21,7 +21,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         self.fetch.used = true;
         self.fetch.body = None;
         self.fetch.response = None;
-        if head.close || core::mem::take(&mut self.close_fetch_after) {
+        // A resource's connection is never used again (REQ-2476): the next
+        // request, for a channel or another resource, opens its own.
+        let resource = matches!(exchange.purpose, Purpose::Resource(_));
+        if head.close || core::mem::take(&mut self.close_fetch_after) || resource {
             sink(Output::Close { connection: ConnectionId::Fetch });
             self.fetch.link = Link::Closed;
         }
@@ -64,6 +67,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 self.complete_page(now, &exchange, &head, (page, subcode, file), sink);
             }
             Purpose::SubPages { page, part } => self.complete_subpages(now, &head, page, part, sink),
+            Purpose::Resource(role) => self.complete_resource(&exchange, &head, role, sink),
         }
     }
 
@@ -153,7 +157,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         }
         // Another channel is confirmed before anything from it is shown
         // (REQ-WEB-021).
-        if self.config.redirects_within_channel && !self.redirect_keeps_channel(&exchange.url, &next) {
+        // A resource belongs to no channel, and follows a redirect to any
+        // origin within the checks above (REQ-2476, REQ-123).
+        let resource = matches!(exchange.purpose, Purpose::Resource(_));
+        if !resource && self.config.redirects_within_channel && !self.redirect_keeps_channel(&exchange.url, &next) {
             event(sink, Event::RedirectToOtherChannel { location: next.as_str() });
             self.finish_purpose(exchange.purpose, Err(Failure::RedirectToOtherChannel), sink);
             return;

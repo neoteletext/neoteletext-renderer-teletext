@@ -1,0 +1,4 @@
+Content-Type: text/html
+Link: <https://example.org/teletext/>; rel="alternate"; type="application/vnd.neoteletext+json", <style.css>; rel=stylesheet
+Link: <a/> ; REL = "next alternate" ; type = text/x-teletext-tti ; title="a, b; c"; anchor="x"
+

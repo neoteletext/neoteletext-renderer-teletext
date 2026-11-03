@@ -339,3 +339,17 @@ path = "fuzz_targets/picture_convert.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "discovery_header"
+path = "fuzz_targets/discovery_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "discovery_element"
+path = "fuzz_targets/discovery_element.rs"
+test = false
+doc = false
+bench = false
