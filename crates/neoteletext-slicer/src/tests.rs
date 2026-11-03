@@ -1,4 +1,4 @@
-//! Slicer tests with synthetic signals (REQ-TST-060, REQ-FSM-009).
+//! Tests of the slicer with synthetic signals (REQ-TST-060, REQ-FSM-009).
 //!
 //! Tests marked `#[ignore]` print measurements for the report; run them
 //! with `cargo test -p neoteletext-slicer --release -- --ignored --nocapture`.

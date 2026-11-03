@@ -45,7 +45,10 @@ fn read(variant: T42Variant, input: &[u8], chunk: usize) -> (Vec<Packet>, Vec<Di
     (packets, diagnostics)
 }
 
-/// REQ-166: a headerless sequence of 42-byte packets, in any chunks.
+/// REQ-166: a headerless sequence of 42-byte packets, in any chunks; and
+/// in each other variant of the reader, packets after a run-in and framing
+/// code (REQ-167, REQ-INP-003) and bit-reversed packets (REQ-168,
+/// REQ-INP-004).
 #[test]
 fn every_variant_round_trips_in_any_chunk_size() {
     let packets = sample_packets(20);
@@ -60,6 +63,8 @@ fn every_variant_round_trips_in_any_chunk_size() {
     }
 }
 
+/// REQ-167 (REQ-INP-003): a stream with framing codes, with or without the
+/// run-in, finds its packets again after bytes that are not one.
 #[test]
 fn framed_streams_resynchronise_after_garbage() {
     let packets = sample_packets(5);

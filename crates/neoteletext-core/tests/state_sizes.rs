@@ -1,4 +1,4 @@
-//! REQ-147 (REQ-GEN-003): the size of every state type a port allocates,
+//! Tests of REQ-147 (REQ-GEN-003): the size of every state type a port allocates,
 //! reported for the default build so that `docs/spec/design/porting.md`
 //! can publish it, and bounded so that growth is seen.
 #![cfg(all(feature = "level15", feature = "render", feature = "viewer"))]

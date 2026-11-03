@@ -1,4 +1,4 @@
-//! REQ-SLC-003 and REQ-SLC-005: black level and amplitude.
+//! Tests of REQ-SLC-003 and REQ-SLC-005: black level and amplitude.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

@@ -77,7 +77,7 @@ fn palette_flash_and_reveal() {
 }
 
 /// REQ-RND-021's test harness: rows drawn alone, in reverse order and
-/// line by line match the whole-screen loop.
+/// line by line match the whole-screen loop of REQ-397 (REQ-RND-022).
 #[test]
 fn rows_render_identically_in_any_order() {
     let mut grid = Grid::EMPTY;

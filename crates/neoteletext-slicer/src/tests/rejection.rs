@@ -1,4 +1,4 @@
-//! REQ-SLC-010: other signals are rejected, and untrusted input never panics.
+//! Tests of REQ-SLC-010: other signals are rejected, and untrusted input never panics.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

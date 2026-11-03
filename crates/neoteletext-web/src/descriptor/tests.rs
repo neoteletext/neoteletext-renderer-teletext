@@ -149,6 +149,8 @@ fn input_goes_only_to_the_descriptors_own_origin() {
     assert_eq!(parse(r#"{"address":"ws://keys.example/p"}"#), Ok(false), "push alone may");
 }
 
+/// REQ-420 (REQ-SEC-007): a descriptor fetched over HTTPS that names a
+/// plain `http://` or `ws://` address is rejected.
 #[test]
 fn https_descriptor_cannot_name_plain_addresses() {
     let cases: [(&str, Member); 3] = [
