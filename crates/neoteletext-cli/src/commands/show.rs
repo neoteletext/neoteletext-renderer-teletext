@@ -1,17 +1,21 @@
-//! `neottx show` (REQ-CLI-001): one page in the terminal, as an iTerm2
-//! image or as characters.
+//! `neottx show` (REQ-CLI-001): one page in the terminal, as a kitty,
+//! Sixel or iTerm2 image or as characters (REQ-RND-029).
 
 use super::{Selection, display, grid_of, mosaic_style, parse_selection, sandbox_closed, scale_for, selected};
 use crate::ansi::{ColourDepth, ansi, plain};
 use crate::args::{GraphicsChoice, RasterArgs};
 use crate::frame::Frame;
-use crate::image::{iterm2_inline, png, raster};
+use crate::image::{iterm2_inline, kitty_transmit, png, raster, sixel};
 use crate::terminal::{self, Display};
 use neoteletext_app::input::{self, Options};
 use neoteletext_app::{Failure, exit};
 use neoteletext_core::consts::{PAGE_WIDTH, ROWS};
 use neoteletext_image::palette::Rgba;
 use std::io::{IsTerminal, Write};
+
+/// The kitty image id of the page `show` draws: one image, left on the
+/// screen when the program ends.
+const SHOWN_IMAGE: u32 = 1;
 
 /// `neottx show`.
 pub fn show(
@@ -32,17 +36,31 @@ pub fn show(
         eprintln!("neottx: using text output: {reason}");
     }
     // Measure the terminal before the sandbox closes /dev/tty.
-    let area = if display == Display::Iterm2 { terminal::text_area() } else { None };
+    let area = if display == Display::Text { None } else { terminal::text_area() };
     let mut session = input::load_sandboxed(options, selection.page(), || sandbox_closed(options.no_sandbox))?;
     let frame = Frame::still(session.decoder().config(), raster_args.reveal);
     let key = *selected(&session, selection)?.first().ok_or((exit::NOT_FOUND, "no page found".to_owned()))?;
     let grid = grid_of(&mut session, key)?;
     let mut out = std::io::stdout().lock();
+    let black = Rgba::opaque(0, 0, 0);
+    let image = || {
+        let scale = scale_for(raster_args, area, (PAGE_WIDTH, ROWS.saturating_mul(frame.options.row_height())));
+        raster(&grid, frame, scale, black)
+    };
+    let failed = |error: std::io::Error| (exit::INPUT, error.to_string());
     match display {
+        Display::Kitty => {
+            let encoded = png(&image()).map_err(failed)?;
+            let _ = out.write_all(kitty_transmit(&encoded, SHOWN_IMAGE, true).as_bytes());
+            let _ = out.write_all(b"\n");
+        }
+        Display::Sixel => {
+            let _ = out.write_all(&sixel(&image(), black).map_err(failed)?);
+            let _ = out.write_all(b"\n");
+        }
         Display::Iterm2 => {
-            let scale = scale_for(raster_args, area, (PAGE_WIDTH, ROWS.saturating_mul(frame.options.row_height())));
-            let image = raster(&grid, frame, scale, Rgba::opaque(0, 0, 0));
-            let encoded = png(&image).map_err(|error| (exit::INPUT, error.to_string()))?;
+            let image = image();
+            let encoded = png(&image).map_err(failed)?;
             let _ = out.write_all(iterm2_inline(&encoded, image.width, image.height).as_bytes());
             let _ = out.write_all(b"\n");
         }

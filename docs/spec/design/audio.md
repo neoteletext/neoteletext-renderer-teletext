@@ -129,7 +129,7 @@ The owner chose Opus (RFC 6716, with RFC 8251's corrections) for sound beside PC
 
 - **One packet a block, all one length.** The OBJECT's block bytes are the packet length, 1 to 160, the same for every block: a constant-rate encoder writes them so (`ffmpeg -c:a libopus -b:a 16k -vbr off -frame_duration 20`, 40 bytes a packet). A block holds 960 samples; the final block is whole. Rate code 7 only. A DATA record holds 25 packets of 40 bytes.
 - **Decoded in order** (REQ-AUD-025): the receiver keeps two decoders, each following one sound; a stored sound is decoded from its first block as far as its blocks have arrived without a gap; a live sound's lost packet is concealed by its decoder, not given as silence.
-- **Not encoded by the engine:** a publisher's encoder writes the packets, and the publishing tools carry them as they are.
+- **Not encoded by the engine:** a publisher's encoder writes the packets, and the publishing tools carry them as they are. `neottx sound --codec opus` reads them from an encoder's Ogg Opus file (RFC 3533, RFC 7845) with the engine's own bounded reader, `neoteletext_audio::ogg`: one logical stream, every page's CRC and sequence checked, a mono header of mapping family 0, every packet of the profile and of one length; the last granule position trims the final frame, and the pre-skip is played, since the profile has no field for it (DEC-2448).
 
 The decoder, `neoteletext-opus`:
 
@@ -375,6 +375,8 @@ Layer 3 asks the sink where a voice has got to, measured in samples.
 
 This is the shape of tellyboy's voice API: `tb_audio_voice_rom`, `tb_audio_stream_open`, `tb_audio_voice_fade`, `tb_audio_voice_set_gain`, `tb_audio_voice_position`. The microcontroller sink is therefore a direct mapping. Its detailed interface is left for implementation.
 
+A sink that decodes IMA ADPCM itself, as tellyboy's driver does, says so (`VoiceSink::decodes_ima`) and is then given an IMA ADPCM sound's blocks undecoded, their headers checked, never its samples: a stored block with its first sample (`ima_samples`), a live one in order (`ima_stream`), each with flags saying which edge to fade because the neighbouring block has not arrived. A live block is given whole, so before a block given as silence the sink fades out the end of what it holds (DEC-2449).
+
 ### 10.2 Gain and fades
 
 Gain is a whole percentage, as tellyboy's `gain_percent`, so every platform computes the same level.
@@ -437,6 +439,8 @@ These are tellyboy's constraints as built (`<tellyboy/audio.h>`; `components/AUD
 | Progressive and live sound | network only | yes |
 
 A receiver publishes its actual figures: `Receiver::limits` returns the store's bytes, the objects and the records in flight it was built with, and `ReceiverLimits::meets` checks them against `LEVEL_A_MINIMUM` or `LEVEL_B_MINIMUM` in `neoteletext-audio` (REQ-AUD-017). KB and MB here are binary multiples: 16,384 and 4,194,304 bytes (DEC-2372).
+
+**Flash, measured.** `cargo xtask size` links the receiver alone in both shapes, every entry point a port calls rooted, over the core with no optional area: `audio-mcu` (broadcast carriage, PCM16 and IMA ADPCM, at Level A's minimums) and `audio-desktop` (broadcast carriage and Opus, at Level B's). On 4 November 2026: 43,142 and 112,122 bytes on the Cortex-M0 (`thumbv6m-none-eabi`), 45,634 and 121,568 on RV32IMC, no static RAM, and no panic path in either (REQ-GEN-019). The arena is the port's and is not counted.
 
 The Level A numbers are proposals. They must be checked against the RAM the teletext renderer leaves on its smallest microcontroller target (open decision 5). The SAMD21's 32 KB, the floor of tellyboy's own budget, is too small to hold the renderer, the store and the stream rings at once.
 

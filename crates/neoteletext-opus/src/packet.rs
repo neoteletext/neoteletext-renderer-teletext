@@ -93,6 +93,16 @@ pub enum PacketError {
     NotTwentyMs,
 }
 
+/// Checks that `bytes` is a packet of the profile (REQ-AUD-022), as the
+/// decoder checks it before its state changes, without decoding it: for a
+/// publishing tool that carries an encoder's packets.
+///
+/// # Errors
+/// The reason the decoder would refuse it.
+pub fn check_packet(bytes: &[u8]) -> Result<(), PacketError> {
+    Packet::parse(bytes).map(|_| ())
+}
+
 /// A packet that fits the profile: its frame's mode and bandwidth, and the frame's bytes.
 pub(crate) struct Packet<'a> {
     pub(crate) mode: Mode,

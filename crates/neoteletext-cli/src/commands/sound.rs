@@ -1,6 +1,8 @@
 //! `neottx sound --page MPP INPUT.wav OUTPUT.t42` (REQ-CLI-011,
 //! REQ-AUD-020): a sound as the audio profile's broadcast packets, with the
-//! command that plays it, ready to add to a T42 stream. With `--live`, the
+//! command that plays it, ready to add to a T42 stream. With `--codec
+//! opus` the input is an encoder's Ogg Opus file, whose packets are carried
+//! as they are (decision E.124, TODO-1228). With `--live`, the
 //! sound is sent as a live one (REQ-AUD-014), each block at the moment a
 //! player of the file reaches it.
 
@@ -32,7 +34,7 @@ pub struct SoundOptions {
     pub channel: u8,
     /// The gain, 0 to 100 per cent.
     pub gain: u8,
-    /// `ima` or `pcm`.
+    /// `ima`, `pcm` or `opus`.
     pub codec: String,
     /// The sound's handle.
     pub handle: u8,

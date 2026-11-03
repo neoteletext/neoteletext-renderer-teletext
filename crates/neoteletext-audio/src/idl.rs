@@ -7,6 +7,7 @@
 //! the fragment's index, [`FRAGMENT_DATA`] bytes of the record, and a CRC-16
 //! over the 36 bytes before it (clause 6.5.8.1).
 
+use crate::copy_into;
 use neoteletext_core::consts::PACKET_BYTES;
 use neoteletext_core::consts::{
     ADDRESS_BYTE_0, ADDRESS_BYTE_1, IDL_AUDIO_CONTROL_BYTE, IDL_AUDIO_DATA_BYTES, IDL_AUDIO_DATA_START,
@@ -116,12 +117,12 @@ pub fn packet(service: u8, record: u8, index: u8, last: bool, chunk: &[u8]) -> P
         }
         let chunk = chunk.get(..chunk.len().min(FRAGMENT_DATA)).unwrap_or(&[]);
         if let Some(target) = audio.get_mut(2..2usize.saturating_add(chunk.len())) {
-            target.copy_from_slice(chunk);
+            copy_into(target, chunk);
         }
         let checked = IDL_AUDIO_DATA_BYTES.saturating_sub(2);
         let crc = crc16_idl(audio.get(..checked).unwrap_or(&[]));
         if let Some(target) = audio.get_mut(checked..) {
-            target.copy_from_slice(&crc.to_be_bytes());
+            copy_into(target, &crc.to_be_bytes());
         }
     }
     Packet { bytes }

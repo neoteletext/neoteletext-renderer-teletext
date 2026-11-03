@@ -76,6 +76,9 @@ pub mod idl;
 // kept for microcontroller ports, which build it with the `ima` feature.
 #[cfg(feature = "ima")]
 pub mod ima;
+// Reading an encoder's Ogg Opus file needs the decoder's packet check.
+#[cfg(all(feature = "encode", feature = "opus"))]
+pub mod ogg;
 pub mod port;
 mod profile;
 pub mod receiver;
@@ -85,6 +88,16 @@ pub mod store;
 pub mod ttau;
 
 pub use codec::*;
+
+/// Copies `source` into `target` as far as both go. Unlike
+/// `copy_from_slice`, it has no panic path for lengths that differ, which
+/// the linked receiver must not hold (REQ-GEN-019); every caller passes
+/// slices of one length.
+pub(crate) fn copy_into<T: Copy>(target: &mut [T], source: &[T]) {
+    for (to, &from) in target.iter_mut().zip(source) {
+        *to = from;
+    }
+}
 
 /// REQ-GEN-011: the error types implement `core::error::Error`. Their
 /// `Display` text is their `Debug` text, and both need `core::fmt`, which
@@ -109,6 +122,8 @@ mod error_trait {
     error_trait!(crate::ima::ImaError);
     #[cfg(feature = "encode")]
     error_trait!(crate::encode::EncodeError);
+    #[cfg(all(feature = "encode", feature = "opus"))]
+    error_trait!(crate::ogg::OggError);
 
     #[cfg(test)]
     mod tests {
@@ -127,6 +142,8 @@ mod error_trait {
             is_error::<crate::ima::ImaError>();
             #[cfg(feature = "encode")]
             is_error::<crate::encode::EncodeError>();
+            #[cfg(all(feature = "encode", feature = "opus"))]
+            is_error::<crate::ogg::OggError>();
         }
     }
 }

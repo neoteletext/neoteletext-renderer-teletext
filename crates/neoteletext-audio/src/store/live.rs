@@ -2,6 +2,7 @@
 //! oldest, and the cursor of the block the sink gets next.
 
 use super::{Entry, Store, Stored};
+use crate::copy_into;
 use crate::port::SoundId;
 use crate::record::Data;
 
@@ -76,7 +77,7 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
             }
             let start = entry.offset.saturating_add(usize::from(slot).saturating_mul(length));
             if let Some(target) = self.arena.get_mut(start..start.saturating_add(length)) {
-                target.copy_from_slice(bytes);
+                copy_into(target, bytes);
             }
             let table = entry
                 .offset
@@ -84,7 +85,7 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
                 .saturating_add(entry.bitmap_bytes())
                 .saturating_add(usize::from(slot).saturating_mul(2));
             if let Some(target) = self.arena.get_mut(table..table.saturating_add(2)) {
-                target.copy_from_slice(&index.to_be_bytes());
+                copy_into(target, &index.to_be_bytes());
             }
             let bit = entry.offset.saturating_add(entry.data_bytes()).saturating_add(usize::from(slot / 8));
             if let Some(byte) = self.arena.get_mut(bit) {

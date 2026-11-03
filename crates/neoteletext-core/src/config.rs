@@ -3,7 +3,8 @@
 //! PRF). Changing the configuration never requires re-acquiring pages.
 
 use crate::consts::{
-    FIELD_PERIOD_US, FLASH_FIELDS_HIDDEN, FLASH_FIELDS_SHOWN, MOMENTARY_REVEAL_US, PAGE_COMPLETION_TIMEOUT_US,
+    DESIGNATION_LATIN_ENGLISH, FIELD_PERIOD_US, FLASH_FIELDS_HIDDEN, FLASH_FIELDS_SHOWN, MOMENTARY_REVEAL_US,
+    NATIONAL_INDEX_MASK, PAGE_COMPLETION_TIMEOUT_US, RomVariantSets, SAA5246A_ROM_VARIANTS,
 };
 
 /// The presentation level (decision E.40, REQ-PRF-006). EN 300 706 clause 12
@@ -99,6 +100,94 @@ pub enum CellMode {
     Saa5246a,
 }
 
+/// The national option ROM variants of the SAA5246A (REQ-PRF-003; the
+/// design's Part D.5; the SAA5246A product specification, Tables 15 to 23).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum RomVariant {
+    /// /E: West European (English, German, Swedish, Italian, French,
+    /// Spanish).
+    WestEuropean,
+    /// /H: East European (Polish, German, Swedish, Serbo-Croat, Czech,
+    /// Rumanian).
+    EastEuropean,
+    /// /T: West European and Turkish.
+    WestEuropeanTurkish,
+    /// /J: Yugoslav (Serbo-Croat Latin and Cyrillic, Rumanian).
+    Yugoslav,
+    /// /K: French and Arabic.
+    FrenchArabic,
+    /// /L: Arabic and Hebrew.
+    ArabicHebrew,
+    /// /I: Greek and Turkish.
+    GreekTurkish,
+    /// /S: English and Thai.
+    EnglishThai,
+}
+
+impl RomVariant {
+    /// Every variant, in the datasheet's order.
+    pub const ALL: [Self; 8] = [
+        Self::WestEuropean,
+        Self::EastEuropean,
+        Self::WestEuropeanTurkish,
+        Self::Yugoslav,
+        Self::FrenchArabic,
+        Self::ArabicHebrew,
+        Self::GreekTurkish,
+        Self::EnglishThai,
+    ];
+
+    /// The letter the datasheet names the variant by: `E`, `H`, `T`, `J`,
+    /// `K`, `L`, `I` or `S`.
+    #[must_use]
+    pub const fn letter(self) -> char {
+        match self {
+            Self::WestEuropean => 'E',
+            Self::EastEuropean => 'H',
+            Self::WestEuropeanTurkish => 'T',
+            Self::Yugoslav => 'J',
+            Self::FrenchArabic => 'K',
+            Self::ArabicHebrew => 'L',
+            Self::GreekTurkish => 'I',
+            Self::EnglishThai => 'S',
+        }
+    }
+
+    /// The variant a letter names, in either case.
+    #[must_use]
+    pub fn from_letter(letter: char) -> Option<Self> {
+        Self::ALL.into_iter().find(|variant| variant.letter() == letter.to_ascii_uppercase())
+    }
+
+    /// The sets the variant's ROM holds.
+    #[must_use]
+    pub const fn sets(self) -> RomVariantSets {
+        let [west, east, west_turkish, yugoslav, french_arabic, arabic_hebrew, greek_turkish, english_thai] =
+            SAA5246A_ROM_VARIANTS;
+        match self {
+            Self::WestEuropean => west,
+            Self::EastEuropean => east,
+            Self::WestEuropeanTurkish => west_turkish,
+            Self::Yugoslav => yugoslav,
+            Self::FrenchArabic => french_arabic,
+            Self::ArabicHebrew => arabic_hebrew,
+            Self::GreekTurkish => greek_turkish,
+            Self::EnglishThai => english_thai,
+        }
+    }
+
+    /// The Table 32 value the variant gives a national option index, and
+    /// whether the variant lacked it and gave its default language.
+    #[must_use]
+    pub fn designation(self, national: u8) -> (u8, bool) {
+        let sets = self.sets();
+        match sets.by_national.get(usize::from(national & NATIONAL_INDEX_MASK)).copied().flatten() {
+            Some(value) => (value, false),
+            None => (sets.default, true),
+        }
+    }
+}
+
 /// The decoder configuration: a plain struct with a `Default`
 /// implementation and named profile constructors (REQ-GEN-011).
 // Each flag is a separate Part E decision that REQ-ARCH-008 requires to be
@@ -122,9 +211,16 @@ pub struct Config {
     /// Default character set group when neither X/28/0 nor M/29/0 gives one
     /// (decision E.4), 0 to 15.
     pub default_region: u8,
-    /// Use a fixed national option and ignore C12 to C14 (the SAA5050
-    /// profile); `None` follows the header.
-    pub fixed_national_index: Option<u8>,
+    /// One fixed Table 32 designation value (group and national option)
+    /// that every page uses, ignoring C12 to C14, X/28 and M/29, as a
+    /// receiver with one character set in its ROM did (the SAA5050
+    /// profile, REQ-PRF-002); `None` follows the page.
+    pub fixed_designation: Option<u8>,
+    /// The SAA5246A's national option ROM variant (REQ-PRF-003): C12 to
+    /// C14 choose among that variant's sets alone, X/28 and M/29 are not
+    /// read, and a combination it lacks gives its default language.
+    /// `None` follows the page. [`Config::fixed_designation`] comes first.
+    pub rom_variant: Option<RomVariant>,
     /// Parity failure display policy (decision E.8).
     pub parity_policy: ParityPolicy,
     /// Roll incoming headers while searching (decision E.11).
@@ -196,7 +292,8 @@ impl Config {
             strict_row_setting: false,
             ignore_out_of_order_triplets: false,
             default_region: 0,
-            fixed_national_index: None,
+            fixed_designation: None,
+            rom_variant: None,
             parity_policy: ParityPolicy::KeepLastGood,
             rolling_header: true,
             flash_shown_us: FLASH_SHOWN_US,
@@ -226,8 +323,9 @@ impl Config {
     pub const fn saa5050() -> Self {
         let mut config = Self::en_300_706();
         config.level = PresentationLevel::Level1;
-        // English is national option index 0 in Table 32 group 0000.
-        config.fixed_national_index = Some(0);
+        // The chip's ROM held Latin English alone: Table 32 group 0000,
+        // national option 000 (REQ-PRF-002).
+        config.fixed_designation = Some(DESIGNATION_LATIN_ENGLISH);
         // Decision E.18: the SAA5050 has no black colour codes.
         config.black_colour_codes = false;
         config.row24 = Row24Policy::Never;
@@ -245,6 +343,9 @@ impl Config {
         config.row24 = Row24Policy::WhenPresent;
         config.cell_mode = CellMode::Saa5246a;
         config.rounding = false;
+        // The West European chip unless another variant is chosen
+        // (DEC-2430).
+        config.rom_variant = Some(RomVariant::WestEuropean);
         config
     }
 

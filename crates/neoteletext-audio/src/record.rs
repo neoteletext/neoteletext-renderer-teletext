@@ -247,6 +247,12 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
             return Err(RecordError::BadValue("sample rate"));
         }
         let per_block = codec.samples_per_block(block_bytes);
+        // A block the codec allows holds a sample; the check also leaves
+        // the division no zero to panic on in the linked image
+        // (REQ-GEN-019).
+        if per_block == 0 {
+            return Err(RecordError::BadValue("block size"));
+        }
         let expected = samples.div_ceil(per_block);
         if u32::from(blocks) != expected {
             return Err(RecordError::BadValue("block count"));

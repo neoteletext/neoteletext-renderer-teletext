@@ -21,7 +21,9 @@
 //!    (midway between "0" and "1"), take the data amplitude from the tone's
 //!    strength, and score how well the bit centres match the pattern.
 //! 4. Gate on amplitude and match (REQ-SLC-005), then hold the threshold.
-//! 5. Look for the framing code within ±2 bits (REQ-SLC-008, decision E.24).
+//! 5. Look for the framing code within ±2 bits (REQ-SLC-008, decision E.24),
+//!    with one bit wrong only on a line already carrying teletext
+//!    (DEC-1092).
 //! 6. Read 336 bits at bit centres with a fixed bit period of
 //!    sample rate / 6,937,500 (REQ-SLC-006 Phase 1), interpolating linearly
 //!    between samples (REQ-SLC-007), first bit as bit 0 (REQ-SLC-009).
@@ -45,6 +47,7 @@ use crate::math::{ceil_index, f32_from_u32, f32_from_usize, floor_index, sin_cos
 mod bits;
 mod black;
 mod config;
+mod expected;
 mod framing;
 mod line;
 mod machine;
@@ -182,6 +185,10 @@ pub struct Slicer {
     format: SampleFormat,
     /// The current line's black level, in sample codes.
     black: f32,
+    /// Which lines carry teletext, for the framing tolerance (DEC-1092).
+    expected: expected::ExpectedLines,
+    /// The current line's place in [`Slicer::expected`].
+    line_slot: Option<usize>,
 }
 
 impl Slicer {
@@ -204,6 +211,8 @@ impl Slicer {
             len: 0,
             format: SampleFormat::U8,
             black: 0.0,
+            expected: expected::ExpectedLines::new(),
+            line_slot: None,
         }
     }
 

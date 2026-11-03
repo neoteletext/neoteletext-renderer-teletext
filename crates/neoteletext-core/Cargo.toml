@@ -97,6 +97,11 @@ name = "numbering"
 required-features = ["viewer"]
 
 [[test]]
+name = "profiles"
+# The alternatives of REQ-PRF-004 under each profile, at Levels 1.5 to 3.5.
+required-features = ["level15", "level25"]
+
+[[test]]
 name = "capabilities"
 required-features = ["level15", "level25"]
 

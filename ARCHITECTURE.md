@@ -170,7 +170,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
 
 - **Owns:**
   - conversion of palette indices to RGB565, RGB888, RGBA8888, grey and 1-bit, with byte order, stride and rotation;
-  - PNG and PPM writers;
+  - PNG, PPM and Sixel writers;
   - text and ANSI output, which always passes the sanitising rules of REQ-SEC-010;
   - terminal graphics output in the kitty, Sixel and iTerm2 protocols, with detection and fallback to ANSI output (decision E.37).
 - **Must not know about:** teletext rules.
@@ -238,13 +238,13 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
 - **The split between `neoteletext-app` and `neoteletext-cli`:**
   - `neoteletext-app` holds what any program needs. That is the session, reading inputs, both processes of live mode, sandboxing, conversion and slicing, and the `Source` trait a viewer reads pages through.
   - `neoteletext-cli` holds argument parsing, terminal output and the terminal viewer.
-  - `neoteletext-app` also holds what viewers share: the row 24 messages (`interact`), and text and raster output (`present`).
+  - `neoteletext-app` also holds what viewers share: the row 24 messages (`interact`), and text and raster output (`present`), and the reading of a terminal's replies to the graphics queries (`terminal_reply`, DEC-2459); `neottx` sends the queries and draws kitty, Sixel (`neoteletext-image::sixel`) or iTerm2 images.
   - `neoteletext-app::write_text` (feature `write-text`) is `neoteletext-formats::write_text` under the name `neottx write-text` uses (decision E.82, REQ-CLI-010); the writer itself is in L0 (section 4.6).
 - **Requirements:** CLI, SEC-017 to SEC-019, GEN-018.
 
 ### Audio — `neoteletext-audio`, `neoteletext-audio-mix`, `neoteletext-opus` (area AUD)
 
-Sound carried with teletext sits beside the page layers, as the web user agent does: it shares only the packet type and the Hamming 8/4 decoder of L1 and Foundation, and the EN 300 708 constants of `consts`. The port passes each packet to `neoteletext_audio::receiver::Receiver::push_packet` before the decoder, a push WebSocket's binary message to `Receiver::push_message`, and a `.ttau` file to `Receiver::push_file` (REQ-AUD-008); the decoder keeps ignoring packet 31 (REQ-PKT-008). The receiver reassembles records (`idl`), frames a file's records (`ttau`), parses them (`record`), keeps sounds compressed (`store`), applies each channel's latest command (`control`), decodes PCM16 and IMA ADPCM (`ima`) or Opus, fades either side of a block that has not arrived and reports it `concealed` (REQ-AUD-013), and drives the port's voice sink (`port::VoiceSink`, the L8 contract for sound). Each codec is a feature: the desktop builds leave out PCM16 and IMA ADPCM, which microcontroller builds keep (decision E.131). It mixes nothing and touches no hardware. `neoteletext-audio-mix` is a mixer a desktop or phone port may use as its sink's engine; a microcontroller port maps the sink onto the tellyboy driver instead. The design is `docs/spec/design/audio.md` and `audio-platforms.md`.
+Sound carried with teletext sits beside the page layers, as the web user agent does: it shares only the packet type and the Hamming 8/4 decoder of L1 and Foundation, and the EN 300 708 constants of `consts`. The port passes each packet to `neoteletext_audio::receiver::Receiver::push_packet` before the decoder, a push WebSocket's binary message to `Receiver::push_message`, and a `.ttau` file to `Receiver::push_file` (REQ-AUD-008); the decoder keeps ignoring packet 31 (REQ-PKT-008). The receiver reassembles records (`idl`), frames a file's records (`ttau`), parses them (`record`), keeps sounds compressed (`store`), applies each channel's latest command (`control`), decodes PCM16 and IMA ADPCM (`ima`) or Opus, fades either side of a block that has not arrived and reports it `concealed` (REQ-AUD-013), and drives the port's voice sink (`port::VoiceSink`, the L8 contract for sound), giving a sink that decodes IMA ADPCM itself the blocks undecoded with their fades (DEC-2449). Each codec is a feature: the desktop builds leave out PCM16 and IMA ADPCM, which microcontroller builds keep (decision E.131). It mixes nothing and touches no hardware. `neoteletext-audio-mix` is a mixer a desktop or phone port may use as its sink's engine; a microcontroller port maps the sink onto the tellyboy driver instead. The design is `docs/spec/design/audio.md` and `audio-platforms.md`.
 
 `neoteletext-opus` decodes Opus (RFC 6716) for one profile, mono, one 20 ms frame a packet, 48 kHz out (decision E.123): an integer-only port of libopus 1.5.2's fixed-point decoder, bit-exact with it, `no_std`, with no allocation and no dependency. A packet outside the profile is refused before the decoder changes; a lost packet is concealed; in-band FEC is read past, never decoded. Its interface is `Decoder::decode`, `Decoder::conceal` and `Decoder::final_range`; the decoder holds its own scratch, about 28 KB, and a decode needs about 2.5 KB of stack. It reads packets and writes samples, and is the audio profile's decoder for its code 2 once that is wired (issue #223).
 
@@ -494,7 +494,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `write_text/`: the writer's set table and encoding, right-to-left lines, and `runs`, text runs at their places with their triplets merged into a program's.
 
 **`neoteletext-slicer`**
-- `slicer/`: the line slicer's parts: the line, its settings, black level, run-in, framing code, bits, the transition driver and the outcome.
+- `slicer/`: the line slicer's parts: the line, its settings, black level, run-in, framing code, the lines expected to carry teletext (`expected.rs`, DEC-1092), bits, the transition driver and the outcome.
 - `generator/`: the test-signal generator's noise source.
 
 **`neoteletext-image`**
@@ -521,6 +521,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `store/`: the arena sounds are defined in, and a live sound's ring.
 - `receiver/`: the broadcast and network carriages, the file carriage, starting plays, sending samples to the sink, the fades at a lost block (`fade`) and the `concealed` report (`loss`).
 - `ttau`: the `.ttau` file's records, framed by their lengths.
+- `ogg` (features `encode` and `opus`): an encoder's Ogg Opus file read into the profile's packets for `neottx sound`, every page bounded and checked (DEC-2448).
 - `mixer/` (`neoteletext-audio-mix`): live sounds in the mixer.
 
 **`neoteletext-opus`**

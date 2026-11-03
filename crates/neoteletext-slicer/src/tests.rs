@@ -148,6 +148,32 @@ fn traced(samples: &[u8], rate: u32, config: Config) -> (Result<Sliced, Rejectio
     (outcome, trace, slicer.counters())
 }
 
+/// The place in the first field of the line the tests carry teletext on.
+const TELETEXT_LINE: u16 = 10;
+
+/// A line at `position` of the first field.
+fn placed(samples: &[u8], rate: u32, position: u16) -> Line<'_> {
+    Line { second_field: Some(false), position_in_field: Some(position), ..Line::new(samples, SampleFormat::U8, rate) }
+}
+
+/// A slicer with `config` that has just seen packets with an exact framing
+/// code on [`TELETEXT_LINE`] in as many fields in a row as make that line
+/// expected to carry teletext (DEC-1092); its counters start from zero.
+fn expecting(config: Config, rate: u32) -> Slicer {
+    let samples = line_with(&line_bytes(&known_packet()), &SignalParams::nominal(rate as f32), rate);
+    let mut slicer = Slicer::new(config);
+    for _ in 0..crate::consts::EXPECTED_LINE_EXACT_PACKETS {
+        assert!(slicer.slice(&placed(&samples, rate, TELETEXT_LINE)).is_ok(), "the exact packet");
+    }
+    slicer.reset_counters();
+    slicer
+}
+
+/// Slices `samples` as the next field's [`TELETEXT_LINE`].
+fn slice_expected(slicer: &mut Slicer, samples: &[u8], rate: u32) -> Result<Sliced, Rejection> {
+    slicer.slice(&placed(samples, rate, TELETEXT_LINE))
+}
+
 fn line_with(bytes: &LineBytes, params: &SignalParams, rate: u32) -> Vec<u8> {
     let mut generator = Generator::new(9);
     render(&mut generator, params, bytes, samples_per_line(rate))

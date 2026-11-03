@@ -14,7 +14,9 @@ use neoteletext_core::viewer::Viewer;
 /// be: the size measured on 3 November 2026 (the `Decoder` and `Viewer` on
 /// 4 November) on `x86_64` Linux with every
 /// feature and with only `level15`, `render` and `viewer` (the same in both), rounded up to the next 64 bytes, so that a change that grows
-/// one is seen and the published table is revisited.
+/// one is seen and the published table is revisited. The decoder's grew
+/// to 1,936 bytes on 4 November 2026 with its configuration's fixed
+/// designation and SAA5246A ROM variant (DEC-2430).
 #[test]
 fn every_state_type_has_a_bounded_size() {
     let sizes: [(&str, usize, usize); 7] = [

@@ -18,7 +18,9 @@ pub struct Config {
     /// Minimum run-in match quality, percent (REQ-SLC-005).
     pub min_match_percent: u8,
     /// Accept a framing code with one wrong bit when the address bytes
-    /// decode (decision E.24). `false` is the "strict" option.
+    /// decode, on a line expected to carry teletext (decision E.24 as
+    /// DEC-1092 limits it). `false` is the "strict" option: the exact
+    /// framing code on every line.
     pub framing_tolerance: bool,
     /// The nominal data amplitude of 8-bit samples: the "1" level above
     /// black, in sample codes.

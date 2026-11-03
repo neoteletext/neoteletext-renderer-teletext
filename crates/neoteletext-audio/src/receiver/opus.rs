@@ -11,6 +11,7 @@
 //! what is decoded are held back, and sent faded out while the next block is
 //! missing, then as they were once it is decoded (REQ-AUD-013).
 
+use crate::copy_into;
 use neoteletext_opus::{Decoder, FRAME_SAMPLES};
 
 use crate::port::{SoundId, VoiceSink};
@@ -123,7 +124,7 @@ impl Lanes {
             let kept = samples.saturating_sub(held);
             sink.samples(entry.sound, first, pcm.get(..kept).unwrap_or(&[]));
             if let (Some(target), Some(source)) = (lane.tail.get_mut(..held), pcm.get(kept..samples)) {
-                target.copy_from_slice(source);
+                copy_into(target, source);
                 lane.tail_len = held;
                 lane.tail_at = first.saturating_add(u32::try_from(kept).unwrap_or(0));
             }

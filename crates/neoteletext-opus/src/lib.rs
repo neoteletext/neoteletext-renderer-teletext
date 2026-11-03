@@ -56,7 +56,7 @@ mod silk;
 mod slices;
 
 pub use decoder::{DecodeError, Decoder, FRAME_SAMPLES, SAMPLE_RATE};
-pub use packet::{MAX_PACKET, PacketError};
+pub use packet::{MAX_PACKET, PacketError, check_packet};
 
 /// REQ-GEN-011: the error types implement `core::error::Error`. Their
 /// `Display` text is their `Debug` text, and both need `core::fmt`, which

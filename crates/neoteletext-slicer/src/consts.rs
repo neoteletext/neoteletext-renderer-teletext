@@ -146,6 +146,29 @@ pub const BACK_PORCH_GUARD_NS: u32 = 250;
 /// cannot let its magnitude drift.
 pub const PHASOR_RENORMALISE_STEPS: usize = 256;
 
+/// Lines in the longer field of a 625-line frame: 625 lines in two fields,
+/// the half line counted whole (ITU-R BT.470).
+pub const MAX_LINES_PER_FIELD: usize = 313;
+/// Lines whose expectation of teletext is tracked: every line number of a
+/// 625-line frame (1 to 625, slot 0 unused), or every position of either
+/// field when only the position is known (DEC-1092).
+pub const EXPECTED_LINE_SLOTS: usize = 2 * MAX_LINES_PER_FIELD;
+/// Fields for which a line stays expected to carry teletext after its last
+/// packet with an exact framing code, and the most fields between the exact
+/// packets that make it expected (DEC-1092, DEC-2431): one second at
+/// 50 fields a second. An inserter that serves a line sends a packet on it
+/// in every field, so a second spans many exact packets on any signal the
+/// one-bit tolerance could help, and a line whose teletext has gone is
+/// strict again within a second.
+pub const EXPECTED_LINE_FIELDS: u32 = 50;
+/// Exact packets in a row, each within [`EXPECTED_LINE_FIELDS`] of the one
+/// before, that make a line expected (DEC-2431). Random data after a
+/// run-in has an exact framing code and a valid address on about 0.34 per
+/// cent of lines, so one such packet would make a noisy line expected
+/// often; measured, one gave 1.25 per cent false packets on lines that never
+/// carried teletext, where three keep the exact code's rate.
+pub const EXPECTED_LINE_EXACT_PACKETS: u8 = 3;
+
 #[cfg(test)]
 mod tests {
     use super::*;

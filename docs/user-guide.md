@@ -2,7 +2,7 @@
 
 `neottx` is the command-line receiver of neoteletext (REQ-DOC-002). It decodes World System Teletext (ETSI EN 300 706, Presentation Levels 1.0, 1.5, 2.5 and 3.5) from recordings, live feeds and web services, and shows pages in the terminal, writes them as text or images, or converts them between formats.
 
-`neottx` is built for Linux on x86_64, aarch64, 32-bit Arm and 64-bit RISC-V, for macOS on Apple silicon and Intel, and for Windows with the MinGW toolchain (`scripts/build-targets.sh`, run by the full gate). It sandboxes itself on Linux (REQ-SEC-017). Graphics in the terminal use iTerm2 inline images; every other terminal gets coloured text.
+`neottx` is built for Linux on x86_64, aarch64, 32-bit Arm and 64-bit RISC-V, for macOS on Apple silicon and Intel, and for Windows with the MinGW toolchain (`scripts/build-targets.sh`, run by the full gate). It sandboxes itself on Linux (REQ-SEC-017). Graphics in the terminal use the kitty graphics protocol, Sixel or iTerm2 inline images, whichever the terminal answers it has; every other terminal gets coloured text.
 
 ## Building
 
@@ -55,7 +55,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx font sets FONT` | Reports, for each of the 55 character sets fonts draw (the standard's 24 and NeoTeletext's own 31), whether a 12 × 10 or 12 × 20 font conforms for it (REQ-FNT-011), how many of its 96 positions it draws, and the first rule it fails; `--library-line NAME` prints the font's `c` line for a library's `fonts.txt`. |
 | `neottx font library LIBRARY` | Lists a font library's fonts by title, from its `fonts.txt` (the folder or the file), with each font's file name or address, its SHA-256 and the sets its `c` line states; each malformed line is reported on standard error. No font is read or fetched. |
 | `neottx write-text --set SET --page PAGE INPUT OUTPUT` | Writes a TTI page from a UTF-8 text file in the named character set, or with `--language TAG` in the set a language takes. See "Writing pages from text" below. |
-| `neottx sound --page PAGE IN.wav OUT.t42` | Writes a sound as the audio profile's packets, with the command that plays it on `PAGE`: IMA ADPCM by default, `--codec pcm` for 16-bit PCM. The WAVE file is 16-bit PCM at 8, 11.025, 16, 22.05, 24, 32, 44.1 or 48 kHz; stereo is mixed to mono. `--channel 0-3`, `--gain 0-100`, `--loop` and `--repeat N` set the rest. Append the output to a channel's T42 stream, and a receiver that plays sound plays it while that page is open. See `docs/spec/design/audio.md`. |
+| `neottx sound --page PAGE IN.wav OUT.t42` | Writes a sound as the audio profile's packets, with the command that plays it on `PAGE`: IMA ADPCM by default, `--codec pcm` for 16-bit PCM. The WAVE file is 16-bit PCM at 8, 11.025, 16, 22.05, 24, 32, 44.1 or 48 kHz; stereo is mixed to mono. With `--codec opus` the input is instead an encoder's Ogg Opus file, whose packets are carried as they are: mono, 20 ms frames, constant rate, 1 to 160 bytes a packet (for example `ffmpeg -i in.wav -ac 1 -c:a libopus -b:a 16k -vbr off -frame_duration 20 out.opus`); a file or packet outside that is refused with status 3, naming the byte offset of the page or the packet's number (DEC-2448). `--channel 0-3`, `--gain 0-100`, `--loop` and `--repeat N` set the rest. Append the output to a channel's T42 stream, and a receiver that plays sound plays it while that page is open. See `docs/spec/design/audio.md`. |
 | `neottx qr TEXT --page PAGE OUT.tti` | Writes `TEXT`, such as a qrkeyboard join address, as a QR code in a page's mosaics, from row 2 unless `--row` says otherwise, so a channel can show a code a phone scans. See DOC-2029. |
 | `neottx keyboard WS-ADDRESS` | Makes a phone the keyboard of a channel that takes input: it shows a qrkeyboard QR in the terminal (and with `--qr-page PAGE --qr-output FILE` writes it as a page), pairs with the phone that scans it, and sends what is typed on the phone to the channel's push WebSocket in the input protocol, once the channel has answered its HELLO; it stops if the channel does not answer within 10 seconds. `--pin` pairs with a PIN instead of a key in the QR; `--relay` names another relay. Anyone who can see the code can type. |
 | `neottx contents FOLDER` | Writes a channel's `contents.txt` to standard output from a folder of page files (`NNN.tti`, `NNN.t42`, `index.t42`, and a page held only in its folder `NNN/` as `NNN/SSSS.t42` or `NNN/SSSS.tti`): a section for each magazine and a dated entry for each page. Its format is DOC-1868 of `neoteletext-common/PROTOCOL.html`. Exits with 4 when a file was skipped, or when the listing stopped before a page because it would pass the 64 kilobytes or 1,000 lines a contents file may hold. |
@@ -121,7 +121,9 @@ A live input runs in two processes (REQ-SEC-018). A fetcher process does the net
 
 `show` and `view` choose the graphics with `--graphics`:
 
-- `auto` (the default): iTerm2 inline images when `TERM_PROGRAM` is `iTerm.app` or `LC_TERMINAL` is `iTerm2`, otherwise text.
+- `auto` (the default): the terminal is asked, before anything is drawn, with the kitty graphics query, XTVERSION and Primary Device Attributes, and the first it has of kitty, Sixel and iTerm2 is used (iTerm2 also when `TERM_PROGRAM` is `iTerm.app` or `LC_TERMINAL` is `iTerm2`); otherwise text. Its replies are read strictly and bounded, and a terminal that has not answered within half a second gets text. Inside tmux or GNU screen, which may not pass graphics through, it is always text. With `-v` both commands say why text was used (DEC-2459).
+- `kitty`: the page is sent as a PNG by the kitty graphics protocol. `view` sends each frame of a page once, its flash phases among them, and then only switches between them.
+- `sixel`: the page is sent as Sixel graphics, each palette index its own colour register (DEC-561), so the terminal needs as many registers as the page has colours: up to 144 at Levels 1 and 1.5.
 - `iterm2`: the page is rendered at full resolution and sent as a PNG inline image (decision E.37).
 - `text`: characters with ANSI colour. Mosaics use the Unicode block mosaic characters; separated mosaics need a font with Unicode 16 separated mosaics, or `--legacy-mosaics` draws them contiguous. `--colours8` uses the eight basic colours instead of 24-bit colour.
 
@@ -194,6 +196,8 @@ Every command accepts these options. Each one changes a setting that a decision 
 | `--level 1\|1.5\|2.5\|3.5` | The presentation level, overriding the profile's (REQ-CLI-007, decision E.40). | The profile's level |
 | `--no-rounding` | Turns character rounding off (REQ-RND-012). | Rounding on |
 | `--single-start-box` | Accepts a single Start Box code (decision E.17). | Two required |
+| `--dump-repeated-rows` | In a raw screen dump, leaves out a row that repeats, byte for byte, the double-height row above it, as the BBC Microcomputer's mode 7 dumps hold it; teletext ignores the row under a double-height row (REQ-INP-017). | Off |
+| `--variant LETTER` | The SAA5246A's national option ROM variant, E, H, T, J, K, L, I or S: C12 to C14 choose among its sets alone, a combination it lacks gives its default language, and X/28 and M/29 are not read (REQ-PRF-003). | E under `saa5246a`; none otherwise |
 | `--pages N` | Pages and sub-pages kept in memory. | 4096 |
 | `-v`, `-vv`, `-vvv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds the state machine trace (REQ-FSM-010); `-vvv` adds each cell's step of the row attribute machine (REQ-FSM-006). | Off |
 
@@ -203,7 +207,7 @@ Every command accepts these options. Each one changes a setting that a decision 
 |---|---|---|---|
 | Presentation level (E.40) | 3.5 | 1 | 1.5 |
 | X/26/15 processed (E.2) | Yes | Yes | No |
-| National option | From C12 to C14 | Fixed: English | From C12 to C14 |
+| Character set | X/28, M/29 and C12 to C14 | Fixed: Latin English, whatever the page designates | The ROM variant's set for C12 to C14 (`--variant`, /E by default) |
 | Black colour codes 0/0 and 1/0 (E.18) | Black | No function | Black |
 | Row 24 (E.23) | Annex H flag | Never | Whenever X/24 is present |
 | Cell size | 12 by 20 | 12 by 20 | 12 by 10 |
@@ -221,7 +225,8 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `strict_row_setting` | E.3: the clause 12.3.2 rule instead of Annex A.3 | Off |
 | `ignore_out_of_order_triplets` | REQ-L15-009 | Off |
 | `default_region` | E.4 | 0 |
-| `fixed_national_index` | REQ-PRF-002 | None |
+| `fixed_designation` | REQ-PRF-002: one Table 32 value for every page, no designation read | None |
+| `rom_variant` | REQ-PRF-003: the SAA5246A ROM variant whose sets C12 to C14 choose among | None |
 | `parity_policy` | E.8 | Keep the last good character |
 | `rolling_header` | E.11 | On |
 | `flash_shown_us`, `flash_hidden_us` | E.12: 0.75 hertz, 3 to 1 | 960 ms, 320 ms |
@@ -230,7 +235,7 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `black_colour_codes` | E.18 | On |
 | `page_completion_timeout_us` | E.19 | 100 ms |
 | `row24` | E.23 | Annex H |
-| `framing_tolerance` | E.24: accept one wrong framing-code bit | On |
+| `framing_tolerance` | E.24 as DEC-1092 limits it: accept one wrong framing-code bit on a line that carried three packets with the exact code within a second, each within a second of the one before; off, the exact code on every line | On |
 | `store_hexadecimal_pages` | REQ-ACQ-013: also store pages with a hexadecimal digit, for diagnostics; never the reserved numbers mFD, mFE, mFF, 1BE and 1F0, whose tables are kept as received apart from the pages (DEC-2341) | Off |
 | `stale_after_us` | REQ-ACQ-012 | 60 s |
 | `reveal`, `momentary_reveal_us` | REQ-NAV-007 | Latched; 160 ms |

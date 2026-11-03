@@ -131,3 +131,52 @@ fn report_impairments() {
         }
     }
 }
+
+/// DEC-1092, REQ-447: false packets from random data after a valid run-in,
+/// and from VPS-shaped lines, on a line where no teletext was seen (held to
+/// the exact framing code) and on a line expected to carry teletext (one
+/// wrong bit tolerated). Each false line is preceded, in the field before,
+/// by nothing on its line or by an exact packet, so that the expectation is
+/// as stated.
+#[test]
+#[ignore = "measurement report; run in release mode"]
+fn report_false_packets_by_line() {
+    const LINES: u32 = 20_000;
+    std::println!("Random data after a valid run-in ({LINES} lines, 35.47 MHz):");
+    let exact = line_with(&line_bytes(&known_packet()), &nominal(), RATE);
+    for expected in [false, true] {
+        let mut generator = Generator::new(8);
+        let mut slicer = Slicer::new(Config::new());
+        let mut accepted = 0;
+        for _ in 0..LINES {
+            let mut bytes = [0u8; PACKET_BYTES_WITH_RUN_IN];
+            for byte in &mut bytes {
+                *byte = generator.rng().byte();
+            }
+            bytes[0] = CLOCK_RUN_IN;
+            bytes[1] = CLOCK_RUN_IN;
+            let samples = render(&mut generator, &SignalParams::nominal(RATE as f32), &bytes, samples_per_line(RATE));
+            // Each field: when the line measured is expected, exact packets
+            // on it in the fields before (it is then measured on the next
+            // field's line); otherwise teletext on the line above it only.
+            let line = if expected {
+                for _ in 0..crate::consts::EXPECTED_LINE_EXACT_PACKETS {
+                    assert!(slicer.slice(&placed(&exact, RATE, TELETEXT_LINE)).is_ok());
+                }
+                TELETEXT_LINE
+            } else {
+                assert!(slicer.slice(&placed(&exact, RATE, TELETEXT_LINE)).is_ok());
+                TELETEXT_LINE + 1
+            };
+            if slicer.slice(&placed(&samples, RATE, line)).is_ok() {
+                accepted += 1;
+            }
+        }
+        let percent = 100.0 * f64::from(accepted) / f64::from(LINES);
+        std::println!("  expected line {expected}: {accepted} accepted ({percent:.2}%)");
+    }
+    std::println!("VPS-shaped lines of random contents ({LINES} lines, 35.47 MHz), on a line no teletext was seen on:");
+    let (accepted, lines) = biphase_false_packets(10.0e6, LINES, Config::new());
+    let percent = 100.0 * f64::from(accepted) / f64::from(lines);
+    std::println!("  {accepted} of {lines} accepted ({percent:.2}%)");
+}

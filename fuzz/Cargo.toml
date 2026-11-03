@@ -20,12 +20,14 @@ neoteletext-core = { path = "../crates/neoteletext-core" }
 neoteletext-formats = { path = "../crates/neoteletext-formats", features = ["default", "std"] }
 neoteletext-slicer = { path = "../crates/neoteletext-slicer" }
 neoteletext-web = { path = "../crates/neoteletext-web", features = ["default", "dbsc"] }
-neoteletext-audio = { path = "../crates/neoteletext-audio" }
+# `encode` for the Ogg Opus reader of the publishing tools (TODO-1228).
+neoteletext-audio = { path = "../crates/neoteletext-audio", features = ["default", "encode"] }
 neoteletext-opus = { path = "../crates/neoteletext-opus" }
 neoteletext-input = { path = "../crates/neoteletext-input" }
-# The pipe between neottx's fetcher and decoder processes (REQ-SEC-018).
-# Without its default features the application crate builds no TLS and no
-# web module: the pipe's codec needs neither.
+# The pipe between neottx's fetcher and decoder processes (REQ-SEC-018),
+# and the terminal replies `neottx` reads when it asks for graphics
+# (DEC-2459). Without its default features the application crate builds
+# no TLS and no web module: neither needs them.
 neoteletext-app = { path = "../crates/neoteletext-app", default-features = false }
 # The qrkeyboard client's readers of what the relay and the phone send
 # (REQ-SEC-003).
@@ -304,8 +306,22 @@ doc = false
 bench = false
 
 [[bin]]
+name = "ogg_opus"
+path = "fuzz_targets/ogg_opus.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "qrkeyboard_messages"
 path = "fuzz_targets/qrkeyboard_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "terminal_reply"
+path = "fuzz_targets/terminal_reply.rs"
 test = false
 doc = false
 bench = false

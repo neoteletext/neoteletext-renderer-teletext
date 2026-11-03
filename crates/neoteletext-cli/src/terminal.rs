@@ -1,9 +1,21 @@
 //! Terminal capabilities: graphics protocol detection (REQ-RND-029,
-//! decision 17 of IMPLEMENTATION-LOG.md) and size.
+//! REQ-382, DEC-2459) and size.
+//!
+//! Detection asks the terminal, where the viewer's terminal library is
+//! built in: the kitty graphics query, XTVERSION and Primary Device
+//! Attributes, whose replies `neoteletext_app::terminal_reply` reads. The
+//! order of preference is kitty, Sixel, iTerm2, then characters. A build
+//! without the viewer reads only the environment, for iTerm2.
+
+use neoteletext_app::terminal_reply::Replies;
 
 /// How a page is shown in the terminal.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Display {
+    /// The kitty graphics protocol.
+    Kitty,
+    /// Sixel graphics.
+    Sixel,
     /// iTerm2 inline images.
     Iterm2,
     /// Characters with ANSI colour.
@@ -22,9 +34,82 @@ pub fn detect(forced: Option<Display>, is_terminal: bool) -> (Display, Option<&'
     if std::env::var_os("TMUX").is_some() || std::env::var_os("STY").is_some() {
         return (Display::Text, Some("inside tmux or GNU screen: graphics may not pass through"));
     }
-    let iterm = std::env::var("TERM_PROGRAM").is_ok_and(|value| value == "iTerm.app")
+    let iterm_environment = std::env::var("TERM_PROGRAM").is_ok_and(|value| value == "iTerm.app")
         || std::env::var("LC_TERMINAL").is_ok_and(|value| value == "iTerm2");
-    if iterm { (Display::Iterm2, None) } else { (Display::Text, Some("terminal is not iTerm2")) }
+    choose(query(), iterm_environment)
+}
+
+/// The display the replies call for, in the order kitty, Sixel, iTerm2,
+/// characters; `None` replies are a terminal that did not answer.
+#[must_use]
+pub fn choose(replies: Option<Replies>, iterm_environment: bool) -> (Display, Option<&'static str>) {
+    match replies {
+        Some(replies) if replies.kitty_graphics => (Display::Kitty, None),
+        Some(replies) if replies.sixel => (Display::Sixel, None),
+        Some(replies) if replies.is_iterm2() => (Display::Iterm2, None),
+        _ if iterm_environment => (Display::Iterm2, None),
+        Some(_) => (Display::Text, Some("the terminal reports no kitty, Sixel or iTerm2 graphics")),
+        None => (Display::Text, Some("the terminal did not answer the graphics queries")),
+    }
+}
+
+/// The longest the terminal is given to answer the queries. A terminal
+/// answers Primary Device Attributes, the last query, as soon as it reads
+/// it, so the wait ends with that reply; the ceiling only bounds a
+/// terminal that never answers (DEC-2459).
+#[cfg(feature = "view")]
+const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Asks the terminal the graphics queries and reads its replies, in raw
+/// mode, before the sandbox closes the terminal device. `None` when the
+/// terminal cannot be opened or did not answer in time.
+#[cfg(feature = "view")]
+fn query() -> Option<Replies> {
+    use neoteletext_app::terminal_reply::{MAX_REPLY_BYTES, QUERIES, parse};
+    use std::io::{Read, Write};
+    let mut tty = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").ok()?;
+    let mut reader = tty.try_clone().ok()?;
+    crossterm::terminal::enable_raw_mode().ok()?;
+    let sent = tty.write_all(QUERIES).and_then(|()| tty.flush());
+    let (bytes_sent, bytes) = std::sync::mpsc::channel::<Vec<u8>>();
+    if sent.is_ok() {
+        // The reader blocks on the terminal; it ends once the last reply is
+        // in, or the bound is read, or nothing more comes. A terminal that
+        // never answers leaves it waiting for a byte, which it then drops.
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; MAX_REPLY_BYTES];
+            let mut read = 0;
+            while read < MAX_REPLY_BYTES {
+                let Ok(count) = reader.read(&mut chunk) else { return };
+                if count == 0 || bytes_sent.send(chunk.get(..count).unwrap_or(&[]).to_vec()).is_err() {
+                    return;
+                }
+                read = read.saturating_add(count);
+            }
+        });
+    }
+    let deadline = std::time::Instant::now().checked_add(QUERY_TIMEOUT)?;
+    let mut received = Vec::new();
+    let mut replies = None;
+    while sent.is_ok() && received.len() < MAX_REPLY_BYTES {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        let Ok(more) = bytes.recv_timeout(left) else { break };
+        received.extend_from_slice(&more);
+        let read = parse(&received);
+        if read.complete {
+            replies = Some(read);
+            break;
+        }
+    }
+    let _ = crossterm::terminal::disable_raw_mode();
+    replies
+}
+
+/// A build without the viewer has no terminal library to set raw mode
+/// with, so it reads only the environment.
+#[cfg(not(feature = "view"))]
+const fn query() -> Option<Replies> {
+    None
 }
 
 /// The terminal's text area in pixels, measured before the sandbox closes
@@ -75,6 +160,25 @@ pub fn fit_scale(area: Option<TextArea>, page_width: usize, page_height: usize, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REQ-382: kitty comes before Sixel, Sixel before iTerm2, and iTerm2
+    /// before characters; a terminal that answered nothing, or no graphics,
+    /// gets characters with the reason.
+    #[test]
+    fn the_order_of_preference() {
+        let replies = |kitty_graphics, sixel, version: Option<&str>| {
+            Some(Replies { kitty_graphics, sixel, version: version.map(str::to_owned), complete: true })
+        };
+        assert_eq!(choose(replies(true, true, Some("iTerm2 3.5")), true).0, Display::Kitty);
+        assert_eq!(choose(replies(false, true, Some("iTerm2 3.5")), false).0, Display::Sixel);
+        assert_eq!(choose(replies(false, false, Some("iTerm2 3.5")), false).0, Display::Iterm2);
+        assert_eq!(choose(replies(false, false, None), true).0, Display::Iterm2);
+        assert_eq!(
+            choose(replies(false, false, Some("XTerm(390)")), false),
+            (Display::Text, Some("the terminal reports no kitty, Sixel or iTerm2 graphics"))
+        );
+        assert_eq!(choose(None, false), (Display::Text, Some("the terminal did not answer the graphics queries")));
+    }
 
     /// REQ-RND-029: the scale fits the width and the height.
     #[test]

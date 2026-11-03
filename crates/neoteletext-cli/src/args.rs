@@ -2,6 +2,7 @@
 //! command and option, as clap parses them.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use neoteletext_core::config::RomVariant;
 use std::path::PathBuf;
 
 /// neoteletext: a software teletext receiver (ETSI EN 300 706 Levels 1.0, 1.5, 2.5 and 3.5).
@@ -61,6 +62,15 @@ pub struct Common {
     /// Accept a single Start Box (decision E.17).
     #[arg(long)]
     pub single_start_box: bool,
+    /// The SAA5246A's national option ROM variant, E, H, T, J, K, L, I or
+    /// S: C12 to C14 then choose among its sets alone (REQ-PRF-003). The
+    /// saa5246a profile's is E.
+    #[arg(long, value_name = "LETTER", value_parser = parse_rom_variant)]
+    pub variant: Option<RomVariant>,
+    /// In a screen dump, leave out a row that repeats the double-height row
+    /// above it, as the BBC Microcomputer's dumps hold it (REQ-INP-017).
+    #[arg(long)]
+    pub dump_repeated_rows: bool,
     /// Print diagnostics; with -vv the state machine trace (REQ-FSM-010),
     /// and with -vvv each cell's step of the row attribute machine as well.
     #[arg(short, long, action = clap::ArgAction::Count)]
@@ -144,6 +154,10 @@ pub enum LevelChoice {
 pub enum GraphicsChoice {
     /// Detect.
     Auto,
+    /// The kitty graphics protocol.
+    Kitty,
+    /// Sixel graphics.
+    Sixel,
     /// iTerm2 inline images.
     Iterm2,
     /// Characters with ANSI colour.
@@ -397,7 +411,8 @@ pub(crate) enum Command {
         /// The gain, 0 to 100 per cent.
         #[arg(long, default_value_t = 80)]
         gain: u8,
-        /// `ima` (IMA ADPCM, a quarter of the size) or `pcm`.
+        /// `ima` (IMA ADPCM, a quarter of the size) or `pcm`, from a WAVE
+        /// file; or `opus`, an encoder's packets from an Ogg Opus file.
         #[arg(long, default_value = "ima")]
         codec: String,
         /// The sound's handle, 0 to 255.
@@ -417,7 +432,9 @@ pub(crate) enum Command {
         /// With `--live`, the packets a second the file is played at.
         #[arg(long, default_value_t = crate::commands::PLAYER_PACKETS_PER_SECOND)]
         pace: u32,
-        /// A WAVE file of 16-bit PCM at one of the profile's rates.
+        /// A WAVE file of 16-bit PCM at one of the profile's rates, or with
+        /// `--codec opus` an Ogg Opus file of the profile: mono, 20 ms
+        /// constant-rate packets of 1 to 160 bytes.
         input: PathBuf,
         /// The T42 file to write.
         output: PathBuf,
@@ -524,3 +541,12 @@ pub(crate) enum FontCommand {
 
 #[cfg(test)]
 mod tests;
+
+/// A ROM variant named by its datasheet letter (REQ-PRF-003).
+fn parse_rom_variant(text: &str) -> Result<RomVariant, String> {
+    let mut letters = text.chars();
+    match (letters.next().and_then(RomVariant::from_letter), letters.next()) {
+        (Some(variant), None) => Ok(variant),
+        _ => Err("expected one of E, H, T, J, K, L, I or S".to_owned()),
+    }
+}

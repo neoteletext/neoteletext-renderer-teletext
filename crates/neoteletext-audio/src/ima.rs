@@ -77,6 +77,21 @@ impl State {
     }
 }
 
+/// Checks one block's header as [`decode_block`] does and returns how many
+/// samples it holds, without decoding it: for a sink that decodes IMA
+/// ADPCM itself (REQ-AUD-018).
+///
+/// # Errors
+/// A block shorter than its header, or a step index beyond the table.
+pub fn check_block(block: &[u8]) -> Result<usize, ImaError> {
+    let header = block.get(..IMA_HEADER).ok_or(ImaError::Truncated)?;
+    let index = header.get(2).copied().unwrap_or(0);
+    if index > MAX_INDEX {
+        return Err(ImaError::StepIndex(index));
+    }
+    Ok(block.len().saturating_sub(IMA_HEADER).saturating_mul(2).saturating_add(1))
+}
+
 /// Decodes one block into `out` and returns how many samples it held: the
 /// header's predictor, then two samples a byte, low nibble first.
 ///

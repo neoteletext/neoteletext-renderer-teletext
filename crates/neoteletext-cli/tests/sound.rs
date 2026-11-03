@@ -191,3 +191,126 @@ fn a_live_sound_too_fast_for_the_pace_is_refused() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
+
+/// TODO-1228: `neottx sound --codec opus` carries an encoder's Ogg Opus
+/// packets as they are (decision E.124).
+mod opus {
+    use super::*;
+    use neoteletext_audio::ogg::write_ogg_opus;
+    use neoteletext_opus::{Decoder, FRAME_SAMPLES};
+
+    /// A constant-rate packet's length: 16 kbit/s at 20 ms.
+    const PACKET: u16 = 40;
+    /// The table of contents of a CELT-only full-band 20 ms mono frame
+    /// (RFC 6716 section 3.1: configuration 31, code 0).
+    const CELT_FULL_BAND_20_MS: u8 = 31 << 3;
+    /// The same at 10 ms (configuration 30), outside the profile.
+    const CELT_FULL_BAND_10_MS: u8 = 30 << 3;
+
+    /// `count` packets made from a seed: the engine holds no recording, and
+    /// a CELT frame decodes whatever its bytes.
+    fn packets(count: usize) -> Vec<u8> {
+        let mut state = 0x2545_f491_u32;
+        (0..count)
+            .flat_map(|_| {
+                let mut packet = vec![CELT_FULL_BAND_20_MS];
+                packet.extend((1..PACKET).map(|_| {
+                    // xorshift32 (Marsaglia 2003).
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    state.to_le_bytes()[0]
+                }));
+                packet
+            })
+            .collect()
+    }
+
+    /// What one decoder writes for the packets, in order.
+    fn decoded(data: &[u8]) -> Vec<i16> {
+        let mut decoder = Decoder::new();
+        let mut out = Vec::new();
+        for packet in data.chunks(usize::from(PACKET)) {
+            let mut pcm = [0_i16; FRAME_SAMPLES];
+            assert!(decoder.decode(packet, &mut pcm).is_ok());
+            out.extend_from_slice(&pcm);
+        }
+        out
+    }
+
+    fn write(name: &str, file: &[u8], extra: &[&str]) -> (std::process::Output, std::path::PathBuf) {
+        let folder = folder(name);
+        let input = folder.join("sound.opus");
+        let output = folder.join("sound.t42");
+        std::fs::write(&input, file).unwrap();
+        let mut arguments = vec!["sound", "--page", "123", "--codec", "opus"];
+        arguments.extend_from_slice(extra);
+        arguments.extend([input.to_str().unwrap(), output.to_str().unwrap()]);
+        let leaked: Vec<String> = arguments.iter().map(|argument| (*argument).to_owned()).collect();
+        let run = neottx(&leaked.iter().map(String::as_str).collect::<Vec<_>>());
+        (run, output)
+    }
+
+    fn played(output: &std::path::Path) -> Keeper {
+        let stream = std::fs::read(output).unwrap();
+        let mut arena = vec![0; 1 << 20];
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        let mut sink = Keeper::default();
+        receiver.open_page(Some(0x123), &mut sink);
+        for bytes in stream.as_chunks::<PACKET_BYTES>().0 {
+            assert!(receiver.push_packet(&Packet { bytes: *bytes }, &mut sink), "every packet is audio");
+        }
+        sink
+    }
+
+    // Verifies REQ-96 and TODO-1228: an Ogg Opus file of the profile is
+    // written as records the receiver decodes to exactly what one decoder
+    // gives, cut where the last granule position says.
+    #[test]
+    fn an_ogg_opus_file_plays_back_exactly() {
+        let data = packets(30);
+        let samples = 29 * 960 + 400;
+        let (run, output) = write("opus-stored", &write_ogg_opus(&data, PACKET, samples, 3), &[]);
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let report = String::from_utf8_lossy(&run.stderr);
+        assert!(report.contains("28240 samples at 48000 Hz, 1200 bytes of opus"), "{report}");
+        let sink = played(&output);
+        assert_eq!(sink.starts.len(), 1);
+        let mut want = decoded(&data);
+        want.truncate(usize::try_from(samples).unwrap());
+        assert_eq!(sink.pcm, want);
+    }
+
+    // Verifies TODO-1228: sent live, the packets are the sound's blocks, one
+    // a block, and play as one decoder's output.
+    #[test]
+    fn an_ogg_opus_file_plays_back_live() {
+        let data = packets(20);
+        let (run, output) = write("opus-live", &write_ogg_opus(&data, PACKET, 20 * 960, 3), &["--live"]);
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let sink = played(&output);
+        assert_eq!(sink.pcm, decoded(&data));
+    }
+
+    // Verifies REQ-AUD-022 through TODO-1228: a packet outside the profile is
+    // refused with the input status and its number, and so is a damaged
+    // page, with its byte offset.
+    #[test]
+    fn a_packet_outside_the_profile_and_a_damaged_page_are_refused() {
+        let mut data = packets(5);
+        data[3 * usize::from(PACKET)] = CELT_FULL_BAND_10_MS;
+        let (run, _) = write("opus-ten-ms", &write_ogg_opus(&data, PACKET, 5 * 960, 3), &[]);
+        assert_eq!(run.status.code(), Some(3));
+        assert!(String::from_utf8_lossy(&run.stderr).contains("packet 4 is not one 20 ms mono frame"));
+        let mut file = write_ogg_opus(&packets(5), PACKET, 5 * 960, 3);
+        let last = file.len() - 1;
+        file[last] ^= 1;
+        let (run, _) = write("opus-damaged", &file, &[]);
+        assert_eq!(run.status.code(), Some(3));
+        assert!(
+            String::from_utf8_lossy(&run.stderr).contains("fails its CRC"),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+}
