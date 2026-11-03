@@ -76,3 +76,15 @@ fn a_letter_beside_a_tatweel_joins_it() {
     join_row(&mut cells);
     assert_eq!(forms(&cells, 3), [JoinForm::Final, JoinForm::Medial, JoinForm::Initial]);
 }
+
+/// REQ-84, DEC-2350: a letter carrying a diacritical mark placed by X/26
+/// joins as the letter does, and so do its neighbours: visual sin, beh with
+/// a mark, sin read right to left as initial, medial and final.
+#[test]
+fn a_letter_with_a_mark_still_joins() {
+    let mut cells = row("\u{0633}\u{0628}\u{0633}");
+    let Glyph::Char(beh) = &mut cells[1].glyph else { panic!() };
+    beh.diacritic = 1;
+    join_row(&mut cells);
+    assert_eq!(forms(&cells, 3), [JoinForm::Final, JoinForm::Medial, JoinForm::Initial]);
+}
