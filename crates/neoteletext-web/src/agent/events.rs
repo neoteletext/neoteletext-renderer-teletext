@@ -189,6 +189,9 @@ pub enum Failure {
     BadRedirect,
     /// An address failed the strict parser.
     Address(UrlError),
+    /// An address given as a channel's breaks a rule of a channel's
+    /// address, named here (REQ-WEB-023, REQ-1693).
+    ChannelAddress(crate::map::MapError),
     /// A media type outside the profile (REQ-WEB-014).
     MediaType,
     /// A blocked local-network address (REQ-SEC-006).

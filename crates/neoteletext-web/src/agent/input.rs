@@ -34,8 +34,9 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 Err(MapError::Channel(channel::ChannelError::Address(error))) => {
                     event(sink, Event::DescriptorFailed(Failure::Address(error)));
                 }
-                Err(MapError::Channel(_)) => event(sink, Event::DescriptorFailed(Failure::Address(UrlError::Path))),
-                Err(_) => event(sink, Event::DescriptorFailed(Failure::Address(UrlError::Fragment))),
+                // REQ-WEB-023: the diagnostic names the rule the address
+                // breaks.
+                Err(other) => event(sink, Event::DescriptorFailed(Failure::ChannelAddress(other))),
             },
             // REQ-WEB-018: a live channel fetches nothing after its
             // settings; its pages and its index come on its connection.

@@ -11,7 +11,7 @@ use neoteletext_transport::{SOCKET_READ, web_address};
 use neoteletext_web::agent::{
     Config, Event, Failure, Input, InputMessage, Output, PageBytes, PushStop, Source as Came, Storage, UserAgent,
 };
-use neoteletext_web::channel::is_channel_address;
+use neoteletext_web::channel::{broken_channel_rule, is_channel_address};
 use neoteletext_web::consts::{INVALID_PACKET_REPORT_SECONDS, PUSH_SUBPROTOCOL};
 use neoteletext_web::descriptor::Descriptor;
 use neoteletext_web::http::MediaType;
@@ -43,6 +43,12 @@ pub(super) fn run_web(
     allow_local: &[IpAddr],
     proxy: Option<Proxy>,
 ) {
+    // REQ-WEB-023: an address that is a channel's in form and breaks a rule
+    // is refused, naming the rule, and never fetched as a descriptor.
+    if let Some(rule) = broken_channel_rule(address) {
+        let _ = send(&Frame::Notice(Notice::Message(format!("not a channel's address: {rule:?}"))));
+        return;
+    }
     let mut storage = Box::new(Storage::default());
     let channel = is_channel_address(address);
     let config = agent_config(channel, allow_local, proxy.is_some());

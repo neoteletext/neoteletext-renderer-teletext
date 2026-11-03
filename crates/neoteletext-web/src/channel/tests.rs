@@ -217,3 +217,22 @@ fn an_address_says_whether_it_is_a_channel() {
         assert!(!is_channel_address(service), "{service}");
     }
 }
+
+// Verifies REQ-WEB-023 (REQ-512): an address that is a channel's in form,
+// a folder or a channel's entry file, and breaks a rule, says which rule;
+// a channel's address, a descriptor's and one no parser reads say none.
+#[test]
+fn a_channel_address_that_breaks_a_rule_says_which() {
+    let settings = std::format!("https://h.example/a b/{SETTINGS_FILE}");
+    for (address, rule) in [
+        ("https://h.example/a//", Some(ChannelError::EmptySegment)),
+        ("https://h.example/%41/", Some(ChannelError::Character)),
+        ("https://h.example/a/", None),
+        ("https://h.example/service.json", None),
+        ("https://h.example/a b/", None),
+        ("wss://h.example/a/", None),
+        (settings.as_str(), None),
+    ] {
+        assert_eq!(broken_channel_rule(address), rule, "{address}");
+    }
+}

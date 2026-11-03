@@ -1376,7 +1376,7 @@ fn a_channels_entry_file_opens_whatever_type_a_host_gives_it() {
 fn a_channels_old_entry_file_is_not_read() {
     let mut harness = site_harness(Config::default());
     let records = harness.open_channel("http://site.example/news/channel.json");
-    assert!(has_event(&records, "DescriptorFailed(Address(Path))"), "{records:?}");
+    assert!(has_event(&records, "DescriptorFailed(ChannelAddress(Channel(NotChannelFile)))"), "{records:?}");
     assert_eq!(harness.replay().requests.len(), 0);
 }
 
@@ -1969,7 +1969,7 @@ fn push_target(address: &str) -> String {
 fn an_address_with_a_refused_fragment_opens_nothing() {
     for address in ["http://site.example/a/#302", "http://site.example/a/302.tti#303", "http://site.example/a/#wall"] {
         let mut harness = site_harness(Config::default());
-        assert!(has_event(&harness.open_channel(address), "DescriptorFailed(Address(Fragment))"), "{address}");
+        assert!(has_event(&harness.open_channel(address), "DescriptorFailed(ChannelAddress(Place))"), "{address}");
         assert!(harness.replay().requests_to("site.example:80").is_empty(), "{address}");
     }
 }
@@ -2623,4 +2623,23 @@ fn the_second_file_of_a_page_carries_no_validators_of_the_first() {
     assert_eq!(request_path(t42), "/news/100.t42");
     assert_eq!(header_value(t42, "If-None-Match"), None);
     assert_eq!(header_value(t42, "If-Modified-Since"), None);
+}
+
+// Verifies REQ-512 (REQ-WEB-023): a channel's address that breaks a rule is
+// refused with the rule it breaks, and nothing is fetched.
+#[test]
+fn a_channel_address_that_breaks_a_rule_names_it() {
+    for (address, rule) in [
+        ("http://site.example/a//", "EmptySegment"),
+        ("http://site.example/a/%41/", "Character"),
+        ("ws://site.example/a/", "Scheme"),
+    ] {
+        let mut harness = site_harness(Config::default());
+        let records = harness.open_channel(address);
+        assert!(
+            has_event(&records, &format!("DescriptorFailed(ChannelAddress(Channel({rule})))")),
+            "{address}: {records:?}"
+        );
+        assert!(harness.replay().requests_to("site.example:80").is_empty(), "{address}");
+    }
 }
