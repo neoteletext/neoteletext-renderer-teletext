@@ -123,8 +123,8 @@ A live input runs in two processes (REQ-SEC-018). A fetcher process does the net
 
 - `auto` (the default): the terminal is asked, before anything is drawn, with the kitty graphics query, XTVERSION and Primary Device Attributes, and the first it has of kitty, Sixel and iTerm2 is used (iTerm2 also when `TERM_PROGRAM` is `iTerm.app` or `LC_TERMINAL` is `iTerm2`); otherwise text. Its replies are read strictly and bounded, and a terminal that has not answered within half a second gets text. Inside tmux or GNU screen, which may not pass graphics through, it is always text. With `-v` both commands say why text was used (DEC-2459).
 - `kitty`: the page is sent as a PNG by the kitty graphics protocol. `view` sends each frame of a page once, its flash phases among them, and then only switches between them.
-- `sixel`: the page is sent as Sixel graphics, each palette index its own colour register (DEC-561), so the terminal needs as many registers as the page has colours: up to 144 at Levels 1 and 1.5.
-- `iterm2`: the page is rendered at full resolution and sent as a PNG inline image (decision E.37).
+- `sixel`: the page is sent as Sixel graphics, each palette index its own colour register (DEC-561), so the terminal needs as many registers as the page has colours: up to 144 at Levels 1 and 1.5. When the page changes in `view`, a flash phase, the clock or a row, only the text rows that changed are sent again, as a band placed at its row, where the terminal reports its size in pixels and its rows divide that height exactly; otherwise, and when the page's colours or size change or the terminal is resized, the whole page is sent.
+- `iterm2`: the page is rendered at full resolution and sent as a PNG inline image (decision E.37). Every change sends the whole page again: an iTerm2 image cannot be placed in part over another.
 - `text`: characters with ANSI colour. Mosaics use the Unicode block mosaic characters; separated mosaics need a font with Unicode 16 separated mosaics, or `--legacy-mosaics` draws them contiguous. `--colours8` uses the eight basic colours instead of 24-bit colour.
 
 `--scale N` sets a whole-number scale factor; 0 fits the terminal. `--aspect` stretches the width by 16/13 (about 1.23) for the proportions of a 4:3 television, on which each pixel was wider than tall (REQ-RND-004). `--reveal` shows concealed text.
@@ -147,23 +147,27 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 
 | Key | Action |
 |---|---|
-| `0` to `9` | Enter a page number. |
+| `0` to `9` | Enter a page number. Where the page shown has its own link for the number (an `LK` line), or else the channel's `channel.ttx` has an alias for it, the number goes there (REQ-509, DEC-2480). |
 | `r` `g` `y` `c`, or F1 to F4 | Follow the red, green, yellow and cyan links. They work only while row 24 is shown in full (REQ-SEC-024). |
-| `i` | Index link. |
+| `i` | Index link. Held, where the terminal reports key releases (the Kitty keyboard protocol): back through the history (DEC-2477). |
 | `h` or Home | Initial page. |
 | Up or `+`, Down or `-` | Next and previous page. |
 | Right and Left | Next and previous sub-page. |
 | `s`, then four digits | Show that sub-page, keyed as on a television: 0001 to 3979, the third digit 0 to 7 and the first 0 to 3 (REQ-NUM-017). A digit that cannot belong is ignored, and any other key leaves the entry. |
-| Alt+Left or Backspace, Alt+Right | Back and forward through the history. |
+| Alt+Left or Backspace, Alt+Right | Back and forward through the history. `--back-key KEY` and `--forward-key KEY` add a key of your own for each, as a remote control's configurable keys: one printable character the viewer does not already use. |
 | `?` | Reveal concealed text. |
 | `H` | Hold the page, so that new receptions do not update it. |
 | `m` | Mix: cell backgrounds become transparent, as when text is superimposed on the picture. |
 | `z` | Zoom: top half, bottom half, off. |
 | `q`, Esc or Ctrl+C | Quit. |
 
+Where the terminal reports key releases, `i` acts when it is let go: let go at once it is Index; held until the keyboard repeats it, or for half a second, it goes back, once a hold. On a terminal that reports no releases a hold cannot be told from a press, so `i` is Index at once and Back is Backspace, Alt+Left or the `--back-key`.
+
+A typed number whose link or alias leads to another service asks in row 24, `Enter: Weather at weather.example`, unless that origin was confirmed already; Enter goes there and any other key stays. An alias to another channel's address is not opened: row 24 says the page is another channel's, and the address is printed when the viewer ends.
+
 A link to another service asks for confirmation: the status area shows `LEAVE?`, and row 24 the service's name and its origin, as in `Same key: Weather at weather.example` (the scheme is shown when it is not `https`), and pressing the same key again goes there; any other key stays. Once an origin is confirmed it is not asked about again for as long as the viewer runs, in any service (REQ-288, DEC-2454).
 
-With `-vv` the viewer writes the state machines' transitions, as the other commands do, to standard error; since the page is drawn on the terminal, standard error must be redirected for them to be written (`neottx view -vv INPUT 2>trace.txt`). The walk of a page's presentation level is traced once for each reception of the page shown, and the viewer's own machine reports each key and decoder event that changes its state or does something. With `-vvv` each cell's step of the row attribute machine is traced as well: a thousand lines a page. Without the redirection the trace is dropped, and the viewer says so when it ends.
+With `-vv` the viewer writes the packet trace and the state machines' transitions, as the other commands do, to standard error; since the page is drawn on the terminal, standard error must be redirected for them to be written (`neottx view -vv INPUT 2>trace.txt`). The walk of a page's presentation level is traced once for each reception of the page shown, and the viewer's own machine reports each key and decoder event that changes its state or does something. With `-vvv` each cell's step of the row attribute machine is traced as well: a thousand lines a page. Without the redirection the trace is dropped, and the viewer says so when it ends.
 
 On a channel that takes input (its descriptor's `push` says `"input": true`), the viewer greets the channel when its WebSocket opens, and once the channel answers, every key goes to it, as a terminal's keys go to its host: digits, Escape and Ctrl+C included. Printable keys go as text and the rest as key events, with Shift, Control and Alt. The channel decides what they mean; videotex channels take `*nnn#` for a page, `#` for the next and `*#` for the one before. A paste goes to the channel as one paste, and the terminal's focus as the channel's, where the terminal reports them; in a terminal with the Kitty keyboard protocol, releases and repeats go too, and in any other a key goes as a press alone. The channel is told the page or sub-page selected whenever it changes, whatever the focus, and every input event is stamped with the page and sub-code the viewer is drawing. Keys stop going when the terminal loses the focus or after Ctrl+], which leaves the keys to the viewer and gives them back: the channel is told the focus went, with a lost release of each key held where the terminal reports releases. A channel that does not answer within 10 seconds is said not to take input. See DOC-1781 of `neoteletext-common/PROTOCOL.html`.
 
@@ -199,7 +203,7 @@ Every command accepts these options. Each one changes a setting that a decision 
 | `--dump-repeated-rows` | In a raw screen dump, leaves out a row that repeats, byte for byte, the double-height row above it, as the BBC Microcomputer's mode 7 dumps hold it; teletext ignores the row under a double-height row (REQ-INP-017). | Off |
 | `--variant LETTER` | The SAA5246A's national option ROM variant, E, H, T, J, K, L, I or S: C12 to C14 choose among its sets alone, a combination it lacks gives its default language, and X/28 and M/29 are not read (REQ-PRF-003). | E under `saa5246a`; none otherwise |
 | `--pages N` | Pages and sub-pages kept in memory. | 4096 |
-| `-v`, `-vv`, `-vvv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds the state machine trace (REQ-FSM-010); `-vvv` adds each cell's step of the row attribute machine (REQ-FSM-006). | Off |
+| `-v`, `-vv`, `-vvv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds a line for every packet read, `packet M/N/D: fields; protection`, with the fields the decoder read from it (a header's page, sub-code and control bits, a row's parity errors, a designation code) and what its Hamming codes corrected or could not (REQ-CLI-002), and the state machine trace (REQ-FSM-010); `-vvv` adds each cell's step of the row attribute machine (REQ-FSM-006). | Off |
 
 ### Profiles
 

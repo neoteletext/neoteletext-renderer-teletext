@@ -29,13 +29,33 @@ const ENHANCEMENT_PACKETS: usize = ENHANCEMENT_PACKETS_LEVEL_35 + MAGAZINES * MO
 /// tables. Most object sub-pages hold more than eight packets.
 const ENHANCEMENT_SUB_PAGES: usize = ENHANCEMENT_PACKETS_LEVEL_35 / 8 + MAGAZINES;
 
+/// One line of the `-vv` trace (REQ-CLI-002): a decoder event, with the
+/// state machine transitions (REQ-FSM-010), or a packet as it arrived
+/// ([`crate::packet_trace::line`]).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum TraceLine {
+    /// An event of the decoder, the walk or the viewer.
+    Event(Event),
+    /// A packet's line.
+    Packet(String),
+}
+
+impl std::fmt::Display for TraceLine {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Event(event) => write!(formatter, "{event:?}"),
+            Self::Packet(line) => formatter.write_str(line),
+        }
+    }
+}
+
 /// A session over one input.
 pub struct Session {
     decoder: Decoder<'static>,
     capacity: usize,
     clock: u64,
-    /// Events seen, kept for `--verbose` tracing.
-    pub trace: Vec<Event>,
+    /// Packets and events seen, kept for `-vv` tracing.
+    pub trace: Vec<TraceLine>,
     tracing: bool,
     /// Which packets to keep for the program as well as decode, and those
     /// kept, oldest first, at most [`MAX_KEPT`].
@@ -136,7 +156,15 @@ impl Session {
             Some(stamp) if stamp >= self.clock => stamp,
             _ => self.clock.saturating_add(LINE_PERIOD_US),
         };
+        self.trace_packet(packet);
         self.decoder.push(packet, meta, Instant(self.clock), &mut Self::trace_sink(self.tracing, &mut self.trace));
+    }
+
+    /// Keeps a packet's line for the trace, when tracing is on (REQ-CLI-002).
+    fn trace_packet(&mut self, packet: &Packet) {
+        if self.tracing {
+            self.trace.push(TraceLine::Packet(crate::packet_trace::line(packet)));
+        }
     }
 
     /// Feeds one packet received now, on the session's real clock (live
@@ -144,6 +172,7 @@ impl Session {
     pub fn push_at(&mut self, packet: &Packet, meta: &PacketMeta, now: Instant) {
         self.maybe_keep(packet);
         self.clock = self.clock.max(now.0);
+        self.trace_packet(packet);
         self.decoder.push(packet, meta, Instant(self.clock), &mut Self::trace_sink(self.tracing, &mut self.trace));
     }
 
@@ -202,7 +231,7 @@ impl Session {
         let config = self.decoder.config();
         let lookup = self.decoder.enhancement_lookup();
         let mut entries = Vec::new();
-        let mut keep = |entry| entries.push(Event::Trace(entry));
+        let mut keep = |entry| entries.push(TraceLine::Event(Event::Trace(entry)));
         let mut trace = TraceSink { time: Instant(self.clock), entries: &mut keep };
         build_grid_traced(&mut grid, Some(page), &magazine, config, &options, &mut trace);
         let build = PageBuild::of(page, config.level);
@@ -216,11 +245,11 @@ impl Session {
         Some(grid)
     }
 
-    /// Prints the events kept for tracing, as `-vv` asks (REQ-CLI-002), and
-    /// forgets them.
+    /// Prints the packets and events kept for tracing, as `-vv` asks
+    /// (REQ-CLI-002), and forgets them.
     pub fn print_trace(&mut self) {
-        for event in self.trace.drain(..) {
-            eprintln!("neottx: {event:?}");
+        for line in self.trace.drain(..) {
+            eprintln!("neottx: {line}");
         }
     }
 
@@ -240,10 +269,10 @@ impl Session {
     /// The decoder's event sink: each event kept for tracing when tracing is
     /// on (`-vv`, REQ-FSM-010), dropped otherwise. It takes the two fields
     /// rather than the session, so that the decoder may be borrowed beside it.
-    fn trace_sink(tracing: bool, trace: &mut Vec<Event>) -> impl FnMut(Event) + '_ {
+    fn trace_sink(tracing: bool, trace: &mut Vec<TraceLine>) -> impl FnMut(Event) + '_ {
         move |event| {
             if tracing {
-                trace.push(event);
+                trace.push(TraceLine::Event(event));
             }
         }
     }

@@ -87,12 +87,13 @@ impl ViewState {
             // REQ-508: a bundle's first page is shown when the page asked
             // for is not in it and the viewer has not moved.
             Notice::Bundle(mpp) => self.show_bundle(mpp),
+            // REQ-509: the service's aliases, for a typed number.
+            Notice::Aliases(aliases) => self.aliases = aliases,
             // An origin confirmed stays confirmed for the session (REQ-288).
             Notice::Service(_)
             | Notice::Offline(_)
             | Notice::Current(_)
             | Notice::ServiceName(_)
-            | Notice::Aliases(_)
             | Notice::Region(_)
             | Notice::Refresh(_)
             // A part of a list is taken by the source; a step waiting for

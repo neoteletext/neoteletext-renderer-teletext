@@ -226,6 +226,13 @@ pub(crate) enum Command {
         /// Use 8 colours instead of 24-bit colour.
         #[arg(long)]
         colours8: bool,
+        /// A key that goes Back, as a remote control's configurable key;
+        /// one character the viewer does not already use.
+        #[arg(long, value_name = "KEY")]
+        back_key: Option<char>,
+        /// A key that goes Forward, as `--back-key` goes Back.
+        #[arg(long, value_name = "KEY")]
+        forward_key: Option<char>,
     },
     /// Open a channel as a receiver does and report how it answers: the
     /// entry file, the handshake, the input protocol and how each sample

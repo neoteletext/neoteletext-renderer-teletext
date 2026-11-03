@@ -82,8 +82,13 @@ pub fn convert(
             let mut reader = input::reader(options, false);
             let mut pages: Vec<PageFile> = Vec::new();
             let mut failure = None;
+            let trace = options.verbose >= input::TRACE_VERBOSITY;
             input::pump(input.as_mut(), reader.as_mut(), &mut |item| match item {
                 Item::Packet { packet, .. } => {
+                    // REQ-CLI-002: the packet trace, with no session here.
+                    if trace {
+                        eprintln!("neottx: {}", crate::packet_trace::line(&packet));
+                    }
                     if let Err(error) = writer.write_packet(&packet) {
                         failure = Some(error);
                     }

@@ -20,16 +20,29 @@ use neoteletext_input::event::Stamp;
 use std::io::IsTerminal;
 use std::sync::mpsc;
 
+/// What a drawing of the page depends on: the grid, the frame where the
+/// display is a picture (every picture protocol draws the flash phase
+/// itself, REQ-RND-029; text flashes by the terminal's blink), reveal and
+/// zoom. The page is drawn again when it changes.
+pub(super) fn drawn_state(grid: &Grid, display: Display, frame: Frame, reveal: bool) -> DrawnState {
+    (*grid, (display != Display::Text).then_some(frame), reveal, frame.zoom)
+}
+
+/// See [`drawn_state`].
+pub(super) type DrawnState = (Grid, Option<Frame>, bool, neoteletext_core::level1::Zoom);
+
 impl ViewState {
     /// Runs turns until the user quits. `paint` draws a grid at a flash
-    /// phase; a failure to draw ends the loop with the error.
+    /// phase, the whole page when its third argument is true and otherwise
+    /// what changed where the protocol allows; a failure to draw ends the
+    /// loop with the error.
     pub(super) fn run(
         &mut self,
         session: &mut Session,
         source: &mut dyn Source,
         wakes: &mpsc::Receiver<Wakened>,
         display: Display,
-        paint: &mut dyn FnMut(&Grid, Frame) -> std::io::Result<()>,
+        paint: &mut dyn FnMut(&Grid, Frame, bool) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
         loop {
             if let Some(report) = self.unrecorded.take() {
@@ -66,14 +79,18 @@ impl ViewState {
             }
             self.compose(session, requested, &shown);
             let reveal = self.viewer.reveal(now);
-            // Images change with the flash phase; text flashes by itself.
             let frame = Frame { zoom: self.viewer.zoom(), ..Frame::at(&config, reveal, now) };
-            let state = (self.grid, (display == Display::Iterm2).then_some(frame), reveal, frame.zoom);
+            let state = drawn_state(&self.grid, display, frame, reveal);
             if self.last_drawn.as_ref() != Some(&state) {
-                paint(&self.grid, frame)?;
+                paint(&self.grid, frame, core::mem::take(&mut self.repaint_whole))?;
                 self.last_drawn = Some(state);
             }
             let woke = next_event(wakes, TICK);
+            // A resized terminal may have cleared or moved what was drawn.
+            if matches!(woke, Some(Event::Resize(..))) {
+                self.last_drawn = None;
+                self.repaint_whole = true;
+            }
             let clock_ms = now_ms(self.start);
             self.paste_or_focus(woke.as_ref(), source, clock_ms);
             if let Some(Event::Key(key)) = woke

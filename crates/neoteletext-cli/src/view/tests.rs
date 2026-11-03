@@ -533,6 +533,282 @@ fn kitty_sends_each_flash_phase_once_and_switches_between_them() {
     assert_eq!(text.matches("a=t,").count(), 1);
 }
 
+/// A grid showing `text` on row `row`.
+fn grid_showing(row: usize, text: &[u8]) -> super::Grid {
+    use neoteletext_core::charset::{CharRef, CharSet, G0, G0Set, NationalOption};
+    use neoteletext_core::level1::Glyph;
+    let mut grid = super::Grid::EMPTY;
+    let g0 = CharSet::G0(G0 { set: G0Set::Latin, national: Some(NationalOption::English) });
+    for (cell, &byte) in grid.cells[row].iter_mut().zip(text) {
+        cell.glyph = Glyph::Char(CharRef::new(g0, byte));
+    }
+    grid
+}
+
+/// The height a Sixel image declares in its raster attributes, `"1;1;W;H`.
+fn sixel_heights(output: &[u8]) -> Vec<usize> {
+    let text = String::from_utf8_lossy(output);
+    text.split("\"1;1;")
+        .skip(1)
+        .map(|rest| {
+            let height: String = rest.split(';').nth(1).unwrap().chars().take_while(char::is_ascii_digit).collect();
+            height.parse().unwrap()
+        })
+        .collect()
+}
+
+/// REQ-382 (REQ-RND-029 item 4, TODO-2070): with Sixel, a change to one row
+/// of the page sends an image of that row's text rows only, placed at its
+/// text row, where the whole page was sent before; a page that did not
+/// change sends nothing; and a whole redraw, as after a resize, sends the
+/// page.
+#[test]
+fn sixel_sends_only_the_rows_that_changed() {
+    use super::{Drawer, Look, Scale};
+    use crate::ansi::{ColourDepth, MosaicStyle};
+    use crate::frame::Frame;
+    use crate::terminal::Display;
+    // Text rows of 16 pixels; at scale 1 a teletext row is 20.
+    const TEXT_ROW_PIXELS: usize = 16;
+    let look = Look {
+        display: Display::Sixel,
+        scale: Scale { x: 1, y: 1, aspect: false },
+        depth: ColourDepth::TrueColour,
+        mosaics: MosaicStyle::Unicode16,
+        text_row_pixels: Some(TEXT_ROW_PIXELS),
+    };
+    let mut drawer = Drawer::new(look);
+    let frame = Frame::still(&neoteletext_core::config::Config::default(), false);
+    let mut first = Vec::new();
+    drawer.draw(&mut first, &grid_showing(5, b"ALPHA"), frame, true).unwrap();
+    let page_height = sixel_heights(&first)[0];
+    assert_eq!(page_height, 500, "the whole page first");
+
+    let mut changed = Vec::new();
+    drawer.draw(&mut changed, &grid_showing(5, b"OMEGA"), frame, false).unwrap();
+    let heights = sixel_heights(&changed);
+    assert_eq!(heights.len(), 1);
+    // Teletext row 5 is pixel rows 100 to 119; its first changed pixel
+    // row lies in text row 6 (pixels 96 to 111), where the image starts,
+    // and it ends with the Sixel band holding the last changed pixel row,
+    // at most row 119: at most four bands of six.
+    let height = heights[0];
+    assert!((1..=24).contains(&height), "{height}: {:?}", String::from_utf8_lossy(&changed));
+    assert!(String::from_utf8_lossy(&changed).contains("\u{1b}[7;1H"), "placed at text row 6");
+
+    let mut unchanged = Vec::new();
+    drawer.draw(&mut unchanged, &grid_showing(5, b"OMEGA"), frame, false).unwrap();
+    assert!(sixel_heights(&unchanged).is_empty(), "nothing changed, nothing sent");
+
+    let mut whole = Vec::new();
+    drawer.draw(&mut whole, &grid_showing(5, b"OMEGA"), frame, true).unwrap();
+    assert_eq!(sixel_heights(&whole), [page_height]);
+}
+
+/// REQ-382: every picture protocol draws the page again when only the
+/// flash phase changes, as it draws flash itself; text does not, as the
+/// terminal's blink flashes it.
+#[test]
+fn a_picture_is_drawn_again_at_each_flash_phase() {
+    use super::turn::drawn_state;
+    use crate::frame::Frame;
+    use crate::terminal::Display;
+    let on = Frame::still(&neoteletext_core::config::Config::default(), false);
+    let off = Frame { flash_visible: false, ..on };
+    let grid = super::Grid::EMPTY;
+    for display in [Display::Kitty, Display::Sixel, Display::Iterm2] {
+        assert_ne!(drawn_state(&grid, display, on, false), drawn_state(&grid, display, off, false), "{display:?}");
+    }
+    assert_eq!(drawn_state(&grid, Display::Text, on, false), drawn_state(&grid, Display::Text, off, false));
+}
+
+/// REQ-382: a text row's height is known only when the rows divide the
+/// reported height exactly.
+#[test]
+fn a_text_rows_height_needs_rows_that_divide_the_height() {
+    use crate::terminal::TextArea;
+    assert_eq!(TextArea { width: 800, height: 600, rows: 30 }.text_row_pixels(), Some(20));
+    assert_eq!(TextArea { width: 800, height: 604, rows: 30 }.text_row_pixels(), None, "padding");
+    assert_eq!(TextArea { width: 800, height: 600, rows: 0 }.text_row_pixels(), None);
+}
+
+/// REQ-295 (REQ-NAV-010), DEC-2477: the keys given for Back and Forward act
+/// as Back and Forward, typed without Control or Alt, and a key the viewer
+/// already uses, a key that is not printable, or one key for both is
+/// refused.
+#[test]
+fn the_keys_given_for_back_and_forward_act_as_them() {
+    use super::RemoteKeys;
+    use neoteletext_core::viewer::Key;
+    let keys = RemoteKeys::new(Some('b'), Some('f')).unwrap();
+    let typed = |character, modifiers| keys.key(KeyEvent::new(KeyCode::Char(character), modifiers));
+    assert_eq!(typed('b', KeyModifiers::NONE), Some(Key::Back));
+    assert_eq!(typed('f', KeyModifiers::NONE), Some(Key::Forward));
+    assert_eq!(typed('b', KeyModifiers::CONTROL), None);
+    assert_eq!(typed('x', KeyModifiers::NONE), None);
+    assert_eq!(
+        RemoteKeys::default().key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)),
+        None,
+        "none by default"
+    );
+    for refused in [(Some('i'), None), (None, Some('q')), (Some('7'), None), (Some(' '), None), (Some('b'), Some('b'))]
+    {
+        assert!(RemoteKeys::new(refused.0, refused.1).is_err(), "{refused:?}");
+    }
+}
+
+/// REQ-295 (REQ-NAV-010), DEC-2477: on a terminal that reports releases,
+/// Index held is Back and Index pressed is Index: a repeat goes Back once,
+/// a quick release is Index, a release after the hold time is Back; on a
+/// terminal that reports no releases, `i` is Index at once.
+#[test]
+fn a_held_index_is_back_and_a_pressed_index_is_index() {
+    use super::Shown;
+    use crossterm::event::KeyEventKind;
+    use neoteletext_core::config::Config;
+    use neoteletext_core::types::{Instant, PageAddress};
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let session = neoteletext_app::session::Session::new(Config::default(), 8);
+    let config = Config::default();
+    let shown = Shown { page: None, extras: None, config: &config, now: Instant(0) };
+    let mut source = Recorded::default();
+    let mut state = view_state(&session);
+    state.initial = page(0x150);
+    state.releases_reported = true;
+    let mut press = |state: &mut super::ViewState, character, kind| {
+        let key = KeyEvent::new_with_kind(KeyCode::Char(character), KeyModifiers::NONE, kind);
+        let _ = state.key(key, &mut source, &session, &shown, 0);
+    };
+    for digit in ['3', '0', '0'] {
+        press(&mut state, digit, KeyEventKind::Press);
+    }
+    assert_eq!(state.viewer.requested().0, page(0x300));
+    press(&mut state, 'i', KeyEventKind::Press);
+    assert_eq!(state.viewer.requested().0, page(0x300), "a press waits");
+    press(&mut state, 'i', KeyEventKind::Repeat);
+    assert_eq!(state.viewer.requested().0, page(0x100), "held: Back");
+    press(&mut state, 'i', KeyEventKind::Repeat);
+    press(&mut state, 'i', KeyEventKind::Release);
+    assert_eq!(state.viewer.requested().0, page(0x100), "Back once a hold");
+    press(&mut state, 'i', KeyEventKind::Press);
+    press(&mut state, 'i', KeyEventKind::Release);
+    assert_eq!(state.viewer.requested().0, page(0x150), "pressed: Index");
+    // Held past the hold time with no repeat.
+    let started = StdInstant::now();
+    assert_eq!(state.index_hold(KeyEventKind::Press, started), None);
+    assert_eq!(
+        state.index_hold(KeyEventKind::Release, started + super::keys::HOLD_FOR_BACK),
+        Some(neoteletext_core::viewer::Key::Back)
+    );
+    // A terminal that reports no releases: Index at once.
+    let mut plain = view_state(&session);
+    plain.initial = page(0x150);
+    for digit in ['3', '0', '0'] {
+        press(&mut plain, digit, KeyEventKind::Press);
+    }
+    press(&mut plain, 'i', KeyEventKind::Press);
+    assert_eq!(plain.viewer.requested().0, page(0x150));
+}
+
+/// Types `digits` into the viewer as key presses, with `extras` the page
+/// shown's links.
+fn type_number(
+    state: &mut super::ViewState,
+    source: &mut dyn neoteletext_app::source::Source,
+    session: &neoteletext_app::session::Session,
+    extras: Option<&neoteletext_app::extras::PageExtras>,
+    keys: &[KeyCode],
+) {
+    let config = neoteletext_core::config::Config::default();
+    let shown = super::Shown { page: None, extras, config: &config, now: neoteletext_core::types::Instant(0) };
+    for &code in keys {
+        let _ = state.key(KeyEvent::new(code, KeyModifiers::NONE), source, session, &shown, 0);
+    }
+}
+
+/// REQ-509 (REQ-WEB-020), DEC-2480: a typed number with an alias to a
+/// linked service asks, naming the service and its origin, and Enter goes
+/// there; once its origin is confirmed it goes at once; an alias to
+/// another channel's address is said; a number with no alias is a page of
+/// this service.
+#[test]
+fn a_typed_number_follows_its_alias() {
+    use neoteletext_core::nav::LinkTarget;
+    use neoteletext_core::types::{PageAddress, SubCode};
+    use neoteletext_core::viewer::Action;
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let digits = |text: &str| text.chars().map(KeyCode::Char).collect::<Vec<_>>();
+    let session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut source = Linking(vec![linked("weather", "Weather", "https://weather.example")]);
+    let mut state = view_state(&session);
+    state.take_notice(
+        neoteletext_app::pipe::Notice::Aliases(vec![
+            (0x300, "weather:301".to_owned()),
+            (0x400, "https://sport.example/400.t42".to_owned()),
+        ]),
+        &mut source,
+    );
+    type_number(&mut state, &mut source, &session, None, &digits("300"));
+    let target = LinkTarget { address: page(0x301), subcode: SubCode::ANY, service: Some(0) };
+    assert_eq!(state.pending_link, Some(target));
+    assert_eq!(
+        state.prompt,
+        Some(neoteletext_app::interact::prompt_with("Enter: ", "Weather", "https://weather.example"))
+    );
+    type_number(&mut state, &mut source, &session, None, &[KeyCode::Enter]);
+    assert_eq!(state.action, Action::FollowService(target));
+    state.act(&mut neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8), &mut source);
+    // The origin is now confirmed: the alias goes at once.
+    type_number(&mut state, &mut source, &session, None, &digits("300"));
+    assert_eq!(state.action, Action::FollowService(target));
+    // Another key lets a question go.
+    let mut asked = view_state(&session);
+    asked.aliases = state.aliases.clone();
+    type_number(&mut asked, &mut source, &session, None, &digits("3001"));
+    assert_eq!((asked.pending_link, asked.prompt), (None, None));
+    // Another channel's address is said.
+    type_number(&mut state, &mut source, &session, None, &digits("400"));
+    assert!(
+        state.messages.iter().any(|message| message.contains("https://sport.example/400.t42")),
+        "{:?}",
+        state.messages
+    );
+    // No alias: the page of this service.
+    type_number(&mut state, &mut source, &session, None, &digits("500"));
+    assert_eq!(state.viewer.requested().0, page(0x500));
+}
+
+/// REQ-509 (REQ-WEB-020): a page's own `LK` link for a typed number wins
+/// over the service's alias for it, and leads to a page of this service as
+/// one visit, so Back returns to the page before.
+#[test]
+fn a_pages_own_number_link_wins_over_the_alias() {
+    use neoteletext_app::extras::{Destination, PageExtras};
+    use neoteletext_core::nav::LinkTarget;
+    use neoteletext_core::types::{PageAddress, SubCode};
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut source = Linking(vec![linked("weather", "Weather", "https://weather.example")]);
+    let mut state = view_state(&session);
+    state.aliases = vec![(0x300, "weather:300".to_owned())];
+    let extras = PageExtras {
+        links: None,
+        row24: None,
+        key_addresses: Default::default(),
+        number_links: vec![(
+            page(0x300),
+            Destination::Page(LinkTarget { address: page(0x350), subcode: SubCode::ANY, service: None }),
+        )],
+        text_links: Vec::new(),
+    };
+    let keys: Vec<KeyCode> = "300".chars().map(KeyCode::Char).collect();
+    type_number(&mut state, &mut source, &session, Some(&extras), &keys);
+    assert_eq!(state.viewer.requested().0, page(0x350));
+    assert_eq!(state.pending_link, None);
+    type_number(&mut state, &mut source, &session, Some(&extras), &[KeyCode::Backspace]);
+    assert_eq!(state.viewer.requested().0, page(0x100), "one visit: Back goes to the page before");
+}
+
 /// REQ-89 (REQ-CLI-004): the interactive viewer takes a key for each
 /// function the requirement lists: page number entry, next and previous
 /// page, the four Fastext keys on F1 to F4 and on r, g, y and c, Index,

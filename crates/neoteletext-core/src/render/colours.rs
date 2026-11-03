@@ -5,7 +5,7 @@
 use super::flash::{FlashPhase, flash_shown};
 use crate::consts::{
     ADJACENT_CLUT_FLIP, COLOUR_MAP_ENTRIES, COLOUR_TRANSPARENT, COLOURS, PALETTE_CONCEAL_BASE, PALETTE_FLASH_BASE,
-    PALETTE_SIZE, PALETTE_TRANSPARENT, RECEIVER_COLOUR_BASE, RECEIVER_COLUMNS, ROWS,
+    PALETTE_SIZE, PALETTE_TRANSPARENT, RECEIVER_COLOUR_BASE, ROWS,
 };
 use crate::level1::{Cell, FlashMode, FlashRate, Grid};
 
@@ -55,7 +55,7 @@ fn plane(index: u8, background: bool, cell: &Cell, grid: &Grid, row: usize, colu
         return COLOUR_TRANSPARENT;
     }
     let index = index & COLOUR_INDEX_MASK;
-    let receiver = is_receiver_cell(grid, row, column);
+    let receiver = grid.is_receiver_cell(row, column);
     if index != COLOUR_TRANSPARENT {
         // The receiver's cells take the receiver's fixed colours, which no
         // page can redefine (REQ-SEC-005, REQ-SEC-024, DEC-2464); they hold
@@ -67,12 +67,6 @@ fn plane(index: u8, background: bool, cell: &Cell, grid: &Grid, row: usize, colu
         return COLOUR_TRANSPARENT;
     }
     grid.row_colours.get(row).map_or(COLOUR_TRANSPARENT, |&colour| colour & COLOUR_INDEX_MASK)
-}
-
-/// True for a cell the receiver draws: the status area, row 0 columns 0 to
-/// 7 (REQ-SEC-005), and a row 24 drawn from links (REQ-NAV-011).
-const fn is_receiver_cell(grid: &Grid, row: usize, column: usize) -> bool {
-    (row == 0 && column < RECEIVER_COLUMNS) || (grid.receiver_row_24 && row == ROWS - 1)
 }
 
 /// The resolved colours of a two-colour cell (REQ-RND-036): invert, then

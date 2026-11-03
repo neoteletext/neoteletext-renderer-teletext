@@ -26,8 +26,8 @@ pub fn run() -> ExitCode {
         Command::Show { common, page, raster, graphics, legacy_mosaics, colours8 } => {
             commands::show(&common.options(), &page, &raster, graphics, legacy_mosaics, colours8)
         }
-        Command::View { common, raster, graphics, legacy_mosaics, colours8 } => {
-            commands::view(&common.options(), &raster, graphics, legacy_mosaics, colours8)
+        Command::View { common, raster, graphics, legacy_mosaics, colours8, back_key, forward_key } => {
+            commands::view(&common.options(), &raster, graphics, (legacy_mosaics, colours8), (back_key, forward_key))
         }
         Command::Probe { common, selections } => commands::probe(&common.options(), &selections),
         Command::Render { common, page, output, raster, image } => {
