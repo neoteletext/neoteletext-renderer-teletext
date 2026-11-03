@@ -78,6 +78,7 @@ impl ViewState {
                 self.step_subpage(forward, source, session, &shown);
             }
             self.compose(session, requested, &shown);
+            self.ask_enhancements(session, source, shown.page, &config);
             let reveal = self.viewer.reveal(now);
             let frame = Frame { zoom: self.viewer.zoom(), ..Frame::at(&config, reveal, now) };
             let state = drawn_state(&self.grid, display, frame, reveal);
@@ -124,7 +125,11 @@ impl ViewState {
                     // REQ-295: the viewer goes on in the service followed,
                     // its history keeping the pages before the link.
                     match source.follow(service, target.address, target.subcode) {
-                        Some(number) => self.viewer.followed(number, target.address, target.subcode),
+                        Some(number) => {
+                            self.viewer.followed(number, target.address, target.subcode);
+                            // Its enhancement pages are its own (REQ-511).
+                            self.enhancements_asked.clear();
+                        }
                         None => self.prompt = Some(message_row("This service cannot be opened")),
                     }
                 }
@@ -136,6 +141,7 @@ impl ViewState {
             // without asking.
             Action::ReturnTo(entry) => {
                 source.reopen(entry.service, entry.address, entry.subcode);
+                self.enhancements_asked.clear();
                 self.prompt = None;
             }
             Action::ConfirmService(target) => {
