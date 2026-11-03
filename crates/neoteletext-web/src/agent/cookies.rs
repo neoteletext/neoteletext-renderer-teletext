@@ -69,7 +69,6 @@ pub(super) fn store_response_cookies(
 /// matches, keeping room for the empty line. `scope` is the open channel's
 /// folder, whose cookies alone may go (REQ-515), as given when they were
 /// stored. Returns true when some matching cookies did not fit.
-#[allow(clippy::too_many_arguments, reason = "a request's cookie context: where, which channel, how, when")]
 pub(super) fn write_cookie_header(
     jar: &mut dyn Cookies,
     writer: &mut Writer<'_>,

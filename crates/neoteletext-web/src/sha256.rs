@@ -94,9 +94,10 @@ impl Sha256 {
         self.total_bytes = total;
     }
 
-    // The working variables keep the single-letter names of FIPS 180-4
-    // section 6.2.2, so the code can be checked against it line by line.
-    #[allow(clippy::many_single_char_names)]
+    #[allow(
+        clippy::many_single_char_names,
+        reason = "the working variables keep the single-letter names of FIPS 180-4 section 6.2.2, so the code can be checked against it line by line"
+    )]
     fn compress(&mut self, block: &[u8; SHA256_BLOCK_BYTES]) {
         let mut schedule = [0u32; SCHEDULE_WORDS];
         for (word, bytes) in schedule.iter_mut().zip(block.as_chunks::<4>().0) {
@@ -184,7 +185,6 @@ const fn hex_value(digit: u8) -> Option<u8> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
 

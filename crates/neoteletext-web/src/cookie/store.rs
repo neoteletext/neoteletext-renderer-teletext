@@ -59,7 +59,7 @@ struct SplitHeader<'a> {
 /// process that keeps no cookie, and the jar applies every rule to the
 /// fields it is given (the browser's DEC-1765).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(clippy::struct_excessive_bools)] // Each flag is one cookie attribute of REQ-WEB-006.
+#[allow(clippy::struct_excessive_bools, reason = "each flag is one cookie attribute of REQ-WEB-006")]
 pub struct SetCookie<'a> {
     /// The cookie's name.
     pub name: &'a [u8],

@@ -76,8 +76,7 @@ const MAX_SUBPROTOCOL_LENGTH: usize = crate::consts::PUSH_SUBPROTOCOL.len();
 
 /// What the profile reads from a response head (REQ-WEB-014).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-// Each flag is a separate header fact of REQ-WEB-014's table.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "each flag is a separate header fact of the table of REQ-WEB-014")]
 pub struct ResponseHead {
     /// The status code.
     pub status: u16,

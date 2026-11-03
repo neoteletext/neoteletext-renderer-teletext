@@ -1,9 +1,6 @@
 #![allow(
     clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    clippy::panic
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
 )]
 //! The `SET_COOKIE` record (REQ-WEB-006, DOC-1957): what
 //! [`SetCookie::line`] writes the cookie jar's parser reads back.

@@ -140,7 +140,11 @@ pub fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, Base64Error> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
+)]
 mod tests {
     use super::*;
 

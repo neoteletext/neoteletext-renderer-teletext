@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 //! The tests of HTTP/1.1 as the profile reads and writes it, and of the
 //! response-head parser (`super::head`), with its property tests.
 

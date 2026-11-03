@@ -1,10 +1,3 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    clippy::panic
-)]
 //! The LOG record at its bounds (REQ-INP-026, DOC-1956).
 
 use neoteletext_core::packet::Packet;
