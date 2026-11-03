@@ -18,6 +18,11 @@
 //!   3.5 test stream (REQ-TST-024).
 //! - `check-noto`: check the Noto Teletext files against the SHA-256s in
 //!   their provenance record (REQ-FNT-001, REQ-FNT-012).
+//! - `misc-fixed`: write the X11 misc-fixed 6x10 font at 12 by 20 from the
+//!   original kept beside it (REQ-2223).
+//! - `check-misc-fixed`: check the misc-fixed files against the SHA-256s in
+//!   their provenance record, and that the converted fonts are the original
+//!   with every pixel two by two (REQ-2223).
 //! - `features`: lint and test the fixed list of feature builds of decision
 //!   E.61.
 //! - `size [--target TRIPLE]`: link the microcontroller test image for each
@@ -29,10 +34,11 @@
 mod checks;
 mod corpus;
 mod features;
+mod font_folders;
 mod g3;
 mod glyphs;
 mod level25;
-mod noto;
+mod misc_fixed;
 mod size;
 mod spec_examples;
 mod test_code;
@@ -56,13 +62,15 @@ fn main() -> ExitCode {
         "check-constants" => checks::constants(&root),
         "check-io" => checks::io(&root),
         "level25-stream" => level25::write(&std::env::args().skip(2).collect::<Vec<_>>()),
-        "check-noto" => noto::check(&root),
+        "check-noto" => font_folders::check(&root, &font_folders::NOTO),
+        "misc-fixed" => misc_fixed::generate(&root),
+        "check-misc-fixed" => misc_fixed::check(&root),
         "features" => features::run(&root),
         "size" => size::run(&root, &std::env::args().skip(2).collect::<Vec<_>>()),
         "spec-examples" => spec_examples::write_examples(&root, &std::env::args().skip(2).collect::<Vec<_>>()),
         _ => Err(format!(
             "usage: cargo xtask <glyphs|corpus|check-layers|check-deps|check-constants|check-io|\
-             check-noto|level25-stream|features|size|spec-examples> (got {command:?})"
+             check-noto|misc-fixed|check-misc-fixed|level25-stream|features|size|spec-examples> (got {command:?})"
         )),
     };
     match result {

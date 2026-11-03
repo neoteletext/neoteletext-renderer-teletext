@@ -177,6 +177,8 @@ push_steps() {
 
     step "the compiled font: the Noto Teletext files match their recorded SHA-256 (REQ-FNT-001, REQ-FNT-012)"
     cargo xtask check-noto
+    step "the misc-fixed font: its files match their recorded SHA-256, and the conversion is the original doubled (REQ-2223)"
+    cargo xtask check-misc-fixed
 }
 
 linux_steps() {
