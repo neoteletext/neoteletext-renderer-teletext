@@ -179,14 +179,14 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
 ### L6 Interaction — `neoteletext-core::{viewer, nav}`
 
 - **Owns:**
-  - the viewer state machine;
+  - the viewer state machine: `viewer_transition` in `viewer/machine.rs`, one pure function from a `ViewerMachine` (the state and the digits being entered) and a `ViewerInput` (a decoder event, or a key with the facts it needs already resolved by `viewer/keys.rs`) to the next state and a `ViewerAction`, which `Viewer` applies; the viewer keeps its transitions for the trace until the port takes them (`Viewer::take_trace`);
   - page number entry;
   - Fastext, index, home and sub-page navigation;
   - back and forward history;
   - reveal, mix and zoom;
   - the contents of the receiver-owned status area in row 0, columns 0 to 7, including every security indicator.
 - **Must not know about:** HTTP, sockets, how pages are fetched.
-- **Key types:** `Viewer`, `ViewerState`, `History<const N: usize>`, `Key`, `Action`.
+- **Key types:** `Viewer`, `ViewerState`, `ViewerMachine`, `ViewerInput`, `ViewerAction`, `History<const N: usize>`, `Key`, `Action`.
 - **Requirements:** NAV, FSM-005, SEC-005. The form model of Appendix C was here until the TTI Form Extension was withdrawn on 27 October 2026 (decision E.126).
 
 ### L7 Web user agent — `neoteletext-web`

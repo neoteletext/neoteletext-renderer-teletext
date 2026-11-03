@@ -88,7 +88,7 @@ impl ViewState {
     /// The viewer at the start of `session`'s service, started at `start`.
     fn new(session: &Session, start: StdInstant, opening: Opening) -> Self {
         let (initial, subcode) = opening.page.unwrap_or((initial_page(session.service().as_ref()), SubCode::ANY));
-        let mut viewer = Viewer::new(initial);
+        let mut viewer = Viewer::new(initial).with_trace(session.decoder().config().trace);
         let mut action = viewer.event(ViewerEvent::Started);
         if subcode != SubCode::ANY {
             action = viewer.show_subpage(subcode);
@@ -128,13 +128,17 @@ impl ViewState {
         self.messages
     }
 
-    /// Writes the trace kept this turn, the decoder's and the walk's, as
-    /// the other commands print it with `-vv` (REQ-FSM-010): to `out`,
+    /// Writes the trace kept this turn, the decoder's, the walk's and the
+    /// viewer's, as the other commands print it with `-vv` (REQ-FSM-010): to `out`,
     /// standard error, when it is not the terminal the viewer draws on,
     /// where its lines would spoil the page; otherwise it is dropped, and
     /// the viewer says so when it ends. Nothing is kept from turn to turn.
     fn write_trace(&mut self, session: &mut Session, out: &mut dyn Write, out_is_terminal: bool) {
         session.trace.append(&mut self.walk_trace);
+        let now = Instant(self.start.elapsed().as_micros().try_into().unwrap_or(u64::MAX));
+        let lost = self.viewer.take_trace(now, &mut |entry| {
+            session.trace.push(neoteletext_core::acq::Event::Trace(entry));
+        });
         if session.trace.is_empty() {
             return;
         }
@@ -145,6 +149,9 @@ impl ViewState {
         }
         for event in session.trace.drain(..) {
             let _ = writeln!(out, "neottx: {event:?}");
+        }
+        if lost > 0 {
+            let _ = writeln!(out, "neottx: {lost} viewer transitions came between two passes and were not kept");
         }
     }
 }

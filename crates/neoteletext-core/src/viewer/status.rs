@@ -32,8 +32,8 @@ impl Viewer {
     #[must_use]
     pub fn status(&self, store: &PageStore<'_>) -> [u8; STATUS_COLUMNS] {
         let mut status = [SPACE; STATUS_COLUMNS];
-        let digits = match self.state {
-            ViewerState::Entering1 | ViewerState::Entering2 => self.entry.display(),
+        let digits = match self.machine.state {
+            ViewerState::Entering1 | ViewerState::Entering2 => self.machine.entry.display(),
             _ => self.requested.ascii(),
         };
         let write = |status: &mut [u8; STATUS_COLUMNS], at: usize, bytes: &[u8]| {
@@ -41,11 +41,11 @@ impl Viewer {
                 *slot = byte;
             }
         };
-        if self.state == ViewerState::EnteringSubPage {
+        if self.machine.state == ViewerState::EnteringSubPage {
             // "P/01--": the sub-code's digits as entered (DEC-2363), in the
             // form a four-digit place takes (DEC-2349).
             write(&mut status, 0, b"P/");
-            write(&mut status, 2, &self.subpage_entry.display());
+            write(&mut status, 2, &self.machine.subpage_entry.display());
             return status;
         }
         if self.confirming() {
@@ -59,7 +59,7 @@ impl Viewer {
                 // stored, a rotating page with sub-pages their count, both
                 // counted by the store (decision E.122); "?" stands in the
                 // separator's place on a stale page.
-                let entering = matches!(self.state, ViewerState::Entering1 | ViewerState::Entering2);
+                let entering = matches!(self.machine.state, ViewerState::Entering1 | ViewerState::Entering2);
                 let number = if entering {
                     None
                 } else if self.subcode.is_any() {

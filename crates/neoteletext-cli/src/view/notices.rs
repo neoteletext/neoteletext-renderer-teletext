@@ -20,7 +20,7 @@ impl ViewState {
             && !core::mem::take(&mut self.named);
         self.initial = address;
         if untouched && address != self.viewer.requested().0 {
-            self.viewer = Viewer::new(address);
+            self.viewer = Viewer::new(address).with_trace(self.viewer.traces());
             self.action = self.viewer.event(ViewerEvent::Started);
         }
     }

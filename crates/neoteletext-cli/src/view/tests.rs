@@ -400,6 +400,11 @@ fn the_viewer_writes_the_trace_where_it_does_not_spoil_the_page() {
     state.write_trace(&mut session, &mut written, false);
     let text = String::from_utf8(written).unwrap();
     assert!(text.lines().any(|line| line.starts_with("neottx: Trace(")), "{text}");
+    // The viewer's own machine is in it: its start, from the state's making.
+    assert!(
+        text.lines().any(|line| line.contains("machine: Viewer") && line.contains("event: \"decoder started\"")),
+        "{text}"
+    );
     assert!(session.trace.is_empty(), "nothing is kept");
     session.push(&header, &PacketMeta::default());
     let mut written = Vec::new();

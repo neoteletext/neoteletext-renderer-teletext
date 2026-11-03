@@ -89,7 +89,7 @@ impl ViewState {
                 if let Some(service) = target.service {
                     self.confirmed_services.insert(service);
                     source.follow(service, target.address, target.subcode);
-                    self.viewer = Viewer::new(target.address);
+                    self.viewer = Viewer::new(target.address).with_trace(self.viewer.traces());
                     let _ = self.viewer.event(ViewerEvent::Started);
                 }
                 self.prompt = None;
@@ -126,7 +126,7 @@ impl ViewState {
             && let Some(address) = PageAddress::from_mpp(mpp)
             && (address, SubCode::new(sub)) != (requested, subcode)
         {
-            self.viewer = Viewer::new(address);
+            self.viewer = Viewer::new(address).with_trace(self.viewer.traces());
             self.action = self.viewer.event(ViewerEvent::Started);
             if SubCode::new(sub) != SubCode::ANY {
                 self.action = self.viewer.show_subpage(SubCode::new(sub));

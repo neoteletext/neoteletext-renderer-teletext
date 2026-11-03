@@ -45,10 +45,10 @@ impl Viewer {
     ) -> Composed {
         let ComposeContext { magazine, config, rolling_header, store, row24, lookup } = *context;
         // REQ-NAV-006: while held, new receptions do not reach the screen.
-        if self.state == ViewerState::Holding {
+        if self.machine.state == ViewerState::Holding {
             return Composed::Held;
         }
-        let searching = page.is_none() || self.state == ViewerState::Searching;
+        let searching = page.is_none() || self.machine.state == ViewerState::Searching;
         let options = DisplayOptions {
             status: self.status(store),
             searching,
