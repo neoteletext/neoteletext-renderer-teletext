@@ -313,3 +313,87 @@ fn every_language_is_listed_with_its_direction() {
     tags.dedup();
     assert_eq!(tags.len(), listed.len(), "tags are unique");
 }
+
+/// Writes `runs` on a page in `language` at `level` over a blank grid.
+fn written_in(language: &str, level: Level, runs: &[TextRun<'_>]) -> ([[u8; COLUMNS]; ROWS], Encoded) {
+    let mut grid = blank();
+    let page = PageText { language: Some(language), designation: ENGLISH, level, runs };
+    let encoded = write_runs(&mut grid, &page, &[]).unwrap();
+    (grid, encoded)
+}
+
+// REQ-2148, REQ-2149 (TODO-2343, DEC-2473): German has no `@`; Latin English
+// shows it in its cell. Before, the run was refused as unshown.
+#[test]
+fn an_at_sign_in_german_is_shown_through_latin_english() {
+    let runs = [run(5, 0, "Schreib an post@beispiel.de", None)];
+    let (grid, encoded) = written_in("de", Level::NeoTeletext, &runs);
+    assert_eq!(read(&grid, &encoded, true)[5], "Schreib an post@beispiel.de");
+    // Every other character of the run is in both sets, and the run ends
+    // the row's text, so the whole run is the one stretch of English: one
+    // row set triplet at its start, and none back.
+    assert_eq!(encoded.triplets, [position(5), row_set(0, ENGLISH), end()]);
+    assert_eq!(encoded.runs[0], Report { cells: 27, triplets: 3 });
+    let (grid, encoded) = written_in("de", Level::Standard, &runs);
+    assert_eq!(read(&grid, &encoded, false)[5], "Schreib an post@beispiel.de");
+    // At Level 3.5 a stretch in another set is a designation and a triplet
+    // a character, so only the `@` is English: the row address, a
+    // designation, the `@`, a designation back to German and the end.
+    assert_eq!(encoded.count, 1 + 1 + 1 + 1 + 1);
+    // With German text after it on the row, the set changes back.
+    let runs = [run(5, 0, "post@beispiel.de", None), run(5, 20, "Grüße", None)];
+    let (grid, encoded) = written_in("de", Level::NeoTeletext, &runs);
+    assert_eq!(read(&grid, &encoded, true)[5], "post@beispiel.de    Grüße");
+    assert_eq!(encoded.triplets, [position(5), row_set(0, ENGLISH), row_set(16, value("de")), end()]);
+}
+
+// REQ-2148 (TODO-2343, DEC-2473): a Latin word in Russian is one stretch
+// of Latin English, its spaces with it, so the set changes once each way.
+#[test]
+fn a_latin_word_in_russian_is_one_stretch_of_latin_english() {
+    let runs = [run(7, 0, "Мы любим NeoTeletext и Linux", None)];
+    let (grid, encoded) = written_in("ru", Level::NeoTeletext, &runs);
+    assert_eq!(read(&grid, &encoded, true)[7], "Мы любим NeoTeletext и Linux");
+    let russian = value("ru");
+    // The page's set is Russian: English at "NeoTeletext", back to Russian
+    // at the space after it (the space is shown by both, and lies between
+    // English and Russian), English again at "Linux", which ends the run.
+    assert_eq!(encoded.triplets, [position(7), row_set(9, ENGLISH), row_set(20, russian), row_set(23, ENGLISH), end()]);
+    // On an English page the run is Russian with the Latin words in the
+    // page's own set: a switch to Russian and one back, twice.
+    let runs = [run(7, 0, "Мы любим NeoTeletext и Linux", Some("ru"))];
+    let (grid, encoded) = written(Level::NeoTeletext, &runs);
+    assert_eq!(read(&grid, &encoded, true)[7], "Мы любим NeoTeletext и Linux");
+    assert_eq!(
+        encoded.triplets,
+        [position(7), row_set(0, russian), row_set(9, ENGLISH), row_set(20, russian), row_set(23, ENGLISH), end()]
+    );
+}
+
+// REQ-2148 (TODO-2343, DEC-2473): an Arabic run with digits and an ASCII
+// question mark, which the Arabic set lacks, is put in visual order first
+// and then cut, so the digits read left to right in their cells.
+#[test]
+fn digits_and_a_question_mark_in_arabic_are_shown_through_latin_english() {
+    let text = "هل عمرك 25?";
+    let runs = [run(9, 0, text, None)];
+    let (grid, encoded) = written_in("ar", Level::NeoTeletext, &runs);
+    let visual: String = rtl::visual_line(text).into_iter().collect();
+    assert_eq!(read(&grid, &encoded, true)[9], visual);
+    assert!(encoded.triplets.iter().any(|&triplet| triplet == row_set(triplet.address, ENGLISH)));
+    assert_eq!(encoded.runs[0].cells, 11);
+}
+
+// TODO-2343: a character no set of the level shows is still refused, and a
+// run in Latin English has nothing to fall back on.
+#[test]
+fn a_character_latin_english_cannot_show_is_still_refused() {
+    let mut grid = blank();
+    let page = PageText {
+        language: Some("ru"),
+        designation: ENGLISH,
+        level: Level::NeoTeletext,
+        runs: &[run(2, 0, "мир 中", None)],
+    };
+    assert_eq!(write_runs(&mut grid, &page, &[]).unwrap_err().fault, RunFault::Unshown('中'));
+}

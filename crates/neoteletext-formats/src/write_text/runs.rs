@@ -22,6 +22,15 @@
 //!
 //! Right-to-left runs are put in visual order and Arabic letters of Table
 //! 44 take their joined forms, as the page writer does.
+//!
+//! A character the run's language cannot show but Latin English can (an
+//! `@` in German, digits and ASCII punctuation in Arabic, a Latin word in
+//! Russian) is written in its cell through Latin English, by the same means
+//! as a run in another set: the run is cut, after it is put in visual
+//! order, into stretches of its own set and stretches of Latin English, and
+//! a character both sets show between two Latin English ones stays in the
+//! Latin English stretch so that the set changes as seldom as it can
+//! (TODO-2343, DEC-2473).
 
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -270,21 +279,36 @@ pub fn write_runs(
         Designations { default: page_value, second: default_second_value(page_value).unwrap_or(NO_SECOND_G0) };
     let parsed = parse(program);
     let original = *grid;
+    // A run is one stretch, or several where Latin English shows what its
+    // language cannot; `owners` names each stretch's run and `ends` where
+    // each run's stretches end.
     let mut placed: Vec<Placed> = Vec::with_capacity(page.runs.len());
+    let mut owners: Vec<usize> = Vec::with_capacity(page.runs.len());
+    let mut ends: Vec<usize> = Vec::with_capacity(page.runs.len());
     for (index, run) in page.runs.iter().enumerate() {
         let at = |fault| RunError { run: Some(index), fault };
-        let one = encode_run(run, page.language, page_value, own).map_err(at)?;
-        check_place(&one, &placed, parsed.as_ref().ok(), &original).map_err(at)?;
-        placed.push(one);
+        for stretch in encode_run(run, page.language, page_value, own).map_err(at)? {
+            check_place(&stretch, &placed, parsed.as_ref().ok(), &original)
+                .map_err(|fault| match fault {
+                    RunFault::Overlap(other) => RunFault::Overlap(owners.get(other).copied().unwrap_or(other)),
+                    fault => fault,
+                })
+                .map_err(at)?;
+            placed.push(stretch);
+            owners.push(index);
+        }
+        ends.push(placed.len());
     }
     let program_count = local_length(program);
-    let mut reports = Vec::with_capacity(placed.len());
+    let mut reports = Vec::with_capacity(ends.len());
     let mut before = program_count;
     let mut merged: Option<Vec<Triplet>> = None;
-    for count in 1..=placed.len() {
-        let index = count.saturating_sub(1);
-        if let Some(run) = placed.get(index) {
-            write_cells(grid, run, own);
+    let mut start = 0;
+    for (index, &count) in ends.iter().enumerate() {
+        let stretches = placed.get(start..count).unwrap_or_default();
+        start = count;
+        for stretch in stretches {
+            write_cells(grid, stretch, own);
         }
         let prefix = placed.get(..count).unwrap_or_default();
         let rows = encoder_rows(grid, prefix, page_value, own, parsed.as_ref().ok());
@@ -303,7 +327,8 @@ pub fn write_runs(
         if now > usize::from(LOCAL_TRIPLETS) {
             return Err(RunError { run: Some(index), fault: RunFault::OverBudget(now) });
         }
-        let cells = placed.get(index).map_or(0, |run| u8::try_from(run.letters.len()).unwrap_or(u8::MAX));
+        let cells =
+            u8::try_from(stretches.iter().map(|stretch| stretch.letters.len()).sum::<usize>()).unwrap_or(u8::MAX);
         reports.push(Report { cells, triplets: now.saturating_sub(before) });
         before = now;
     }
@@ -375,15 +400,34 @@ fn run_sets(value: u8, other: bool, own: bool) -> Option<Sets> {
     Some(sets)
 }
 
-fn encode_run(run: &TextRun<'_>, page_language: Option<&str>, page_value: u8, own: bool) -> Result<Placed, RunFault> {
+/// Which set writes a character of a run that its own set cannot write
+/// whole.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Writer {
+    /// Only the run's own set.
+    Own,
+    /// Only Latin English.
+    English,
+    /// Either: it goes with its neighbours.
+    Either,
+}
+
+/// Encodes a run into the stretches it is written as: one, in its own
+/// set, when that set writes it all; otherwise stretches of its own set and
+/// of Latin English (TODO-2343, DEC-2473).
+fn encode_run(
+    run: &TextRun<'_>,
+    page_language: Option<&str>,
+    page_value: u8,
+    own: bool,
+) -> Result<Vec<Placed>, RunFault> {
     if !(FIRST_TEXT_ROW..=LAST_TEXT_ROW).contains(&run.row) || usize::from(run.column) >= COLUMNS {
         return Err(RunFault::OutOfRows);
     }
     let tag = run.language.or(page_language).unwrap_or(LATIN_ENGLISH_TAG);
     let unknown = || RunFault::UnknownLanguage(tag.to_string());
     let value = language_value(tag, own).ok_or_else(unknown)?;
-    let other = value != page_value;
-    let sets = run_sets(value, other, own).ok_or_else(unknown)?;
+    let sets = run_sets(value, value != page_value, own).ok_or_else(unknown)?;
     let set = match sets.base {
         CharSet::G0(G0 { set, .. }) => Some(set),
         CharSet::G2(_) | CharSet::G3 => None,
@@ -396,13 +440,121 @@ fn encode_run(run: &TextRun<'_>, page_language: Option<&str>, page_value: u8, ow
     };
     let right_to_left = set.is_some_and(|set| set.is_joined() || set == G0Set::Hebrew || set == G0Set::Arabic);
     let characters: Vec<char> = if right_to_left { rtl::visual_line(&text) } else { text.chars().collect() };
-    let letters = encode_from(&sets, &characters, State::default(), false, LINE).map_err(unshown)?.0;
-    let placed = Placed { row: run.row, column: run.column, value, other, letters };
-    let end = placed.end();
+    let stretches = match encode_from(&sets, &characters, State::default(), false, LINE) {
+        Ok((letters, _)) => {
+            vec![Placed { row: run.row, column: run.column, value, other: value != page_value, letters }]
+        }
+        Err(WriteError::Missing { character, .. }) => {
+            through_english(run, &sets, value, &characters, page_value, own).ok_or(RunFault::Unshown(character))??
+        }
+        Err(error) => return Err(unshown(error)),
+    };
+    let end = stretches.last().map_or(usize::from(run.column), Placed::end);
     if end > COLUMNS {
         return Err(RunFault::OutOfColumns(end.saturating_sub(1)));
     }
-    Ok(placed)
+    Ok(stretches)
+}
+
+/// The run's stretches when its own set cannot write all of `characters`
+/// (already in visual order) and Latin English writes the rest; `None` when
+/// the run is itself in Latin English, so nothing is left to try.
+fn through_english(
+    run: &TextRun<'_>,
+    sets: &Sets,
+    value: u8,
+    characters: &[char],
+    page_value: u8,
+    own: bool,
+) -> Option<Result<Vec<Placed>, RunFault>> {
+    let english = language_value(LATIN_ENGLISH_TAG, own)?;
+    if english == value {
+        return None;
+    }
+    let english_sets = run_sets(english, english != page_value, own)?;
+    // How a set writes a character alone: `Some(true)` by a code in the
+    // row, `Some(false)` only with an X/26 triplet (a marked letter or a G2
+    // character), `None` not at all.
+    let shows = |sets: &Sets, character: char| match encode_from(sets, &[character], State::default(), false, LINE) {
+        Ok((letters, _)) => Some(matches!(letters.as_slice(), [Cell::Code(_)])),
+        Err(_) => None,
+    };
+    let mut writers: Vec<Writer> = Vec::with_capacity(characters.len());
+    for &character in characters {
+        let writer = match (shows(sets, character), shows(&english_sets, character)) {
+            // A set that needs a triplet for it loses to one that does not.
+            (Some(true), Some(false)) | (Some(_), None) => Writer::Own,
+            (Some(false), Some(true)) | (None, Some(_)) => Writer::English,
+            (Some(_), Some(_)) => Writer::Either,
+            // A combining mark is written with the letter before it, in that
+            // letter's set; anything else neither set writes is refused.
+            (None, None) => match writers.last() {
+                Some(&last) => last,
+                None => return Some(Err(RunFault::Unshown(character))),
+            },
+        };
+        writers.push(writer);
+    }
+    // At Level 3.5 a stretch in another set than the page's costs a triplet
+    // a character (`by_triplets`): when only English pays that, a character
+    // either set writes stays in the run's own set.
+    let english_dearer = english != page_value && !own && value == page_value;
+    settle(&mut writers, english_dearer);
+    let mut stretches = Vec::new();
+    let mut column = usize::from(run.column);
+    let mut from = 0;
+    while let Some(&writer) = writers.get(from) {
+        let to = (from..writers.len()).find(|&at| writers.get(at) != Some(&writer)).unwrap_or(writers.len());
+        let (stretch_sets, stretch_value) =
+            if writer == Writer::English { (&english_sets, english) } else { (sets, value) };
+        let piece = characters.get(from..to).unwrap_or_default();
+        let letters = match encode_from(stretch_sets, piece, State::default(), false, LINE) {
+            Ok((letters, _)) => letters,
+            Err(error) => return Some(Err(unshown(error))),
+        };
+        let start = u8::try_from(column).unwrap_or(u8::MAX);
+        column = column.saturating_add(letters.len());
+        stretches.push(Placed {
+            row: run.row,
+            column: start,
+            value: stretch_value,
+            other: stretch_value != page_value,
+            letters,
+        });
+        from = to;
+    }
+    Some(Ok(stretches))
+}
+
+/// Gives each character either set writes to a side: Latin English when
+/// the nearest characters only one set writes are Latin English on both
+/// sides, or on one side with the run's edge on the other, so that a Latin
+/// word's spaces and punctuation stay in its stretch; the run's own set
+/// otherwise. The run's own set thus changes to Latin English as seldom
+/// as it can. With `english_dearer`, every such character takes the run's
+/// own set, since each character in Latin English then costs a triplet.
+fn settle(writers: &mut [Writer], english_dearer: bool) {
+    let mut at = 0;
+    while at < writers.len() {
+        if writers.get(at) != Some(&Writer::Either) {
+            at = at.saturating_add(1);
+            continue;
+        }
+        let end =
+            (at..writers.len()).find(|&index| writers.get(index) != Some(&Writer::Either)).unwrap_or(writers.len());
+        let before = at.checked_sub(1).and_then(|index| writers.get(index)).copied();
+        let after = writers.get(end).copied();
+        let english = !english_dearer
+            && matches!(
+                (before, after),
+                (Some(Writer::English), Some(Writer::English) | None) | (None, Some(Writer::English))
+            );
+        let side = if english { Writer::English } else { Writer::Own };
+        for writer in writers.get_mut(at..end).unwrap_or_default() {
+            *writer = side;
+        }
+        at = end;
+    }
 }
 
 // ------------------------------------------------------- where runs go
