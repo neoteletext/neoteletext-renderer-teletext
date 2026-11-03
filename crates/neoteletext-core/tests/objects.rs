@@ -752,15 +752,16 @@ fn enhancement_pages_are_not_shown_as_text() {
 }
 
 /// REQ-OBJ-020, REQ-TST-019, REQ-SEC-012: a worst-case page, with objects
-/// invoked to the limits, the deepest nesting, objects filling an object
-/// page and all sixteen X/26 packets, finishes within the stated bound,
+/// invoked to the limits, the deepest nesting, each object of 507 triplets
+/// filling an object page sub-page of its own (REQ-472), and all sixteen
+/// X/26 packets, finishes within the stated bound,
 /// uses only the memory given, and never panics. Active objects reach 100:
 /// the local data holds no more invocations at distinct positions, and
 /// Annex A.8 allows only fifteen objects open at one position; Adaptive and
 /// Passive objects reach their limit of 127.
 #[test]
 fn worst_case_page_is_bounded() {
-    let packets = common::worst_case_page();
+    let packets = common::worst_case_page(common::ObjectLayout::SubPageEach);
     let started = std::time::Instant::now();
     let (grid, report) = build(&packets, L35);
     let report = report.unwrap();

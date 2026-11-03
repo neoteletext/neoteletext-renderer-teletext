@@ -262,7 +262,7 @@ fn row_renderer_cost_with_per_set_fonts() {
 #[test]
 #[ignore = "measurement; run in release mode"]
 fn worst_case_grid_at_level_35() {
-    let packets = common::worst_case_page();
+    let packets = common::worst_case_page(common::ObjectLayout::SubPageEach);
     let config = Config::default();
     common::Receiver::new().run(&packets, config, |decoder| {
         let rounds = 20;
