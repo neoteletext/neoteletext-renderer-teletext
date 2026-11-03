@@ -1140,3 +1140,35 @@ fn c8_is_raised_by_the_page_machine() {
     assert_eq!(raised, [("Partial", "update indicator", "raise update indicator", "Partial")]);
     assert!(events.contains(&Event::UpdateIndicator(key(0x101, 0))));
 }
+
+/// DEC-622 (decision E.98), decision E.19, REQ-FSM-004: the decoder says
+/// when it next needs a tick, the moment a page in reception times out or
+/// a complete page goes stale; ticking just before that does nothing, and
+/// ticking then does the work.
+#[test]
+fn the_decoder_says_when_it_next_needs_a_tick() {
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let config = Config::default();
+    let timeout = config.page_completion_timeout_us;
+    let stale_after = config.stale_after_us;
+    let mut decoder = Decoder::new(&mut slots, config);
+    assert_eq!(decoder.next_tick(), None, "nothing pending");
+    let mut events = Vec::new();
+    decoder.push(&header(1, 0x00, 0, 0), &PacketMeta::default(), Instant(5000), &mut |e| events.push(e));
+    let due = decoder.next_tick().unwrap();
+    assert_eq!(due, Instant(5000 + timeout + 1), "page 100 in reception times out");
+    events.clear();
+    decoder.tick(Instant(due.0 - 1), &mut |e| events.push(e));
+    assert!(!events.iter().any(|event| matches!(event, Event::PageCompleted(_))));
+    decoder.tick(due, &mut |e| events.push(e));
+    assert!(events.contains(&Event::PageCompleted(key(0x100, 0))));
+    let last_received = decoder.store().latest(PageAddress::from_mpp(0x100).unwrap()).unwrap().last_received;
+    let due = decoder.next_tick().unwrap();
+    assert_eq!(due, Instant(last_received.0 + stale_after + 1), "page 100 goes stale");
+    events.clear();
+    decoder.tick(Instant(due.0 - 1), &mut |e| events.push(e));
+    assert_eq!(events, []);
+    decoder.tick(due, &mut |e| events.push(e));
+    assert!(events.contains(&Event::PageStale(key(0x100, 0))));
+    assert_eq!(decoder.next_tick(), None, "a stale page waits for nothing");
+}

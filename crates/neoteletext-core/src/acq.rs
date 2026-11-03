@@ -298,6 +298,33 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// The earliest instant at which [`Decoder::tick`] has work to do: a
+    /// page in reception reaching its completion timeout (decision E.19) or
+    /// a complete page going stale (REQ-FSM-004); `None` when nothing is
+    /// pending. A port waits until then rather than ticking on an interval
+    /// (decision E.98). It looks at each slot once, as `tick` does, so it
+    /// costs no more than the tick it saves; it is not called per packet.
+    #[must_use]
+    pub fn next_tick(&self) -> Option<Instant> {
+        // `tick` acts once strictly more than the period has passed.
+        let after = |last: Instant, period: u64| Instant(last.0.saturating_add(period).saturating_add(1));
+        let timeout = self.config.page_completion_timeout_us;
+        let magazines = self
+            .magazines
+            .iter()
+            .zip(&self.last_packet)
+            .filter(|(state, _)| !matches!(state, MagazineState::Idle))
+            .map(|(_, &last)| after(last, timeout));
+        let stale_after = self.config.stale_after_us;
+        let pages = self
+            .store
+            .pages()
+            .iter()
+            .filter(|page| page.state == PageState::Complete)
+            .map(|page| after(page.last_received, stale_after));
+        magazines.chain(pages).min()
+    }
+
     fn count(&mut self, magazine: Magazine, number: u8) {
         if let Some(count) = self.stats.per_magazine.get_mut(magazine.index()) {
             *count = count.saturating_add(1);
