@@ -80,3 +80,7 @@ required-features = ["std", "tti"]
 [[test]]
 name = "level25"
 required-features = ["std", "tti"]
+
+[[test]]
+name = "cldr"
+required-features = ["std", "tti", "write-text"]

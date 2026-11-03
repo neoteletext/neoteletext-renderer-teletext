@@ -56,7 +56,9 @@ pub fn fetch(root: &Path) -> Result<(), String> {
         }
         if !have {
             let mut command = Command::new("curl");
-            command.args(["--fail", "--silent", "--show-error", "--location", "--max-time", "300", "-o"]).arg(&target);
+            command
+                .args(["--fail", "--silent", "--show-error", "--location", "--create-dirs", "--max-time", "300", "-o"])
+                .arg(&target);
             if *bytes != "0" {
                 let last = bytes.parse::<u64>().map_err(|e| e.to_string())?.saturating_sub(1);
                 command.arg("--range").arg(format!("0-{last}"));

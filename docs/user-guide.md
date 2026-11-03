@@ -40,7 +40,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 
 | Command | What it does |
 |---|---|
-| `neottx list INPUT` | Lists the pages and sub-pages found, with reception counts and error statistics. |
+| `neottx list INPUT` | Lists the pages and sub-pages found, with reception counts and error statistics, including how many pages named a character set designation that Table 32 reserves and so fell back to another set. |
 | `neottx show INPUT PAGE` | Shows one page in the terminal and exits. |
 | `neottx view INPUT` | Browses pages interactively. |
 | `neottx probe CHANNEL` | Opens a channel as a receiver does and reports what it found, for a channel's developer. |
@@ -53,6 +53,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx check FILES...` | Checks TTI page files for authoring problems, a row longer than the page among them. `--descriptor FILE` resolves link targets against a channel's `channel.ttx` or a service's descriptor. |
 | `neottx font convert INPUT OUTPUT` | Converts a BDF font of another cell size to a 12 × 10 or 12 × 20 font that `neottx render --font` loads, only where the conversion is exact. See "Fonts" below. |
 | `neottx font sets FONT` | Reports, for each of the 55 character sets fonts draw (the standard's 24 and NeoTeletext's own 31), whether a 12 × 10 or 12 × 20 font conforms for it (REQ-FNT-011), how many of its 96 positions it draws, and the first rule it fails; `--library-line NAME` prints the font's `c` line for a library's `fonts.txt`. |
+| `neottx font library LIBRARY` | Lists a font library's fonts by title, from its `fonts.txt` (the folder or the file), with each font's file name or address, its SHA-256 and the sets its `c` line states; each malformed line is reported on standard error. No font is read or fetched. |
 | `neottx write-text --set SET --page PAGE INPUT OUTPUT` | Writes a TTI page from a UTF-8 text file in the named character set, or with `--language TAG` in the set a language takes. See "Writing pages from text" below. |
 | `neottx sound --page PAGE IN.wav OUT.t42` | Writes a sound as the audio profile's packets, with the command that plays it on `PAGE`: IMA ADPCM by default, `--codec pcm` for 16-bit PCM. The WAVE file is 16-bit PCM at 8, 11.025, 16, 22.05, 24, 32, 44.1 or 48 kHz; stereo is mixed to mono. `--channel 0-3`, `--gain 0-100`, `--loop` and `--repeat N` set the rest. Append the output to a channel's T42 stream, and a receiver that plays sound plays it while that page is open. See `docs/spec/design/audio.md`. |
 | `neottx qr TEXT --page PAGE OUT.tti` | Writes `TEXT`, such as a qrkeyboard join address, as a QR code in a page's mosaics, from row 2 unless `--row` says otherwise, so a channel can show a code a phone scans. See DOC-2029. |
@@ -303,6 +304,10 @@ G0-Cyrillic-3                      90/96  rule 2: no glyph at 2/6
 ```
 
 A library's `fonts.txt` may state each font's conformance on a `c` line: `c`, the font's file name or address as its `f` line gives it, and the sets separated by spaces, each followed by `*` for the SAA5050 cell profile. `neottx font sets --library-line NAME FONT` writes that line. A program can use it to list fonts before loading them, and recomputes conformance from the glyphs once a font has loaded.
+
+`neottx font library LIBRARY` lists a library: one line per font, giving its title, its file name or address, its SHA-256 and the sets its `c` line states, separated by tabs. A malformed line (a field missing or extra, a title of more than 32 characters, a checksum that is not 64 hexadecimal digits, a second `f` line for a font, a `c` line for a font no `f` line lists or a second one for a font, or an unknown set name) is reported with its number on standard error and ignored; a line of an unknown kind is ignored. An index over 64 kilobytes or 1,000 lines is refused. Listing a library reads only its index: no font is fetched (REQ-FNT-004).
+
+`neottx render --font FILE --font-sha256 HEX` draws in the font only when the file's SHA-256 is the one named, as a library gives it; a file with any other is refused before it is read (REQ-FNT-003). Fonts are loaded from local files; loading one from an `http` or `https` address is not built yet.
 
 `neottx font convert INPUT OUTPUT` makes a loadable font from fonts of other sizes, only where nothing is lost (REQ-FNT-010, decision E.77):
 

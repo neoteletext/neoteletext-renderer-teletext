@@ -1,6 +1,6 @@
 //! `neottx render` (REQ-RND-007): one page, or all, as image files.
 
-use super::font::{parse_table, read_table_file};
+use super::font::{parse_sha256, parse_table, read_table_file};
 use super::io_failure;
 use super::{ImageFormat, Selection, grid_of, page_file_name, parse_selection, sandbox_writable, scale_for, selected};
 use crate::args::RasterArgs;
@@ -22,6 +22,7 @@ pub fn render(
     image: ImageFormat,
 ) -> Result<(), Failure> {
     let selection = parse_selection(page)?;
+    let expected = raster_args.font_sha256.as_deref().map(parse_sha256).transpose()?;
     let directory: PathBuf = if selection == Selection::All {
         std::fs::create_dir_all(output).map_err(|error| io_failure(output, error))?;
         output.to_path_buf()
@@ -39,7 +40,7 @@ pub fn render(
         input::load_sandboxed(options, selection.page(), || sandbox_writable(Some(&directory), options.no_sandbox))?;
     let frame = Frame::still(session.decoder().config(), raster_args.reveal);
     let scale = scale_for(raster_args, None, (0, 0));
-    let table = font_file.map(|(path, bytes)| parse_table(path, &bytes)).transpose()?;
+    let table = font_file.map(|(path, bytes)| parse_table(path, &bytes, expected.as_ref())).transpose()?;
     let loaded =
         table.as_deref().map(LoadedFont::new).transpose().map_err(|error| (exit::INPUT, format!("{error:?}")))?;
     let glyphs = GlyphSet::noto_teletext().with_fonts(loaded, [None; FONT_SET_COUNT]);

@@ -74,3 +74,30 @@ fn verbosity_prints_the_walk_trace() {
         assert!(!quiet.contains("TraceEntry"), "{quiet}");
     }
 }
+
+/// The designation fallback count of the summary line of `neottx list`.
+fn designation_fallbacks(listing: &str) -> Option<u32> {
+    let summary = listing.lines().find(|line| line.contains(" page(s); "))?;
+    summary.rsplit_once("; designation fallbacks ")?.1.parse().ok()
+}
+
+/// REQ-72 (REQ-CHR-003, "the fallback shall be counted as a diagnostic"):
+/// `neottx list` builds every page once at every level and shows how many
+/// of them named a reserved Table 32 entry. In region 14, where Table 32
+/// assigns nothing, every page with no designation of its own falls back;
+/// in the default region none does.
+#[test]
+fn list_counts_the_designation_fallbacks() {
+    for level in ["1", "1.5", "2.5", "3.5"] {
+        let (listing, _) = neottx_on_stream(&["list", "-", "--level", level]);
+        assert_eq!(designation_fallbacks(&listing), Some(0), "Level {level}:\n{listing}");
+        let (reserved, _) = neottx_on_stream(&["list", "-", "--level", level, "--region", "14"]);
+        let pages: u32 = reserved
+            .lines()
+            .find_map(|line| line.split_once(" page(s); "))
+            .and_then(|(count, _)| count.trim().parse().ok())
+            .expect("a page count");
+        let counted = designation_fallbacks(&reserved).expect("a fallback count");
+        assert!(counted > 0 && counted <= pages, "Level {level}: {counted} of {pages}:\n{reserved}");
+    }
+}

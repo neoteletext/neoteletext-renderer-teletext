@@ -46,8 +46,9 @@ pub fn build_grid(
     options: &DisplayOptions,
 ) {
     out.clear();
-    let (designation, second, _) = resolve_designation(page, magazine, config);
+    let (designation, second, fallback) = resolve_designation(page, magazine, config);
     out.designation = designation;
+    out.designation_fallback = fallback;
     out.mix = options.mix;
     let control = page.map_or(0, |page| page.control.0);
     // REQ-L1-011, REQ-ACQ-015, decision E.22: box membership matters only

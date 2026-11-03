@@ -210,7 +210,7 @@ pub fn write_file_name(writer: &mut Writer<'_>, file: ChannelFile) -> Result<(),
 }
 
 /// Checks one folder segment (REQ-WEB-023).
-fn check_segment(segment: &[u8]) -> Result<(), ChannelError> {
+pub(crate) fn check_segment(segment: &[u8]) -> Result<(), ChannelError> {
     if segment.is_empty() {
         return Err(ChannelError::EmptySegment);
     }

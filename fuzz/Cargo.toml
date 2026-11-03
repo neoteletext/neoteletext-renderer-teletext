@@ -232,6 +232,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "font_library"
+path = "fuzz_targets/font_library.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "subpages"
 path = "fuzz_targets/subpages.rs"
 test = false
