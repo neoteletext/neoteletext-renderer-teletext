@@ -6,7 +6,7 @@ use super::{Action, Key, KeyContext, Viewer, ViewerState};
 use crate::acq::PageStore;
 use crate::config::{RevealStyle, StepOrder};
 use crate::level1::Zoom;
-use crate::nav::{EntryResult, PageLinks, SubPageEntryResult, next_page, previous_page, step_stored};
+use crate::nav::{EntryResult, PageLinks, SubPageEntryResult, step_numerical, step_stored};
 use crate::types::{Instant, SubCode};
 
 impl Viewer {
@@ -75,7 +75,9 @@ impl Viewer {
                 _ => self.select(initial, SubCode::ANY, true),
             },
             Key::Home => self.select(initial, SubCode::ANY, true),
-            Key::NextPage | Key::PreviousPage => self.step_page(key == Key::NextPage, config.step_order, store),
+            Key::NextPage | Key::PreviousPage => {
+                self.step_page(key == Key::NextPage, config.step_order, config.store_hexadecimal_pages, store)
+            }
             Key::NextSubPage | Key::PreviousSubPage => self.step_subpage(key == Key::NextSubPage, store),
             Key::Back => match self.history.back() {
                 Some(entry) => self.select(entry.address, entry.subcode, false),
@@ -144,11 +146,12 @@ impl Viewer {
     }
 
     /// Next or previous page, in the configured step order.
-    fn step_page(&mut self, forward: bool, step_order: StepOrder, store: &PageStore<'_>) -> Action {
+    fn step_page(&mut self, forward: bool, step_order: StepOrder, hexadecimal: bool, store: &PageStore<'_>) -> Action {
+        // REQ-ACQ-017: hexadecimal pages are stepped to only under the
+        // diagnostic setting of REQ-ACQ-013.
         let target = match step_order {
-            StepOrder::Numerical if forward => next_page(self.requested),
-            StepOrder::Numerical => previous_page(self.requested),
-            StepOrder::Stored => step_stored(self.requested, forward, store),
+            StepOrder::Numerical => step_numerical(self.requested, forward, hexadecimal),
+            StepOrder::Stored => step_stored(self.requested, forward, hexadecimal, store),
         };
         self.select(target, SubCode::ANY, true)
     }

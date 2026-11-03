@@ -396,7 +396,7 @@ fn top_pages_are_not_offered_as_display_pages() {
         assert!(decoder.enhancement_store().contains_address(address(0x101)));
         let store = decoder.store();
         assert!(store.contains(address(0x102)), "the MIP's TOP page is stored as the data page it is");
-        assert_eq!(step_stored(address(0x100), true, store), address(0x103));
+        assert_eq!(step_stored(address(0x100), true, false, store), address(0x103));
         assert_eq!(store.subpage_count(address(0x102)), 0);
         assert_eq!(store.subpage_count(address(0x103)), 1);
     });
@@ -628,7 +628,7 @@ fn a_page_function_in_x_28_4_is_honoured() {
         let mut stream = vec![header(0x150, 0), level35, header(0x151, 0)];
         stream.extend(filling());
         feed(decoder, &stream);
-        assert_eq!(step_stored(address(0x149), true, decoder.store()), address(0x151));
+        assert_eq!(step_stored(address(0x149), true, false, decoder.store()), address(0x151));
         assert_eq!(decoder.store().subpage_count(address(0x150)), 0);
     });
 }
