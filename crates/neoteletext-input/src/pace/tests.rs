@@ -1,5 +1,8 @@
 //! Tests of the pacer (REQ-INT-122; REQ-RCH-031 to REQ-RCH-033, REQ-RCH-045).
-#![allow(clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::indexing_slicing, reason = "a test")]
+#![allow(
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 use super::*;
 use crate::event::{Device, Mouse, MouseAction, Point, Stamp, Touch};

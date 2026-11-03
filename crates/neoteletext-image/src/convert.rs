@@ -155,7 +155,10 @@ fn index_at(indices: &[u8], start: usize, x: usize, format: IndexFormat) -> u8 {
 /// [`ConvertError::BufferTooSmall`] when `out` is too short for the
 /// geometry and `out_stride` given. An index beyond the end of `indices`
 /// reads as 0, as an index beyond `palette` is transparent.
-#[allow(clippy::too_many_arguments)] // Each argument is a separate geometry or format parameter of REQ-RND-018.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each argument is a separate geometry or format parameter of REQ-RND-018, and grouping them in a struct would only rename them"
+)]
 pub fn convert(
     indices: &[u8],
     index_format: IndexFormat,
@@ -192,7 +195,12 @@ pub fn convert(
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size, `unwrap` on results it expects to be good and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 mod tests {
     use super::*;
     use crate::palette::{CLUT0, palette};

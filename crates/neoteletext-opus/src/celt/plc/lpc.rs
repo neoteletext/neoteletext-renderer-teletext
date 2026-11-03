@@ -195,7 +195,6 @@ pub fn autocorr(x: &[i16], ac: &mut [i32], windowed: bool, scratch: &mut [i16]) 
             ac0 = add32(ac0, square(b));
         }
         // Halved as C divides, towards zero.
-        #[allow(clippy::manual_midpoint, reason = "midpoint rounds down, the reference towards zero")]
         {
             shift = i32::from(celt_ilog2(ac0)).wrapping_sub(30).wrapping_add(10) / 2;
         }

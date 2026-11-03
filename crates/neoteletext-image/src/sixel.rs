@@ -161,7 +161,10 @@ pub fn write<S: Sink>(
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 mod tests {
     use super::*;
     use crate::SliceSink;

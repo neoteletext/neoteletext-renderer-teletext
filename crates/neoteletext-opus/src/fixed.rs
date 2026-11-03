@@ -275,13 +275,6 @@ pub const fn ec_ilog(x: u32) -> i32 {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "tests may panic"
-)]
 mod tests {
     use super::*;
 

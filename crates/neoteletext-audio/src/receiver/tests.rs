@@ -1,4 +1,9 @@
-#![allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size, `unwrap` on results it expects to be good and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 // Tests of REQ-AUD-001 and decision E.131: a codec the build leaves out is
 // unsupported, its sound skipped, never played and never a panic.
