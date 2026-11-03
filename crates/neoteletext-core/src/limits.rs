@@ -375,7 +375,20 @@ pub const fn sub_code_of(place: u16, count: u16) -> Option<u16> {
     if count <= SET_SUBPAGES {
         return decimal_at(place);
     }
-    if count as usize > SUBCODES_ABOVE_SET {
+    sub_code_of_updated(place, count)
+}
+
+/// The sub-code of place `place` (1 to `count`) of a page whose sub-pages
+/// are meant to be seen as one page updated: a set that changes only
+/// slightly from one sub-page to the next (REQ-NUM-016 rule 4), or, with a
+/// count of 1, a single page that changes on each transmission, such as a
+/// rotating advertisement (rule 6; Annex A.1, note 1). Every place takes a
+/// unique sub-code above 0079, in the order [`sub_code_of`] gives a set of
+/// more than 79, so a single page gets 0100, non-zero and outside 1 to 79.
+/// `None` for a place outside 1 to `count`, or a count above 8,069.
+#[must_use]
+pub const fn sub_code_of_updated(place: u16, count: u16) -> Option<u16> {
+    if place == 0 || place > count || count as usize > SUBCODES_ABOVE_SET {
         return None;
     }
     if place as usize <= DECIMAL_SUBCODES_ABOVE_SET {

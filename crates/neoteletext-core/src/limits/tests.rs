@@ -240,3 +240,25 @@ fn data_broadcasting_sub_codes_number_no_sub_pages() {
     // S2 and S4: 25 is S4 3, S2 1.
     assert_eq!(data_sub_code(0, 0, 25), 0x3010);
 }
+
+/// REQ-314 (REQ-NUM-016) rules 4 and 6: a set meant to be seen as one page
+/// updated takes a unique sub-code above 0079 on every sub-page, whether it
+/// has 2 or 79 sub-pages, and a single page that changes on each
+/// transmission a non-zero sub-code outside 1 to 79.
+#[test]
+fn an_updated_set_and_a_rotating_single_page_number_above_0079() {
+    for count in [2u16, 79, 80, 8069] {
+        let codes: Vec<u16> = (1..=count).map(|place| sub_code_of_updated(place, count).unwrap()).collect();
+        assert!(codes.iter().all(|&code| code > SET_LAST_SUBCODE && is_sub_code(code) && code != SUBCODE_ANY));
+        let unique: BTreeSet<u16> = codes.iter().copied().collect();
+        assert_eq!(unique.len(), usize::from(count), "{count}");
+    }
+    assert_eq!(sub_code_of_updated(1, 1), Some(0x0100), "a rotating single page");
+    assert_eq!(sub_code_of_updated(1, 2), Some(0x0100));
+    assert_eq!(sub_code_of_updated(0, 2), None);
+    assert_eq!(sub_code_of_updated(3, 2), None);
+    assert_eq!(sub_code_of_updated(1, 8070), None);
+    for place in 1..=200 {
+        assert_eq!(sub_code_of_updated(place, 200), sub_code_of(place, 200), "same order as a set above 79");
+    }
+}
