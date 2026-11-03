@@ -2388,3 +2388,65 @@ fn the_agent_reassembles_a_list_of_sub_pages() {
     let total = fragments(broken[0].len()) + fragments(broken[1].len());
     assert!(has_event(&records, &format!("InvalidPackets {{ total: {total} }}")), "{records:?}");
 }
+
+// Verifies REQ-INP-026 and DOC-1956 through the agent: at most 16 LOG lines
+// reach the port before the first page frame, and 16 for each page frame.
+#[test]
+#[cfg(feature = "push")]
+fn log_lines_are_limited_for_each_page_frame() {
+    use neoteletext_formats::log::{LogLevel, MAX_LOG_LINES_PER_PAGE};
+    use neoteletext_web::records::log;
+    let mut harness = push_service("ws://tt.example/push");
+    let lines = |first_id: u8| {
+        packets_of(|out| {
+            for index in 0..MAX_LOG_LINES_PER_PAGE + 4 {
+                let id = first_id.wrapping_add(index as u8);
+                log::encode(LogLevel::Information, None, "line", 3, id, out).unwrap();
+            }
+        })
+    };
+    let header = packet_at(1, 0);
+    let message = [lines(0).as_slice(), &header, &lines(100)].concat();
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    let logged = events(&records).iter().filter(|event| event.starts_with("Log {")).count();
+    assert_eq!(logged, 2 * MAX_LOG_LINES_PER_PAGE, "{records:?}");
+}
+
+// Verifies REQ-WEB-006, REQ-515 and DOC-1957 through the agent: a SET_COOKIE
+// record on a live channel's connection is kept in the channel's folder, as
+// the push handshake's cookies are, and so is sent to that channel's pages
+// and never another's.
+#[test]
+#[cfg(all(feature = "push", feature = "cookies"))]
+fn a_set_cookie_record_stays_in_its_channel_folder() {
+    use neoteletext_web::records::cookie::SetCookie;
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", json_response(br#"{"push":{}}"#));
+    let cookie = SetCookie {
+        name: "s",
+        value: "1",
+        path: Some("/"),
+        max_age: None,
+        same_site: neoteletext_web::cookie::SameSite::Default,
+        secure: false,
+        http_only: false,
+    };
+    let message = packets_of(|out| {
+        cookie.encode(3, 1, out).unwrap();
+    });
+    harness.replay().reply("site.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open_channel("http://site.example/a/");
+    assert!(!has_event(&records, "CookieRejected"), "{records:?}");
+    assert_eq!(harness.agent.cookies().len(), 1, "the record's cookie is kept");
+    harness.replay().reply("site.example:80", not_found());
+    harness.replay().reply("site.example:80", not_found());
+    // A channel in a folder inside the first is another channel, whose
+    // requests the cookie's path alone would match.
+    harness.open_channel("http://site.example/a/b/");
+    harness.replay().reply("site.example:80", tti_response(&[]));
+    harness.fetch(0x100);
+    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
+    assert_eq!(request_path(&last), "/a/b/100.tti");
+    assert_eq!(header_value(&last, "Cookie"), None, "not sent to another channel's folder");
+}

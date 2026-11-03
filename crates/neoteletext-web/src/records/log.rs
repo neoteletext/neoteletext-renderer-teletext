@@ -88,3 +88,6 @@ pub fn encode(
     }
     write_packets(TYPE_LOG, body, service, record_id, out).ok_or(RecordFault::Length)
 }
+
+#[cfg(test)]
+mod tests;
