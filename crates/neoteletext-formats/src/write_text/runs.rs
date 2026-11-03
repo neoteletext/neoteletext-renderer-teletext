@@ -378,7 +378,9 @@ fn unshown(error: WriteError) -> RunFault {
         WriteError::Missing { character, .. } => RunFault::Unshown(character),
         WriteError::UnknownSet(name) | WriteError::UnknownLanguage(name) => RunFault::UnknownLanguage(name),
         // The run encoder makes no rows and builds no page.
-        _ => RunFault::OutOfColumns(COLUMNS),
+        WriteError::TooManyRows(_) => RunFault::OutOfColumns(COLUMNS),
+        #[cfg(all(feature = "std", feature = "tti"))]
+        WriteError::Author(_) => RunFault::OutOfColumns(COLUMNS),
     }
 }
 
@@ -894,5 +896,8 @@ pub fn designate(triplets: &mut [Triplet; neoteletext_core::consts::TRIPLETS_PER
     }
 }
 
-#[cfg(test)]
+// The tests read each page back through the page file and its encoder,
+// the `pages` feature, so a build of `write-text` alone does not compile
+// them; `cargo xtask features` runs them in its `write-text,std,tti` build.
+#[cfg(all(test, feature = "pages"))]
 mod tests;
