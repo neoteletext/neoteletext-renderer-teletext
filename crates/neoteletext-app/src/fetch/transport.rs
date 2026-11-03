@@ -1,28 +1,34 @@
 //! The std transport: the engine's network port over `neoteletext-transport`,
 //! each connection read by a thread of its own that wakes the loop when bytes
-//! arrive (decision 27, REQ-WEB-032).
+//! arrive, and written by another, so that no operation of the port blocks
+//! the loop (decision 27, REQ-WEB-032, REQ-490).
 
 use super::decoder_link::send;
 use super::wakes::Wake;
 use crate::pipe::{Frame, Notice};
 use neoteletext_transport::{
     Connection, SOCKET_READ, TlsFailure, client_config, connect_within_limit, mozilla_roots, open_tunnel, start_tls,
-    web_address, write_records,
+    web_address,
 };
 use neoteletext_web::port::{ConnectionId, LinkState, RandomSource, Received, Security, Transport};
 use neoteletext_web::proxy::Proxy;
+use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use writer::Outgoing;
+
+mod writer;
 
 /// A transport over std sockets and rustls, checking every resolved
 /// address against the policy before connecting (decision 27), whose
 /// connections each wake the loop when bytes arrive. A connection is opened
 /// on a thread of its own, so that `connect` returns at once and the loop
 /// goes on while a name resolves, a proxy answers and TLS shakes hands
-/// (REQ-490, DEC-2490).
+/// (REQ-490, DEC-2490); and each open connection's writes are a thread's,
+/// so that a send hands its bytes over and returns.
 pub struct StdTransport {
-    streams: [Option<Connection>; 3],
+    streams: [Option<Open>; 3],
     states: [LinkState; 3],
     /// Each connection's opening while it is under way: the thread hands
     /// back the connection and its peer, or why it failed.
@@ -30,8 +36,57 @@ pub struct StdTransport {
     opener: Opener,
 }
 
+/// An open connection: its reading side, which holds the TLS state, and
+/// its writer thread.
+struct Open {
+    connection: Connection,
+    outgoing: Outgoing,
+}
+
+impl Open {
+    /// Gives the writer thread whatever records TLS has ready, as one piece,
+    /// so that what was sent together leaves in one write; false when the
+    /// thread does not take them.
+    fn give_records(tls: &mut rustls::ClientConnection, outgoing: &Outgoing) -> bool {
+        let mut records = Vec::new();
+        while tls.wants_write() {
+            // Writing to memory does not fail.
+            if tls.write_tls(&mut records).is_err() {
+                return false;
+            }
+        }
+        records.is_empty() || outgoing.give(records)
+    }
+
+    /// Hands `bytes` to the writer thread, encrypted first over TLS; false
+    /// when the thread does not take them.
+    fn send(&mut self, bytes: &[u8]) -> bool {
+        match self.connection.tls_mut() {
+            None => self.outgoing.give(bytes.to_vec()),
+            Some(tls) => {
+                std::io::Write::write_all(&mut tls.writer(), bytes).is_ok() && Self::give_records(tls, &self.outgoing)
+            }
+        }
+    }
+
+    /// What has arrived, looking without waiting: any failure is the
+    /// connection's end. The records TLS answers with (an alert, a key
+    /// update) go to the writer thread, after what was sent before them.
+    fn receive(&mut self, buffer: &mut [u8]) -> Received {
+        let Self { connection, outgoing } = self;
+        let answer = |tls: &mut rustls::ClientConnection, _: &TcpStream| {
+            if Self::give_records(tls, outgoing) { Ok(()) } else { Err(ErrorKind::BrokenPipe.into()) }
+        };
+        connection.take(buffer, None, answer).unwrap_or(Received::Closed)
+    }
+
+    fn shutdown(&self) {
+        self.connection.shutdown();
+    }
+}
+
 /// What an opening thread hands back.
-type Opened = Result<(Connection, IpAddr), String>;
+type Opened = Result<(Open, IpAddr), String>;
 
 /// What opening a connection needs, owned, so that a thread of its own can
 /// do it.
@@ -115,7 +170,7 @@ impl Opener {
         Ok((socket, peer, early))
     }
 
-    fn open(&self, host: &str, port: u16, security: Security) -> Result<(Connection, IpAddr), String> {
+    fn open(&self, host: &str, port: u16, security: Security) -> Result<(Open, IpAddr), String> {
         let (mut socket, peer, early) = self.reach(host, port)?;
         let (tls, first) = match security {
             Security::Plain => (None, early),
@@ -131,19 +186,17 @@ impl Opener {
                 (Some(Box::new(connection)), Vec::new())
             }
         };
-        let wake = self.wake.clone();
-        let wake = move || {
-            let _ = wake.send(Wake::Network);
+        let waker = |wake: Sender<Wake>| {
+            move || {
+                let _ = wake.send(Wake::Network);
+            }
         };
-        let connection = Connection::start(socket, tls, first, SOCKET_READ, wake).map_err(|error| error.to_string())?;
-        Ok((connection, peer))
+        let written = socket.try_clone().map_err(|error| error.to_string())?;
+        let connection = Connection::start(socket, tls, first, SOCKET_READ, waker(self.wake.clone()))
+            .map_err(|error| error.to_string())?;
+        let outgoing = Outgoing::start(written, waker(self.wake.clone()));
+        Ok((Open { connection, outgoing }, peer))
     }
-}
-
-/// What has arrived on `connection`, looking without waiting: any failure
-/// is the connection's end.
-fn receive(connection: &mut Connection, buffer: &mut [u8]) -> Received {
-    connection.take(buffer, None, write_records).unwrap_or(Received::Closed)
 }
 
 impl embedded_io::ErrorType for StdTransport {
@@ -196,25 +249,22 @@ impl Transport for StdTransport {
             .get_mut(slot(connection))
             .and_then(Option::as_mut)
             .ok_or(embedded_io::ErrorKind::NotConnected)?;
-        // Written whole, blocking, within the write limit: a request or an
-        // input message is small, and the kernel takes it at once unless
-        // the peer has stopped reading for long enough to fill the socket's
-        // buffer (DEC-2490 item 2; the writer thread that would make this
-        // non-blocking too is owed in TODO-2058).
-        open.write_all(bytes).map_err(|_| embedded_io::ErrorKind::Other)
+        // REQ-490: handed whole to the writer thread, as one write, and the
+        // loop goes on; a writer that holds too much, or has ended, fails
+        // the send, which ends the connection.
+        if open.send(bytes) { Ok(()) } else { Err(embedded_io::ErrorKind::Other) }
     }
 
-    /// Nothing waits here: a send is written whole, blocking, to the
-    /// kernel, and what the kernel has not sent cannot be read without
-    /// unsafe code (REQ-SEC-015), so moves are never held for this
-    /// transport (REQ-RCH-035; an rdm to-do).
-    fn unsent(&mut self, _: ConnectionId) -> usize {
-        0
+    /// What the writer thread has been given and has not yet written
+    /// (REQ-RCH-035); the operating system's own buffer is not seen
+    /// (`writer.rs`).
+    fn unsent(&mut self, connection: ConnectionId) -> usize {
+        self.streams.get(slot(connection)).and_then(Option::as_ref).map_or(0, |open| open.outgoing.unsent())
     }
 
     fn receive(&mut self, connection: ConnectionId, buffer: &mut [u8]) -> Result<Received, Self::Error> {
         let open = self.streams.get_mut(slot(connection)).and_then(Option::as_mut);
-        Ok(open.map_or(Received::Closed, |open| receive(open, buffer)))
+        Ok(open.map_or(Received::Closed, |open| open.receive(buffer)))
     }
 
     fn close(&mut self, connection: ConnectionId) {
