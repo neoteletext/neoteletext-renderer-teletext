@@ -160,6 +160,9 @@ pub struct ComposeContext<'a> {
 pub const HISTORY_ENTRIES: usize = 32;
 
 /// The viewer.
+// Reveal, mix, boxed display and staleness are separate settings and facts
+// of the viewer (REQ-NAV-007, REQ-L1-020), each set and read alone.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug)]
 pub struct Viewer {
     state: ViewerState,
@@ -173,6 +176,7 @@ pub struct Viewer {
     reveal: bool,
     reveal_until: Option<Instant>,
     mix: bool,
+    boxed: bool,
     zoom: Zoom,
     stale: bool,
     indicator: SecurityIndicator,
@@ -194,6 +198,7 @@ impl Viewer {
             reveal: false,
             reveal_until: None,
             mix: false,
+            boxed: false,
             zoom: Zoom::Off,
             stale: false,
             indicator: SecurityIndicator::None,
@@ -229,6 +234,19 @@ impl Viewer {
     #[must_use]
     pub const fn mix(&self) -> bool {
         self.mix
+    }
+
+    /// Boxed display (REQ-L1-020): only the page's boxed areas are shown,
+    /// as on a newsflash or subtitle page, whatever the page's C5 and C6
+    /// say; a port turns it on to show subtitles over a picture.
+    #[must_use]
+    pub const fn boxed(&self) -> bool {
+        self.boxed
+    }
+
+    /// Turns boxed display on or off.
+    pub fn set_boxed(&mut self, boxed: bool) {
+        self.boxed = boxed;
     }
 
     /// Sets the security indicator (from the web module's events).

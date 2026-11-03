@@ -495,3 +495,32 @@ fn the_sub_page_key_enters_a_decimal_sub_code() {
     assert_eq!(viewer.state(), ViewerState::Displaying);
     assert_eq!(viewer.requested(), (page(0x100), SubCode::new(0x0002)));
 }
+
+/// REQ-245 (REQ-L1-020): boxed display is a viewer setting the composed
+/// grid carries, on any page; off, a page's own C5 and C6 decide.
+#[test]
+fn boxed_display_is_a_viewer_setting() {
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let mut decoder = Decoder::new(&mut slots, Config::default());
+    receive(&mut decoder, &[(0x100, 0x0000)]);
+    let config = Config::default();
+    let magazine = MagazineData::default();
+    let rolling = [SPACE; HEADER_DISPLAY_BYTES];
+    let compose = ComposeContext {
+        magazine: &magazine,
+        config: &config,
+        rolling_header: &rolling,
+        store: decoder.store(),
+        row24: None,
+        lookup: decoder.enhancement_lookup(),
+    };
+    let page = decoder.store().latest(page(0x100));
+    let mut viewer = displaying();
+    let mut grid = Grid::EMPTY;
+    let _ = viewer.compose(&mut grid, page, &compose);
+    assert!(!grid.boxed_mode);
+    viewer.set_boxed(true);
+    assert!(viewer.boxed());
+    let _ = viewer.compose(&mut grid, page, &compose);
+    assert!(grid.boxed_mode);
+}

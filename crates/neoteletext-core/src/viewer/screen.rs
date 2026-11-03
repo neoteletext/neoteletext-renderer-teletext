@@ -57,7 +57,7 @@ impl Viewer {
             row24,
             security_indicator: self.indicator != SecurityIndicator::None || self.confirming(),
             mix: self.mix,
-            boxed: false,
+            boxed: self.boxed,
         };
         build_grid(grid, page, magazine, config, &options);
         Composed::Built(page.and_then(|page| match trace {
