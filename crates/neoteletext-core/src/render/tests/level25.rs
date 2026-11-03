@@ -1,8 +1,9 @@
 //! Tests of the rendering of Levels 2.5 and 3.5: the resolved colour mode,
 //! double width and size, underline, invert, flash and
 //! conceal, G3 drawing and the flash timing
-//! (REQ-RND-030 to REQ-RND-040). Every grid is built by hand, so these
-//! tests depend on nothing but the grid (REQ-RND-001).
+//! (REQ-RND-030 to REQ-RND-040), and the rulings of REQ-1641. Every grid
+//! is built by hand, so these tests depend on nothing but the grid
+//! (REQ-RND-001).
 #![allow(
     clippy::unwrap_used,
     clippy::indexing_slicing,

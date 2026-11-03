@@ -532,3 +532,32 @@ fn kitty_sends_each_flash_phase_once_and_switches_between_them() {
     assert_eq!(text.matches("a=d,d=I,").count(), 2, "both old images freed: {text:?}");
     assert_eq!(text.matches("a=t,").count(), 1);
 }
+
+/// REQ-89 (REQ-CLI-004): the interactive viewer takes a key for each
+/// function the requirement lists: page number entry, next and previous
+/// page, the four Fastext keys on F1 to F4 and on r, g, y and c, Index,
+/// reveal, hold, mix, zoom and sub-page stepping. Quitting (`q` or Escape)
+/// is the loop's own key, read before this mapping (`input.rs`).
+#[test]
+fn every_function_of_the_interactive_viewer_has_its_key() {
+    use super::keys::map_key;
+    use neoteletext_core::viewer::Key;
+    let key = |code: KeyCode| map_key(KeyEvent::new(code, KeyModifiers::NONE));
+    for digit in 0..=9u8 {
+        assert_eq!(key(KeyCode::Char(char::from(b'0' + digit))), Some(Key::Digit(digit)));
+    }
+    assert_eq!(key(KeyCode::Up), Some(Key::NextPage));
+    assert_eq!(key(KeyCode::Down), Some(Key::PreviousPage));
+    let fastext = [(1, 'r', Key::Red), (2, 'g', Key::Green), (3, 'y', Key::Yellow), (4, 'c', Key::Cyan)];
+    for (function, letter, wanted) in fastext {
+        assert_eq!(key(KeyCode::F(function)), Some(wanted), "F{function}");
+        assert_eq!(key(KeyCode::Char(letter)), Some(wanted), "{letter}");
+    }
+    assert_eq!(key(KeyCode::Char('i')), Some(Key::Index));
+    assert_eq!(key(KeyCode::Char('?')), Some(Key::Reveal));
+    assert_eq!(key(KeyCode::Char('H')), Some(Key::Hold));
+    assert_eq!(key(KeyCode::Char('m')), Some(Key::Mix));
+    assert_eq!(key(KeyCode::Char('z')), Some(Key::Zoom));
+    assert_eq!(key(KeyCode::Right), Some(Key::NextSubPage));
+    assert_eq!(key(KeyCode::Left), Some(Key::PreviousSubPage));
+}

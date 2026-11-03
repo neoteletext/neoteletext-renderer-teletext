@@ -90,6 +90,9 @@ fn checksums() -> String {
     out
 }
 
+// REQ-26 (REQ-ARCH-004): the test card, a TTI page file, is encoded to
+// packets with their parity and Hamming coding and acquired by the decoder
+// as broadcast packets are.
 // Verifies REQ-RND-015.
 #[test]
 fn golden_rasters_match() {

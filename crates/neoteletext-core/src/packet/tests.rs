@@ -26,6 +26,8 @@ fn mag(number: u8) -> Magazine {
     Magazine::new(number).unwrap()
 }
 
+// REQ-24 (REQ-ARCH-002): every decoding works from the 42-byte packet form,
+// Hamming bits kept, here the address bytes the encoder writes.
 // REQ-349: the magazine and packet number come from the two Hamming 8/4
 // address bytes.
 #[test]
@@ -643,6 +645,8 @@ fn triplet_functions_are_named_as_tables_28_and_29() {
     }
 }
 
+/// REQ-24 (REQ-ARCH-002): the packet form keeps each byte's parity bit, so
+/// the decoder judges it.
 /// REQ-351: packet numbers 1 to 25 give their 40 bytes, each one's 7-bit
 /// character and its parity status readable, a byte that fails kept.
 #[test]

@@ -12,6 +12,8 @@
 
 use super::*;
 
+/// REQ-440 (REQ-SLC-001): one sampled line at a time, at every sample rate,
+/// gives its one 42-byte packet.
 #[test]
 fn clean_lines_decode_at_every_rate() {
     for rate in RATES {

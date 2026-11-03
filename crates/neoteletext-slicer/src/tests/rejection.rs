@@ -91,6 +91,7 @@ pub(super) fn biphase_false_packets(element_rate: f32, lines: u32, config: Confi
     (accepted, lines)
 }
 
+/// REQ-440 (REQ-SLC-001): a line that holds no teletext gives no packet.
 #[test]
 fn noise_lines_give_no_packets() {
     let len = samples_per_line(RATE);

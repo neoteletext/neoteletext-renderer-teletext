@@ -37,6 +37,8 @@ fn bt8x8_file(frames: usize) -> (Vec<u8>, Vec<Option<Packet>>) {
     (file, packets)
 }
 
+/// REQ-25 (REQ-ARCH-003): each packet from raw samples comes with its line,
+/// field, time stamp and slicer quality.
 #[test]
 fn raw_bt8x8_file_in_odd_chunks() {
     let (file, packets) = bt8x8_file(3);
