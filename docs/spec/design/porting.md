@@ -65,6 +65,10 @@ All state lives in memory you provide (REQ-GEN-003):
 - A `Grid` is 1000 cells of 16 bytes and the page-wide state: 16,100 bytes, measured on 31 October 2026. Build it in place with `build_grid(&mut grid, ...)`.
 - A rendered text row at 480 by 20 needs 9.6 kilobytes at 8 bits per pixel or 4.8 kilobytes at 4 bits.
 
+## Sub-pages
+
+A page may have up to 3,199 sub-pages (area NUM, decision E.130), each in its own slot of the page store. `PageStore` lists and steps them without any memory of its own: `subcodes` iterates a page's stored sub-codes in order, and `subpage_count`, `first_subpage`, `last_subpage`, `next_subpage`, `previous_subpage` and `subpage_place` (a sub-page's place, counted from 1, as the status area shows it) each make one bounded pass over the slots you gave it. A port that shows a list of sub-pages calls them per frame or keeps its own copy; the store never allocates.
+
 ## Pixels and colour
 
 - The renderer writes palette indices, never colours (REQ-RND-023): 0 to 7 the colours, 8 transparent, 16 to 79 flashing, 80 to 143 concealed.
