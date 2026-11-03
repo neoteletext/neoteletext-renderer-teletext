@@ -111,13 +111,31 @@ mod error_trait {
         crate::agent::Failure,
         crate::url::UrlError,
         crate::zxnet::ChannelError,
-        crate::cookie::CookieRejected
+        crate::cookie::CookieRejected,
+        crate::contents::ContentsError,
+        crate::contents::Fault,
+        crate::contents::LineFault,
+        crate::subpages::SubPagesError,
+        crate::subpages::Fault,
+        crate::subpages::LineFault,
+        crate::json::JsonError,
+        crate::map::MapError,
+        crate::proxy::ProxyError,
+        crate::records::RecordFault,
+        crate::records::index::IndexError,
+        crate::user_agent::UserAgentError,
+        crate::zxnet::Malformed,
     );
+    #[cfg(feature = "std")]
+    error_trait!(crate::subpages::LayoutError);
+    #[cfg(feature = "dbsc")]
+    error_trait!(crate::dbsc::InstructionsError, crate::dbsc::ImportError, crate::dbsc::ProofError);
 
     #[cfg(test)]
     mod tests {
         const fn is_error<T: core::error::Error>() {}
 
+        // REQ-155: every error type of the crate is an error.
         #[test]
         fn every_error_type_is_an_error() {
             is_error::<crate::bytes::Overflow>();
@@ -128,6 +146,31 @@ mod error_trait {
             is_error::<crate::url::UrlError>();
             is_error::<crate::zxnet::ChannelError>();
             is_error::<crate::cookie::CookieRejected>();
+            is_error::<crate::contents::ContentsError>();
+            is_error::<crate::contents::Fault>();
+            is_error::<crate::contents::LineFault>();
+            is_error::<crate::subpages::SubPagesError>();
+            is_error::<crate::subpages::Fault>();
+            is_error::<crate::subpages::LineFault>();
+            is_error::<crate::json::JsonError>();
+            is_error::<crate::map::MapError>();
+            is_error::<crate::proxy::ProxyError>();
+            is_error::<crate::records::RecordFault>();
+            is_error::<crate::records::index::IndexError>();
+            is_error::<crate::user_agent::UserAgentError>();
+            is_error::<crate::zxnet::Malformed>();
+            #[cfg(feature = "dbsc")]
+            {
+                is_error::<crate::dbsc::InstructionsError>();
+                is_error::<crate::dbsc::ImportError>();
+                is_error::<crate::dbsc::ProofError>();
+            }
+            #[cfg(feature = "std")]
+            {
+                is_error::<crate::proxy::TunnelError>();
+                is_error::<crate::proxy::ProxyParseError>();
+                is_error::<crate::subpages::LayoutError>();
+            }
         }
     }
 }

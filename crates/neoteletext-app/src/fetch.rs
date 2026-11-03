@@ -24,7 +24,7 @@ const RESOLVER_PATHS: [&str; 6] = ["/etc", "/run/systemd/resolve", "/usr/lib", "
 
 /// Runs the fetcher for `address` until the decoder process goes away.
 pub fn run(address: &str, no_sandbox: bool, allow_local: &[IpAddr], proxy: Option<&str>) -> Result<(), (u8, String)> {
-    let proxy = proxy.map(Proxy::parse).transpose().map_err(|message| (crate::exit::USAGE, message))?;
+    let proxy = proxy.map(Proxy::parse).transpose().map_err(|error| (crate::exit::USAGE, error.to_string()))?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let (wake, receiver) = mpsc::channel();
     decoder_link::requests(wake.clone());
@@ -37,7 +37,7 @@ pub fn run(address: &str, no_sandbox: bool, allow_local: &[IpAddr], proxy: Optio
         crate::sandbox::Policy { writable_directory: None, network: true, readable: &readable },
         no_sandbox,
     )
-    .map_err(|message| (crate::exit::INPUT, message))?;
+    .map_err(|error| (crate::exit::INPUT, error.to_string()))?;
     match feed(address) {
         Some(channel) => {
             let channel = channel.map_err(|error| (crate::exit::USAGE, format!("unknown live feed: {error:?}")))?;

@@ -78,15 +78,17 @@ impl Value {
     /// Reads one document.
     ///
     /// # Errors
-    /// Malformed JSON, nesting past the reader's limit, or more
-    /// values than the reader's item limit (`MAX_ITEMS`).
-    pub fn parse(bytes: &[u8]) -> Result<Self, &'static str> {
-        let mut reader = JsonReader::new(bytes).map_err(|_| "JSON")?;
+    /// [`JsonError::Malformed`] for malformed JSON or nesting past the
+    /// reader's limit, [`JsonError::TooManyValues`] for more values than
+    /// the item limit (`MAX_ITEMS`), [`JsonError::BadString`] for a string
+    /// that would not decode.
+    pub fn parse(bytes: &[u8]) -> Result<Self, JsonError> {
+        let mut reader = JsonReader::new(bytes).map_err(|_| JsonError::Malformed)?;
         let mut items = 0_usize;
-        let first = reader.next_token().map_err(|_| "JSON")?.ok_or("JSON")?;
+        let first = next(&mut reader)?;
         let value = read(&mut reader, first, &mut items)?;
-        if reader.next_token().map_err(|_| "JSON")?.is_some() {
-            return Err("JSON");
+        if reader.next_token().map_err(|_| JsonError::Malformed)?.is_some() {
+            return Err(JsonError::Malformed);
         }
         Ok(value)
     }
@@ -147,10 +149,42 @@ impl Value {
     }
 }
 
-fn read(reader: &mut JsonReader<'_>, token: Token<'_>, items: &mut usize) -> Result<Value, &'static str> {
+/// Why [`Value::parse`] refused a document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JsonError {
+    /// Not JSON: a broken token, a document that ends early or has more
+    /// after its value, or nesting deeper than the engine's reader allows.
+    Malformed,
+    /// More members and elements than `MAX_ITEMS`, 4,096, in the document.
+    TooManyValues,
+    /// A string or a key that would not decode. The engine's reader checks
+    /// each string's escapes and UTF-8 as it reads it, so a document does
+    /// not reach this; a decode that failed is refused all the same rather
+    /// than trusted.
+    BadString,
+}
+
+impl core::fmt::Display for JsonError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str(match self {
+            Self::Malformed => "JSON",
+            Self::TooManyValues => "too many values",
+            Self::BadString => "JSON string",
+        })
+    }
+}
+
+impl std::error::Error for JsonError {}
+
+/// The next token, which must exist: the document has not ended.
+fn next<'a>(reader: &mut JsonReader<'a>) -> Result<Token<'a>, JsonError> {
+    reader.next_token().map_err(|_| JsonError::Malformed)?.ok_or(JsonError::Malformed)
+}
+
+fn read(reader: &mut JsonReader<'_>, token: Token<'_>, items: &mut usize) -> Result<Value, JsonError> {
     *items = items.saturating_add(1);
     if *items > MAX_ITEMS {
-        return Err("too many values");
+        return Err(JsonError::TooManyValues);
     }
     Ok(match token {
         Token::Null => Value::Null,
@@ -160,7 +194,7 @@ fn read(reader: &mut JsonReader<'_>, token: Token<'_>, items: &mut usize) -> Res
         Token::BeginArray => {
             let mut values = Vec::new();
             loop {
-                match reader.next_token().map_err(|_| "JSON")?.ok_or("JSON")? {
+                match next(reader)? {
                     Token::EndArray => break,
                     token => values.push(read(reader, token, items)?),
                 }
@@ -170,28 +204,28 @@ fn read(reader: &mut JsonReader<'_>, token: Token<'_>, items: &mut usize) -> Res
         Token::BeginObject => {
             let mut members = Vec::new();
             loop {
-                match reader.next_token().map_err(|_| "JSON")?.ok_or("JSON")? {
+                match next(reader)? {
                     Token::EndObject => break,
                     Token::Key(key) => {
                         let key = decode(key)?;
-                        let token = reader.next_token().map_err(|_| "JSON")?.ok_or("JSON")?;
+                        let token = next(reader)?;
                         members.push((key, read(reader, token, items)?));
                     }
-                    _ => return Err("JSON"),
+                    _ => return Err(JsonError::Malformed),
                 }
             }
             Value::Object(members)
         }
-        Token::EndArray | Token::EndObject | Token::Key(_) => return Err("JSON"),
+        Token::EndArray | Token::EndObject | Token::Key(_) => return Err(JsonError::Malformed),
     })
 }
 
-fn decode(text: neoteletext_web::json::JsonStr<'_>) -> Result<String, &'static str> {
+fn decode(text: neoteletext_web::json::JsonStr<'_>) -> Result<String, JsonError> {
     // Decoding never makes a string longer than its escaped form.
     let mut buffer = vec![0_u8; text.raw_len()];
-    let length = text.decode_into(&mut buffer).map_err(|_| "JSON string")?;
+    let length = text.decode_into(&mut buffer).map_err(|_| JsonError::BadString)?;
     buffer.truncate(length);
-    String::from_utf8(buffer).map_err(|_| "JSON string")
+    String::from_utf8(buffer).map_err(|_| JsonError::BadString)
 }
 
 /// A string as `JSON.stringify` writes it (ECMA-262 `QuoteJSONString`):
@@ -231,14 +265,16 @@ mod tests {
         assert_eq!(value.get("a").and_then(|a| a.get("d")).and_then(Value::as_u64), Some(2));
     }
 
+    /// REQ-155: each refusal is its own variant of an error enumeration.
     #[test]
     fn malformed_documents_are_refused() {
         for text in [b"{".as_slice(), b"{\"a\":1}x", b"[1,]", b"\"\xff\""] {
-            assert!(Value::parse(text).is_err(), "{text:?}");
+            assert_eq!(Value::parse(text), Err(JsonError::Malformed), "{text:?}");
         }
         let deep = "[".repeat(100) + &"]".repeat(100);
-        assert!(Value::parse(deep.as_bytes()).is_err(), "nesting is bounded");
+        assert_eq!(Value::parse(deep.as_bytes()), Err(JsonError::Malformed), "nesting is bounded");
         let many = format!("[{}0]", "0,".repeat(MAX_ITEMS));
-        assert_eq!(Value::parse(many.as_bytes()), Err("too many values"));
+        assert_eq!(Value::parse(many.as_bytes()), Err(JsonError::TooManyValues));
+        assert_eq!(JsonError::TooManyValues.to_string(), "too many values");
     }
 }

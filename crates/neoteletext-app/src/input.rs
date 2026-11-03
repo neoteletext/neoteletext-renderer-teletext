@@ -15,7 +15,7 @@ use std::net::IpAddr;
 
 mod feed;
 
-pub use feed::{Opening, is_live, link_address, open_live, opening};
+pub use feed::{Opening, OpeningError, is_live, link_address, open_live, opening};
 
 /// What to read and how to decode it: the options every `neottx` command
 /// accepts (REQ-CLI-002), free of any argument parser.
@@ -178,7 +178,7 @@ pub fn sandbox(options: &Options, writable: Option<&std::path::Path>) -> Result<
         crate::sandbox::Policy { writable_directory: writable, network: false, readable: &[] },
         options.no_sandbox,
     )
-    .map_err(|message| (exit::INPUT, message))
+    .map_err(|error| (exit::INPUT, error.to_string()))
 }
 
 /// Reads all of an opened file or standard input into a new session.

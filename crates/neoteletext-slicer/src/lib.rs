@@ -66,15 +66,17 @@ mod error_trait {
             impl core::error::Error for $error {}
         )+};
     }
-    error_trait!(crate::raw::GeometryError);
+    error_trait!(crate::raw::GeometryError, crate::Rejection);
 
     #[cfg(test)]
     mod tests {
         const fn is_error<T: core::error::Error>() {}
 
+        // REQ-155: every error type of the crate is an error.
         #[test]
         fn every_error_type_is_an_error() {
             is_error::<crate::raw::GeometryError>();
+            is_error::<crate::Rejection>();
         }
     }
 }

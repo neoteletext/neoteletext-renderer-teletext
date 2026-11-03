@@ -18,7 +18,7 @@ pub fn open(
     proxy: Option<&str>,
     region_named: bool,
 ) -> Result<Box<dyn Source>, Failure> {
-    let address = crate::input::link_address(address).map_err(|message| (exit::USAGE, message))?;
+    let address = crate::input::link_address(address).map_err(|error| (exit::USAGE, error.to_string()))?;
     let program = std::env::current_exe().map_err(|error| (exit::INPUT, error.to_string()))?;
     let mut command = Command::new(program);
     command.arg("fetch").arg(address).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());

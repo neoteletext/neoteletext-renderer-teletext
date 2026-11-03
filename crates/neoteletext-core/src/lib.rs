@@ -103,19 +103,24 @@ mod error_trait {
             impl core::error::Error for $error {}
         )+};
     }
-    error_trait!(crate::packet::PacketError);
+    error_trait!(crate::packet::PacketError, crate::objects::Absent);
     #[cfg(feature = "render")]
-    error_trait!(crate::render::RenderError);
+    error_trait!(crate::render::RenderError, crate::glyphs::FontTableError);
 
     #[cfg(test)]
     mod tests {
         const fn is_error<T: core::error::Error>() {}
 
+        // REQ-155: every error type of the crate is an error.
         #[test]
         fn every_error_type_is_an_error() {
             is_error::<crate::packet::PacketError>();
+            is_error::<crate::objects::Absent>();
             #[cfg(feature = "render")]
-            is_error::<crate::render::RenderError>();
+            {
+                is_error::<crate::render::RenderError>();
+                is_error::<crate::glyphs::FontTableError>();
+            }
         }
     }
 }

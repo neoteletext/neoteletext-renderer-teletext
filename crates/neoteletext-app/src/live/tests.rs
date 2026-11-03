@@ -89,7 +89,7 @@ fn link(address: &str) -> String {
 /// scheme in either case, and nothing else.
 #[test]
 fn a_link_from_outside_unwraps_to_its_address() {
-    use crate::input::{is_live, link_address};
+    use crate::input::{OpeningError, is_live, link_address};
     let https = link("https://a.example/demo/");
     assert_eq!(link_address(&https), Ok("https://a.example/demo/"));
     let http = link("http://a.example/demo/?id=7");
@@ -105,7 +105,8 @@ fn a_link_from_outside_unwraps_to_its_address() {
         &format!("{LINK_SCHEME}https://a.example/"),
         "wss://a.example/",
     ] {
-        assert!(link_address(&link(refused)).is_err(), "{refused}");
+        // REQ-155: the refusal is its variant of an error enumeration.
+        assert_eq!(link_address(&link(refused)), Err(OpeningError::LinkWrapsNoWebAddress), "{refused}");
     }
     assert!(is_live(&https));
     assert!(
@@ -189,7 +190,7 @@ fn a_page_file_fills_only_its_page() {
 /// rest; a service's descriptor and a channel's own file name no place.
 #[test]
 fn an_address_says_where_a_viewer_opens() {
-    use crate::input::{Opening, opening};
+    use crate::input::{Opening, OpeningError, link_address, opening};
     use neoteletext_core::types::{PageAddress, SubCode};
     use neoteletext_web::channel::SETTINGS_FILE;
     let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
@@ -221,7 +222,10 @@ fn an_address_says_where_a_viewer_opens() {
         &format!("https://a.example/home/{SETTINGS_FILE}#302"),
         &link("https://a.example/home/#WALL"),
     ] {
-        assert!(opening(address).is_err(), "{address}");
+        // REQ-155: the refusal is its variant of an error enumeration.
+        // A link is refused for the address it wraps.
+        let refused = link_address(address).unwrap().to_owned();
+        assert_eq!(opening(address), Err(OpeningError::NotAChannelAddress(refused)), "{address}");
     }
 }
 
