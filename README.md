@@ -8,6 +8,13 @@ target/release/neottx show recording.t42 100
 target/release/neottx view zxnet:teefax
 ```
 
+While changing the code, build with the `iterate` profile instead: release optimisation without link-time optimisation, built incrementally, so an edit rebuilds in 2.7 seconds (to the program) or 3.6 seconds (to the core), against 76 seconds for `--release` (measured on 14 October 2026). `neoteletext-common/DEVELOPMENT.md` section 2.2 says how it is used.
+
+```sh
+cargo build --profile iterate -p neoteletext-cli
+target/iterate/neottx show recording.t42 100
+```
+
 A windowed browser built on the engine, with tabs, channels and a tuning screen, is maintained in the separate neoteletext-browser repository (decision E.76).
 
 Each crate's optional parts are Cargo features, on by default, so a port or a smaller `neottx` compiles in only what it uses. The features are listed in the user guide and the porting guide. The decoder's capabilities from the later teletext levels are features too: the recommended `modern-classic` profile keeps those that preserve teletext's look or make it more usable, and switches off those that would dilute it, such as colour bitmap characters, the 32-colour palette and animation ([docs/spec/design/capabilities.md](docs/spec/design/capabilities.md)).
@@ -20,7 +27,8 @@ Each crate's optional parts are Cargo features, on by default, so a port or a sm
 | [docs/spec/design/porting.md](docs/spec/design/porting.md) | Writing a port of the library for a new display or device. |
 | [docs/spec/design/font-security.md](docs/spec/design/font-security.md) | The security analysis of the font strategy: one compiled font, other BDF fonts loaded when the user names them. |
 | [docs/spec/design/capabilities.md](docs/spec/design/capabilities.md) | The compile-time capability features and the modern-classic profile: what keeps teletext's distinctive look and is kept, and what would dilute it and is switched off. |
-| [docs/spec/](docs/spec/README.md) | The specification: requirements, decisions, design and open questions. |
+| [docs/spec/](docs/spec/README.md) | The design documents, glossary and sources. The requirements, decisions and open questions are in rdm. |
+| `neoteletext-common/PROTOCOL.html`, DOC-2182 and DOC-2183 | How teletext came to have its G0 and G2 character sets, and how a page's sets, glyphs and stand-ins work together; DOC-2028 holds every set's code table. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The layers, their boundaries and allowed dependencies. |
 | [THREAT-MODEL.md](THREAT-MODEL.md), [SECURITY.md](SECURITY.md) | Security design and reporting. |
 | [docs/spec/module-sources.md](docs/spec/module-sources.md) | Where test data and live feeds come from. |
