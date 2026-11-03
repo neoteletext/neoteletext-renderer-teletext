@@ -37,6 +37,7 @@ impl Frame<'_> {
             slot: 0,
             designation: None,
             passive: Attrs::PASSIVE,
+            last_write: None,
         }
     }
 

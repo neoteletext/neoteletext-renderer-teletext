@@ -140,6 +140,7 @@ impl<'s> Walker<'_, 's> {
             slot,
             designation: None,
             passive: Attrs::PASSIVE,
+            last_write: None,
         })
     }
 }
