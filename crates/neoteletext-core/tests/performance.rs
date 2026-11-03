@@ -195,6 +195,69 @@ fn row_renderer_cost_with_a_loaded_font() {
     }
 }
 
+/// REQ-125, REQ-FNT-005 (TODO-1134): the row renderer's cost with a user
+/// font for each character set, beside the compiled font alone and a font
+/// in use. A page of printable ASCII in the English option fills rows 1 to
+/// 24, so needs no corpus. A font for the page's own set is found through
+/// `font_set_of` after the font in use, so the last case, a font in use
+/// that lacks the page's letters, makes every cell look in both fonts.
+#[test]
+#[ignore = "measurement; run in release mode"]
+fn row_renderer_cost_with_per_set_fonts() {
+    use neoteletext_core::acq::MagazineData;
+    let config = Config::default();
+    let mut page = StoredPage::EMPTY;
+    page.state = neoteletext_core::fsm::PageState::Complete;
+    let printable = 0x20u8..0x7F;
+    for (row, cells) in page.cells.iter_mut().enumerate().take(25).skip(1) {
+        for (column, cell) in cells.iter_mut().enumerate() {
+            let code = printable.start + u8::try_from((row + column) % printable.len()).unwrap();
+            *cell = neoteletext_core::ecc::with_odd_parity(code);
+        }
+        page.rows_received |= 1 << row;
+    }
+    page.parity_ok = [u64::MAX; 26];
+    page.ever_good = [u64::MAX; 26];
+    let mut grid = Grid::EMPTY;
+    build_grid(&mut grid, Some(&page), &MagazineData::default(), &config, &DisplayOptions::default());
+    let table: Vec<FontGlyph> = (0x20u32..0x7F)
+        .map(|code_point| FontGlyph::small(code_point, [u16::try_from(code_point).unwrap(); CELL_FIELD_LINES]))
+        .collect();
+    // One glyph the page never uses, so the font in use finds none of its letters.
+    let lacking = [FontGlyph::small(u32::from('\u{00A3}'), [1; CELL_FIELD_LINES])];
+    let font = LoadedFont::new(&table).unwrap();
+    let english = neoteletext_core::glyphs::conformance::font_set_of(neoteletext_core::charset::CharSet::G0(
+        neoteletext_core::charset::G0 {
+            set: neoteletext_core::charset::G0Set::Latin,
+            national: Some(neoteletext_core::charset::NationalOption::English),
+        },
+    ))
+    .unwrap();
+    let mut by_set = [None; FONT_SET_COUNT];
+    by_set[english] = Some(font);
+    let cases = [
+        ("compiled font only", GlyphSet::noto_teletext()),
+        ("font in use", GlyphSet::noto_teletext().with_fonts(Some(font), [None; FONT_SET_COUNT])),
+        ("font for the page's set", GlyphSet::noto_teletext().with_fonts(None, by_set)),
+        (
+            "font in use lacking the letters, then the set's font",
+            GlyphSet::noto_teletext().with_fonts(Some(LoadedFont::new(&lacking).unwrap()), by_set),
+        ),
+    ];
+    let options = RenderOptions::from_config(&config, false);
+    let mut pixels = vec![0u8; PAGE_WIDTH * 500];
+    for (name, glyphs) in cases {
+        let rounds = 2000;
+        let start = Clock::now();
+        for _ in 0..rounds {
+            let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut pixels, stride: PAGE_WIDTH };
+            render_screen(&grid, ALL_ROWS, &glyphs, options, &mut buffer).unwrap();
+        }
+        let rate = f64::from(rounds) / start.elapsed().as_secs_f64();
+        println!("whole screens rendered per second ({name}, palette mode, 8 bits): {rate:.0}; {}", pixels[0]);
+    }
+}
+
 /// REQ-TST-019: the time to build the worst-case page of the object tests
 /// at Level 3.5.
 #[test]
