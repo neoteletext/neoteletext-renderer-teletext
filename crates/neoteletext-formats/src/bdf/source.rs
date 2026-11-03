@@ -106,6 +106,12 @@ struct Header<'a> {
 
 /// Reads a source font into `glyphs`, which must have room for every
 /// character (4,096 is always enough).
+///
+/// # Errors
+/// [`FontError`], with the line at fault (0 for the file as a whole) and
+/// its [`FontErrorKind`]: the file breaks the source profile of REQ-FNT-010
+/// (too large, not BDF, a cell it does not convert, a glyph outside its
+/// cell, more than one bit a pixel, among the kinds).
 pub fn read_source<'a>(bytes: &'a [u8], glyphs: &mut [SourceGlyph]) -> Result<SourceFont<'a>, FontError> {
     if bytes.len() > SOURCE_FONT_MAX_FILE_BYTES {
         return Err(FontError { line: 0, kind: FontErrorKind::TooLarge });

@@ -56,6 +56,11 @@ pub struct MapError {
 /// character, the code as the font's `ENCODING` writes it, in decimal.
 /// Empty lines are allowed. Returns how many pairs `pairs` holds; a code
 /// given twice is refused.
+///
+/// # Errors
+/// [`MapError`] naming the line at fault: line 0 for a file larger than
+/// `FONT_MAP_MAX_FILE_BYTES` or more pairs than `pairs` holds, otherwise a
+/// line that is not `code<TAB>U+XXXX` or repeats a code.
 pub fn read_map(text: &[u8], pairs: &mut [(u32, u32)]) -> Result<usize, MapError> {
     if text.len() > FONT_MAP_MAX_FILE_BYTES {
         return Err(MapError { line: 0 });
@@ -92,6 +97,14 @@ pub fn read_map(text: &[u8], pairs: &mut [(u32, u32)]) -> Result<usize, MapError
 /// Converts the glyphs of `font` into `out`, sorted by code point, and
 /// returns how many there are. `map` gives the code points of a font not
 /// in ISO10646; it is ignored for one that is.
+///
+/// # Errors
+/// [`ConvertError::Cell`] when the font's cell has no exact conversion,
+/// [`ConvertError::Unmapped`] for a character of a font not in ISO10646
+/// that the map does not name, [`ConvertError::NotScalar`] for a code point
+/// that is not a Unicode scalar value, [`ConvertError::Repeated`] when two
+/// characters give one code point, and [`ConvertError::TooMany`] for more
+/// characters than `out` or REQ-FNT-002 allows.
 pub fn convert(
     font: &SourceFont<'_>,
     glyphs: &[SourceGlyph],

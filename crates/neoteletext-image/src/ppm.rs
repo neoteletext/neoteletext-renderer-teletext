@@ -27,6 +27,9 @@ const MAX_SAMPLE: &[u8] = b"255";
 /// Writes a `width` by `height` image of palette indices as P6. `palette`
 /// is the 144 colours of the palette mode or the 32 of a Colour Map
 /// (REQ-RND-030); an index beyond it takes the fill colour.
+///
+/// # Errors
+/// The sink's error, when it fails.
 pub fn write<S: Sink>(
     sink: &mut S,
     indices: &[u8],

@@ -247,7 +247,8 @@ fn palette_mode_is_refused_where_it_cannot_draw() {
     assert!(!refused(&grid));
 }
 
-/// REQ-RND-036, decisions E.47 and E.48: invert, then flash, then conceal,
+/// REQ-389 (REQ-RND-016), the cell raster primitive, and REQ-RND-036,
+/// decisions E.47 and E.48: invert, then flash, then conceal,
 /// for every combination, in both phases. Red on blue; the slow rate is on
 /// in unit 0 and off in unit 9.
 #[test]

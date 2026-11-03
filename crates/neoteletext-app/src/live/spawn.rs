@@ -11,6 +11,11 @@ use std::sync::mpsc;
 
 /// Starts the fetcher process for `address`. Must run before sandboxing:
 /// starting a program is blocked afterwards.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// for a link that wraps no web address, or when the fetcher program cannot
+/// be found or started.
 pub fn open(
     address: &str,
     no_sandbox: bool,
@@ -18,7 +23,7 @@ pub fn open(
     proxy: Option<&str>,
     region_named: bool,
 ) -> Result<Box<dyn Source>, Failure> {
-    let address = crate::input::link_address(address).map_err(|message| (exit::USAGE, message))?;
+    let address = crate::input::link_address(address).map_err(|error| (exit::USAGE, error.to_string()))?;
     let program = std::env::current_exe().map_err(|error| (exit::INPUT, error.to_string()))?;
     let mut command = Command::new(program);
     command.arg("fetch").arg(address).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());

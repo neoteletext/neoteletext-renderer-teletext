@@ -126,6 +126,8 @@ mod tests {
         items
     }
 
+    /// REQ-174 (REQ-INP-010): Linux sliced data records are read in both
+    /// byte orders.
     #[test]
     fn reads_teletext_records_in_both_byte_orders() {
         for order in [ByteOrder::Little, ByteOrder::Big] {

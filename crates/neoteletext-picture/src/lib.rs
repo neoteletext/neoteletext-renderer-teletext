@@ -71,6 +71,11 @@ impl Page {
     /// The page as T42 packets, in the order of Annex B of EN 300 706: the
     /// TTI text read back by the engine's own TTI reader and encoded by its
     /// T42 writer, so the packets are the ones any engine program would send.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::T42`], with the reason, when the engine's TTI reader or T42
+    /// writer refuses the page.
     pub fn t42(&self) -> Result<Vec<u8>, Error> {
         tti::to_t42(&self.tti)
     }
@@ -80,6 +85,22 @@ impl Page {
 ///
 /// The options are checked first ([`Options::check`]); then the picture is
 /// decoded, fitted to the page and encoded.
+///
+/// # Errors
+///
+/// - [`Error::Conflict`] when two options contradict each other;
+/// - [`Error::InputTooLarge`] when the file is larger than
+///   [`MAX_INPUT_BYTES`];
+/// - [`Error::Decode`] when the bytes are none of the five formats, or their
+///   decoder refuses them;
+/// - [`Error::PictureTooLarge`] when the picture passes [`MAX_SIDE`] on a
+///   side or would need more than [`MAX_DECODE_BYTES`] to decode;
+/// - [`Error::CropOutside`] when the crop region falls outside the picture;
+/// - [`Error::PixelArtTooLarge`] when pixel art is larger than the sixels
+///   the page draws;
+/// - [`Error::NoChangeCostFits`] and [`Error::TooManyObjectSubpages`] when,
+///   at Levels 2.5 and 3.5, the page's enhancement triplets cannot be made to
+///   fit.
 pub fn convert(bytes: &[u8], options: &Options) -> Result<Page, Error> {
     options.check()?;
     let picture = decode::decode(bytes, options)?;

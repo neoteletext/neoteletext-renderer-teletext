@@ -13,12 +13,22 @@ use super::{MAX_TRANSITIONS, Slicer, Work, check_address};
 
 impl Slicer {
     /// Slices one line.
+    ///
+    /// # Errors
+    /// The line gave no packet: [`Rejection::NoSignal`] when no run-in is in
+    /// the search window, [`Rejection::BelowGate`] when its amplitude or
+    /// match is below the configured minimum, [`Rejection::NoFramingCode`]
+    /// when no acceptable framing code follows, and [`Rejection::BadAddress`]
+    /// when the packet address is uncorrectable. Each is counted.
     pub fn slice(&mut self, line: &Line<'_>) -> Result<Sliced, Rejection> {
         self.slice_traced(line, |_| {})
     }
 
     /// Slices one line, passing each transition to `trace` when tracing is
     /// on in the settings (REQ-FSM-010).
+    ///
+    /// # Errors
+    /// As [`Slicer::slice`].
     pub fn slice_traced<F: FnMut(TraceEntry)>(&mut self, line: &Line<'_>, mut trace: F) -> Result<Sliced, Rejection> {
         let mut state = SlicerState::Start;
         let mut work = Work::new();

@@ -187,6 +187,26 @@ impl core::fmt::Display for RunFault {
     }
 }
 
+// REQ-GEN-011: errors are enumerations implementing `core::error::Error`.
+// The writer needs an allocator, so `core::fmt` costs it nothing here, and
+// these impls need no feature, as `WriteError`'s do not.
+impl core::error::Error for RunFault {}
+
+impl core::fmt::Display for RunError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.run {
+            Some(run) => write!(formatter, "run {run}: {}", self.fault),
+            None => write!(formatter, "the page: {}", self.fault),
+        }
+    }
+}
+
+impl core::error::Error for RunError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(&self.fault)
+    }
+}
+
 /// Which way a language is written.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Direction {

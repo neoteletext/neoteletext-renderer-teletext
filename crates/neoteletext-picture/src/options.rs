@@ -251,6 +251,11 @@ const BLACK: Rgb8 = [0; 3];
 
 impl Options {
     /// Refuses the combinations that contradict each other.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Conflict`], naming the contradiction, when two options
+    /// contradict each other (REQ-2336).
     pub fn check(&self) -> Result<(), Error> {
         let refused = if self.hold_mosaics && self.level.is_enhanced() {
             Some("hold mosaics is for Levels 1 and 1.5")

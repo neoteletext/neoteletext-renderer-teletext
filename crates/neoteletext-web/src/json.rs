@@ -60,6 +60,11 @@ impl<'a> JsonStr<'a> {
 
     /// Decodes the string as UTF-8 into `output`, returning its length.
     /// The escapes were validated when the string was read.
+    ///
+    /// # Errors
+    /// [`Overflow`] when the decoded string does not fit in `output`; the
+    /// part that fitted stays written. An `output` of [`Self::raw_len`]
+    /// bytes always holds it.
     pub fn decode_into(&self, output: &mut [u8]) -> Result<usize, Overflow> {
         let mut written = 0usize;
         let mut index = 0usize;
@@ -174,6 +179,10 @@ pub struct JsonReader<'a> {
 impl<'a> JsonReader<'a> {
     /// A reader over `input`, which must be valid UTF-8 (RFC 8259 section
     /// 8.1).
+    ///
+    /// # Errors
+    /// A [`JsonError`] of kind [`JsonErrorKind::Encoding`] when `input` is
+    /// not valid UTF-8, with the offset of the first byte that is not.
     pub fn new(input: &'a [u8]) -> Result<Self, JsonError> {
         core::str::from_utf8(input)
             .map_err(|error| JsonError { offset: error.valid_up_to(), kind: JsonErrorKind::Encoding })?;
@@ -226,6 +235,22 @@ impl<'a> JsonReader<'a> {
     }
 
     /// The next token, `None` at the end of a complete document.
+    ///
+    /// # Errors
+    /// A [`JsonError`] giving the byte offset of the fault and its kind:
+    /// - [`JsonErrorKind::Unexpected`] for a byte that cannot start or
+    ///   continue the token expected there;
+    /// - [`JsonErrorKind::Truncated`] when the input ends inside a value;
+    /// - [`JsonErrorKind::BadString`] for a bad escape, a control character
+    ///   or an unpaired surrogate in a string;
+    /// - [`JsonErrorKind::BadNumber`] for a number outside the grammar of
+    ///   RFC 8259 section 6;
+    /// - [`JsonErrorKind::TooDeep`] for nesting deeper than
+    ///   [`MAX_JSON_DEPTH`] levels;
+    /// - [`JsonErrorKind::TrailingData`] for anything but white space after
+    ///   the top-level value.
+    ///
+    /// The document is to be abandoned after an error.
     pub fn next_token(&mut self) -> Result<Option<Token<'a>>, JsonError> {
         loop {
             self.skip_whitespace();
@@ -436,6 +461,11 @@ impl<'a> JsonReader<'a> {
 
     /// Skips the value whose first token was just returned (`first`), so a
     /// member the caller does not use costs no more than reading it.
+    ///
+    /// # Errors
+    /// Any error of [`Self::next_token`] met inside the skipped value, and
+    /// [`JsonErrorKind::Truncated`] when the document ends before the value
+    /// closes.
     pub fn skip(&mut self, first: Token<'a>) -> Result<(), JsonError> {
         if !matches!(first, Token::BeginObject | Token::BeginArray) {
             return Ok(());

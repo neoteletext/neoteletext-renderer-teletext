@@ -1,4 +1,4 @@
-//! The user agent driven through the in-memory replay transport
+//! Tests of the user agent driven through the in-memory replay transport
 //! (REQ-WEB-001, REQ-WEB-013's exact replay), including channels
 //! (REQ-WEB-018, REQ-WEB-019, REQ-WEB-024, REQ-WEB-026, REQ-WEB-027) and
 //! redirects within a channel (REQ-WEB-021).
@@ -604,7 +604,7 @@ fn no_downgrade_after_https() {
     assert!(!harness.replay().connects.iter().any(|(_, _, port, _)| *port == 80));
 }
 
-/// Finding F-43 (decision E.114 item 3): when the memory of hosts reached
+/// REQ-420 (REQ-SEC-007), finding F-43 (decision E.114 item 3): when the memory of hosts reached
 /// over HTTPS is full, the host least recently seen is forgotten, so the
 /// rule against downgrade holds for the hosts in use. The memory filled
 /// silently, and the 33rd host was never remembered.

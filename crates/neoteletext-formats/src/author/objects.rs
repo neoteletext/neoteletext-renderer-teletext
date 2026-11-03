@@ -122,6 +122,10 @@ impl ObjectPage {
 
     /// Defines the next object of a type on sub-page `s1`, and returns the
     /// reference that invokes it.
+    ///
+    /// # Errors
+    /// [`AuthorError::TooManyObjects`] when the sub-page already holds the
+    /// 32 objects of the type, and [`Self::define_at`]'s other errors.
     pub fn define(&mut self, s1: u8, kind: ObjectKind, usage: ObjectUsage, body: Triplets) -> Result<ObjectRef> {
         let index = (0..OBJECTS_PER_TYPE)
             .find(|&index| {
@@ -135,6 +139,12 @@ impl ObjectPage {
 
     /// Defines an object with a chosen index (0 to 31) among its type on
     /// sub-page `s1`.
+    ///
+    /// # Errors
+    /// [`AuthorError::BadSubPage`] for `s1` above 15,
+    /// [`AuthorError::TooManyObjects`] for an index above 31 or one already
+    /// used, and [`AuthorError::UnknownLocalObject`] when the body invokes a
+    /// Local Object, which a public object cannot.
     pub fn define_at(
         &mut self,
         s1: u8,
@@ -170,6 +180,13 @@ impl ObjectPage {
     }
 
     /// The page files, one per sub-page in ascending S1 (Figure 19).
+    ///
+    /// # Errors
+    /// [`AuthorError::ObjectSubPageFull`] when a sub-page's objects need more
+    /// than its 507 definition triplets, [`AuthorError::BadPosition`] for a
+    /// pointer override outside the pointer table, and
+    /// [`AuthorError::PageFull`] when the packets need more lines than a page
+    /// file keeps.
     pub fn build(&self) -> Result<Vec<PageFile>> {
         let last = self.subpages.keys().next_back().copied();
         self.subpages.iter().map(|(&s1, sub)| self.build_subpage(s1, sub, Some(s1) == last)).collect()

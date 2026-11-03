@@ -58,6 +58,11 @@ impl GeometryChoice {
 /// parts `choice` gives replaced, and writes the packets found to `output`
 /// as T42. A geometry the reader cannot use is refused with the usage
 /// status. Returns the slicer's quality statistics.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// for a preset or a geometry the reader cannot use, an input or output
+/// that cannot be opened, or a sandbox that cannot be applied.
 pub fn slice(options: &Options, output: &Path, preset: &str, choice: &GeometryChoice) -> Result<Counters, Failure> {
     let preset = match preset {
         "bt8x8" => Preset::Bt8x8,

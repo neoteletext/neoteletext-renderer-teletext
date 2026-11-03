@@ -93,6 +93,22 @@ impl FrameReader {
     /// Feeds bytes. Returns the bytes used and, when a message or control
     /// frame completed, what it was. Data messages are assembled in
     /// `message`, whose length is the message size limit.
+    ///
+    /// # Errors
+    /// Each error ends the connection, closed with
+    /// [`WsError::close_code`]:
+    /// - [`WsError::Protocol`] for a frame that breaks RFC 6455 section 5: a
+    ///   masked server frame, a reserved bit set, an unknown opcode, a length
+    ///   not in its minimal form or with its top bit set, a control frame
+    ///   fragmented or longer than [`WS_CONTROL_MAX`], a data frame inside an
+    ///   unfinished message, a continuation with no message begun, a close
+    ///   payload of one byte, or a close code reserved for use outside
+    ///   frames (RFC 6455 section 7.4.1);
+    /// - [`WsError::TooBig`] for a data message longer than `message`, unless
+    ///   the reader was made by [`FrameReader::skipping_oversized`], which
+    ///   skips it instead;
+    /// - [`WsError::InvalidText`] for a text message, or a close frame's
+    ///   reason, that is not UTF-8 (RFC 6455 section 8.1).
     pub fn feed(&mut self, message: &mut [u8], input: &[u8]) -> Result<(usize, Option<WsMessage>), WsError> {
         let mut used = 0usize;
         loop {

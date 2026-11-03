@@ -106,6 +106,9 @@ impl Mot {
 
     /// Object link `number` of a level: 0 is the GPOP link, 1 to 7 the POP
     /// links (Table 20).
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for a link number above 7.
     pub fn object_link(&mut self, level: MotLevel, number: usize, link: MotObjectLink) -> Result<&mut Self> {
         for &index in level.indices() {
             let links = self.levels.get_mut(index).ok_or(AuthorError::BadPosition)?;
@@ -134,6 +137,11 @@ impl Mot {
     /// The page file. Packets X/1 to X/14 are sent where they hold a byte
     /// pair; the link packets of a level are sent where that level has any
     /// link or totals. Unset links are coded with page FF, "not used".
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] when an entry or a link falls outside the
+    /// table's packets, and [`AuthorError::PageFull`] when the packets need
+    /// more lines than a page file keeps.
     pub fn build(&self) -> Result<Box<PageFile>> {
         let mut rows: BTreeMap<u8, [u8; DATA_BYTES]> = BTreeMap::new();
         for (&page, &entry) in &self.entries {

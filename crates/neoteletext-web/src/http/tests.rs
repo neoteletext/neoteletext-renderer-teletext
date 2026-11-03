@@ -85,6 +85,9 @@ fn framing_rules() {
     assert!(head(b"HTTP/1.0 200 OK\r\nContent-Length: 1\r\n\r\n").unwrap().close);
 }
 
+/// REQ-424 (REQ-SEC-011): responses whose framing is ambiguous are
+/// rejected (both a length and chunked encoding, conflicting lengths,
+/// folded headers), and so are compressed ones.
 #[test]
 fn framing_attacks_are_rejected() {
     let cases: [(&[u8], HttpError); 13] = [
@@ -126,6 +129,7 @@ fn a_head_with_bytes_after_it_is_rejected() {
     assert_eq!(head(b"HTTP/1.1 200 OK\r\n").map(|h| h.status), Err(HttpError::Malformed));
 }
 
+/// REQ-424 (REQ-SEC-011): the number of headers is limited.
 #[test]
 fn header_count_limit() {
     let mut text = [0u8; 2048];
@@ -191,6 +195,7 @@ fn chunked_bodies() {
     }
 }
 
+/// REQ-424 (REQ-SEC-011): an invalid chunk size is rejected.
 #[test]
 fn bad_chunks_are_rejected() {
     let cases: [&[u8]; 8] = [

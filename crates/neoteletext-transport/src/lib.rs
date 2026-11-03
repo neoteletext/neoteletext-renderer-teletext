@@ -39,7 +39,7 @@ mod reach;
 mod tls;
 
 pub use connection::{Connection, SOCKET_READ, write_records};
-pub use reach::{CONNECT_TIMEOUT, connect_within_limit, first_address, open_tunnel, web_address};
+pub use reach::{CONNECT_TIMEOUT, ReachError, connect_within_limit, first_address, open_tunnel, web_address};
 pub use tls::{TlsFailure, client_config, mozilla_roots, start_tls};
 
 #[cfg(test)]

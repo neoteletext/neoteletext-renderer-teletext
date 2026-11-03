@@ -227,7 +227,7 @@ mod run {
         if !input::is_live(&options.input) {
             return Err((exit::USAGE, format!("{:?} is not the address of a channel", options.input)));
         }
-        let opening = input::opening(&options.input).map_err(|message| (exit::USAGE, message))?;
+        let opening = input::opening(&options.input).map_err(|error| (exit::USAGE, error.to_string()))?;
         let (mut session, source) = input::open_live(options)?;
         session.keep(neoteletext_input::is_input_packet);
         sandbox_closed(options.no_sandbox)?;

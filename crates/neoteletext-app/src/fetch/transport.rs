@@ -58,7 +58,7 @@ impl StdTransport {
     /// first bytes when the proxy's answer brought them.
     fn reach(&self, host: &str, port: u16) -> Result<(TcpStream, IpAddr, Vec<u8>), String> {
         let (socket, early) = if let Some(proxy) = &self.proxy {
-            open_tunnel(proxy, host, port)?
+            open_tunnel(proxy, host, port).map_err(|error| error.to_string())?
         } else {
             let candidates: Vec<SocketAddr> =
                 (host, port).to_socket_addrs().map_err(|error| format!("{host}: {error}"))?.collect();
@@ -66,7 +66,7 @@ impl StdTransport {
                 .iter()
                 .find(|address| !web_address(address.ip()).is_blocked() || self.allowed_local.contains(&address.ip()))
                 .ok_or_else(|| format!("{host}: every address is on a blocked local network (REQ-SEC-006)"))?;
-            (connect_within_limit(allowed, host)?, Vec::new())
+            (connect_within_limit(allowed, host).map_err(|error| error.to_string())?, Vec::new())
         };
         socket.set_nodelay(true).map_err(|error| error.to_string())?;
         let peer = socket.peer_addr().map_err(|error| error.to_string())?.ip();

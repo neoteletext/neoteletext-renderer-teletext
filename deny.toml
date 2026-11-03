@@ -25,6 +25,15 @@ unused-allowed-license = "allow"
 crate = "webpki-roots"
 allow = ["CDLA-Permissive-2.0"]
 
+# The fuzz workspace (fuzz/, checked by scripts/check.sh full with this file):
+# libfuzzer-sys bundles LLVM's libFuzzer sources, under the University of
+# Illinois/NCSA licence, permissive and with no copyleft. It is a test tool,
+# linked only into the fuzz targets and never into a shipped program (DEC-2434,
+# waiting for the owner's confirmation).
+[[licenses.exceptions]]
+crate = "libfuzzer-sys"
+allow = ["NCSA"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

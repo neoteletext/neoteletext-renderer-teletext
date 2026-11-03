@@ -1,4 +1,4 @@
-//! REQ-SLC-008 and decision E.24: framing code.
+//! Tests of REQ-SLC-008 and decision E.24: framing code.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
