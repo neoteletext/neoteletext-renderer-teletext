@@ -101,3 +101,55 @@ fn the_sandbox_blocks_files_programs_and_the_network() {
     }
     assert!(run.status.success());
 }
+
+/// A channel's folder for `contents` and `html`: its entry file, a good page,
+/// and a page file whose bytes fail the check for its format, which only
+/// parsing finds.
+fn channel_in(name: &str) -> PathBuf {
+    let folder = folder(name);
+    fs::write(folder.join("channel.ttx"), r#"{"name":"Sandboxed","initial_page":"100"}"#).unwrap();
+    fs::write(folder.join("100.tti"), PAGE).unwrap();
+    fs::write(folder.join("101.tti"), "[% INCLUDE header %]\n").unwrap();
+    folder
+}
+
+// Verifies REQ-430: `contents` and `html` read every file of the folder
+// first, then apply the sandbox, and only then check or decode a byte of
+// them, so the bad page is reported after the sandbox's message. Before,
+// they decoded the folder and then applied the sandbox, so the bad page was
+// reported first (seen failing on that code).
+#[test]
+fn a_channel_folder_is_parsed_only_after_the_sandbox() {
+    let folder = channel_in("sandbox-folder-order");
+    let path = text(&folder);
+    for arguments in [
+        vec!["contents", path, "--no-sandbox"],
+        vec!["html", path, "--address", "https://h.example/news/", "--no-sandbox"],
+    ] {
+        let run = neottx(&arguments);
+        let said = String::from_utf8_lossy(&run.stderr);
+        let sandboxed = said.find(UNSANDBOXED);
+        let parsed = said.find("101.tti: skipped: not a TTI page file");
+        assert!(sandboxed.is_some() && parsed.is_some(), "{arguments:?}: {said}");
+        assert!(sandboxed < parsed, "{arguments:?} parsed before the sandbox: {said}");
+    }
+}
+
+// Verifies REQ-430 on Linux, where the sandbox is applied: `contents` and
+// `html` still read the folder they opened before it, and `html` still
+// writes into it.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_channel_folder_is_read_under_the_sandbox() {
+    let folder = channel_in("sandbox-folder-applied");
+    let path = text(&folder);
+    let contents = neottx(&["contents", path]);
+    let said = String::from_utf8_lossy(&contents.stderr);
+    assert!(!said.contains("cannot apply"), "{said}");
+    assert!(String::from_utf8_lossy(&contents.stdout).contains("p\t100\tSANDBOXED"), "{said}");
+    let html = neottx(&["html", path, "--address", "https://h.example/news/"]);
+    let said = String::from_utf8_lossy(&html.stderr);
+    assert!(!said.contains("cannot apply"), "{said}");
+    assert!(fs::read_to_string(folder.join("index.html")).unwrap().contains("Sandboxed"), "{said}");
+    assert!(folder.join("100/index.html").exists());
+}

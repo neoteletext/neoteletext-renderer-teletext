@@ -1,10 +1,11 @@
 //! `neottx contents FOLDER` (REQ-CLI-008, decision E.70 item 9): writes a
 //! channel's `contents.txt` from the author's own folder of page files.
 //!
-//! The folder is listed and its files read and decoded first; then the
-//! sandbox is applied, as for every other command (REQ-SEC-017), and the
-//! titles are taken from the decoded pages. Nothing is written but
-//! standard output and standard error.
+//! The folder is listed and its files read, each within its bound, first;
+//! then the sandbox is applied, as for every other command (REQ-SEC-017),
+//! and only then is a byte of them checked or decoded, and the titles taken
+//! from the decoded pages. Nothing is written but standard output and
+//! standard error.
 //!
 //! A page's folder belongs to the channel (REQ-1885): a page held only there
 //! is found from its lowest sub-page's file. Any other folder is a channel of
@@ -41,7 +42,24 @@ pub(super) struct Found {
     pub file: usize,
 }
 
-/// A channel's folder, read and decoded before the sandbox.
+/// A file of a channel's folder, read within its bound before the sandbox
+/// and not yet looked at (REQ-SEC-017).
+struct Unparsed {
+    path: PathBuf,
+    file: ChannelFile,
+    modified: Option<SystemTime>,
+    bytes: Vec<u8>,
+}
+
+/// A channel's folder, its files read before the sandbox; [`decode_folder`]
+/// parses them after it.
+pub(super) struct ReadFolder {
+    files: Vec<Unparsed>,
+    wanted: fn(PageAddress) -> bool,
+    skipped: usize,
+}
+
+/// A channel's folder, decoded under the sandbox.
 pub(super) struct Folder {
     /// Its page files and bundle.
     pub loaded: Vec<Loaded>,
@@ -50,7 +68,7 @@ pub(super) struct Folder {
     skipped: usize,
 }
 
-/// A file of the folder, read and decoded before the sandbox.
+/// A file of the folder, decoded under the sandbox.
 pub(super) struct Loaded {
     path: PathBuf,
     /// The page its name gives; `None` for `index.t42`.
@@ -129,18 +147,25 @@ const fn largest(file: ChannelFile) -> usize {
     }
 }
 
-/// Reads and decodes one file of the folder; `None`, with a diagnostic,
-/// when it cannot be read, is larger than it may be, or fails the check for
-/// its format (REQ-WEB-027, REQ-1904).
-fn load(options: &Options, path: &Path, file: ChannelFile, modified: Option<SystemTime>) -> Option<Loaded> {
-    let report = |why: &str| eprintln!("neottx: {}: skipped: {why}", path.display());
-    let bytes = match read_bounded(path, largest(file)) {
-        Ok(bytes) => bytes,
+/// Reads one file of the folder within its bound, before the sandbox; `None`,
+/// with a diagnostic, when it cannot be read or is larger than it may be
+/// (REQ-1904).
+fn read_file(path: &Path, file: ChannelFile, modified: Option<SystemTime>) -> Option<Unparsed> {
+    match read_bounded(path, largest(file)) {
+        Ok(bytes) => Some(Unparsed { path: path.to_path_buf(), file, modified, bytes }),
         Err((_, message)) => {
-            report(&message);
-            return None;
+            eprintln!("neottx: {}: skipped: {message}", path.display());
+            None
         }
-    };
+    }
+}
+
+/// Checks and decodes one file read before the sandbox; `None`, with a
+/// diagnostic, when it fails the check for its format (REQ-WEB-027) or
+/// cannot be decoded.
+fn decode(options: &Options, unparsed: Unparsed) -> Option<Loaded> {
+    let Unparsed { path, file, modified, bytes } = unparsed;
+    let report = |why: &str| eprintln!("neottx: {}: skipped: {why}", path.display());
     let (page, t42) = match file {
         ChannelFile::Page { page, t42 } | ChannelFile::SubPage { page, t42, .. } => (Some(page), t42),
         _ => (None, true),
@@ -151,14 +176,10 @@ fn load(options: &Options, path: &Path, file: ChannelFile, modified: Option<Syst
         return None;
     }
     let file_options = Options { input: path.to_string_lossy().into_owned(), ..options.clone() };
-    match input::load(&file_options) {
-        Ok(session) => Some(Loaded {
-            path: path.to_path_buf(),
-            page,
-            description: if t42 { None } else { description(&bytes) },
-            modified,
-            session,
-        }),
+    match input::load_from(&file_options, &mut bytes.as_slice()) {
+        Ok(session) => {
+            Some(Loaded { page, description: if t42 { None } else { description(&bytes) }, path, modified, session })
+        }
         Err((_, message)) => {
             report(&message);
             None
@@ -187,10 +208,11 @@ fn first_sub_page(folder: &Path, number: &str) -> Option<(PathBuf, ChannelFile, 
     first
 }
 
-/// Reads and decodes the page files of `wanted` and the bundle of
-/// `options.input`, the channel's folder. Only the folder's own files and its
-/// pages' folders count: any other folder is a channel of its own.
-pub(super) fn read_folder(options: &Options, wanted: fn(PageAddress) -> bool) -> Result<Folder, Failure> {
+/// Reads, without parsing, the page files of `wanted` and the bundle of
+/// `options.input`, the channel's folder, each within its bound. Only the
+/// folder's own files and its pages' folders count: any other folder is a
+/// channel of its own.
+pub(super) fn read_folder(options: &Options, wanted: fn(PageAddress) -> bool) -> Result<ReadFolder, Failure> {
     let folder = Path::new(&options.input);
     let listing = std::fs::read_dir(folder).map_err(|error| io_failure(folder, error))?;
     let mut files: Vec<(PathBuf, ChannelFile, Option<SystemTime>)> = Vec::new();
@@ -226,14 +248,28 @@ pub(super) fn read_folder(options: &Options, wanted: fn(PageAddress) -> bool) ->
         files.extend(first_sub_page(path, &String::from_utf8_lossy(&page.ascii())));
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut read = Folder { loaded: Vec::new(), wanted, skipped: 0 };
+    let mut read = ReadFolder { files: Vec::new(), wanted, skipped: 0 };
     for (path, file, modified) in &files {
-        match load(options, path, *file, *modified) {
-            Some(file) => read.loaded.push(file),
+        match read_file(path, *file, *modified) {
+            Some(unparsed) => read.files.push(unparsed),
             None => read.skipped = read.skipped.saturating_add(1),
         }
     }
     Ok(read)
+}
+
+/// Checks and decodes the files [`read_folder`] read; called under the
+/// sandbox, since this is where outside bytes are first parsed (REQ-SEC-017).
+pub(super) fn decode_folder(options: &Options, read: ReadFolder) -> Folder {
+    let ReadFolder { files, wanted, mut skipped } = read;
+    let mut loaded = Vec::with_capacity(files.len());
+    for unparsed in files {
+        match decode(options, unparsed) {
+            Some(file) => loaded.push(file),
+            None => skipped = skipped.saturating_add(1),
+        }
+    }
+    Folder { loaded, wanted, skipped }
 }
 
 /// The pages `folder` holds that its command wants, each from its page file,
@@ -281,8 +317,9 @@ pub(super) fn skipped_files(folder: &Folder) -> Result<(), Failure> {
 
 /// `neottx contents FOLDER`.
 pub fn contents(options: &Options) -> Result<(), Failure> {
-    let mut folder = read_folder(options, |page| page.page.is_decimal())?;
+    let read = read_folder(options, |page| page.page.is_decimal())?;
     sandbox_closed(options.no_sandbox)?;
+    let mut folder = decode_folder(options, read);
     let pages = pages_of(&mut folder);
     let mut listing = Listing::default();
     let mut magazine = None;
