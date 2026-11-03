@@ -10,7 +10,7 @@
 //! Colour Map travels with the grid to the renderer.
 
 use crate::consts::{
-    CLUT_ENTRIES, CLUT_ENTRY_MASK, CLUT_SHIFT, COLOUR_MAP_DEFAULTS, COLOUR_MAP_ENTRIES, COLOUR_TRANSPARENT,
+    CLUT_ENTRIES, CLUT_ENTRY_MASK, CLUT_SHIFT, COLOUR_MAP_DEFAULTS, COLOUR_MAP_ENTRIES, COLOUR_TRANSPARENT, COLOURS,
     PRIMARY_4_TO_8, REMAPPING_CLUTS, TRIPLET_COLOUR_INDEX_MASK,
 };
 use crate::types::{ColourWords, Rgb12};
@@ -49,6 +49,13 @@ impl ColourMap {
         }
         Self { entries }
     };
+
+    /// The eight colours of CLUT 0: the Level 1 colours, which the
+    /// receiver's own cells take (DEC-2464).
+    #[must_use]
+    pub fn clut0(&self) -> [Rgb12; COLOURS] {
+        core::array::from_fn(|index| self.entries.get(index).copied().unwrap_or_default())
+    }
 
     /// The colour of an index; indices above 31 use their low five bits.
     #[must_use]

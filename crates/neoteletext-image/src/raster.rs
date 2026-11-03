@@ -104,7 +104,7 @@ pub fn raster_zoomed(
     let _ = scale_indices(&indices, width, height, scale.x.max(1), scale.y.max(1), scale.aspect, &mut scaled);
     let palette = match options.colour {
         ColourMode::Palette => palette(&clut0_of(&grid.colour_map), picture, flash_visible, options.reveal).to_vec(),
-        ColourMode::Resolved(_) => colour_map_palette(&grid.colour_map, picture).to_vec(),
+        ColourMode::Resolved(_) => colour_map_palette(&grid.colour_map, &grid.receiver_colours, picture).to_vec(),
     };
     Raster { width: scaled_width, height: scaled_height, indices: scaled, palette }
 }

@@ -2,6 +2,7 @@
 //! field, with documented defaults and named profiles (REQ-ARCH-008, area
 //! PRF). Changing the configuration never requires re-acquiring pages.
 
+use crate::colour::ColourMap;
 use crate::consts::{
     DESIGNATION_LATIN_ENGLISH, FIELD_PERIOD_US, FLASH_FIELDS_HIDDEN, FLASH_FIELDS_SHOWN, MOMENTARY_REVEAL_US,
     NATIONAL_INDEX_MASK, PAGE_COMPLETION_TIMEOUT_US, RomVariantSets, SAA5246A_ROM_VARIANTS,
@@ -270,6 +271,13 @@ pub struct Config {
     /// a row's own codes in another set from its column (DEC-2179,
     /// REQ-2180). Off, the mode is reserved, as EN 300 706 Table 29 has it.
     pub row_set_triplets: bool,
+    /// The user's colours (REQ-RND-005, REQ-RND-030, DEC-2482): a Colour
+    /// Map whose entries replace Table 30's before any page data redefines
+    /// them, and whose CLUT 0 the receiver's own cells take; `None` keeps
+    /// Table 30. A reference to the port's own value, so that a port
+    /// without them pays one pointer, not 64 bytes, in every copy of the
+    /// configuration.
+    pub user_colours: Option<&'static ColourMap>,
 }
 
 /// Flash shown and hidden durations derived from decision E.12's field
@@ -314,6 +322,17 @@ impl Config {
             trace_cells: false,
             status_on_suppressed_header: false,
             row_set_triplets: true,
+            user_colours: None,
+        }
+    }
+
+    /// The colours pages start from: the user's (REQ-RND-005), or Table
+    /// 30's.
+    #[must_use]
+    pub const fn base_colours(&self) -> &ColourMap {
+        match self.user_colours {
+            Some(colours) => colours,
+            None => &ColourMap::DEFAULT,
         }
     }
 

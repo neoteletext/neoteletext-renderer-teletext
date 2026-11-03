@@ -198,6 +198,7 @@ Every command accepts these options. Each one changes a setting that a decision 
 | `--single-start-box` | Accepts a single Start Box code (decision E.17). | Two required |
 | `--dump-repeated-rows` | In a raw screen dump, leaves out a row that repeats, byte for byte, the double-height row above it, as the BBC Microcomputer's mode 7 dumps hold it; teletext ignores the row under a double-height row (REQ-INP-017). | Off |
 | `--variant LETTER` | The SAA5246A's national option ROM variant, E, H, T, J, K, L, I or S: C12 to C14 choose among its sets alone, a combination it lacks gives its default language, and X/28 and M/29 are not read (REQ-PRF-003). | E under `saa5246a`; none otherwise |
+| `--colours LIST` | Your own colours in place of Table 30's, before any page redefines them (REQ-RND-005): up to 32 colours separated by commas, each three hexadecimal digits of red, green and blue, replacing the Colour Map from entry 0. The first eight are the Level 1 colours, which the status area and a row 24 the receiver draws also take; entry 8 stays transparent. For example `--colours 000,F00,0F0,FF0,00F,F0F,0FF,CCC` makes white a light grey. | Table 30's colours |
 | `--pages N` | Pages and sub-pages kept in memory. | 4096 |
 | `-v`, `-vv`, `-vvv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds the state machine trace (REQ-FSM-010); `-vvv` adds each cell's step of the row attribute machine (REQ-FSM-006). | Off |
 

@@ -823,3 +823,20 @@ fn a_prompt_recoloured_by_the_page_is_not_shown() {
     grid.receiver_row_24 = true;
     assert_eq!(grid.prompts_shown(), [true, false, false, false], "the receiver's row keeps its colours");
 }
+
+/// REQ-377 (REQ-RND-005), DEC-2482: with the user's colours, a page's own
+/// prompt drawn in the user's red is a prompt; one the page recoloured
+/// away from it is not.
+#[test]
+fn a_prompt_in_the_users_colours_is_shown() {
+    use crate::consts::COLOUR_RED_BIT;
+    use crate::types::Rgb12;
+    let red = usize::from(COLOUR_RED_BIT);
+    let user_red = Rgb12::new(15, 8, 0);
+    let mut grid = hostile_row(COLOUR_RED_BIT, |_| {});
+    grid.colour_map.entries[red] = user_red;
+    grid.receiver_colours[red] = user_red;
+    assert_eq!(grid.prompts_shown(), [true, false, false, false], "drawn in the user's red");
+    grid.colour_map.entries[red] = crate::colour::ColourMap::DEFAULT.entries[red];
+    assert_eq!(grid.prompts_shown(), [false; 4], "a page that gives it back Table 30's red is not the user's red");
+}

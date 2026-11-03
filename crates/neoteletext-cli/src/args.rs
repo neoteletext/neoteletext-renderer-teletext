@@ -2,7 +2,10 @@
 //! command and option, as clap parses them.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use neoteletext_core::colour::ColourMap;
 use neoteletext_core::config::RomVariant;
+use neoteletext_core::consts::COLOUR_TRANSPARENT;
+use neoteletext_core::types::Rgb12;
 use std::path::PathBuf;
 
 /// neoteletext: a software teletext receiver (ETSI EN 300 706 Levels 1.0, 1.5, 2.5 and 3.5).
@@ -67,6 +70,13 @@ pub struct Common {
     /// saa5246a profile's is E.
     #[arg(long, value_name = "LETTER", value_parser = parse_rom_variant)]
     pub variant: Option<RomVariant>,
+    /// Your own colours in place of Table 30's, before any page redefines
+    /// them (REQ-RND-005): up to 32 colours separated by commas, each three
+    /// hexadecimal digits of red, green and blue, replacing the Colour Map
+    /// from entry 0; the first eight are the Level 1 colours, and entry 8
+    /// stays transparent. For example `000,F00,0F0,FF0,00F,F0F,0FF,CCC`.
+    #[arg(long, value_name = "COLOURS", value_parser = parse_colours)]
+    pub colours: Option<&'static ColourMap>,
     /// In a screen dump, leave out a row that repeats the double-height row
     /// above it, as the BBC Microcomputer's dumps hold it (REQ-INP-017).
     #[arg(long)]
@@ -543,6 +553,35 @@ pub(crate) enum FontCommand {
 mod tests;
 
 /// A ROM variant named by its datasheet letter (REQ-PRF-003).
+/// The user's colours of `--colours` (REQ-RND-005): Table 30's Colour Map
+/// with its first entries replaced by the list's. The map is made once for
+/// the run and lives as long as it, as the configuration's reference to it
+/// must (DEC-2482).
+fn parse_colours(text: &str) -> Result<&'static ColourMap, String> {
+    let mut map = ColourMap::DEFAULT;
+    let mut given = 0usize;
+    for (entry, colour) in map.entries.iter_mut().zip(text.split(',')) {
+        *entry = parse_rgb12(colour.trim())
+            .ok_or_else(|| format!("{colour:?} is not three hexadecimal digits of red, green and blue"))?;
+        given = given.saturating_add(1);
+    }
+    if text.split(',').count() > given {
+        return Err(format!("at most {} colours, one for each Colour Map entry", map.entries.len()));
+    }
+    // Table 30: CLUT 1 entry 0 is transparent whatever is given.
+    if let Some(entry) = map.entries.get_mut(usize::from(COLOUR_TRANSPARENT)) {
+        *entry = ColourMap::DEFAULT.entry(COLOUR_TRANSPARENT);
+    }
+    Ok(Box::leak(Box::new(map)))
+}
+
+/// A 12-bit colour written as three hexadecimal digits, red first.
+fn parse_rgb12(text: &str) -> Option<Rgb12> {
+    let mut digits = text.chars().map(|digit| digit.to_digit(16).and_then(|value| u8::try_from(value).ok()));
+    let colour = Rgb12::new(digits.next()??, digits.next()??, digits.next()??);
+    digits.next().is_none().then_some(colour)
+}
+
 fn parse_rom_variant(text: &str) -> Result<RomVariant, String> {
     let mut letters = text.chars();
     match (letters.next().and_then(RomVariant::from_letter), letters.next()) {

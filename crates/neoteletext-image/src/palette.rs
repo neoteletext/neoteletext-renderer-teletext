@@ -4,10 +4,11 @@
 
 use neoteletext_core::colour::ColourMap;
 use neoteletext_core::consts::{
-    COLOUR_BLUE_BIT, COLOUR_GREEN_BIT, COLOUR_MAP_ENTRIES, COLOUR_RED_BIT, COLOURS, PALETTE_SIZE, PRIMARY_FULL,
-    RESOLVED_COLOURS,
+    COLOUR_BLUE_BIT, COLOUR_GREEN_BIT, COLOUR_MAP_ENTRIES, COLOUR_RED_BIT, COLOURS, PALETTE_SIZE, PRIMARY_4_TO_8,
+    PRIMARY_FULL, RESOLVED_COLOURS,
 };
 use neoteletext_core::render::fill_palette;
+use neoteletext_core::types::Rgb12;
 
 /// A colour with alpha; alpha 0 is fully transparent.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -72,15 +73,16 @@ pub fn palette(colours: &[Rgba; COLOURS], picture: Rgba, flash_visible: bool, re
 /// transparent by default, or a fill colour for formats without alpha
 /// (REQ-RND-006).
 ///
-/// Indices 32 to 39 follow: the receiver's own colours, the eight of
-/// [`CLUT0`] whatever the page's Colour Map holds, in which the renderer
-/// draws the status area and a receiver-drawn row 24 (REQ-SEC-005,
-/// REQ-SEC-024, DEC-2464).
+/// Indices 32 to 39 follow: the receiver's own colours, `receiver`
+/// ([`Grid::receiver_colours`](neoteletext_core::level1::Grid), Table 30's
+/// CLUT 0 or the user's) whatever the page's Colour Map holds, in which the
+/// renderer draws the status area and a receiver-drawn row 24
+/// (REQ-SEC-005, REQ-SEC-024, DEC-2464).
 #[must_use]
-pub fn colour_map_palette(map: &ColourMap, picture: Rgba) -> [Rgba; RESOLVED_COLOURS] {
+pub fn colour_map_palette(map: &ColourMap, receiver: &[Rgb12; COLOURS], picture: Rgba) -> [Rgba; RESOLVED_COLOURS] {
     core::array::from_fn(|index| {
-        if let Some(&receiver) = index.checked_sub(COLOUR_MAP_ENTRIES).and_then(|entry| CLUT0.get(entry)) {
-            return receiver;
+        if let Some(&receiver) = index.checked_sub(COLOUR_MAP_ENTRIES).and_then(|entry| receiver.get(entry)) {
+            return rgba_of(receiver);
         }
         let index = index as u8;
         if ColourMap::is_transparent(index) {
@@ -89,6 +91,13 @@ pub fn colour_map_palette(map: &ColourMap, picture: Rgba) -> [Rgba; RESOLVED_COL
         let [r, g, b] = map.rgb888(index);
         Rgba::opaque(r, g, b)
     })
+}
+
+/// The opaque 8-bit colour of a 12-bit one: each primary times 17
+/// (REQ-RND-030).
+fn rgba_of(colour: Rgb12) -> Rgba {
+    let [r, g, b] = [colour.red(), colour.green(), colour.blue()].map(|primary| primary.saturating_mul(PRIMARY_4_TO_8));
+    Rgba::opaque(r, g, b)
 }
 
 /// The eight colours of CLUT 0 of a Colour Map: the base colours of the
@@ -107,7 +116,7 @@ pub fn clut0_of(map: &ColourMap) -> [Rgba; COLOURS] {
 mod tests {
     use super::*;
     use neoteletext_core::colour::colour_index;
-    use neoteletext_core::types::{ColourWords, Rgb12};
+    use neoteletext_core::types::ColourWords;
 
     /// REQ-RND-030: every index converts as Table 30 gives, index 8 is the
     /// picture, and redefined CLUTs convert with their own values.
@@ -115,7 +124,7 @@ mod tests {
     #[test]
     fn colour_map_palette_follows_table_30() {
         let fill = Rgba::opaque(1, 2, 3);
-        let palette = colour_map_palette(&ColourMap::DEFAULT, fill);
+        let palette = colour_map_palette(&ColourMap::DEFAULT, &ColourMap::DEFAULT.clut0(), fill);
         for (index, colour) in palette.iter().enumerate().take(COLOUR_MAP_ENTRIES) {
             let entry = ColourMap::DEFAULT.entry(index as u8);
             let expected =
@@ -129,13 +138,19 @@ mod tests {
         let words: ColourWords = core::array::from_fn(|index| Rgb12::new(15, index as u8, 0));
         map.set_cluts(0, &words);
         map.set_cluts(2, &words);
-        let palette = colour_map_palette(&map, Rgba::TRANSPARENT);
+        let palette = colour_map_palette(&map, &ColourMap::DEFAULT.clut0(), Rgba::TRANSPARENT);
         assert_eq!(palette[3], Rgba::opaque(255, 51, 0));
         assert_eq!(palette[8], Rgba::TRANSPARENT, "CLUT 1 entry 0 stays the picture");
         assert_eq!(palette[16 + 15], Rgba::opaque(255, 255, 0));
         // REQ-SEC-005, DEC-2464: the receiver's colours follow the Colour
         // Map's 32 and stay Table 30's CLUT 0 whatever the page redefined.
         assert_eq!(&palette[COLOUR_MAP_ENTRIES..], &CLUT0[..]);
+        // REQ-377 (REQ-RND-005), DEC-2482: the user's CLUT 0, which the grid
+        // carries, gives the receiver's colours.
+        let mut user = ColourMap::DEFAULT;
+        user.entries[1] = Rgb12::new(15, 8, 0);
+        let palette = colour_map_palette(&map, &user.clut0(), Rgba::TRANSPARENT);
+        assert_eq!(palette[COLOUR_MAP_ENTRIES + 1], Rgba::opaque(255, 136, 0));
     }
 
     /// REQ-230, REQ-377: colour number n has red if bit 0 is set, green if

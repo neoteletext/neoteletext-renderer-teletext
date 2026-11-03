@@ -338,7 +338,7 @@ fn images_of_a_page() {
     let (width, height, indices) = render(&grid, options(CellMode::Saa5050, 0, false));
     assert_eq!((width, height), (PAGE_WIDTH, ROWS * CELL_HEIGHT));
     assert!(indices.iter().all(|&index| usize::from(index) < neoteletext_core::consts::RESOLVED_COLOURS));
-    let palette = colour_map_palette(&grid.colour_map, Rgba::TRANSPARENT);
+    let palette = colour_map_palette(&grid.colour_map, &grid.receiver_colours, Rgba::TRANSPARENT);
     let file = png(width, height, &indices, &palette);
     let chunks = chunks(&file);
     let header = &chunks[0].1;
@@ -424,7 +424,7 @@ fn write_samples_when_asked() {
         let (scaled_width, scaled_height) = scaled_size(width, height, 2, 2, true);
         let mut scaled = vec![0u8; scaled_width * scaled_height];
         scale_indices(&indices, width, height, 2, 2, true, &mut scaled).unwrap();
-        let palette = colour_map_palette(&grid.colour_map, Rgba::opaque(0, 0, 0));
+        let palette = colour_map_palette(&grid.colour_map, &grid.receiver_colours, Rgba::opaque(0, 0, 0));
         std::fs::write(directory.join(file), png(scaled_width, scaled_height, &scaled, &palette)).unwrap();
     }
 }

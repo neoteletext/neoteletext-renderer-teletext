@@ -102,7 +102,7 @@ fn process(
     grid.designation = designation;
     grid.designation_fallback = fallback;
 
-    let presentation = presentation(page, magazine, &links, level);
+    let presentation = presentation(page, magazine, &links, level, config.base_colours());
     let default_sets = (designation.g0.set, designation.g2);
     let inputs = Inputs {
         page,
@@ -152,6 +152,7 @@ fn presentation(
     magazine: &MagazineData,
     links: &EnhancementLinks,
     level: PresentationLevel,
+    base: &ColourMap,
 ) -> PagePresentation {
     let page_fields = page.page_data.map(|data| data.fields);
     let page_fields_35 = page.page_data_level35.map(|data| data.fields);
@@ -162,7 +163,7 @@ fn presentation(
         magazine_level_35: magazine.level35.as_ref(),
         fallback: links.fallback,
     };
-    colour::resolve(&sources, level, &ColourMap::DEFAULT)
+    colour::resolve(&sources, level, base)
 }
 
 /// The screen colour and the row colours the page-level run set (decision

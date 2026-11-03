@@ -390,7 +390,7 @@ mod image {
     }
 
     fn colours(map: &ColourMap, clut: &[Rgba; COLOURS], picture: Rgba) {
-        black_box(colour_map_palette(map, picture));
+        black_box(colour_map_palette(map, &map.clut0(), picture));
         black_box(palette(clut, picture, true, false));
     }
 

@@ -1037,6 +1037,59 @@ fn an_undefined_character_position_is_traced() {
     assert_eq!(run(false), []);
 }
 
+/// REQ-377 (REQ-RND-005), REQ-402 (REQ-RND-030), DEC-2482: the user's
+/// colours replace Table 30's at every level before any page data
+/// redefines them; a page's redefinition of an entry still wins; the
+/// receiver's own colours follow the user's CLUT 0 and no page.
+#[test]
+fn the_users_colours_replace_table_30_and_a_page_still_wins() {
+    let user_red = crate::types::Rgb12::new(15, 8, 0);
+    let user_clut_2 = crate::types::Rgb12::new(1, 2, 3);
+    // The red key's colour, CLUT 0 entry 1, and CLUT 2 entry 0.
+    let red = usize::from(crate::consts::FASTEXT_COLOURS[0]);
+    let clut_2 = usize::from(crate::colour::colour_index(2, 0));
+    let mut map = crate::colour::ColourMap::DEFAULT;
+    map.entries[red] = user_red;
+    map.entries[clut_2] = user_clut_2;
+    let user: &'static crate::colour::ColourMap = Box::leak(Box::new(map));
+    let plain = page(0, &[(1, b"ROW 1")], Vec::new());
+    for presentation in
+        [PresentationLevel::Level1, PresentationLevel::Level15, PresentationLevel::Level25, PresentationLevel::Level35]
+    {
+        let config = Config { user_colours: Some(user), ..level(presentation) };
+        let grid = with_page(PAGE, &plain, &config, |page, magazine, lookup| {
+            let options = DisplayOptions::default();
+            let mut grid = Box::new(Grid::EMPTY);
+            build_grid(&mut grid, Some(page), magazine, &config, &options);
+            let _ = apply(&mut grid, page, magazine, lookup, &config, &options);
+            grid
+        });
+        assert_eq!(grid.colour_map.entries[red], user_red, "{presentation:?}");
+        assert_eq!(grid.receiver_colours[red], user_red, "{presentation:?}");
+    }
+    // A page that redefines CLUTs 2 and 3 (X/28/0 format 1 at Level 2.5)
+    // wins over the user's entry 16; the user's red stays.
+    let words: crate::types::ColourWords = core::array::from_fn(|_| crate::types::Rgb12::new(0, 15, 15));
+    let redefined = page(
+        0,
+        &[(1, b"ROW 1")],
+        std::vec![x28_0(&PresentationFields { colour_words: Some(words), ..PresentationFields::default() })],
+    );
+    let config = Config { user_colours: Some(user), ..level(PresentationLevel::Level25) };
+    let grid = with_page(PAGE, &redefined, &config, |page, magazine, lookup| {
+        let options = DisplayOptions::default();
+        let mut grid = Box::new(Grid::EMPTY);
+        build_grid(&mut grid, Some(page), magazine, &config, &options);
+        let _ = apply(&mut grid, page, magazine, lookup, &config, &options);
+        grid
+    });
+    if cfg!(feature = "level25-32colors") {
+        assert_eq!(grid.colour_map.entries[clut_2], words[0], "the page's redefinition wins");
+    }
+    assert_eq!(grid.colour_map.entries[red], user_red);
+    assert_eq!(grid.receiver_colours, user.clut0());
+}
+
 /// True when no two names are the same.
 fn distinct(names: &[&str]) -> bool {
     let mut sorted = names.to_vec();

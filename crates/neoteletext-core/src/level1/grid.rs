@@ -4,9 +4,10 @@ use super::Cell;
 use crate::charset::{self, Designation, G0};
 use crate::colour::{ColourIndex, ColourMap};
 use crate::consts::{
-    CLOCK_BYTES, COLOUR_BLACK, COLUMNS, FASTEXT_COLOURS, FASTEXT_KEYS, HEADER_DISPLAY_BYTES, ROWS, SPACE,
+    CLOCK_BYTES, COLOUR_BLACK, COLOURS, COLUMNS, FASTEXT_COLOURS, FASTEXT_KEYS, HEADER_DISPLAY_BYTES, ROWS, SPACE,
     STATUS_COLUMNS,
 };
+use crate::types::Rgb12;
 
 /// The decoded page (REQ-L1-001): 25 rows by 40 columns, plus page-wide
 /// display state. It is the core's primary output; every renderer works
@@ -35,8 +36,14 @@ pub struct Grid {
     /// (REQ-CHR-003) chose `designation`. The port counts it with
     /// `Decoder::record_designation`, once per build of the page.
     pub designation_fallback: bool,
-    /// The page's Colour Map (REQ-L25-030); Table 30 at Levels 1 and 1.5.
+    /// The page's Colour Map (REQ-L25-030): the configuration's base
+    /// colours (Table 30's, or the user's, REQ-RND-005), with the page's
+    /// redefinitions at Levels 2.5 and 3.5.
     pub colour_map: ColourMap,
+    /// The colours of the receiver's own cells, indices 32 to 39 of the
+    /// resolved mode (DEC-2464): CLUT 0 of the configuration's base
+    /// colours, which no page can redefine.
+    pub receiver_colours: [Rgb12; COLOURS],
     /// The screen colour, for the borders around the rows (decision E.45).
     pub screen_colour: ColourIndex,
     /// The full row colour of each row (decision E.45).
@@ -46,6 +53,21 @@ pub struct Grid {
     /// ([`RECEIVER_COLOUR_BASE`](crate::consts::RECEIVER_COLOUR_BASE)).
     pub receiver_row_24: bool,
 }
+
+/// CLUT 0 of Table 30, the receiver's colours of an empty grid.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "evaluated at compile time over arrays of constant length: an index out of range fails the build"
+)]
+const TABLE_30_CLUT0: [Rgb12; COLOURS] = {
+    let mut colours = [Rgb12(0); COLOURS];
+    let mut index = 0;
+    while index < COLOURS {
+        colours[index] = ColourMap::DEFAULT.entries[index];
+        index += 1;
+    }
+    colours
+};
 
 /// The character sets of an empty grid: Latin with the English national
 /// option, until a page's designation replaces them.
@@ -80,14 +102,15 @@ impl Grid {
     /// receiver-drawn row 24 is drawn in the receiver's fixed colours, so
     /// its indices are its colours. On a page's own row 24, the page may
     /// have redefined CLUT 0 (X/28/4, M/29/4): the cell's Colour Map entry
-    /// must still hold the key's colour of Table 30, and its background's
-    /// entry another colour.
+    /// must still hold the key's colour as the receiver's colours give it
+    /// (Table 30's, or the user's), and its background's entry another
+    /// colour.
     fn drawn_as_itself(&self, colour: u8, cell: &Cell) -> bool {
         if self.receiver_row_24 {
             return true;
         }
         let entry = |index: u8| self.colour_map.entries.get(usize::from(index)).copied();
-        let expected = ColourMap::DEFAULT.entries.get(usize::from(colour)).copied();
+        let expected = self.receiver_colours.get(usize::from(colour)).copied();
         expected.is_some() && entry(cell.foreground) == expected && entry(cell.background) != expected
     }
 
@@ -111,6 +134,7 @@ impl Grid {
             designation: DEFAULT_DESIGNATION,
             designation_fallback: false,
             colour_map: ColourMap::DEFAULT,
+            receiver_colours: TABLE_30_CLUT0,
             screen_colour: COLOUR_BLACK,
             row_colours: [COLOUR_BLACK; ROWS],
             receiver_row_24: false,
@@ -128,6 +152,7 @@ impl Grid {
         self.designation = DEFAULT_DESIGNATION;
         self.designation_fallback = false;
         self.colour_map = ColourMap::DEFAULT;
+        self.receiver_colours = TABLE_30_CLUT0;
         self.screen_colour = COLOUR_BLACK;
         self.row_colours = [COLOUR_BLACK; ROWS];
         self.receiver_row_24 = false;

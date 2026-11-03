@@ -18,7 +18,8 @@ use neoteletext_core::viewer::Viewer;
 /// November 2026, after the merges of that day: `Decoder` 1,936 bytes (its
 /// configuration's fixed designation and SAA5246A ROM variant, DEC-2430),
 /// `Grid` 16,104 and `Viewer` 320 (its transitions kept for the trace,
-/// DEC-2446).
+/// DEC-2446); then `Decoder` 1,944 and `Grid` 16,120, with the user's
+/// colours (DEC-2482).
 #[test]
 fn every_state_type_has_a_bounded_size() {
     let sizes: [(&str, usize, usize); 7] = [

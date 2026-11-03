@@ -83,6 +83,11 @@ fn build(
     mut decode: impl FnMut(u8, &[u8; COLUMNS], u64, &RowContext<'_>) -> ([Cell; COLUMNS], bool),
 ) {
     out.clear();
+    // REQ-RND-005, REQ-RND-030: the user's colours replace Table 30's
+    // before any page data redefines them.
+    let base = config.base_colours();
+    out.colour_map = *base;
+    out.receiver_colours = base.clut0();
     let (designation, second, fallback) = resolve_designation(page, magazine, config);
     out.designation = designation;
     out.designation_fallback = fallback;

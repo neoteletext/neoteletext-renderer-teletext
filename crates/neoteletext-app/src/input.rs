@@ -3,6 +3,7 @@
 
 use crate::session::Session;
 use crate::{Failure, exit};
+use neoteletext_core::colour::ColourMap;
 use neoteletext_core::config::{Config, ParityPolicy, PresentationLevel, RomVariant};
 use neoteletext_core::types::PageAddress;
 use neoteletext_formats::Item;
@@ -55,6 +56,9 @@ pub struct Options {
     /// The SAA5246A national option ROM variant, overriding the profile's
     /// (REQ-PRF-003).
     pub rom_variant: Option<RomVariant>,
+    /// The user's colours, replacing Table 30's before any page data
+    /// redefines them (REQ-RND-005, DEC-2482).
+    pub colours: Option<&'static ColourMap>,
     /// Leave out a screen dump's row that repeats the double-height row
     /// above it (REQ-181).
     pub dump_repeated_rows: bool,
@@ -98,6 +102,9 @@ pub fn config(options: &Options) -> Result<Config, Failure> {
     }
     if let Some(variant) = options.rom_variant {
         config.rom_variant = Some(variant);
+    }
+    if let Some(colours) = options.colours {
+        config.user_colours = Some(colours);
     }
     config.trace = options.verbose >= 2;
     // A thousand entries a page: the row attribute machine's cells only at
@@ -319,6 +326,7 @@ mod tests {
             no_rounding: false,
             single_start_box: false,
             rom_variant: None,
+            colours: None,
             dump_repeated_rows: false,
             verbose: 0,
             no_sandbox: false,
@@ -341,6 +349,7 @@ mod tests {
             no_rounding: true,
             single_start_box: true,
             rom_variant: Some(RomVariant::GreekTurkish),
+            colours: Some(&ColourMap::DEFAULT),
             ..options("saa5050")
         };
         let changed = Config {
@@ -350,6 +359,7 @@ mod tests {
             rounding: false,
             double_start_box: false,
             rom_variant: Some(RomVariant::GreekTurkish),
+            user_colours: Some(&ColourMap::DEFAULT),
             ..profile
         };
         assert_eq!(config(&given).unwrap(), changed);
