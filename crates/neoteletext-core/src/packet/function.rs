@@ -189,8 +189,8 @@ pub enum TripletFunction {
         diacritic: u8,
     },
     /// Column modes 01101, DRCS Character Invocation, and 01110, Font
-    /// Style, which are not acted on (decisions E.95 and E.96): each moves
-    /// the active position and does nothing else.
+    /// Style, which are not acted on (decisions E.95 and E.96; REQ-143,
+    /// REQ-2196): each moves the active position and does nothing else.
     UnsupportedColumn {
         /// The column.
         column: u8,

@@ -15,6 +15,7 @@ use crate::charset::*;
 use crate::charset::code_table::base_unicode;
 use crate::charset::test_tables::*;
 
+/// REQ-75: the Latin G2 set of Table 37, row by row.
 #[test]
 fn latin_g2_rows() {
     let set = CharSet::G2(G2Set::Latin);

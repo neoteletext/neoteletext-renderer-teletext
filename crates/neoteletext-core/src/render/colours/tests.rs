@@ -313,8 +313,8 @@ fn resolved_indices_are_colour_map_indices() {
     assert_eq!((raster.foreground, raster.background), (31, 31));
 }
 
-/// The screen colour is the picture on a boxed page and in mix mode
-/// (decision E.45).
+/// REQ-278, decision E.45: the screen colour is the picture on a boxed page
+/// and in mix mode.
 #[test]
 fn border_index_follows_the_screen_colour() {
     let mut grid = Grid::EMPTY;

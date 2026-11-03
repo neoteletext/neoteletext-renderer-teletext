@@ -120,7 +120,8 @@ impl RowState {
                 self.level_1_conceal = false;
             }
             FLASH => self.attrs.flash = LEVEL_1_FLASH,
-            // Decision E.47: the Level 1 box codes act only on boxed pages.
+            // Decision E.47, REQ-1639: the Level 1 box codes act only on
+            // boxed pages.
             END_BOX if context.boxed_page => self.attrs.boxed = false,
             START_BOX if context.boxed_page && (!context.double_start_box || next == START_BOX) => {
                 self.attrs.boxed = true;
@@ -217,7 +218,9 @@ impl Resolved {
     }
 }
 
-/// Builds a cell from a glyph and the attributes it is drawn with.
+/// Builds a cell from a glyph and the attributes it is drawn with;
+/// underline only for the glyphs [`is_text`](super::characters::is_text)
+/// accepts (REQ-407).
 pub(super) fn cell_of(glyph: Glyph, attrs: &Attrs, source: CharSource, column: usize) -> Resolved {
     let text = is_text(glyph);
     let mut attributes = CellAttributes::DEFAULT.with_source(source).with_invert(attrs.invert);
@@ -355,7 +358,7 @@ fn resolve_segment(
             *slot = cell;
         }
         // Step 7: the held mosaic, from Level 1 characters only (decision
-        // E.50), in the form shown at this cell.
+        // E.50, REQ-262, REQ-232), in the form shown at this cell.
         if segment.codes.is_some() {
             if state.mosaic && code > ATTRIBUTE_LAST && code & MOSAIC_BIT5 != 0 {
                 state.held = Some((mosaic_pattern(code), level_1_separated || plane_attrs.underline));

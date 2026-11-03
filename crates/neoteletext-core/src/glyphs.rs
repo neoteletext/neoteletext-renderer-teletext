@@ -59,7 +59,8 @@ pub enum CharClass {
     G3(u8),
 }
 
-/// How a character is drawn.
+/// How a character is drawn. Mosaics and G3 characters are drawn by rule,
+/// never from a loaded font (decision E.72 item 8, REQ-121).
 #[must_use]
 pub const fn class(character: CharRef) -> CharClass {
     match character.set {

@@ -106,7 +106,7 @@ fn palette_cell_allowed(cell: &Cell) -> bool {
 }
 
 /// The index of the screen colour, for the borders around the rows
-/// (decision E.45): the picture on a boxed page and in mix mode.
+/// (decision E.45, REQ-278): the picture on a boxed page and in mix mode.
 #[must_use]
 pub fn border_index(grid: &Grid) -> u8 {
     if grid.boxed_mode || grid.mix { COLOUR_TRANSPARENT } else { grid.screen_colour & COLOUR_INDEX_MASK }

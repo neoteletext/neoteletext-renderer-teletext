@@ -119,7 +119,7 @@ pub const MODE_G0_LEVEL_25: u8 = 0x09;
 /// Column mode 01100: Display Attributes (Table 29).
 pub const MODE_DISPLAY_ATTRIBUTES: u8 = 0x0C;
 /// Column mode 01101: DRCS Character Invocation (Table 29), recognised only
-/// to move the active position (decision E.95).
+/// to move the active position (decision E.95, REQ-143, REQ-2196).
 pub const MODE_DRCS_CHARACTER: u8 = 0x0D;
 /// Row mode 11000: DRCS Mode (Table 28). The decoder treats it as
 /// reserved (decision E.95); it is named so that authored test streams can
@@ -135,7 +135,7 @@ pub const DRCS_USAGE_BOTH_LEVELS: u8 = 0x30;
 /// Invocation (Table 29: 0 to 47).
 pub const DRCS_CHARACTER_LAST: u8 = 47;
 /// Column mode 01110: Font Style, Level 3.5 only (Table 29), recognised
-/// only to move the active position (decision E.96).
+/// only to move the active position (decision E.96, REQ-143).
 pub const MODE_FONT_STYLE: u8 = 0x0E;
 /// Font Style data bit D0: proportional spacing (Table 29, mode 01110).
 pub const FONT_STYLE_PROPORTIONAL: u8 = 0x01;
