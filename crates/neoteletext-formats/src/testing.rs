@@ -1,5 +1,4 @@
 //! Helpers shared by the unit tests.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::boxed::Box;
 use std::vec::Vec;

@@ -4,9 +4,9 @@
 #![allow(
     clippy::unwrap_used,
     clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
     clippy::panic,
-    clippy::cast_possible_truncation
+    clippy::cast_possible_truncation,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and `panic!` on outcomes it rules out; casts of counts and positions the test keeps in range"
 )]
 
 use super::*;

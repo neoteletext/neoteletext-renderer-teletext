@@ -103,7 +103,6 @@ impl<const N: usize> Lines<N> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
     use super::*;
     use std::vec::Vec;

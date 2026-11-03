@@ -292,7 +292,10 @@ impl Default for PageFile {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 mod tests {
     use super::*;
     use neoteletext_core::consts::{C5_NEWSFLASH, C8_UPDATE, C11_SERIAL, C12, C14};

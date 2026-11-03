@@ -1,9 +1,8 @@
 #![allow(
     clippy::unwrap_used,
     clippy::indexing_slicing,
-    clippy::panic,
     clippy::arithmetic_side_effects,
-    reason = "a test"
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
 )]
 
 //! Text runs at their places (REQ-2214, REQ-2148), read back through the
