@@ -491,6 +491,24 @@ mod audio {
         receiver.set_page_sounds(on, &mut Quiet);
     }
 
+    fn record(receiver: &mut Receiver<'_>, bytes: &[u8]) {
+        receiver.push_record(bytes, &mut Quiet);
+    }
+
+    fn service(receiver: &mut Receiver<'_>, service: u8) {
+        receiver.follow_service(service, &mut Quiet);
+        receiver.sink_lost();
+        receiver.reset(&mut Quiet);
+    }
+
+    /// The readers a port may call on its own, outside the receiver.
+    fn readers(bytes: &[u8]) {
+        black_box(neoteletext_audio::record::parse(bytes).is_ok());
+        for record in neoteletext_audio::ttau::records(bytes) {
+            black_box(record);
+        }
+    }
+
     #[used]
     static NEW: for<'a> fn(&mut Option<Receiver<'a>>, &'a mut [u8]) = new;
     #[used]
@@ -503,6 +521,12 @@ mod audio {
     static TICK: fn(&mut Receiver<'_>, u64) = tick;
     #[used]
     static PAGE: fn(&mut Receiver<'_>, Option<u16>, bool) = page;
+    #[used]
+    static RECORD: fn(&mut Receiver<'_>, &[u8]) = record;
+    #[used]
+    static SERVICE: fn(&mut Receiver<'_>, u8) = service;
+    #[used]
+    static READERS: fn(&[u8]) = readers;
 }
 
 /// The input protocol's client (area INT): the session, the channel's
