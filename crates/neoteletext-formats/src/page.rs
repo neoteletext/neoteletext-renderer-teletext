@@ -198,7 +198,8 @@ impl PageFile {
     }
 
     /// Sets C12 to C14 so that the national option index 4×C12 + 2×C13 +
-    /// C14 is `index` (decision E.21).
+    /// C14 is `index`, 0 to 7 (decision E.21); bits of `index` above the
+    /// third are ignored.
     pub fn set_national_index(&mut self, index: u8) {
         let mut bits = self.control().0 & !(C12 | C13 | C14);
         for (bit, weight) in [(C12, 0b100), (C13, 0b010), (C14, 0b001)] {
@@ -209,20 +210,26 @@ impl PageFile {
         self.set_control(ControlBits(bits));
     }
 
-    /// True when row `row` was given.
+    /// True when row `row` was given: `row` is 0 to
+    /// [`STORED_ROWS`] − 1, and any
+    /// other row gives false.
     #[must_use]
     pub fn has_row(&self, row: usize) -> bool {
         u32::try_from(row).ok().and_then(|row| self.rows_present.checked_shr(row)).is_some_and(|bits| bits & 1 == 1)
     }
 
     /// Row `row`'s codes, whether or not it was given (absent rows are
-    /// spaces).
+    /// spaces); `None` for a row not below
+    /// [`STORED_ROWS`].
     #[must_use]
     pub fn row(&self, row: usize) -> Option<&[u8; COLUMNS]> {
         self.rows.get(row)
     }
 
-    /// Sets row `row` from 7-bit codes, padding with spaces.
+    /// Sets row `row` from 7-bit codes, padding with spaces. `row` is 0 to
+    /// [`STORED_ROWS`] − 1, and any
+    /// other row changes nothing; codes past
+    /// [`COLUMNS`] are left out.
     pub fn set_row(&mut self, row: usize, codes: &[u8]) {
         if let Some(target) = self.rows.get_mut(row) {
             *target = [SPACE; COLUMNS];

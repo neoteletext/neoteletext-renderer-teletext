@@ -90,7 +90,8 @@ pub fn flash_unit(now: Instant) -> u8 {
 }
 
 /// True when a character of `rate` is in its "on" phase in flash unit
-/// `unit` (decision E.48, REQ-RND-040):
+/// `unit`, 0 to [`FLASH_UNITS`] − 1, a larger value taken modulo
+/// [`FLASH_UNITS`] (decision E.48, REQ-RND-040):
 ///
 /// - the Level 1 flash is timed by [`flash_visible`], not by units, so it
 ///   counts as on;

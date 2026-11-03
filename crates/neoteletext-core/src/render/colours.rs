@@ -146,6 +146,9 @@ pub fn fill_palette<T: Copy>(out: &mut [T; PALETTE_SIZE], base: &[T; COLOURS + 1
 }
 
 /// The base colour (0 to 7, or 8 for transparent) of a palette index.
+/// `index` is 0 to [`PALETTE_SIZE`] − 1: 0 to 7 are the colours, then come
+/// the flash pairs from `PALETTE_FLASH_BASE` and the conceal pairs from
+/// `PALETTE_CONCEAL_BASE`; any other index gives transparent.
 #[must_use]
 pub fn palette_colour(index: usize, flash_visible: bool, reveal: bool) -> u8 {
     let flash_base = usize::from(PALETTE_FLASH_BASE);

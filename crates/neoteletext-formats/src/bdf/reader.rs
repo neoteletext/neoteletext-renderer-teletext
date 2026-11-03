@@ -91,7 +91,8 @@ struct Header<'a> {
 }
 
 /// Reads a font into `glyphs`, which must have room for every character
-/// (1,024 is always enough). On success the first [`Font::characters`]
+/// ([`FONT_MAX_CHARACTERS`](neoteletext_core::consts::FONT_MAX_CHARACTERS),
+/// 1,024, is always enough, since a longer font is refused). On success the first [`Font::characters`]
 /// entries hold the glyphs, sorted by code point; on failure the table's
 /// contents are meaningless.
 ///

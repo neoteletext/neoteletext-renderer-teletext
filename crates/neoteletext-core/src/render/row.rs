@@ -93,8 +93,8 @@ fn check_mode(grid: &Grid, row: usize, options: RenderOptions) -> Result<(), Ren
     Ok(())
 }
 
-/// Renders text row `row` into `out` with a row stride of `stride` bytes
-/// (REQ-RND-017). In the 12-by-20 mode this draws 20 lines for
+/// Renders text row `row`, 0 to [`ROWS`] − 1, into `buffer` at the
+/// buffer's row stride (REQ-RND-017). In the 12-by-20 mode this draws 20 lines for
 /// [`Field::Both`] and 10 for one field. Each line is [`PAGE_WIDTH`] pixels.
 /// On an error the buffer's contents are unspecified.
 ///
@@ -178,7 +178,8 @@ pub const ZOOM_ROWS: usize = 12;
 
 /// Renders every row, or only changed rows, into a whole-screen framebuffer
 /// (REQ-RND-022), the reference caller of REQ-RND-021. `rows` is a bitmask
-/// of rows to draw. Each row is [`PAGE_WIDTH`] pixels wide from the start of
+/// of rows to draw: bit n for row n, rows 0 to [`ROWS`] − 1, higher bits
+/// ignored. Each row is [`PAGE_WIDTH`] pixels wide from the start of
 /// the framebuffer's lines; filling any border beyond it with
 /// [`border_index`](super::border_index) is for the caller.
 ///

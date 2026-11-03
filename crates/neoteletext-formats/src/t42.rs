@@ -113,7 +113,7 @@ impl T42Reader {
     }
 
     /// A reader that first discards `skip` bytes, as detection asks when a
-    /// stream starts part-way through a packet.
+    /// stream starts part-way through a packet; `skip` may be any count.
     #[must_use]
     pub const fn with_skip(variant: T42Variant, source: Option<u8>, skip: usize) -> Self {
         let mut reader = Self::new(variant, source);

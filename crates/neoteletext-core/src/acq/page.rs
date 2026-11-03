@@ -137,7 +137,8 @@ impl StoredPage {
 
     /// The editorial links of packet X/27/`designation`, 0 to 3, when it
     /// was received (clause 9.6.1; DEC-2344): X/27/0 as decoded, X/27/1 to
-    /// X/27/3 from their stored bytes with the same decoder.
+    /// X/27/3 from their stored bytes with the same decoder. Another
+    /// designation code gives `None`.
     #[must_use]
     pub fn editorial_links(&self, designation: u8) -> Option<Links> {
         let Some(index) = designation.checked_sub(1) else { return self.links };
@@ -162,15 +163,18 @@ impl StoredPage {
         self.numbering == Numbering::SubPages && self.is_display_page()
     }
 
-    /// True when row `row` has been received.
+    /// True when row `row` has been received: `row` is 0 to
+    /// [`STORED_ROWS`] − 1, and any other row gives false.
     #[must_use]
     pub fn has_row(&self, row: u8) -> bool {
         self.rows_received.checked_shr(u32::from(row)).is_some_and(|bits| bits & 1 == 1)
     }
 
     /// The stored byte at a position and whether it is displayable under
-    /// `policy` (decision E.8): `(byte, passed)`. Never-received positions
-    /// give a space.
+    /// `policy` (decision E.8): `(byte, passed)`. `row` is 0 to
+    /// [`STORED_ROWS`] − 1 and `column` 0 to [`COLUMNS`] − 1. Never-received
+    /// positions, and positions outside those ranges, give a space; a
+    /// position outside them is never passed.
     #[must_use]
     pub fn byte(&self, row: usize, column: usize, policy: ParityPolicy) -> (u8, bool) {
         let byte = self.cells.get(row).and_then(|cells| cells.get(column)).copied().unwrap_or(SPACE);

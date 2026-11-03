@@ -195,7 +195,11 @@ fn g3_line(glyphs: &GlyphSet, code: u8, source: usize, mode: CellMode) -> u16 {
 
 /// The cell raster (REQ-RND-016): line `line` of the cell at text row `row`
 /// and column `column`, where `line` is 0 to 19 in the 12-by-20 mode and 0
-/// to 9 in the 12-by-10 mode. Size, glyphs, mosaics, G3, underline and, in
+/// to 9 in the 12-by-10 mode; a line past the cell's last draws only its
+/// gaps. `row` (below [`ROWS`](crate::consts::ROWS)) and `column` (below [`COLUMNS`](crate::consts::COLUMNS)) are the
+/// cell's place in `grid`, read only to keep row 0, columns 0 to 7, the
+/// receiver's and to apply row colours; a place outside the grid is drawn
+/// as an ordinary cell. Size, glyphs, mosaics, G3, underline and, in
 /// the resolved mode, invert, flash, conceal and the display planes are
 /// all applied here.
 #[must_use]

@@ -105,7 +105,8 @@ struct Header<'a> {
 }
 
 /// Reads a source font into `glyphs`, which must have room for every
-/// character (4,096 is always enough).
+/// character ([`SOURCE_FONT_MAX_CHARACTERS`],
+/// 4,096, is always enough, since a larger font is refused).
 ///
 /// # Errors
 /// [`FontError`], with the line at fault (0 for the file as a whole) and

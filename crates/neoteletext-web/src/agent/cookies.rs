@@ -101,7 +101,10 @@ pub(super) fn write_cookie_header(
 impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
     /// Saves the cookies that may be kept (REQ-SEC-013), when the
     /// configuration allows it and calendar time is known. Returns the
-    /// number saved. `scratch` holds the encoded data.
+    /// number saved. `scratch` holds the encoded data: the jar's
+    /// `COOKIE_BYTES` of cookie text and, for each cookie, its line of
+    /// numbers in the saved format ([`crate::cookie`]); a shorter `scratch`
+    /// fails as below.
     ///
     /// # Errors
     /// `Err(None)` when the encoded cookies do not fit in `scratch`; nothing
@@ -124,7 +127,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     }
 
     /// Restores saved cookies, when the configuration allows it and
-    /// calendar time is known. Returns the number restored.
+    /// calendar time is known. Returns the number restored. `scratch`
+    /// receives the saved data, so it must be at least as long as what
+    /// [`Self::save_cookies`] saved; the storage's `load` says what happens
+    /// when it is not.
     ///
     /// # Errors
     /// The storage's own error, when [`CookieStorage::load`] fails. Saved
