@@ -191,6 +191,15 @@ Started 10 October 2026. Instruction: implement the whole system, targeting only
 | 183 | Where do values of other standards live? | In the constants module of the crate that reads them; every teletext value in the core's. | DEC-2472. |
 | 184 | Where do the user's colours live, given RAM on small ports? | A reference in `Config` to the port's 32 entries; the grid carries the receiver's eight. | DEC-2482. |
 | 185 | Two branches met on the viewer: one made a chosen sub-page searched for (REQ-328), the other made the viewer one transition function. | The machine's rows for a chosen sub-page and a completed sub-page entry go to Searching; REQ-137 version 3 says so. | Merge 15b2857; no decision. |
+| 186 | How does a history entry name a service that stays true as others open, and how does the decoder return to one without naming an address? | Both processes number the session's services in the order opened, up to 256, and a new pipe frame `Frame::Reopen` names the number; a return never asks again, and a page is fetched again rather than shown from the store, which holds one service at a time. | DEC-2492. |
+| 187 | Is a channel's page redirect a history visit or a replacement of the current entry? | A visit, through the viewer machine's input `Redirect`. | DEC-2492 item 7. |
+| 188 | Does rustls's client state machine get one owning crate? | No: measured, the change made `neottx` about 14 KB larger, because the optimiser then inlined the one remaining copy. | DEC-2491. |
+| 189 | Where does `neottx`'s writer thread live? | In `neoteletext-app`, as the browser's stays in its fetcher, not in `neoteletext-transport`. | DEC-2490 version 2. |
+| 190 | Is column mode 01010 reserved, as the controls code said, or the row set triplet? | The row set triplet; the controls text was stale, and a compile-time assertion now keeps 01010 for it alone. | DEC-2179, REQ-2180. |
+| 191 | Does the glyph line cache fit the microcontroller budget? | It is behind the non-default feature `glyph-cache`, so the `level15` image does not grow; with it on, the image is 592 bytes larger and still fits. | REQ-392, DEC-553. |
+| 192 | Should the core's Level 2.5 and 3.5 tests use the formats crate's authoring builder, as REQ-468 said? | No: the core cannot depend on it without a second copy of itself; the tests' own builder states pages by function. | DEC-2495. |
+| 193 | Should Greek Ό's composition be compiled only with `extended-sets`, or in every build that draws the standard's sets? | In every such build, with Cyrillic Ё and ё, since a page in the standard's set is drawn by every build. | DEC-2370 version 3, item 7. |
+| 194 | Why did the qrkeyboard wake test fail only when the whole workspace ran? | The transport's reader thread woke its owner while still holding the channel's only sender, so a loaded machine's wait could find the channel open and empty and sleep to its limit; the sender is now dropped before the last wake. | Commit ca208f0; no decision. |
 
 ## Status at the end of the round for NeoTeletext (23 October 2026)
 
@@ -271,21 +280,17 @@ Every crate's optional areas are features (decision E.61), and the gate checks b
 
 ## Status at the end of the round to finish rdm's open work (3 and 4 November 2026)
 
-The owner asked, on 3 November 2026, for all the outstanding work in rdm to be finished, with decisions taken without him except the major ones. Fourteen helpers worked in their own worktrees and branches, in three rounds, and each branch was merged into `livedevelopment` with a plain merge; rows 101 and 103 to 185 record the questions met. Every requirement met is set implemented in rdm on its commit, and every to-do closed names its commit.
+The owner asked, on 3 November 2026, for all the outstanding work in rdm to be finished, with decisions taken without him except the major ones. Nineteen helpers worked in their own worktrees and branches, in five rounds, and each branch was merged into `livedevelopment` with a plain merge; rows 101 and 103 to 194 record the questions met. Every requirement met is set implemented in rdm on its commit, and every to-do closed names its commit.
 
-Verified on `livedevelopment` after the last merge: `cargo clippy --workspace --all-features --all-targets -- -D warnings` clean; `cargo test --workspace --all-features` 1,713 passed, 0 failed, 24 ignored; `cargo xtask check-layers`, `check-constants`, `check-io`, `check-deps` and `size` ok, the `level15` image at 64,375 of its 65,536 bytes. The push and full gates were not run, by instruction.
+Verified on `livedevelopment` after the last merge: `cargo clippy --workspace --all-features --all-targets -- -D warnings` clean; `cargo test --workspace --all-features` 1,801 passed, 0 failed, 24 ignored; `cargo xtask features` all 68 builds passed (9 minutes 1 second); `cargo xtask check-layers`, `check-constants`, `check-io`, `check-deps` and `size` ok, the `level15` image at 64,631 of its 65,536 bytes. The push and full gates were not run, by instruction.
 
 **NOT DONE**, with the reason:
 
 | Item | Reason |
 |---|---|
 | The push and full gates | Not run by instruction; the full gate takes about an hour and runs when the owner integrates to `main`. |
-| The glyph line cache (REQ-392, TODO-2068) | Phase 2; measured worth building (a screen of text 183 µs, mosaics 6.3 µs), plan in the to-do. |
-| The service kept across a link in `neottx view` (TODO-2050 item 3) | A change across the viewer, the pipe and the fetcher, not reached. |
-| A channel's remaining items in `neottx` (TODO-2059): the live keys' pseudo-terminal test, REQ-507's descriptor identity, REQ-511, REQ-523 | Not reached. |
-| The web agent's writer thread and the test server's channel folder (TODO-2058) | Not reached. |
+| The Arabic positions of Tables 44 and 45 in the transcription test (REQ-464), and checking every area L25 requirement against REQ-468's list (TODO-2080) | Not reached; each Arabic glyph must be named as a particular presentation form. |
 | The sandboxes of macOS, Windows and OpenBSD (TODO-1743) | Phase 2, and an operating-system binding would need the owner's approval of a library. |
-| The gap to-dos of the renderer inventory CHK-2483 (TODO-2484 to TODO-2488) | Found at the end of the round. |
 | Real hardware, recordings and readers (TODO-1229, TODO-1655, TODO-1100, TODO-2081, TODO-1170, TODO-1988, TODO-2191) | Need boards, captures, recordings or readers of a language only the owner can provide. |
 | Libraries not added | `insta` (TODO-2080), `p256` for the engine (TODO-1210), a WebAssembly runtime (TODO-2094), a bare-metal test harness (TODO-1107, TODO-1742), `cbindgen` (TODO-2104), `rustix` or `socket2` (TODO-1147): each needs the owner's approval by name. |
 
