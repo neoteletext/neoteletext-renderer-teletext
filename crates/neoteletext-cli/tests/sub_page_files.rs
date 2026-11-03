@@ -1,7 +1,10 @@
 //! `neottx` against a static channel whose page has its sub-pages in a folder
 //! (REQ-1887, REQ-1888, DEC-2116): a sub-page is reached by its own file.
 #![cfg(feature = "live")]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::expect_used,
+    reason = "a test reports a failure by panicking, so it uses `expect` naming what it expected"
+)]
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};

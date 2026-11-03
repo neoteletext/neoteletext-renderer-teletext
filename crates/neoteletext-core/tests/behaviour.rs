@@ -3,7 +3,12 @@
 //! (REQ-L1-016), the second G0 set (REQ-CHR-009, REQ-L1-013), Level 1.5
 //! overwrites over Level 1 attributes (REQ-L15-008), subtitle pages
 //! (REQ-ACQ-015) and independent decoders (REQ-GEN-004).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 use neoteletext_core::acq::{Decoder, MagazineData, StoredPage};
 use neoteletext_core::charset::{CharSet, G0Set, G2Set};

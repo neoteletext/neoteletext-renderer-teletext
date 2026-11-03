@@ -1,4 +1,7 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 //! The tests of the channel folder and file rules (REQ-WEB-023, REQ-WEB-027).
 
 use super::*;

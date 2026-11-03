@@ -75,7 +75,8 @@ pub enum TeletextType {
 }
 
 impl TeletextType {
-    /// Interprets the 5-bit field (EN 300 468 Table 94).
+    /// Interprets the 5-bit field (EN 300 468 Table 94): 1 to 5 are the
+    /// types it names, and any other value is kept as reserved.
     #[must_use]
     pub const fn from_bits(value: u8) -> Self {
         match value {

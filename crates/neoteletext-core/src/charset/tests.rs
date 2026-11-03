@@ -1,7 +1,11 @@
 //! Tests of character sets and their designation (area CHR): Vietnamese
 //! tones, Table 34, the fallback, mosaics and national positions. The tests
 //! of the code tables are in tests/tables.rs.
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `panic!` on outcomes it rules out"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

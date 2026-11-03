@@ -26,7 +26,13 @@ pub const PLAYER_PACKETS_PER_SECOND: u32 = 64 * 5;
 /// What `neottx sound` writes. A build without `sound` refuses the command
 /// before reading any of it.
 #[derive(Clone, Debug)]
-#[cfg_attr(not(feature = "sound"), allow(dead_code))]
+#[cfg_attr(
+    not(feature = "sound"),
+    allow(
+        dead_code,
+        reason = "a build without `sound` refuses the command before reading these options, so their fields are never read"
+    )
+)]
 pub struct SoundOptions {
     /// The page the sound belongs to, 100 to 8FF.
     pub page: String,

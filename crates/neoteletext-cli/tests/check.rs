@@ -1,6 +1,5 @@
 //! `neottx check` (REQ-CLI-006), run as a user runs it.
 #![cfg(feature = "live")]
-#![allow(missing_docs)]
 
 mod common;
 

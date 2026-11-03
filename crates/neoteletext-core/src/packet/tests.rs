@@ -2,7 +2,13 @@
 //! enhancement packets built by the encoder, every field checked; real
 //! captures are decoded by tests/corpus.rs and the service data packet by
 //! service.rs.
-#![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, `panic!` on outcomes it rules out, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 // The module is compiled for tests only (see `packet.rs`); the attribute
 // also marks this file as test code for `cargo xtask check-layers`.
@@ -20,6 +26,8 @@ fn mag(number: u8) -> Magazine {
     Magazine::new(number).unwrap()
 }
 
+// REQ-24 (REQ-ARCH-002): every decoding works from the 42-byte packet form,
+// Hamming bits kept, here the address bytes the encoder writes.
 // REQ-349: the magazine and packet number come from the two Hamming 8/4
 // address bytes.
 #[test]
@@ -637,6 +645,8 @@ fn triplet_functions_are_named_as_tables_28_and_29() {
     }
 }
 
+/// REQ-24 (REQ-ARCH-002): the packet form keeps each byte's parity bit, so
+/// the decoder judges it.
 /// REQ-351: packet numbers 1 to 25 give their 40 bytes, each one's 7-bit
 /// character and its parity status readable, a byte that fails kept.
 #[test]

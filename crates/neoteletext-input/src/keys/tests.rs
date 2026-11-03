@@ -1,4 +1,7 @@
-#![allow(clippy::unwrap_used, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 use super::*;
 

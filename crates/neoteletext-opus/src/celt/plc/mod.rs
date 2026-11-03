@@ -295,7 +295,10 @@ fn last_mut<T>(values: &mut [T], n: usize) -> &mut [T] {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects, reason = "tests may panic")]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size"
+)]
 mod tests {
     use super::{HISTORY, MAX_PERIOD};
     use crate::celt::decoder::CeltDecoder;

@@ -1,6 +1,13 @@
 //! An in-memory transport that replays recorded exchanges (REQ-WEB-001
 //! verification), and helpers to drive the machines through it.
-#![allow(dead_code, clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    dead_code,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size, arithmetic on small values it chose, where an overflow would also fail it and `panic!` on outcomes it rules out; each test file uses only some of these shared helpers"
+)]
 
 use std::collections::{HashMap, VecDeque};
 use std::string::{String, ToString};

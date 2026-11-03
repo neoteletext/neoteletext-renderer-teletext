@@ -59,7 +59,8 @@ impl AddressSpan {
     pub const NONE: Self = Self { start: 0, length: 0, web: false };
 
     /// The address `address` at `start` of whatever holds it, or `None`
-    /// when it could not be one.
+    /// when it could not be one: when `address` is longer than
+    /// [`LINK_TARGET_BYTES`] or `start` does not fit 32 bits.
     #[must_use]
     pub fn at(start: usize, address: &[u8]) -> Option<Self> {
         if address.len() > LINK_TARGET_BYTES {
@@ -115,7 +116,8 @@ impl LinkText {
     }
 
     /// Adds an address and says where it lies, or `None`, adding nothing,
-    /// when it is too long or does not fit.
+    /// when it is longer than [`LINK_TARGET_BYTES`] or the link text would
+    /// pass [`LINK_TEXT_BYTES`].
     pub fn add(&mut self, address: &[u8]) -> Option<AddressSpan> {
         let start = self.as_bytes().len();
         let span = AddressSpan::at(start, address)?;
@@ -163,7 +165,8 @@ pub enum LinkKey {
 }
 
 impl LinkKey {
-    /// The key for a letter of an `LN` line.
+    /// The key for a letter of an `LN` line: R, G, Y, C or I in either
+    /// case; any other byte gives `None`.
     #[must_use]
     pub const fn from_letter(letter: u8) -> Option<Self> {
         match letter.to_ascii_uppercase() {

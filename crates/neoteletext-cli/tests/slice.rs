@@ -1,6 +1,9 @@
 //! `neottx slice` (REQ-CLI-001): what cannot be sliced is reported.
 #![cfg(feature = "slice")]
-#![allow(clippy::unwrap_used, missing_docs, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 mod common;
 use common::{folder, neottx};

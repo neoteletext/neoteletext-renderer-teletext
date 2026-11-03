@@ -46,8 +46,10 @@ impl FlashPhase {
         let mut on = 0;
         let mut index = 0;
         while index < rates.len() {
-            // `index` is below the array's constant length.
-            #[allow(clippy::indexing_slicing)]
+            #[allow(
+                clippy::indexing_slicing,
+                reason = "the loop condition keeps `index` below the array's constant length"
+            )]
             let rate = rates[index];
             if flash_on(rate, unit) {
                 on |= rate_bit(rate);
@@ -88,7 +90,8 @@ pub fn flash_unit(now: Instant) -> u8 {
 }
 
 /// True when a character of `rate` is in its "on" phase in flash unit
-/// `unit` (decision E.48, REQ-RND-040):
+/// `unit`, 0 to [`FLASH_UNITS`] − 1, a larger value taken modulo
+/// [`FLASH_UNITS`] (decision E.48, REQ-RND-040):
 ///
 /// - the Level 1 flash is timed by [`flash_visible`], not by units, so it
 ///   counts as on;

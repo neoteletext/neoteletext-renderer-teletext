@@ -1,17 +1,11 @@
 //! REQ-INP-011: raw sampled video files.
 #![allow(
     clippy::unwrap_used,
-    clippy::expect_used,
     clippy::indexing_slicing,
-    clippy::panic,
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_wrap,
-    clippy::float_cmp,
-    clippy::too_many_lines,
-    clippy::similar_names
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it; casts of counts and positions the test keeps in range; counts and rates made floating point for measurements, all below 2^24 or within the measurement's tolerance"
 )]
 
 use super::*;
@@ -43,6 +37,8 @@ fn bt8x8_file(frames: usize) -> (Vec<u8>, Vec<Option<Packet>>) {
     (file, packets)
 }
 
+/// REQ-25 (REQ-ARCH-003): each packet from raw samples comes with its line,
+/// field, time stamp and slicer quality.
 #[test]
 fn raw_bt8x8_file_in_odd_chunks() {
     let (file, packets) = bt8x8_file(3);

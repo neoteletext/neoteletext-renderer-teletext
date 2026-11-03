@@ -10,8 +10,7 @@
 //! The image's features choose the build being measured (decision E.61).
 #![no_std]
 #![no_main]
-// The image is never run, so it has no entry point, and the linker says so.
-#![allow(linker_messages)]
+#![allow(linker_messages, reason = "the image is never run, so it has no entry point, and the linker says so")]
 
 use core::hint::black_box;
 use neoteletext_core::acq::{Decoder, StoredPage};

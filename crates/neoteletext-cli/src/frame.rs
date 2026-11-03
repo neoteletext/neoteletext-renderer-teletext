@@ -46,7 +46,10 @@ impl Frame {
 }
 
 #[cfg(all(test, feature = "view"))]
-#[allow(clippy::indexing_slicing, reason = "a test")]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size"
+)]
 mod tests {
     use super::*;
     use crate::image::{Scale, raster};

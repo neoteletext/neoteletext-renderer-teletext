@@ -1,6 +1,9 @@
 //! Tests of the viewer machine's transition function, row by row
 //! (REQ-FSM-005, REQ-FSM-009), and of its trace (REQ-FSM-010).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

@@ -383,7 +383,11 @@ impl Decoder {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects, reason = "tests may panic")]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 mod tests {
     use super::{Decoder, FRAME_SAMPLES};
 

@@ -1,6 +1,5 @@
 //! `neottx contents` (REQ-CLI-008): a channel's `contents.txt` written from a
 //! folder of page files, which the contents reader of REQ-WEB-025 accepts.
-#![allow(missing_docs)]
 
 mod common;
 

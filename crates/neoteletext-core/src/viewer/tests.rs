@@ -1,6 +1,11 @@
 //! Tests of the viewer (REQ-FSM-005): page entry, the keys, links and their confirmation, sub-pages,
 //! history, hold, reveal, mix and zoom, and the status area.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, `panic!` on outcomes it rules out and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

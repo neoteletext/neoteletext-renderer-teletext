@@ -66,7 +66,10 @@ fn ramp(samples: &mut [i16], down: bool) {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::panic)]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size"
+)]
 mod tests {
     // Tests of REQ-AUD-013.
     use super::*;

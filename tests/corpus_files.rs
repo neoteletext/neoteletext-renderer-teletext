@@ -2,8 +2,11 @@
 //! included by each crate's corpus tests. Such a test is marked ignored, so a
 //! run counts it as not run, and asked for with `--ignored` it fails if a file
 //! is absent or differs from its pin: it never reports `ok` without reading.
-// Each test file uses its own subset of these.
-#![allow(dead_code, clippy::expect_used, clippy::panic, missing_docs)]
+#![allow(
+    dead_code,
+    clippy::panic,
+    reason = "each crate's corpus tests use their own subset of these helpers, and a missing or changed corpus file fails the test by panicking"
+)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -15,7 +15,11 @@
 //! regenerates the file in the same change, with the reason in the commit:
 //! run with `NEOTELETEXT_UPDATE_GOLDEN=1`.
 #![cfg(feature = "std")]
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 use neoteletext_core::acq::{Decoder, EnhancementPacket, EnhancementStore, EnhancementSubPage, StoredPage};
 use neoteletext_core::compose::compose_level;

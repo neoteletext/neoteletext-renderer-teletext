@@ -1,6 +1,9 @@
 //! The live feed's loop against a server played in memory: the feed's
 //! own deadlines decide when the loop wakes (decision E.97).
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 use super::wakes::{Wake, Wakes};
 use super::zxnet::{LoopOptions, live_loop};

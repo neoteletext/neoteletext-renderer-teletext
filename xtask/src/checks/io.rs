@@ -81,6 +81,7 @@ mod tests {
         forbidden_items(source, FORBIDDEN)
     }
 
+    /// REQ-429 (REQ-SEC-016): the check reads all of a library's production code.
     /// A test-only item above production code does not hide the code from
     /// the check, as cutting the file at its first `#[cfg(test)]` did.
     #[test]
@@ -89,6 +90,8 @@ mod tests {
         assert_eq!(forbidden_items(&production_text(source), FORBIDDEN), vec![(4, "std::thread")]);
     }
 
+    /// REQ-429 (REQ-SEC-016): `cargo xtask check-io` finds the operating-system
+    /// facilities a library crate may not use, however the import is written.
     /// TODO-2094: a grouped import holds no text `std::fs`, and the check that
     /// looked for that text printed ok.
     #[test]

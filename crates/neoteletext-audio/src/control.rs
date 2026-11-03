@@ -77,7 +77,6 @@ impl Channel {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::panic)]
 mod tests {
     // Tests of REQ-AUD-010 and REQ-AUD-015.
     use super::*;

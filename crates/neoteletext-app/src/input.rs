@@ -21,8 +21,7 @@ pub use feed::{Opening, OpeningError, is_live, link_address, open_live, opening}
 
 /// What to read and how to decode it: the options every `neottx` command
 /// accepts (REQ-CLI-002), free of any argument parser.
-// Each flag is a separate user choice.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "each flag is a separate choice the user makes on the command line")]
 #[derive(Clone, Debug)]
 pub struct Options {
     /// A file, `-` for standard input, or a live feed or web service.
@@ -330,7 +329,10 @@ mod tests {
     /// REQ-371: each option changes its setting after the profile is
     /// applied, and leaves the profile's other settings as they were.
     #[test]
-    #[allow(clippy::unwrap_used, reason = "a test")]
+    #[allow(
+        clippy::unwrap_used,
+        reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+    )]
     fn each_option_overrides_its_profile() {
         let profile = Config::profile("saa5050").unwrap();
         assert_eq!(config(&options("saa5050")).unwrap(), profile);
@@ -360,7 +362,10 @@ mod tests {
     /// and the sandbox step replaces its content with a page: a load that
     /// parsed before the sandbox would find no teletext.
     #[test]
-    #[allow(clippy::unwrap_used, reason = "a test")]
+    #[allow(
+        clippy::unwrap_used,
+        reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+    )]
     fn a_file_is_parsed_only_after_the_sandbox() {
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp/input-sandbox-order");
         std::fs::create_dir_all(&folder).unwrap();

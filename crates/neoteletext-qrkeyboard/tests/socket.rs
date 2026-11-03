@@ -2,7 +2,11 @@
 //! has arrived and returns, answering a ping and seeing a close, as
 //! `neottx keyboard` asks of the channel's socket between the phone's keys
 //! (decision E.94).
-#![allow(missing_docs, clippy::unwrap_used, clippy::expect_used, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `expect` naming what it expected"
+)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
