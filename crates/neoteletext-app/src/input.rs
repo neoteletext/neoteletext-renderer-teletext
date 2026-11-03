@@ -91,6 +91,9 @@ pub fn config(options: &Options) -> Result<Config, Failure> {
         config.double_start_box = false;
     }
     config.trace = options.verbose >= 2;
+    // A thousand entries a page: the row attribute machine's cells only at
+    // the highest verbosity.
+    config.trace_cells = options.verbose >= 3;
     Ok(config)
 }
 

@@ -5,7 +5,7 @@ use super::{ComposeContext, SecurityIndicator, Viewer, ViewerState};
 use crate::acq::EnhancementReport;
 use crate::acq::StoredPage;
 use crate::compose::{compose_level, compose_level_traced};
-use crate::level1::{DisplayOptions, Grid, build_grid};
+use crate::level1::{DisplayOptions, Grid, build_grid, build_grid_traced};
 use crate::trace::TraceSink;
 
 impl<const HISTORY: usize> Viewer<HISTORY> {
@@ -45,10 +45,10 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
     ) -> Composed {
         let ComposeContext { magazine, config, rolling_header, store, row24, lookup } = *context;
         // REQ-NAV-006: while held, new receptions do not reach the screen.
-        if self.state == ViewerState::Holding {
+        if self.machine.state == ViewerState::Holding {
             return Composed::Held;
         }
-        let searching = page.is_none() || self.state == ViewerState::Searching;
+        let searching = page.is_none() || self.machine.state == ViewerState::Searching;
         let options = DisplayOptions {
             status: self.status(store),
             searching,
@@ -59,11 +59,13 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
             mix: self.mix,
             boxed: self.boxed,
         };
-        build_grid(grid, page, magazine, config, &options);
-        Composed::Built(page.and_then(|page| match trace {
-            Some(trace) => compose_level_traced(grid, page, magazine, &lookup, config, &options, trace),
-            None => compose_level(grid, page, magazine, &lookup, config, &options),
-        }))
+        Composed::Built(if let Some(trace) = trace {
+            build_grid_traced(grid, page, magazine, config, &options, trace);
+            page.and_then(|page| compose_level_traced(grid, page, magazine, &lookup, config, &options, trace))
+        } else {
+            build_grid(grid, page, magazine, config, &options);
+            page.and_then(|page| compose_level(grid, page, magazine, &lookup, config, &options))
+        })
     }
 }
 

@@ -61,7 +61,8 @@ pub struct Common {
     /// Accept a single Start Box (decision E.17).
     #[arg(long)]
     pub single_start_box: bool,
-    /// Print diagnostics, and with -vv the state machine trace (REQ-FSM-010).
+    /// Print diagnostics; with -vv the state machine trace (REQ-FSM-010),
+    /// and with -vvv each cell's step of the row attribute machine as well.
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
     /// Run without the operating-system sandbox (REQ-SEC-017).

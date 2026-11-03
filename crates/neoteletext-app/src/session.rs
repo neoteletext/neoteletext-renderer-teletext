@@ -10,7 +10,7 @@ use neoteletext_core::consts::{
     COLUMNS, ENHANCEMENT_PACKETS_LEVEL_35, HEADER_DISPLAY_BYTES, MAGAZINES, MOT_PACKETS, PAGE_COMPLETION_TIMEOUT_US,
 };
 use neoteletext_core::fsm::{PageKey, PageState};
-use neoteletext_core::level1::{DisplayOptions, Grid, build_grid};
+use neoteletext_core::level1::{DisplayOptions, Grid, build_grid_traced};
 use neoteletext_core::packet::{Packet, PacketMeta};
 use neoteletext_core::service::{ServiceInfo, interpret};
 use neoteletext_core::trace::TraceSink;
@@ -200,11 +200,11 @@ impl Session {
         let options = DisplayOptions { status, row24, ..DisplayOptions::default() };
         let magazine = self.decoder.magazine_data(address.magazine);
         let config = self.decoder.config();
-        build_grid(&mut grid, Some(page), &magazine, config, &options);
         let lookup = self.decoder.enhancement_lookup();
         let mut entries = Vec::new();
         let mut keep = |entry| entries.push(Event::Trace(entry));
         let mut trace = TraceSink { time: Instant(self.clock), entries: &mut keep };
+        build_grid_traced(&mut grid, Some(page), &magazine, config, &options, &mut trace);
         let build = PageBuild::of(page, config.level);
         let report = compose_level_traced(&mut grid, page, &magazine, &lookup, config, &options, &mut trace);
         if let Some(report) = report {

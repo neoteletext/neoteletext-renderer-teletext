@@ -164,6 +164,10 @@ pub struct Config {
     pub cell_mode: CellMode,
     /// Report state machine transitions (REQ-FSM-010).
     pub trace: bool,
+    /// With `trace`, also report each cell's step of the row attribute
+    /// machine (REQ-FSM-006): a thousand entries a page, so asked for
+    /// apart (`neottx -vvv`).
+    pub trace_cells: bool,
     /// Show row 0's status area even on pages with C7 set (REQ-L1-014).
     pub status_on_suppressed_header: bool,
     /// Apply NeoTeletext's row set triplet, column mode 01010, which reads
@@ -210,6 +214,7 @@ impl Config {
             step_order: StepOrder::Numerical,
             cell_mode: CellMode::Saa5050,
             trace: false,
+            trace_cells: false,
             status_on_suppressed_header: false,
             row_set_triplets: true,
         }

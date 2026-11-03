@@ -4,7 +4,7 @@
 use crate::charset::{CharRef, CharSet, Designation, G0};
 use crate::config::{Config, PresentationLevel};
 use crate::consts::{
-    COLUMNS, DESIGNATION_CODES, DIACRITIC_NONE, RECEIVER_COLUMNS, ROW_ADDRESS_BASE, ROW_ADDRESS_LAST,
+    COLUMNS, DESIGNATION_CODES, DIACRITIC_NONE, PACKET_ROW_24, RECEIVER_COLUMNS, ROW_ADDRESS_BASE, ROW_ADDRESS_LAST,
     ROW_ADDRESS_ROW_24, TRIPLET_AT_SIGN_CODE, TRIPLET_FIRST_CHARACTER,
 };
 use crate::level1::{CharSource, Glyph, Grid, PageRows, Size};
@@ -31,6 +31,22 @@ pub enum WalkState {
     Terminated,
 }
 
+/// The events of the walk (REQ-FSM-007).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WalkEvent {
+    /// The walk begins.
+    Begin,
+    /// The next stored X/26 packet, in designation-code order; missing
+    /// codes, and X/26/15 when the profile says so (decision E.2), are not
+    /// taken.
+    Packet,
+    /// The next triplet of the packet; `None` when it failed its Hamming
+    /// 24/18 check.
+    Triplet(Option<Triplet>),
+    /// No more packets.
+    End,
+}
+
 /// What a triplet does to the walk.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WalkAction {
@@ -50,65 +66,119 @@ pub struct WalkContext {
     pub strict_row_setting: bool,
 }
 
-/// One transition of the walk for one triplet (REQ-FSM-007).
+/// The transition function of the walk (REQ-FSM-007), one arm for each row
+/// of its table; pairs the table does not list change nothing
+/// (REQ-FSM-001).
+// Arms with equal bodies are kept apart so each matches one table row.
+#[allow(clippy::match_same_arms)]
 #[must_use]
-pub fn walk_transition(state: WalkState, triplet: Option<Triplet>, context: WalkContext) -> (WalkState, WalkAction) {
-    let (row, column) = match state {
+pub fn walk_transition(state: WalkState, event: WalkEvent, context: WalkContext) -> (WalkState, WalkAction) {
+    match (state, event) {
         // REQ-L15-003: clause 12.3.2's starting position.
-        WalkState::Start => (0, 0),
-        WalkState::Walking { row, column } => (row, column),
-        WalkState::Terminated => return (WalkState::Terminated, WalkAction::None),
-    };
-    // Decision E.9: a failed triplet neither moves nor writes.
-    let Some(triplet) = triplet else {
-        return (WalkState::Walking { row, column }, WalkAction::None);
-    };
+        (WalkState::Start, WalkEvent::Begin) => (WalkState::Walking { row: 0, column: 0 }, WalkAction::None),
+        (WalkState::Walking { .. }, WalkEvent::Packet) => (state, WalkAction::None),
+        // Decision E.9: a failed triplet neither moves nor writes.
+        (WalkState::Walking { .. }, WalkEvent::Triplet(None)) => (state, WalkAction::None),
+        (WalkState::Walking { row, column }, WalkEvent::Triplet(Some(triplet))) => {
+            triplet_transition(row, column, triplet, context)
+        }
+        (WalkState::Walking { .. }, WalkEvent::End) => (WalkState::Terminated, WalkAction::None),
+        (WalkState::Start, WalkEvent::Packet | WalkEvent::Triplet(_) | WalkEvent::End)
+        | (WalkState::Walking { .. }, WalkEvent::Begin)
+        | (WalkState::Terminated, WalkEvent::Begin | WalkEvent::Packet | WalkEvent::Triplet(_) | WalkEvent::End) => {
+            (state, WalkAction::None)
+        }
+    }
+}
+
+/// The rows of the walk's table for a triplet read while Walking at `row`
+/// and `column`, one arm for each function of Tables 28 and 29.
+fn triplet_transition(row: u8, column: u8, triplet: Triplet, context: WalkContext) -> (WalkState, WalkAction) {
+    let unchanged = (WalkState::Walking { row, column }, WalkAction::None);
+    // Annex A.3 reads the address field of every row triplet, so the raw
+    // address is used whatever the function (REQ-L15-004, decision E.3).
+    let row_set = (
+        WalkState::Walking {
+            row: if triplet.address == ROW_ADDRESS_ROW_24 {
+                // Table 28: row address 40 names row 24.
+                PACKET_ROW_24
+            } else {
+                triplet.address.saturating_sub(ROW_ADDRESS_BASE)
+            },
+            column: 0,
+        },
+        WalkAction::None,
+    );
     // REQ-PKT-010: the pass reads every triplet through the one decoding of
     // Tables 28 and 29.
     let function = triplet.function();
-    // REQ-L15-004, decision E.3.
     match function {
-        TripletFunction::Termination { .. } => return (WalkState::Terminated, WalkAction::None),
+        TripletFunction::Termination { .. } => (WalkState::Terminated, WalkAction::None),
         TripletFunction::AddressDisplayRow0 { address: ROW_ADDRESS_LAST, .. } => {
-            return (WalkState::Walking { row: 0, column: 0 }, WalkAction::None);
+            (WalkState::Walking { row: 0, column: 0 }, WalkAction::None)
         }
-        _ if triplet.is_row_address() => {
-            // Annex A.3 reads the address field of every row triplet, so the
-            // raw address is used whatever the function.
-            let sets_row = !context.strict_row_setting
-                || matches!(
-                    function,
-                    TripletFunction::FullRowColour { .. }
-                        | TripletFunction::SetActivePosition { .. }
-                        | TripletFunction::AddressDisplayRow0 { .. }
-                );
-            if sets_row {
-                let new_row = if triplet.address == ROW_ADDRESS_ROW_24 {
-                    24
-                } else {
-                    triplet.address.saturating_sub(ROW_ADDRESS_BASE)
-                };
-                return (WalkState::Walking { row: new_row, column: 0 }, WalkAction::None);
+        // Clause 12.3.2: these set the row in either setting.
+        TripletFunction::AddressDisplayRow0 { .. }
+        | TripletFunction::FullRowColour { .. }
+        | TripletFunction::SetActivePosition { .. } => row_set,
+        // Annex A.3: every other row triplet sets the row too, unless the
+        // strict setting of decision E.3 is chosen.
+        TripletFunction::FullScreenColour(_)
+        | TripletFunction::ProgrammeDeliveryRow { .. }
+        | TripletFunction::OriginModifier { .. }
+        | TripletFunction::ObjectInvocation { .. }
+        | TripletFunction::ObjectDefinition { .. }
+        | TripletFunction::ReservedRow { .. } => {
+            if context.strict_row_setting {
+                unchanged
+            } else {
+                row_set
             }
-            return (WalkState::Walking { row, column }, WalkAction::None);
         }
-        _ => {}
+        // REQ-L15-005: the reserved column modes and Programme Delivery
+        // Control leave the active position (clause 12.3.4).
+        TripletFunction::ProgrammeDeliveryColumn { .. } | TripletFunction::ReservedColumn { .. } => unchanged,
+        // REQ-L15-006: the character modes of Level 1.5 move and write.
+        TripletFunction::G3Character { column: new_column, code, level_15_form: true } => {
+            write_at(row, new_column, CharRef::new(CharSet::G3, code))
+        }
+        TripletFunction::G2Character { column: new_column, code } => {
+            write_at(row, new_column, CharRef::new(CharSet::G2(context.designation.g2), code))
+        }
+        TripletFunction::G0Diacritic { column: new_column, code: TRIPLET_AT_SIGN_CODE, diacritic: DIACRITIC_NONE } => {
+            write_at(row, new_column, crate::charset::at_sign())
+        }
+        TripletFunction::G0Diacritic { column: new_column, code, diacritic } => {
+            let g0 = CharSet::G0(G0 { set: context.designation.g0.set, national: None });
+            let mut character = CharRef::new(g0, code);
+            character.diacritic = crate::charset::page_mark(context.designation.g2, diacritic);
+            write_at(row, new_column, character)
+        }
+        // REQ-L15-007: every other column mode, including the Level 2.5 G3
+        // form 01011, only moves the active position.
+        TripletFunction::G3Character { column: new_column, level_15_form: false, .. }
+        | TripletFunction::ForegroundColour { column: new_column, .. }
+        | TripletFunction::G1Character { column: new_column, .. }
+        | TripletFunction::BackgroundColour { column: new_column, .. }
+        | TripletFunction::AdditionalFlash { column: new_column, .. }
+        | TripletFunction::ModifiedDesignation { column: new_column, .. }
+        | TripletFunction::G0Character { column: new_column, .. }
+        | TripletFunction::DisplayAttributes { column: new_column, .. }
+        | TripletFunction::UnsupportedColumn { column: new_column, .. } => {
+            (WalkState::Walking { row, column: new_column }, WalkAction::None)
+        }
     }
-    // REQ-L15-005: every column mode sets the column except the reserved
-    // ones and Programme Delivery Control (clause 12.3.4).
-    let Some(new_column) = function.active_column() else {
-        return (WalkState::Walking { row, column }, WalkAction::None);
-    };
-    let next = WalkState::Walking { row, column: new_column };
-    // REQ-L15-007: every other mode, including the Level 2.5 G3 form 01011,
-    // only moves the active position.
-    let Some(character) = character(function, context) else { return (next, WalkAction::None) };
-    // REQ-PKT-009: data values below 2/0 are reserved; the column still
-    // moves, but nothing is written.
+}
+
+/// The column moves to `column`, and the character is written there unless
+/// its data value is reserved: REQ-PKT-009, values below 2/0 write nothing.
+const fn write_at(row: u8, column: u8, character: CharRef) -> (WalkState, WalkAction) {
+    let next = WalkState::Walking { row, column };
     if character.code < TRIPLET_FIRST_CHARACTER {
-        return (next, WalkAction::None);
+        (next, WalkAction::None)
+    } else {
+        (next, WalkAction::Write(character))
     }
-    (next, WalkAction::Write(character))
 }
 
 /// Names for the transition trace (REQ-FSM-010).
@@ -121,13 +191,16 @@ pub const fn walk_state_name(state: WalkState) -> &'static str {
     }
 }
 
-/// Names for the transition trace: the triplet's function, or a triplet
-/// that failed its Hamming 24/18 check.
+/// Names for the transition trace: the walk's beginning and end, a packet,
+/// the triplet's function, or a triplet that failed its Hamming 24/18 check.
 #[must_use]
-pub const fn walk_event_name(triplet: Option<Triplet>) -> &'static str {
-    match triplet {
-        Some(triplet) => triplet.function().name(),
-        None => "damaged triplet",
+pub const fn walk_event_name(event: WalkEvent) -> &'static str {
+    match event {
+        WalkEvent::Begin => "walk begins",
+        WalkEvent::Packet => "next packet",
+        WalkEvent::Triplet(Some(triplet)) => triplet.function().name(),
+        WalkEvent::Triplet(None) => "damaged triplet",
+        WalkEvent::End => "no more packets",
     }
 }
 
@@ -143,26 +216,6 @@ pub const fn walk_action_name(action: WalkAction) -> &'static str {
 /// The trace's action for a write that the strict option of REQ-L15-009
 /// ignores.
 const IGNORED_OUT_OF_ORDER: &str = "ignore out-of-order write";
-
-/// The character a writing triplet names (REQ-L15-006, REQ-L15-010), with
-/// its code as transmitted; `None` for triplets that write nothing at Level
-/// 1.5.
-fn character(function: TripletFunction, context: WalkContext) -> Option<CharRef> {
-    let g0 = CharSet::G0(G0 { set: context.designation.g0.set, national: None });
-    match function {
-        TripletFunction::G3Character { code, level_15_form: true, .. } => Some(CharRef::new(CharSet::G3, code)),
-        TripletFunction::G2Character { code, .. } => Some(CharRef::new(CharSet::G2(context.designation.g2), code)),
-        TripletFunction::G0Diacritic { code: TRIPLET_AT_SIGN_CODE, diacritic: DIACRITIC_NONE, .. } => {
-            Some(crate::charset::at_sign())
-        }
-        TripletFunction::G0Diacritic { code, diacritic, .. } => {
-            let mut character = CharRef::new(g0, code);
-            character.diacritic = crate::charset::page_mark(context.designation.g2, diacritic);
-            Some(character)
-        }
-        _ => None,
-    }
-}
 
 /// A page's packets X/26 by designation code, and which are present.
 pub type EnhancementPackets = [[Option<Triplet>; crate::consts::TRIPLETS_PER_PACKET]; DESIGNATION_CODES];
@@ -207,34 +260,39 @@ fn walk(
         return;
     }
     let context = WalkContext { designation: grid.designation, strict_row_setting: config.strict_row_setting };
+    let taken = packets.iter().enumerate().take(DESIGNATION_CODES).filter(|&(code, _)| {
+        let received = present.checked_shr(code as u32).is_some_and(|bits| bits & 1 == 1);
+        received && (code != usize::from(LAST_DESIGNATION) || config.process_x26_15)
+    });
+    // The table's events in order: the walk begins, each packet taken and
+    // its triplets, and no more packets.
+    let events = core::iter::once(WalkEvent::Begin)
+        .chain(taken.flat_map(|(_, triplets)| {
+            core::iter::once(WalkEvent::Packet).chain(triplets.iter().map(|&triplet| WalkEvent::Triplet(triplet)))
+        }))
+        .chain(core::iter::once(WalkEvent::End));
     let mut state = WalkState::Start;
     let mut previous: Option<(u8, u8)> = None;
-    for (code, triplets) in packets.iter().enumerate().take(DESIGNATION_CODES) {
-        let received = present.checked_shr(code as u32).is_some_and(|bits| bits & 1 == 1);
-        if !received || (code == usize::from(LAST_DESIGNATION) && !config.process_x26_15) {
-            continue;
+    for event in events {
+        let (next, action) = walk_transition(state, event, context);
+        let from = state;
+        state = next;
+        let mut ignored = false;
+        if let (WalkAction::Write(character), WalkState::Walking { row, column }) = (action, next) {
+            let out_of_order = previous.is_some_and(|before| (row, column) < before);
+            ignored = out_of_order && config.ignore_out_of_order_triplets;
+            if !ignored {
+                write(grid, row, column, character, rows);
+            }
+            previous = Some((row, column));
         }
-        for &triplet in triplets {
-            let (next, action) = walk_transition(state, triplet, context);
-            let from = state;
-            state = next;
-            let mut ignored = false;
-            if let (WalkAction::Write(character), WalkState::Walking { row, column }) = (action, state) {
-                let out_of_order = previous.is_some_and(|before| (row, column) < before);
-                ignored = out_of_order && config.ignore_out_of_order_triplets;
-                if !ignored {
-                    write(grid, row, column, character, rows);
-                }
-                previous = Some((row, column));
-            }
-            if let Some(sink) = trace.as_deref_mut() {
-                let action = if ignored { IGNORED_OUT_OF_ORDER } else { walk_action_name(action) };
-                let event = walk_event_name(triplet);
-                sink.transition(Machine::TripletWalk, walk_state_name(from), event, action, walk_state_name(state));
-            }
-            if state == WalkState::Terminated {
-                return;
-            }
+        if let Some(sink) = trace.as_deref_mut() {
+            let action = if ignored { IGNORED_OUT_OF_ORDER } else { walk_action_name(action) };
+            let (from, event, to) = (walk_state_name(from), walk_event_name(event), walk_state_name(next));
+            sink.transition(Machine::TripletWalk, from, event, action, to);
+        }
+        if state == WalkState::Terminated {
+            return;
         }
     }
 }

@@ -6,13 +6,19 @@ use crate::acq::{EnhancementLookup, MagazineData, PageStore};
 use crate::config::Config;
 use crate::consts::{FASTEXT_KEYS, HEADER_DISPLAY_BYTES};
 use crate::level1::Zoom;
-use crate::nav::{History, HistoryEntry, LinkTarget, PageEntry, PageLinks, SubPageEntry};
-use crate::types::{Instant, PageAddress, SubCode};
+use crate::nav::{History, HistoryEntry, LinkTarget, PageLinks};
+use crate::trace::{Machine, TraceEntry};
+use crate::types::{FixedVec, Instant, PageAddress, SubCode};
 
 mod keys;
+mod machine;
 mod screen;
 mod status;
 
+pub use machine::{
+    ColourInput, RevealInput, ViewerAction, ViewerInput, ViewerMachine, viewer_action_name, viewer_input_name,
+    viewer_state_name, viewer_transition,
+};
 pub use screen::Composed;
 
 /// Viewer keys: the numbered functions of area NAV.
@@ -159,6 +165,26 @@ pub struct ComposeContext<'a> {
 /// History capacity (REQ-NAV-010 default).
 pub const HISTORY_ENTRIES: usize = 32;
 
+/// The viewer's transitions kept for the trace between two takes by the
+/// port (REQ-FSM-010): a port takes them every pass, and a pass sees a few
+/// keys at most; when more come, the oldest are dropped and counted.
+pub const VIEWER_TRACE_ENTRIES: usize = 8;
+
+/// One viewer transition kept for the trace, stamped when the port takes it.
+/// It keeps the kinds of input and action as a byte each and is named only
+/// when taken, so it costs a few bytes of the viewer, and a port that never
+/// takes the trace links none of the names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Transition {
+    from: ViewerState,
+    input: u8,
+    action: u8,
+    to: ViewerState,
+}
+
+const NO_TRANSITION: Transition =
+    Transition { from: ViewerState::Starting, input: 0, action: 0, to: ViewerState::Starting };
+
 /// The viewer, with a history of `HISTORY` entries, 32 unless the port
 /// says otherwise (REQ-NAV-010): held inside the viewer, whose memory the
 /// port provides, as it does every other part of the viewer.
@@ -167,13 +193,9 @@ pub const HISTORY_ENTRIES: usize = 32;
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug)]
 pub struct Viewer<const HISTORY: usize = HISTORY_ENTRIES> {
-    state: ViewerState,
+    machine: ViewerMachine,
     requested: PageAddress,
     subcode: SubCode,
-    entry: PageEntry,
-    subpage_entry: SubPageEntry,
-    /// The state sub-page entry returns to: Displaying or Searching.
-    before_subpage_entry: ViewerState,
     history: History<HISTORY>,
     reveal: bool,
     reveal_until: Option<Instant>,
@@ -183,6 +205,9 @@ pub struct Viewer<const HISTORY: usize = HISTORY_ENTRIES> {
     stale: bool,
     indicator: SecurityIndicator,
     service: u8,
+    tracing: bool,
+    transitions: FixedVec<Transition, VIEWER_TRACE_ENTRIES>,
+    transitions_lost: usize,
 }
 
 impl Viewer {
@@ -200,12 +225,9 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
     #[must_use]
     pub fn with_history(initial: PageAddress) -> Self {
         Self {
-            state: ViewerState::Starting,
+            machine: ViewerMachine::START,
             requested: initial,
             subcode: SubCode::ANY,
-            entry: PageEntry::default(),
-            subpage_entry: SubPageEntry::default(),
-            before_subpage_entry: ViewerState::Displaying,
             history: History::new(),
             reveal: false,
             reveal_until: None,
@@ -215,13 +237,48 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
             stale: false,
             indicator: SecurityIndicator::None,
             service: 0,
+            tracing: false,
+            transitions: FixedVec::new(NO_TRANSITION),
+            transitions_lost: 0,
         }
+    }
+
+    /// The same viewer with its transition trace on or off, as the
+    /// configuration's `trace` says (REQ-FSM-010).
+    #[must_use]
+    pub const fn with_trace(mut self, on: bool) -> Self {
+        self.tracing = on;
+        self
+    }
+
+    /// Whether the viewer keeps its transitions for the trace.
+    #[must_use]
+    pub const fn traces(&self) -> bool {
+        self.tracing
+    }
+
+    /// Hands the transitions kept since the last take to `sink`, oldest
+    /// first, stamped with `time`, and returns how many were dropped
+    /// because more came between two takes than are kept.
+    pub fn take_trace(&mut self, time: Instant, sink: &mut dyn FnMut(TraceEntry)) -> usize {
+        for transition in self.transitions.as_slice() {
+            sink(TraceEntry {
+                machine: Machine::Viewer,
+                time,
+                from: viewer_state_name(transition.from),
+                event: machine::input_code_name(transition.input),
+                action: machine::action_code_name(transition.action),
+                to: viewer_state_name(transition.to),
+            });
+        }
+        self.transitions.clear();
+        core::mem::take(&mut self.transitions_lost)
     }
 
     /// The machine state.
     #[must_use]
     pub const fn state(&self) -> ViewerState {
-        self.state
+        self.machine.state
     }
 
     /// The requested page and sub-code.
@@ -271,7 +328,7 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
     /// state and not in the indicator: the page on screen is the same page
     /// while it is asked, and what is known of it stands (REQ-SEC-008).
     const fn confirming(&self) -> bool {
-        matches!(self.state, ViewerState::ConfirmingLink(_))
+        matches!(self.machine.state, ViewerState::ConfirmingLink(_))
     }
 
     /// Sets the service the viewer is showing, for history entries.
@@ -298,14 +355,96 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
     /// until the store holds that sub-page, as it does for a page: one the
     /// store does not hold is fetched, selected or waited for (REQ-328).
     pub fn show_subpage(&mut self, subcode: SubCode) -> Action {
-        if !matches!(self.state, ViewerState::Displaying | ViewerState::Searching) {
-            return Action::None;
-        }
-        self.subcode = subcode;
-        self.state = ViewerState::Searching;
-        Action::Request(self.requested, subcode)
+        self.run(ViewerInput::ChooseSubPage(subcode))
     }
 
+    /// Handles a decoder event (REQ-FSM-005).
+    pub fn event(&mut self, event: ViewerEvent) -> Action {
+        self.run(ViewerInput::Event(event))
+    }
+
+    /// Makes one transition of the machine, keeps it for the trace and
+    /// applies its action.
+    fn run(&mut self, input: ViewerInput) -> Action {
+        let before = self.machine;
+        let (after, action) = viewer_transition(before, input);
+        self.machine = after;
+        if self.tracing && (after.state != before.state || action != ViewerAction::None) {
+            self.keep_transition(Transition {
+                from: before.state,
+                input: machine::input_code(input),
+                action: machine::action_code(action),
+                to: after.state,
+            });
+        }
+        self.apply(action)
+    }
+
+    fn keep_transition(&mut self, transition: Transition) {
+        if self.transitions.is_full() {
+            let _ = self.transitions.remove(0);
+            self.transitions_lost = self.transitions_lost.saturating_add(1);
+        }
+        let _ = self.transitions.push(transition);
+    }
+
+    /// Carries out a transition's action on the viewer's settings and
+    /// navigation, and says what the application must do.
+    fn apply(&mut self, action: ViewerAction) -> Action {
+        match action {
+            ViewerAction::None
+            | ViewerAction::ShowPage
+            | ViewerAction::RollHeader
+            | ViewerAction::ShowDigit
+            | ViewerAction::RejectDigit
+            | ViewerAction::BeginSubPageEntry
+            | ViewerAction::StopUpdates
+            | ViewerAction::ApplyUpdates
+            | ViewerAction::RestoreRow24 => Action::None,
+            ViewerAction::RequestInitial => self.select(self.requested, SubCode::ANY, true),
+            ViewerAction::MarkStale => {
+                self.stale = true;
+                Action::None
+            }
+            ViewerAction::ClearStale => {
+                self.stale = false;
+                Action::None
+            }
+            ViewerAction::Select(address, subcode) => self.select(address, subcode, true),
+            ViewerAction::MoveInHistory { forward, entry } => {
+                let _ = if forward { self.history.forward() } else { self.history.back() };
+                self.select(entry.address, entry.subcode, false)
+            }
+            ViewerAction::ShowSubPage(subcode) => {
+                self.subcode = subcode;
+                Action::Request(self.requested, subcode)
+            }
+            ViewerAction::ToggleReveal => {
+                self.reveal = !self.reveal;
+                Action::None
+            }
+            ViewerAction::RevealUntil(until) => {
+                self.reveal_until = Some(until);
+                Action::None
+            }
+            ViewerAction::ToggleMix => {
+                self.mix = !self.mix;
+                Action::None
+            }
+            ViewerAction::CycleZoom => {
+                self.zoom = match self.zoom {
+                    Zoom::Off => Zoom::Top,
+                    Zoom::Top => Zoom::Bottom,
+                    Zoom::Bottom => Zoom::Off,
+                };
+                Action::None
+            }
+            ViewerAction::FollowService(target) => Action::FollowService(target),
+            ViewerAction::ConfirmService(target) => Action::ConfirmService(target),
+        }
+    }
+
+    /// Requests a page; the machine has already moved to Searching.
     fn select(&mut self, address: PageAddress, subcode: SubCode, record: bool) -> Action {
         if address != self.requested {
             // REQ-NAV-007: reveal clears when a different page is selected.
@@ -314,32 +453,11 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
         }
         self.requested = address;
         self.subcode = subcode;
-        self.state = ViewerState::Searching;
         self.stale = false;
         if record {
             self.history.visit(HistoryEntry { service: self.service, address, subcode });
         }
         Action::Request(address, subcode)
-    }
-
-    /// Handles a decoder event (REQ-FSM-005).
-    pub fn event(&mut self, event: ViewerEvent) -> Action {
-        match (self.state, event) {
-            (ViewerState::Starting, ViewerEvent::Started) => self.select(self.requested, SubCode::ANY, true),
-            (ViewerState::Searching, ViewerEvent::PagePresent) => {
-                self.state = ViewerState::Displaying;
-                Action::None
-            }
-            (ViewerState::Displaying, ViewerEvent::PageStale) => {
-                self.stale = true;
-                Action::None
-            }
-            (ViewerState::Displaying, ViewerEvent::PageUpdated) => {
-                self.stale = false;
-                Action::None
-            }
-            _ => Action::None,
-        }
     }
 }
 

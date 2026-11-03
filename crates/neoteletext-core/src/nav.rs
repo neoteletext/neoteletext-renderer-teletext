@@ -200,6 +200,9 @@ pub enum EntryResult {
 }
 
 impl PageEntry {
+    /// No digits entered.
+    pub const EMPTY: Self = Self { digits: [0; 3], count: 0 };
+
     /// Number of digits entered so far.
     #[must_use]
     pub const fn count(&self) -> u8 {
@@ -272,6 +275,9 @@ pub enum SubPageEntryResult {
 }
 
 impl SubPageEntry {
+    /// No digits entered.
+    pub const EMPTY: Self = Self { digits: [0; SUBCODE_DIGITS], count: 0 };
+
     /// Number of digits entered so far.
     #[must_use]
     pub const fn count(&self) -> u8 {
@@ -394,6 +400,22 @@ impl<const N: usize> History<N> {
         }
         self.position = self.position.saturating_add(1);
         self.current()
+    }
+
+    /// The entry Back would move to, without moving.
+    #[must_use]
+    pub fn peek_back(&self) -> Option<HistoryEntry> {
+        // The current entry is at `position - 1`, the one before it at
+        // `position - 2`; `back` refuses when `position` is 1 or less.
+        let index = self.position.checked_sub(2)?;
+        self.entries.as_slice().get(index).copied()
+    }
+
+    /// The entry Forward would move to, without moving.
+    #[must_use]
+    pub fn peek_forward(&self) -> Option<HistoryEntry> {
+        // The entry after the current one is at `position`.
+        self.entries.as_slice().get(self.position).copied()
     }
 
     /// True when Back has somewhere to go.

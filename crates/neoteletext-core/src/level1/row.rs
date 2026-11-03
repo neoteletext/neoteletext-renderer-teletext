@@ -1,6 +1,11 @@
 //! The row attribute machine of REQ-FSM-006: the Table 26 spacing
 //! attributes, set-at and set-after, applied along one row.
 
+mod trace;
+
+use trace::Shown;
+pub(super) use trace::{CellTrace, NoTrace, RowTracer};
+
 use super::{Cell, Glyph, Size};
 use crate::charset::{CharRef, CharSet, G0, mosaic_pattern};
 use crate::config::Config;
@@ -65,14 +70,20 @@ impl<'a> RowContext<'a> {
 
 /// Decodes one row of 7-bit codes (REQ-FSM-006). `failed` marks columns
 /// whose byte failed parity. Returns the cells and whether the row contains
-/// double height.
-pub(super) fn decode_row(codes: &[u8; COLUMNS], failed: u64, context: &RowContext<'_>) -> ([Cell; COLUMNS], bool) {
+/// double height. `trace` is told each cell's step (REQ-FSM-010).
+pub(super) fn decode_row(
+    codes: &[u8; COLUMNS],
+    failed: u64,
+    context: &RowContext<'_>,
+    trace: &mut impl CellTrace,
+) -> ([Cell; COLUMNS], bool) {
     let mut cells = [Cell::BLANK; COLUMNS];
     let mut state = RowState::DEFAULT;
     let mut has_double = false;
     for (column, out) in cells.iter_mut().enumerate() {
         let code = codes.get(column).copied().unwrap_or(SPACE) & CODE_MASK_7BIT;
         let next = codes.get(column.saturating_add(1)).copied().unwrap_or(SPACE) & CODE_MASK_7BIT;
+        let before = state;
         // Step 1: set-at attributes.
         set_at(&mut state, code);
         // Step 2: what the cell shows.
@@ -99,6 +110,13 @@ pub(super) fn decode_row(codes: &[u8; COLUMNS], failed: u64, context: &RowContex
         if set_after(&mut state, code, next, context) {
             has_double = true;
         }
+        let shown = match glyph {
+            Glyph::Mosaic { .. } if held => Shown::HeldMosaic,
+            Glyph::Mosaic { .. } => Shown::Mosaic,
+            Glyph::Space if code <= ATTRIBUTE_LAST => Shown::Space,
+            Glyph::Space | Glyph::Char(_) => Shown::Character,
+        };
+        trace.cell(code, &before, &state, shown);
     }
     (cells, has_double)
 }

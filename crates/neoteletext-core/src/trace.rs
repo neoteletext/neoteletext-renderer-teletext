@@ -20,6 +20,9 @@ pub enum Machine {
     TripletWalk,
     /// The Level 2.5 and 3.5 enhancement walk (FSM-011).
     EnhancementWalk,
+    /// The row attribute machine of the given display row (FSM-006),
+    /// reported for each cell only when `Config::trace_cells` asks.
+    RowAttributes(u8),
 }
 
 /// One transition.

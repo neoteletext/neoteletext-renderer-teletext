@@ -5,6 +5,8 @@
 // Each test file uses its own subset of these builders.
 #![allow(dead_code, clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
 
+pub mod reorder;
+
 use neoteletext_core::acq::EnhancementReport;
 use neoteletext_core::acq::{Decoder, EnhancementPacket, EnhancementStore, EnhancementSubPage, StoredPage};
 use neoteletext_core::charset::{CharSet, to_unicode};
