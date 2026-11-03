@@ -208,6 +208,30 @@ mod attributes {
             }
         }
     }
+
+    /// REQ-340 and REQ-1639 ruling 9 (decision E.57, DEC-2382): two Adaptive objects
+    /// that both place a colour at one cell, which Annex A.7 does not allow,
+    /// are shown by one merged record for that cell, owned by the later
+    /// object. The later object's green holds over its own range, columns 0
+    /// to 2; the earlier object, whose change at column 0 the later one took,
+    /// shows the page's own white on the rest of its range, columns 3 and 4.
+    #[test]
+    fn overlapping_adaptive_objects_with_attributes_at_one_cell() {
+        let (red, green) = (colour_index(0, 1), colour_index(0, 2));
+        let first = local_object(ObjectKind::Adaptive, 1, &[foreground(0, red), g0(4, b'a')]);
+        let second = local_object(ObjectKind::Adaptive, 2, &[foreground(0, green), g0(2, b'b')]);
+        let local = [
+            set_position(4, 0),
+            invoke(ObjectSource::Local, ObjectKind::Adaptive, local_number(1, 0)),
+            set_position(4, 0),
+            invoke(ObjectSource::Local, ObjectKind::Adaptive, local_number(2, 0)),
+        ];
+        for level in [L25, L35] {
+            let grid = build(&page_with_objects(&[(4, b"0123456")], &local, &[first.clone(), second.clone()]), level).0;
+            let colours: Vec<u8> = (0..6).map(|column| grid.cells[4][column].foreground).collect();
+            assert_eq!(colours, [green, green, green, WHITE, WHITE, WHITE], "{level:?}");
+        }
+    }
 }
 
 /// REQ-OBJ-002, REQ-OBJ-014, REQ-1644: the Origin Modifier places an object

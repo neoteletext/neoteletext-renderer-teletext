@@ -102,4 +102,34 @@ mod tests {
             }
         }
     }
+
+    /// REQ-1641 ruling 7 (as DEC-2382 words it): a still image draws every
+    /// flash rate in its "on" phase. A Level 1 flashing cell and a fast
+    /// flash phase 1 cell, which is off at flash unit 0, both show their
+    /// foreground at every level.
+    #[test]
+    fn a_still_image_draws_every_flash_in_its_on_phase() {
+        use neoteletext_core::level1::{Cell, CellAttributes, FlashRate, Glyph};
+        let solid = Cell {
+            glyph: Glyph::Mosaic { pattern: 0x3F, separated: false },
+            foreground: 3,
+            background: 4,
+            flash: true,
+            ..Cell::BLANK
+        };
+        let mut grid = Grid::EMPTY;
+        grid.cells[1][0] = solid;
+        grid.cells[1][1] = Cell { attributes: CellAttributes::DEFAULT.with_flash_rate(FlashRate::FastPhase1), ..solid };
+        let one = Scale { x: 1, y: 1, aspect: false };
+        for level in [
+            PresentationLevel::Level1,
+            PresentationLevel::Level15,
+            PresentationLevel::Level25,
+            PresentationLevel::Level35,
+        ] {
+            let config = Config { level, ..Config::default() };
+            let still = raster(&grid, Frame::still(&config, false), one, Rgba::TRANSPARENT);
+            assert_eq!((still.indices[20 * 480], still.indices[20 * 480 + 12]), (3, 3), "{level:?}");
+        }
+    }
 }
