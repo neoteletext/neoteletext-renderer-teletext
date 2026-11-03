@@ -68,6 +68,8 @@ struct ViewState {
     repaint_whole: bool,
     action: Action,
     prompt: Option<[u8; COLUMNS]>,
+    // Row 24 for after the next page request, which clears `prompt`.
+    prompt_after_request: Option<[u8; COLUMNS]>,
     // The origins confirmed this session (REQ-288), kept across services.
     confirmed_origins: HashSet<String>,
     // The enhancement pages asked for in this service, `0xMPP`, each once
@@ -137,6 +139,7 @@ impl ViewState {
             repaint_whole: true,
             action,
             prompt: None,
+            prompt_after_request: None,
             confirmed_origins: HashSet::new(),
             enhancements_asked: HashSet::new(),
             typing,

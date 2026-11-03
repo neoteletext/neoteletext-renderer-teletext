@@ -114,7 +114,7 @@ impl ViewState {
                 } else {
                     source.request(address, subcode);
                 }
-                self.prompt = None;
+                self.prompt = self.prompt_after_request.take();
             }
             Action::FollowService(target) => {
                 self.prompt = None;
