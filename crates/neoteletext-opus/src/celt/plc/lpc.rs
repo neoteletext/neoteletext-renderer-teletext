@@ -18,6 +18,11 @@ pub const LPC_ORDER: usize = 24;
 /// `_celt_lpc`: Levinson-Durbin from the autocorrelation `ac` (one more value than `lpc_out`)
 /// to Q12 prediction coefficients in `lpc_out`. As in the reference, the fallback to `A(z) = 1`
 /// writes only `lpc_out[0]`.
+///
+/// Kept whole, past the source conventions' 80 lines a function: it follows one
+/// routine of the reference decoder step for step, so that it can be read against
+/// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+/// comparison would be harder and the parts would have no meaning of their own.
 pub fn lpc(lpc_out: &mut [i16], ac: &[i32]) {
     // As many coefficients as the autocorrelation has lags past the first.
     let p = lpc_out.len().min(LPC_ORDER).min(ac.len().saturating_sub(1));
