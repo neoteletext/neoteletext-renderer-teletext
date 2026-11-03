@@ -246,7 +246,7 @@ pub(crate) enum Command {
     Convert {
         #[command(flatten)]
         common: Common,
-        /// Output file.
+        /// Output file; for `--to channel`, the channel's folder.
         #[arg(short, long)]
         output: PathBuf,
         /// Output format.

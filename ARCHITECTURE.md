@@ -542,7 +542,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `fetch/`: the fetcher process: the engine's network port over `neoteletext-transport`, its wakes, the pipe to the decoder, and the zxnet and web loops.
 - `live/`: the decoder side of live mode: starting the fetcher and which pages a response may fill.
 - `present/`: the palette-index raster and the receiver-drawn page.
-- `convert/`: stored pages back to page files.
+- `convert/`: stored pages back to page files; `convert/channel.rs` (feature `live`) writes them as a static channel's folder through `neoteletext-web`'s `subpages::ChannelFiles` (DEC-2413).
 - `sandbox/`: the Linux sandbox and the platforms without one.
 
 **`neoteletext-cli`** (the program is the library `lib.rs`; `main.rs` calls its `run`)

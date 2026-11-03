@@ -12,6 +12,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+#[cfg(feature = "live")]
+mod channel;
 mod pages;
 
 pub use pages::{enhancement_page_file, magazine_page_file, page_file, session_page_files};
@@ -26,6 +28,10 @@ pub enum Target {
     /// edit.tf page addresses (REQ-INP-016), one page a line, each a web
     /// address whose fragment holds the page, as the editor opens it.
     Edittf,
+    /// A static channel's folder (DEC-2413): page files, page folders of
+    /// sub-page files with their lists in parts, and the bundle. The output
+    /// names the folder.
+    Channel,
 }
 
 /// The web address an edit.tf page address follows: the editor reads the
@@ -35,13 +41,17 @@ pub const EDITTF_ADDRESS_PREFIX: &[u8] = b"https://edit.tf/#";
 
 /// Converts the input to `to`, written to `output`; with a filter, only
 /// that page, and with a sub-code other than `SubCode::ANY` only that
-/// sub-page (REQ-INP-014, REQ-INP-018).
+/// sub-page (REQ-INP-014, REQ-INP-018). For [`Target::Channel`], `output`
+/// is the channel's folder.
 pub fn convert(
     options: &Options,
     output: &Path,
     to: Target,
     filter: Option<(PageAddress, SubCode)>,
 ) -> Result<(), Failure> {
+    if to == Target::Channel {
+        return to_channel(options, output, filter);
+    }
     let file = File::create(output).map_err(|error| (exit::INPUT, format!("{}: {error}", output.display())))?;
     match to {
         Target::T42 => {
@@ -108,7 +118,21 @@ pub fn convert(
             }
             out.flush().map_err(|error| (exit::INPUT, error.to_string()))
         }
+        Target::Channel => to_channel(options, output, filter),
     }
+}
+
+/// A channel's folder, laid out by the web module (DEC-2413).
+#[cfg(feature = "live")]
+fn to_channel(options: &Options, folder: &Path, filter: Option<(PageAddress, SubCode)>) -> Result<(), Failure> {
+    channel::convert(options, folder, filter)
+}
+
+/// A build without the `live` feature has no web module to lay a channel
+/// out with (decision E.61).
+#[cfg(not(feature = "live"))]
+fn to_channel(_options: &Options, _folder: &Path, _filter: Option<(PageAddress, SubCode)>) -> Result<(), Failure> {
+    Err(crate::not_in_build("a channel's folder", "live"))
 }
 
 #[cfg(test)]

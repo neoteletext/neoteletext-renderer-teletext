@@ -19,6 +19,7 @@ pub fn convert(options: &Options, output: &Path, to: ConvertTarget, page: Option
         ConvertTarget::T42 => conversion::Target::T42,
         ConvertTarget::Tti => conversion::Target::Tti,
         ConvertTarget::Edittf => conversion::Target::Edittf,
+        ConvertTarget::Channel => conversion::Target::Channel,
     };
     conversion::convert(options, output, target, filter)
 }

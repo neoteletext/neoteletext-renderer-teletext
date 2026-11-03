@@ -4,6 +4,7 @@
 
 mod common;
 use common::{folder, neottx};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
@@ -100,4 +101,74 @@ fn page_files_convert_to_t42_in_transmission_order() {
         .map(|packet| (decode(packet[3]) << 4) | decode(packet[2]))
         .collect();
     assert_eq!(headers, [0xA0, 0x00], "the object page comes first");
+}
+
+/// Sub-pages of page 100 in the channel test: more than one part of a page's
+/// list holds (`neoteletext_web::subpages::ROWS_PER_PART`, 64).
+const CHANNEL_SUB_PAGES: u16 = 70;
+
+/// Page 100 of [`CHANNEL_SUB_PAGES`] sub-pages, 0001 up, each saying its
+/// sub-code, and page 200 alone.
+fn channel_input() -> String {
+    let mut pages = String::new();
+    for subcode in 1..=CHANNEL_SUB_PAGES {
+        let _ = write!(
+            pages,
+            "PN,100{:02}
+SC,{subcode:04}
+OL,1,SUB {subcode:04}
+",
+            subcode % 100
+        );
+    }
+    pages + "PN,20000\nSC,0000\nOL,1,OTHER\n"
+}
+
+// Verifies REQ-1887 and REQ-1888 through DEC-2413: `convert --to channel`
+// writes a channel's folder whose page of more sub-pages than one part holds
+// has a file for each sub-page and its list in two parts, and the engine's
+// web agent reads a sub-page listed in the second part back from it.
+#[cfg(feature = "live")]
+#[test]
+fn a_channel_is_written_as_a_folder_and_read_back() {
+    let folder = folder("convert-channel");
+    let input = folder.join("in.tti");
+    fs::write(&input, channel_input()).unwrap();
+    let channel = folder.join("channel");
+    let run = neottx(&["convert", input.to_str().unwrap(), "--to", "channel", "-o", channel.to_str().unwrap()]);
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    for name in ["100.t42", "100/0.sub", "100/1.sub", "100/0001.t42", "100/0070.t42", "200.t42", "index.t42"] {
+        assert!(channel.join(name).is_file(), "{name}");
+    }
+    assert!(text_of(&channel.join("100/0067.t42"), "100").contains("SUB 0067"));
+    let (port, asked) = common::serve_folder(channel);
+    let probe = neottx(&[
+        "probe",
+        &format!("http://127.0.0.1:{port}/ch/"),
+        "--allow-local",
+        "127.0.0.1",
+        "--no-sandbox",
+        "--select",
+        "100/0067",
+    ]);
+    let said = String::from_utf8_lossy(&probe.stdout);
+    let asked = asked.lock().unwrap();
+    assert!(said.contains("selection   100/0067: a page in"), "{said}: {asked:?}");
+    assert!(asked.iter().any(|target| target == "/ch/100/0067.t42"), "{asked:?}");
+}
+
+// Verifies DEC-2413 item 1: a file already in the folder is never written
+// over, and the conversion fails saying which.
+#[test]
+fn a_channel_never_overwrites_a_file() {
+    let folder = folder("convert-channel-existing");
+    let input = folder.join("in.tti");
+    fs::write(&input, channel_input()).unwrap();
+    let channel = folder.join("channel");
+    fs::create_dir_all(&channel).unwrap();
+    fs::write(channel.join("200.t42"), "kept").unwrap();
+    let run = neottx(&["convert", input.to_str().unwrap(), "--to", "channel", "-o", channel.to_str().unwrap()]);
+    assert!(!run.status.success());
+    assert!(String::from_utf8_lossy(&run.stderr).contains("200.t42"), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(fs::read(channel.join("200.t42")).unwrap(), b"kept");
 }

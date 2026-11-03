@@ -78,6 +78,9 @@ pub enum ConvertTarget {
     Tti,
     /// edit.tf page addresses, one page a line (REQ-INP-016).
     Edittf,
+    /// A static channel's folder: page files, sub-pages' files and their
+    /// lists, and the bundle (DEC-2413).
+    Channel,
 }
 
 /// What a page argument selects (REQ-CLI-003).
