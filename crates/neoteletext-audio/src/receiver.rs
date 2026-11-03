@@ -153,6 +153,14 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.statistics
     }
 
+    /// What this receiver holds, for its port to publish and to check
+    /// against its level's minimum (REQ-AUD-017): the store's bytes, the
+    /// objects and the records in flight it was built with.
+    #[must_use]
+    pub fn limits(&self) -> crate::ReceiverLimits {
+        crate::ReceiverLimits { store_bytes: self.store.capacity(), objects: OBJECTS, records_in_flight: SLOTS }
+    }
+
     /// The store, for diagnostics.
     #[must_use]
     pub fn store(&self) -> &Store<'a, OBJECTS> {
