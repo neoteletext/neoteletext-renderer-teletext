@@ -242,6 +242,37 @@ neottx check pages/*.tti --descriptor service.json
 neottx sound --page 100 chime.wav chime.t42 && cat pages.t42 chime.t42 > channel.t42
 ```
 
+## Pictures to pages: `neottx-picture`
+
+`neottx-picture` turns a picture into a teletext page of mosaic graphics (DEC-2325, REQ-2337). It is a program of its own, not part of `neottx`:
+
+```sh
+cargo build --release -p neoteletext-picture-cli
+target/release/neottx-picture photo.jpg page.tti --t42 page.t42 --level 3.5
+neottx render page.t42 100 -o page.png
+```
+
+It reads PNG, JPEG, GIF, BMP and WebP files of up to 64 MiB and 32,768 pixels a side, turns a photograph upright by its orientation tag, and writes page 100 as a TTI file, and as T42 with `--t42`. Its options:
+
+| Option | What it does |
+|---|---|
+| `--level 1\|1.5\|2.5\|3.5` | The presentation level; 3.5 by default. Levels 1 and 1.5 use the eight colours and spacing attributes; 2.5 and 3.5 redefine colours and change them with X/26 triplets. |
+| `--objects` | Levels 2.5 and 3.5: carry the colour changes in Active objects on page 1A0, which holds far more of them. The default `neottx` build does not show objects; build it with `--features objects`. |
+| `--hold-mosaics` | Levels 1 and 1.5: an attribute's cell shows the last mosaic rather than the background. |
+| `--display neottx\|tv` | The shape to crop for: square dots as `neottx` draws them (the default), or a 4:3 television's. |
+| `--smooth area\|lanczos` | The scaling filter: the mean of each area (the default), or a sharper Lanczos filter. |
+| `--fit crop\|contain\|stretch` | Fill the page and cut off the rest (the default), show the whole picture between bars, or distort it to fill. |
+| `--align ALIGN` | Which part a crop keeps, or where the picture sits between bars: `center`, `top`, `bottom`, `left`, `right`, `top-left`, `top-right`, `bottom-left` or `bottom-right`. |
+| `--background COLOUR` | The colour of bars and of transparent areas: a Level 1 colour name or `#RRGGBB`; black by default. |
+| `--pixel-art` | Each pixel is one sixel, enlarged by the largest whole number that fits; a picture over 80 by 75 is refused. |
+| `--no-auto-orient` | Take the picture as stored, ignoring its orientation tag. |
+| `--crop X,Y,WIDTH,HEIGHT` | Cut this region out first. |
+| `--no-upscale` | Never enlarge: a small picture keeps its size on bars. |
+| `--focus auto` | Crop where the picture has the most detail. |
+| `--keep-header` | Draw rows 1 to 24 only and leave row 0 to the page's header. |
+
+Options that contradict each other, such as `--hold-mosaics` at Level 3.5, are refused with the reason. The library behind it, `neoteletext-picture`, takes the picture's bytes and returns the page, so other programs can use it; `docs/spec/design/pictures.md` explains how it works.
+
 ## Glyphs
 
 Pages are drawn in Noto Teletext, the one compiled font (REQ-FNT-001, DEC-1761): the Noto fonts converted to teletext's 12 × 20 cell, drawn line for line. It holds every character of the standard's 24 sets and of neoteletext's own sets, with every letter a base and a diacritical mark compose to. A mark on a letter Unicode does not compose is laid over the letter, and a character the font does not hold is drawn as a hollow box. `neottx render --font` draws in another font: a 12 × 10 or 12 × 20 BDF file (area FNT).
