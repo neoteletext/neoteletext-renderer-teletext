@@ -2516,3 +2516,85 @@ fn the_invalid_count_restarts_when_the_connection_reopens() {
     assert!(has_event(&records, "PushConnected"), "{records:?}");
     assert!(has_event(&records, "InvalidPackets { total: 1 }"), "{records:?}");
 }
+
+/// The live channel `site_harness` serves at `/live/`: its settings name a
+/// push connection, and the connection sends `frames`.
+#[cfg(feature = "push")]
+fn live_channel(frames: Vec<u8>) -> (Harness, Vec<Rec>) {
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", json_response(br#"{"push":{}}"#));
+    harness.replay().reply("site.example:80", Reply::WebSocket(frames));
+    let records = harness.open_channel("http://site.example/live/");
+    (harness, records)
+}
+
+// Verifies REQ-WEB-018 (REQ-507), TODO-1528 items 1 and 2: a live channel
+// makes no request after its entry file but its push connection, even when
+// the port asks for its initial page, a part of a page's list of sub-pages
+// and its contents; it reports connecting at once and never a page not
+// found, and is live when the first page frame arrives.
+#[test]
+#[cfg(feature = "push")]
+fn a_live_channel_opens_by_its_connection_alone() {
+    let (mut harness, records) = live_channel(Vec::new());
+    assert!(has_event(&records, "ChannelConnecting"), "{records:?}");
+    assert!(has_event(&records, "PushConnected"), "{records:?}");
+    let page = PageAddress::from_mpp(0x100).unwrap();
+    harness.input(Input::FetchPage { page, subcode: None });
+    harness.input(Input::FetchSubPages { page, part: PartNumber::FIRST });
+    harness.input(Input::FetchContents);
+    harness.advance(10 * SECOND);
+    let later = harness.take();
+    let paths = paths(&mut harness, "site.example:80");
+    assert_eq!(paths, ["/live/channel.ttx", "/live/push"], "the entry file, then the push connection's handshake");
+    assert!(!has_event(&later, "PageNotInService") && !has_event(&records, "PageNotInService"), "{later:?}");
+    assert!(!has_event(&later, "ChannelLive"), "no page yet: {later:?}");
+    // The first page frame makes it live.
+    harness.replay().inject(ConnectionId::Push, &server_frame(0x2, &packet_at(1, 0)));
+    harness.settle();
+    let live = harness.take();
+    assert!(has_event(&live, "ChannelLive"), "{live:?}");
+}
+
+// Verifies REQ-WEB-018, DOC-1955, TODO-1528 item 3: index records on a live
+// channel's connection reach the port as `Index`, and `IndexComplete`
+// follows the last part only.
+#[test]
+#[cfg(feature = "push")]
+fn a_live_channels_index_reaches_the_port() {
+    use neoteletext_web::records::index::{IndexMagazine, IndexPage, encode};
+    let pages = [IndexPage { page: 0x100, subpages: 1, title: "Index", section: "" }];
+    let other = [IndexPage { page: 0x200, subpages: 2, title: "Sport", section: "Sport" }];
+    let magazines = [
+        IndexMagazine { magazine: 1, name: "One", pages: &pages },
+        IndexMagazine { magazine: 2, name: "", pages: &other },
+    ];
+    let message = packets_of(|out| {
+        encode(4, &magazines, 3, 1, out).unwrap();
+    });
+    let (_, records) = live_channel(server_frame(0x2, &message));
+    let order: Vec<&str> = events(&records)
+        .into_iter()
+        .filter(|event| event.starts_with("Index"))
+        .map(|event| event.split([' ', '(']).next().unwrap())
+        .collect();
+    assert_eq!(order, ["Index", "Index", "IndexComplete"], "{records:?}");
+    assert!(has_event(&records, "IndexComplete { generation: 4 }"), "{records:?}");
+}
+
+// Verifies REQ-WEB-018, TODO-1528 items 4 and 5: a static channel still asks
+// for its entry file, then its bundle, and then the page asked for; and a
+// channel opened after a live one is fetched again.
+#[test]
+#[cfg(feature = "push")]
+fn a_static_channel_after_a_live_one_makes_its_requests() {
+    let (mut harness, _) = live_channel(Vec::new());
+    harness.replay().reply("site.example:80", json_response(br#"{"name":"Static"}"#));
+    harness.replay().reply("site.example:80", not_found());
+    let records = harness.open_channel("http://site.example/news/");
+    assert!(!has_event(&records, "ChannelConnecting"), "{records:?}");
+    harness.replay().reply("site.example:80", tti_response(&[]));
+    harness.fetch(0x100);
+    let paths = paths(&mut harness, "site.example:80");
+    assert_eq!(&paths[2..], ["/news/channel.ttx", "/news/index.t42", "/news/100.tti"]);
+}
