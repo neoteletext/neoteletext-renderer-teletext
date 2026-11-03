@@ -72,12 +72,12 @@ All state lives in memory you provide (REQ-GEN-003):
   | `StoredPage` (one slot of the page store) | 2,688 |
   | `EnhancementSubPage` | 120 |
   | `EnhancementPacket` | 42 |
-  | `Decoder` (without its store) | 1,904 |
+  | `Decoder` (without its store) | 1,936 |
   | `Grid` | 16,100 |
   | `Viewer` | 240 |
   | `GlyphSet` | 1,416 |
 
-- **What a decoder needs in all**, from those sizes: in the minimum configuration, one requested page at Level 1.5, a decoder with a store of one page, a `Grid` and a viewer take 1,904 + 2,688 + 16,100 + 240 = 20,932 bytes, about 20.5 kilobytes; `neottx`'s default store of 4,096 pages (`--pages`) adds 4,096 × 2,688 = 11,010,048 bytes, about 10.5 megabytes; and at Level 3.5 the enhancement store for Annex E.8's bound of 1,200 packets and its sub-pages adds about 50 kilobytes (1,200 × 42 bytes of packets, with the sub-page entries at 120 bytes each), plus 24 packets for each magazine's Magazine Organization Table.
+- **What a decoder needs in all**, from those sizes: in the minimum configuration, one requested page at Level 1.5, a decoder with a store of one page, a `Grid` and a viewer take 1,936 + 2,688 + 16,100 + 240 = 20,964 bytes, about 20.5 kilobytes; `neottx`'s default store of 4,096 pages (`--pages`) adds 4,096 × 2,688 = 11,010,048 bytes, about 10.5 megabytes; and at Level 3.5 the enhancement store for Annex E.8's bound of 1,200 packets and its sub-pages adds about 50 kilobytes (1,200 × 42 bytes of packets, with the sub-page entries at 120 bytes each), plus 24 packets for each magazine's Magazine Organization Table.
 - A rendered text row at 480 by 20 needs 9.6 kilobytes at 8 bits per pixel or 4.8 kilobytes at 4 bits.
 
 ## Sub-pages
