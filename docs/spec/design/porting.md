@@ -65,19 +65,19 @@ All state lives in memory you provide (REQ-GEN-003):
 - The page store is a slice of `StoredPage` you allocate: `[StoredPage::EMPTY; N]` in a `static`, or on the heap. Each slot is 2,688 bytes.
 - For Levels 2.5 and 3.5, the enhancement store is two more slices: `EnhancementSubPage::EMPTY` entries of 120 bytes, and `EnhancementPacket::EMPTY` slots of 42 bytes, one per packet. Annex E.8 bounds a service at 500 packets at Level 2.5 and 1200 at Level 3.5, about 21 and 50 kilobytes, plus 24 packets for each magazine's Magazine Organization Table. Pass them to `Decoder::with_enhancement_store`; `Decoder::new` keeps no enhancement pages.
 - A `Grid` is 1000 cells of 16 bytes and the page-wide state: 16,100 bytes. Build it in place with `build_grid(&mut grid, ...)`.
-- The sizes of the state types, reported and bounded by the test `every_state_type_has_a_bounded_size` (`crates/neoteletext-core/tests/state_sizes.rs`; REQ-GEN-003), measured on 3 November 2026 on 64-bit Linux, the same with every feature and with only `level15`, `render` and `viewer` (a 32-bit microcontroller's are the same or smaller, its pointers and `usize` being half as wide):
+- The sizes of the state types, reported and bounded by the test `every_state_type_has_a_bounded_size` (`crates/neoteletext-core/tests/state_sizes.rs`; REQ-GEN-003), measured on 3 November 2026 on 64-bit Linux, and the `Decoder` and `Viewer` again on 4 November 2026, when the configuration gained `trace_cells` and the viewer kept its transitions for the trace (DEC-2446, DEC-2447), the same with every feature and with only `level15`, `render` and `viewer` (a 32-bit microcontroller's are the same or smaller, its pointers and `usize` being half as wide):
 
   | Type | Bytes |
   |---|---|
   | `StoredPage` (one slot of the page store) | 2,688 |
   | `EnhancementSubPage` | 120 |
   | `EnhancementPacket` | 42 |
-  | `Decoder` (without its store) | 1,904 |
+  | `Decoder` (without its store) | 1,936 |
   | `Grid` | 16,100 |
-  | `Viewer` | 240 |
+  | `Viewer` | 320 |
   | `GlyphSet` | 1,416 |
 
-- **What a decoder needs in all**, from those sizes: in the minimum configuration, one requested page at Level 1.5, a decoder with a store of one page, a `Grid` and a viewer take 1,904 + 2,688 + 16,100 + 240 = 20,932 bytes, about 20.5 kilobytes; `neottx`'s default store of 4,096 pages (`--pages`) adds 4,096 × 2,688 = 11,010,048 bytes, about 10.5 megabytes; and at Level 3.5 the enhancement store for Annex E.8's bound of 1,200 packets and its sub-pages adds about 50 kilobytes (1,200 × 42 bytes of packets, with the sub-page entries at 120 bytes each), plus 24 packets for each magazine's Magazine Organization Table.
+- **What a decoder needs in all**, from those sizes: in the minimum configuration, one requested page at Level 1.5, a decoder with a store of one page, a `Grid` and a viewer take 1,936 + 2,688 + 16,100 + 320 = 21,044 bytes, about 20.6 kilobytes; `neottx`'s default store of 4,096 pages (`--pages`) adds 4,096 × 2,688 = 11,010,048 bytes, about 10.5 megabytes; and at Level 3.5 the enhancement store for Annex E.8's bound of 1,200 packets and its sub-pages adds about 50 kilobytes (1,200 × 42 bytes of packets, with the sub-page entries at 120 bytes each), plus 24 packets for each magazine's Magazine Organization Table.
 - A rendered text row at 480 by 20 needs 9.6 kilobytes at 8 bits per pixel or 4.8 kilobytes at 4 bits.
 
 ## Sub-pages

@@ -352,58 +352,133 @@ pub const fn viewer_state_name(state: ViewerState) -> &'static str {
     }
 }
 
-/// Names for the transition trace.
+/// The names of the inputs for the transition trace, by [`input_code`].
+const INPUT_NAMES: [&str; INPUT_KINDS] = [
+    "decoder started",
+    "page present",
+    "header received",
+    "page updated",
+    "page stale",
+    "digit",
+    "sub-page key",
+    "hold key",
+    "reveal key",
+    "mix key",
+    "zoom key",
+    "coloured key",
+    "index key",
+    "home key",
+    "next or previous page",
+    "next or previous sub-page",
+    "back",
+    "forward",
+    "sub-page chosen",
+];
+/// How many kinds of input the machine has.
+const INPUT_KINDS: usize = 19;
+
+/// The names of the actions for the transition trace, by [`action_code`].
+const ACTION_NAMES: [&str; ACTION_KINDS] = [
+    "none",
+    "request initial page",
+    "show page",
+    "roll header",
+    "mark not recently received",
+    "clear not recently received",
+    "show digit",
+    "reject digit",
+    "request page",
+    "move in history and request",
+    "request sub-page",
+    "begin sub-page entry",
+    "stop applying updates",
+    "apply updates",
+    "toggle reveal",
+    "reveal for a while",
+    "toggle mix",
+    "step zoom",
+    "follow link to other service",
+    "ask to confirm other service",
+    "restore row 24",
+];
+/// How many kinds of action the machine has.
+const ACTION_KINDS: usize = 21;
+
+/// The kind of an input, without its facts, as the viewer keeps it for the
+/// trace: one byte, named only when the trace is taken.
 #[must_use]
-pub const fn viewer_input_name(input: ViewerInput) -> &'static str {
+pub(super) const fn input_code(input: ViewerInput) -> u8 {
     match input {
-        ViewerInput::Event(ViewerEvent::Started) => "decoder started",
-        ViewerInput::Event(ViewerEvent::PagePresent) => "page present",
-        ViewerInput::Event(ViewerEvent::HeaderReceived) => "header received",
-        ViewerInput::Event(ViewerEvent::PageUpdated) => "page updated",
-        ViewerInput::Event(ViewerEvent::PageStale) => "page stale",
-        ViewerInput::Digit(_) => "digit",
-        ViewerInput::SubPageKey => "sub-page key",
-        ViewerInput::Hold => "hold key",
-        ViewerInput::Reveal(_) => "reveal key",
-        ViewerInput::Mix => "mix key",
-        ViewerInput::Zoom => "zoom key",
-        ViewerInput::Colour(_) => "coloured key",
-        ViewerInput::Index(_) => "index key",
-        ViewerInput::Home(_) => "home key",
-        ViewerInput::StepPage(_) => "next or previous page",
-        ViewerInput::StepSubPage(_) => "next or previous sub-page",
-        ViewerInput::Back(_) => "back",
-        ViewerInput::Forward(_) => "forward",
-        ViewerInput::ChooseSubPage(_) => "sub-page chosen",
+        ViewerInput::Event(ViewerEvent::Started) => 0,
+        ViewerInput::Event(ViewerEvent::PagePresent) => 1,
+        ViewerInput::Event(ViewerEvent::HeaderReceived) => 2,
+        ViewerInput::Event(ViewerEvent::PageUpdated) => 3,
+        ViewerInput::Event(ViewerEvent::PageStale) => 4,
+        ViewerInput::Digit(_) => 5,
+        ViewerInput::SubPageKey => 6,
+        ViewerInput::Hold => 7,
+        ViewerInput::Reveal(_) => 8,
+        ViewerInput::Mix => 9,
+        ViewerInput::Zoom => 10,
+        ViewerInput::Colour(_) => 11,
+        ViewerInput::Index(_) => 12,
+        ViewerInput::Home(_) => 13,
+        ViewerInput::StepPage(_) => 14,
+        ViewerInput::StepSubPage(_) => 15,
+        ViewerInput::Back(_) => 16,
+        ViewerInput::Forward(_) => 17,
+        ViewerInput::ChooseSubPage(_) => 18,
     }
+}
+
+/// The kind of an action, without its data, as the viewer keeps it.
+#[must_use]
+pub(super) const fn action_code(action: ViewerAction) -> u8 {
+    match action {
+        ViewerAction::None => 0,
+        ViewerAction::RequestInitial => 1,
+        ViewerAction::ShowPage => 2,
+        ViewerAction::RollHeader => 3,
+        ViewerAction::MarkStale => 4,
+        ViewerAction::ClearStale => 5,
+        ViewerAction::ShowDigit => 6,
+        ViewerAction::RejectDigit => 7,
+        ViewerAction::Select(..) => 8,
+        ViewerAction::MoveInHistory { .. } => 9,
+        ViewerAction::ShowSubPage(_) => 10,
+        ViewerAction::BeginSubPageEntry => 11,
+        ViewerAction::StopUpdates => 12,
+        ViewerAction::ApplyUpdates => 13,
+        ViewerAction::ToggleReveal => 14,
+        ViewerAction::RevealUntil(_) => 15,
+        ViewerAction::ToggleMix => 16,
+        ViewerAction::CycleZoom => 17,
+        ViewerAction::FollowService(_) => 18,
+        ViewerAction::ConfirmService(_) => 19,
+        ViewerAction::RestoreRow24 => 20,
+    }
+}
+
+/// The name of the input kind `code`.
+pub(super) fn input_code_name(code: u8) -> &'static str {
+    INPUT_NAMES.get(usize::from(code)).copied().unwrap_or("")
+}
+
+/// The name of the action kind `code`.
+pub(super) fn action_code_name(code: u8) -> &'static str {
+    ACTION_NAMES.get(usize::from(code)).copied().unwrap_or("")
 }
 
 /// Names for the transition trace.
 #[must_use]
-pub const fn viewer_action_name(action: ViewerAction) -> &'static str {
-    match action {
-        ViewerAction::None => "none",
-        ViewerAction::RequestInitial => "request initial page",
-        ViewerAction::ShowPage => "show page",
-        ViewerAction::RollHeader => "roll header",
-        ViewerAction::MarkStale => "mark not recently received",
-        ViewerAction::ClearStale => "clear not recently received",
-        ViewerAction::ShowDigit => "show digit",
-        ViewerAction::RejectDigit => "reject digit",
-        ViewerAction::Select(..) => "request page",
-        ViewerAction::MoveInHistory { .. } => "move in history and request",
-        ViewerAction::ShowSubPage(_) => "request sub-page",
-        ViewerAction::BeginSubPageEntry => "begin sub-page entry",
-        ViewerAction::StopUpdates => "stop applying updates",
-        ViewerAction::ApplyUpdates => "apply updates",
-        ViewerAction::ToggleReveal => "toggle reveal",
-        ViewerAction::RevealUntil(_) => "reveal for a while",
-        ViewerAction::ToggleMix => "toggle mix",
-        ViewerAction::CycleZoom => "step zoom",
-        ViewerAction::FollowService(_) => "follow link to other service",
-        ViewerAction::ConfirmService(_) => "ask to confirm other service",
-        ViewerAction::RestoreRow24 => "restore row 24",
-    }
+pub fn viewer_input_name(input: ViewerInput) -> &'static str {
+    input_code_name(input_code(input))
+}
+
+/// Names for the transition trace.
+#[must_use]
+pub fn viewer_action_name(action: ViewerAction) -> &'static str {
+    action_code_name(action_code(action))
 }
 
 #[cfg(test)]

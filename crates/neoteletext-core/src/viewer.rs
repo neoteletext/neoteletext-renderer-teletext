@@ -171,22 +171,19 @@ pub const HISTORY_ENTRIES: usize = 32;
 pub const VIEWER_TRACE_ENTRIES: usize = 8;
 
 /// One viewer transition kept for the trace, stamped when the port takes it.
-/// It keeps the input and action themselves and is named only when taken,
-/// so a port that never takes the trace links none of the names.
+/// It keeps the kinds of input and action as a byte each and is named only
+/// when taken, so it costs a few bytes of the viewer, and a port that never
+/// takes the trace links none of the names.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Transition {
     from: ViewerState,
-    input: ViewerInput,
-    action: ViewerAction,
+    input: u8,
+    action: u8,
     to: ViewerState,
 }
 
-const NO_TRANSITION: Transition = Transition {
-    from: ViewerState::Starting,
-    input: ViewerInput::Hold,
-    action: ViewerAction::None,
-    to: ViewerState::Starting,
-};
+const NO_TRANSITION: Transition =
+    Transition { from: ViewerState::Starting, input: 0, action: 0, to: ViewerState::Starting };
 
 /// The viewer.
 // Reveal, mix, boxed display and staleness are separate settings and facts
@@ -257,8 +254,8 @@ impl Viewer {
                 machine: Machine::Viewer,
                 time,
                 from: viewer_state_name(transition.from),
-                event: viewer_input_name(transition.input),
-                action: viewer_action_name(transition.action),
+                event: machine::input_code_name(transition.input),
+                action: machine::action_code_name(transition.action),
                 to: viewer_state_name(transition.to),
             });
         }
@@ -358,7 +355,12 @@ impl Viewer {
         let (after, action) = viewer_transition(before, input);
         self.machine = after;
         if self.tracing && (after.state != before.state || action != ViewerAction::None) {
-            self.keep_transition(Transition { from: before.state, input, action, to: after.state });
+            self.keep_transition(Transition {
+                from: before.state,
+                input: machine::input_code(input),
+                action: machine::action_code(action),
+                to: after.state,
+            });
         }
         self.apply(action)
     }
