@@ -46,12 +46,13 @@ fn hamming2418_exhaustive() {
     for value in 0..(1u32 << 18) {
         let encoded = hamming2418_encode(value);
         assert_eq!(hamming2418_decode(encoded), (value, Status::Clean));
+        for position in 0..24 {
+            let mut corrupted = encoded;
+            corrupted[position / 8] ^= 1 << (position % 8);
+            assert_eq!(hamming2418_decode(corrupted), (value, Status::Corrected), "{value:#07x} bit {position}");
+        }
+        // REQ-TST-003 allows the double errors to be a sample.
         if value % 64 == 0 {
-            for position in 0..24 {
-                let mut corrupted = encoded;
-                corrupted[position / 8] ^= 1 << (position % 8);
-                assert_eq!(hamming2418_decode(corrupted), (value, Status::Corrected));
-            }
             lcg = lcg.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             let first = (lcg >> 8) % 24;
             let second = (first + 1 + (lcg >> 16) % 23) % 24;
