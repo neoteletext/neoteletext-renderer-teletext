@@ -6,8 +6,9 @@
 use crate::consts::{
     ATTRIBUTE_BOXING, ATTRIBUTE_CONCEAL, ATTRIBUTE_DOUBLE_HEIGHT, ATTRIBUTE_DOUBLE_WIDTH, ATTRIBUTE_INVERT,
     ATTRIBUTE_UNDERLINE, LEVEL_BIT_25, LEVEL_BIT_35, MODE_OBJECT_TYPE_MASK, OBJECT_ADDRESS_N8_N7_MASK,
-    OBJECT_NUMBER_HIGH_SHIFT, OBJECT_SOURCE_MASK, TRIPLET_COLOUR_HIGH_SHIFT, TRIPLET_COLOUR_INDEX_MASK,
-    TRIPLET_DATA_FIELD_MASK,
+    OBJECT_NUMBER_HIGH_SHIFT, OBJECT_NUMBER_N4_SHIFT, OBJECT_NUMBER_N6_N5_SHIFT, OBJECT_NUMBER_N8_N7_SHIFT,
+    OBJECT_NUMBER_N8_SHIFT, OBJECT_NUMBER_NIBBLE, OBJECT_NUMBER_TWO_BITS, OBJECT_SOURCE_MASK,
+    TRIPLET_COLOUR_HIGH_SHIFT, TRIPLET_COLOUR_INDEX_MASK, TRIPLET_DATA_FIELD_MASK,
 };
 
 /// A colour field of Tables 28 and 29 (decision E.43).
@@ -112,27 +113,19 @@ impl ObjectKind {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct ObjectNumber(pub u16);
 
-/// Masks and shifts of the object number fields (Table 28, p.80).
-const NUMBER_NIBBLE: u16 = 0x0F;
-const NUMBER_N4_SHIFT: u32 = 4;
-const NUMBER_N6_N5_SHIFT: u32 = 5;
-const NUMBER_TWO_BITS: u16 = 0x03;
-const NUMBER_N8_SHIFT: u32 = 8;
-const NUMBER_N8_N7_SHIFT: u32 = 7;
-
 impl ObjectNumber {
     /// N3 to N0 of a public or global object: the S1 sub-code nibble of the
     /// object page's sub-page that holds the definition.
     #[must_use]
     pub const fn subpage(self) -> u8 {
-        (self.0 & NUMBER_NIBBLE) as u8
+        (self.0 & OBJECT_NUMBER_NIBBLE) as u8
     }
 
     /// N8 N7 of a public or global object: which pointer packet, 0 to 3 for
     /// packets 1 to 4.
     #[must_use]
     pub const fn pointer_packet_index(self) -> u8 {
-        ((self.0 >> NUMBER_N8_N7_SHIFT) & NUMBER_TWO_BITS) as u8
+        ((self.0 >> OBJECT_NUMBER_N8_N7_SHIFT) & OBJECT_NUMBER_TWO_BITS) as u8
     }
 
     /// N6 N5 of a public or global object: the group of three pointer
@@ -140,34 +133,34 @@ impl ObjectNumber {
     /// with k = 0 Active, 1 Adaptive, 2 Passive (REQ-OBJ-004).
     #[must_use]
     pub const fn pointer_group(self) -> u8 {
-        ((self.0 >> NUMBER_N6_N5_SHIFT) & NUMBER_TWO_BITS) as u8
+        ((self.0 >> OBJECT_NUMBER_N6_N5_SHIFT) & OBJECT_NUMBER_TWO_BITS) as u8
     }
 
     /// N4 of a public or global object: the pointer is in bits 10 to 18 of
     /// the pointer triplet when true, and in bits 1 to 9 when false.
     #[must_use]
     pub const fn pointer_odd(self) -> bool {
-        (self.0 >> NUMBER_N4_SHIFT) & 1 == 1
+        (self.0 >> OBJECT_NUMBER_N4_SHIFT) & 1 == 1
     }
 
     /// N8 of a local object, which shall be 0 (Table 28).
     #[must_use]
     pub const fn n8(self) -> bool {
-        (self.0 >> NUMBER_N8_SHIFT) & 1 == 1
+        (self.0 >> OBJECT_NUMBER_N8_SHIFT) & 1 == 1
     }
 
     /// N7 to N4 of a local object: the designation code of the X/26 packet
     /// that holds the definition.
     #[must_use]
     pub const fn designation(self) -> u8 {
-        ((self.0 >> NUMBER_N4_SHIFT) & NUMBER_NIBBLE) as u8
+        ((self.0 >> OBJECT_NUMBER_N4_SHIFT) & OBJECT_NUMBER_NIBBLE) as u8
     }
 
     /// N3 to N0 of a local object: the triplet within that packet, 0 to 12
     /// (13 to 15 address no triplet, decision E.51).
     #[must_use]
     pub const fn triplet(self) -> u8 {
-        (self.0 & NUMBER_NIBBLE) as u8
+        (self.0 & OBJECT_NUMBER_NIBBLE) as u8
     }
 
     /// The number from an address and data field: N8 N7 are address bits 2

@@ -10,8 +10,7 @@
 //! the packed characters of the TTI form ([`pack_triplets`], [`nibble_row`]).
 
 use neoteletext_core::consts::{
-    CLOCK_COLUMN, COLUMNS, DESIGNATION_CODES, HEADER_DISPLAY_COLUMN, MODE_TERMINATION, ROW_ADDRESS_LAST,
-    TRIPLETS_PER_PACKET,
+    CLOCK_COLUMN, COLUMNS, HEADER_DISPLAY_COLUMN, LOCAL_TRIPLETS, MODE_TERMINATION, ROW_ADDRESS_LAST,
 };
 use neoteletext_core::packet::Triplet;
 use neoteletext_core::types::{Magazine, PageNumber, SubCode};
@@ -50,7 +49,7 @@ pub const OTHER_SERVICE_LABEL_CHARACTERS: usize = LABEL_CHARACTERS - 1;
 /// columns before the clock (clause 9.6.1, decision E.11).
 pub const CHECKSUM_HEADER_BYTES: usize = CLOCK_COLUMN - HEADER_DISPLAY_COLUMN;
 /// Triplets a page can carry in its sixteen X/26 packets.
-const PAGE_TRIPLETS: usize = DESIGNATION_CODES * TRIPLETS_PER_PACKET;
+const PAGE_TRIPLETS: usize = LOCAL_TRIPLETS as usize;
 
 /// The six X/27/0 link targets handed to the packet builder.
 type LinkTargets = [Option<(Magazine, PageNumber, SubCode)>; FASTEXT_LINKS];

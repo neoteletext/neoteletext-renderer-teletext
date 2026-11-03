@@ -64,8 +64,8 @@ All state lives in memory you provide (REQ-GEN-003):
 
 - The page store is a slice of `StoredPage` you allocate: `[StoredPage::EMPTY; N]` in a `static`, or on the heap. Each slot is 2,688 bytes.
 - For Levels 2.5 and 3.5, the enhancement store is two more slices: `EnhancementSubPage::EMPTY` entries of 120 bytes, and `EnhancementPacket::EMPTY` slots of 42 bytes, one per packet. Annex E.8 bounds a service at 500 packets at Level 2.5 and 1200 at Level 3.5, about 21 and 50 kilobytes, plus 24 packets for each magazine's Magazine Organization Table. Pass them to `Decoder::with_enhancement_store`; `Decoder::new` keeps no enhancement pages.
-- A `Grid` is 1000 cells of 16 bytes and the page-wide state: 16,100 bytes. Build it in place with `build_grid(&mut grid, ...)`.
-- The sizes of the state types, reported and bounded by the test `every_state_type_has_a_bounded_size` (`crates/neoteletext-core/tests/state_sizes.rs`; REQ-GEN-003), measured on 3 November 2026 on 64-bit Linux, and the `Decoder` and `Viewer` again on 4 November 2026, when the configuration gained `trace_cells` and the viewer kept its transitions for the trace (DEC-2446, DEC-2447), the same with every feature and with only `level15`, `render` and `viewer` (a 32-bit microcontroller's are the same or smaller, its pointers and `usize` being half as wide):
+- A `Grid` is 1000 cells of 16 bytes and the page-wide state: 16,104 bytes. Build it in place with `build_grid(&mut grid, ...)`.
+- The sizes of the state types, reported and bounded by the test `every_state_type_has_a_bounded_size` (`crates/neoteletext-core/tests/state_sizes.rs`; REQ-GEN-003), measured on 3 November 2026 and again on 4 November 2026 on 64-bit Linux, the same with every feature and with only `level15`, `render` and `viewer` (a 32-bit microcontroller's are the same or smaller, its pointers and `usize` being half as wide):
 
   | Type | Bytes |
   |---|---|
@@ -73,12 +73,13 @@ All state lives in memory you provide (REQ-GEN-003):
   | `EnhancementSubPage` | 120 |
   | `EnhancementPacket` | 42 |
   | `Decoder` (without its store) | 1,936 |
-  | `Grid` | 16,100 |
+  | `Grid` | 16,104 |
   | `Viewer` | 320 |
   | `GlyphSet` | 1,416 |
 
-- **What a decoder needs in all**, from those sizes: in the minimum configuration, one requested page at Level 1.5, a decoder with a store of one page, a `Grid` and a viewer take 1,936 + 2,688 + 16,100 + 320 = 21,044 bytes, about 20.6 kilobytes; `neottx`'s default store of 4,096 pages (`--pages`) adds 4,096 × 2,688 = 11,010,048 bytes, about 10.5 megabytes; and at Level 3.5 the enhancement store for Annex E.8's bound of 1,200 packets and its sub-pages adds about 50 kilobytes (1,200 × 42 bytes of packets, with the sub-page entries at 120 bytes each), plus 24 packets for each magazine's Magazine Organization Table.
+- **What a decoder needs in all**, from those sizes: in the minimum configuration, one requested page at Level 1.5, a decoder with a store of one page, a `Grid` and a viewer take 1,936 + 2,688 + 16,104 + 320 = 21,048 bytes, about 20.5 kilobytes; `neottx`'s default store of 4,096 pages (`--pages`) adds 4,096 × 2,688 = 11,010,048 bytes, about 10.5 megabytes; and at Level 3.5 the enhancement store for Annex E.8's bound of 1,200 packets and its sub-pages adds about 50 kilobytes (1,200 × 42 bytes of packets, with the sub-page entries at 120 bytes each), plus 24 packets for each magazine's Magazine Organization Table.
 - A rendered text row at 480 by 20 needs 9.6 kilobytes at 8 bits per pixel or 4.8 kilobytes at 4 bits.
+- **Stack** (REQ-GEN-016). The core's largest stack frame is `level1::build_grid`'s: 1,632 bytes in the `level15` build of the test image and 1,552 bytes in its Level 3.5 build (`level15 capabilities render viewer`), on `thumbv6m-none-eabi`, measured on 4 November 2026 by building `firmware/test-image` with the pinned nightly and `-Z emit-stack-sizes` and reading the image's `.stack_sizes` section with `llvm-readobj --stack-sizes`. The next largest are `render::raster::font_or_text_line` (768 bytes), the Level 3.5 enhancement walk (`enhance::walk::Walker::walk`, 840 bytes) and `Decoder::push` (640 bytes at Level 3.5). These are single frames: allow for the calls beneath them, and for the `Decoder` and `Grid` values themselves wherever the port keeps them, which belong in a `static` or the port's own buffers rather than on a small stack. `neoteletext-opus` needs about 2.5 kilobytes of stack for a decode (`ARCHITECTURE.md`).
 
 ## Sub-pages
 

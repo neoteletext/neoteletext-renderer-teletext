@@ -28,48 +28,69 @@ const DEFAULT_TARGET: &str = "thumbv6m-none-eabi";
 const FLASH_BUDGET: u64 = 64 * 1024;
 
 /// One build of the test image: its name, the image features it enables,
-/// and its flash budget, if it has one.
+/// its flash budget, if it has one, and whether REQ-GEN-016 allows it
+/// floating point.
 struct Build {
     name: &'static str,
     features: &'static str,
     budget: Option<u64>,
+    float_allowed: bool,
 }
 
 /// The builds measured, smallest first (decision E.61).
 const BUILDS: &[Build] = &[
     // Acquisition, the Level 1 grid and composing: the core with no
     // optional area.
-    Build { name: "level1", features: "", budget: None },
+    Build { name: "level1", features: "", budget: None, float_allowed: false },
     // A Level 1.5 receiver with the renderer and the viewer: the core's
     // code and character tables, which the budget covers. These are the
     // features of the core's `classic` profile (DEC-1757), so this build
     // is that profile's measurement.
-    Build { name: "level15", features: "level15 render viewer", budget: Some(FLASH_BUDGET) },
+    Build { name: "level15", features: "level15 render viewer", budget: Some(FLASH_BUDGET), float_allowed: false },
     // The same with the compiled font's standard sets, as a port that
     // draws links it (REQ-FNT-001).
-    Build { name: "level15-font", features: "level15 render font viewer", budget: None },
+    Build { name: "level15-font", features: "level15 render font viewer", budget: None, float_allowed: false },
     // The same at Level 3.5, with every capability (decision E.71).
-    Build { name: "level35", features: "level15 capabilities render viewer", budget: None },
+    Build { name: "level35", features: "level15 capabilities render viewer", budget: None, float_allowed: false },
     // The same with only the modern-classic profile's capabilities
     // (decision E.71, REQ-GEN-020).
-    Build { name: "modern-classic", features: "level15 modern-classic render viewer", budget: None },
+    Build {
+        name: "modern-classic",
+        features: "level15 modern-classic render viewer",
+        budget: None,
+        float_allowed: false,
+    },
     // Every area of the core, with the whole compiled font.
-    Build { name: "core-all", features: "level15 capabilities render font extended-sets viewer", budget: None },
+    Build {
+        name: "core-all",
+        features: "level15 capabilities render font extended-sets viewer",
+        budget: None,
+        float_allowed: false,
+    },
     // Format detection reading T42 only, then every format; the core with
     // no optional area underneath.
-    Build { name: "t42", features: "formats", budget: None },
-    Build { name: "formats", features: "formats-all", budget: None },
+    Build { name: "t42", features: "formats", budget: None, float_allowed: false },
+    Build { name: "formats", features: "formats-all", budget: None, float_allowed: false },
     // The web user agent without push and cookies, then with them.
-    Build { name: "web", features: "web", budget: None },
-    Build { name: "web-all", features: "web-all", budget: None },
+    Build { name: "web", features: "web", budget: None, float_allowed: false },
+    Build { name: "web-all", features: "web-all", budget: None, float_allowed: false },
     // The Opus decoder of the audio profile alone (decision E.123), over the core with no
     // optional area.
-    Build { name: "opus", features: "opus", budget: None },
+    Build { name: "opus", features: "opus", budget: None, float_allowed: false },
     // The audio receiver over the core with no optional area (decision
     // E.131): the microcontroller shape, PCM16 and IMA ADPCM at Level A's
     // minimums, and the desktop shape, Opus at Level B's.
-    Build { name: "audio-mcu", features: "audio-microcontroller", budget: None },
-    Build { name: "audio-desktop", features: "audio-desktop", budget: None },
+    Build { name: "audio-mcu", features: "audio-microcontroller", budget: None, float_allowed: false },
+    Build { name: "audio-desktop", features: "audio-desktop", budget: None, float_allowed: false },
+    // The software data slicer, which REQ-GEN-016 allows floating point
+    // ("the slicer may use floating point, with a fixed-point form as
+    // REQ-SLC-015 requires"), so only its compare-and-swap and panic paths
+    // are checked.
+    Build { name: "slicer", features: "slicer", budget: None, float_allowed: true },
+    // The pixel and image helpers that need no allocation.
+    Build { name: "image", features: "image", budget: None, float_allowed: false },
+    // The input protocol's client.
+    Build { name: "input", features: "input", budget: None, float_allowed: false },
 ];
 
 /// Targets without a floating-point unit, where the float probe must be
@@ -129,13 +150,13 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
         {
             failures.push(format!("{}: flash {} bytes is over the budget of {budget}", build.name, image.flash()));
         }
-        for found in forbidden(image.symbols()) {
+        for found in forbidden(image.symbols(), build.float_allowed) {
             failures.push(format!("{}: {found}", build.name));
         }
     }
     if SOFT_FLOAT_TARGETS.contains(&target.as_str()) {
         let probe = link(&image_dir, &target, "float-probe")?;
-        if forbidden(probe.symbols()).iter().any(|found| found.starts_with("floating point")) {
+        if forbidden(probe.symbols(), false).iter().any(|found| found.starts_with("floating point")) {
             println!("float probe: found, as it must be");
         } else {
             failures.push("the deliberate floating-point operation was not found: the symbol check is broken".into());
@@ -169,12 +190,15 @@ fn link(image_dir: &Path, target: &str, features: &str) -> Result<Image, String>
     read_elf(&bytes).ok_or_else(|| format!("{}: not a little-endian ELF image", path.display()))
 }
 
-/// The forbidden symbols of REQ-GEN-019, described.
-fn forbidden(symbols: &[String]) -> Vec<String> {
+/// The forbidden symbols of REQ-GEN-019, described; floating point is not
+/// among them for a build REQ-GEN-016 allows it.
+fn forbidden(symbols: &[String], float_allowed: bool) -> Vec<String> {
     let mut found = Vec::new();
     for symbol in symbols {
         if FLOAT_MARKERS.iter().any(|marker| is_float(symbol, marker)) {
-            found.push(format!("floating point: {symbol}"));
+            if !float_allowed {
+                found.push(format!("floating point: {symbol}"));
+            }
         } else if ATOMIC_MARKERS.iter().any(|marker| symbol.contains(marker)) {
             found.push(format!("compare-and-swap atomic: {symbol}"));
         } else if is_panic(symbol) {
@@ -217,8 +241,23 @@ mod tests {
         .iter()
         .map(|s| (*s).to_string())
         .collect();
-        let found = forbidden(&symbols);
+        let found = forbidden(&symbols, false);
         assert_eq!(found.len(), 5, "{found:?}");
         assert!(found.iter().all(|f| !f.contains("fail_exchange") && !f.contains("test_image")));
+    }
+
+    /// REQ-GEN-016 allows the slicer floating point, and nothing else: its
+    /// build still fails on compare-and-swap and panic paths.
+    #[test]
+    fn only_floating_point_is_allowed_where_the_rule_allows_it() {
+        let symbols: Vec<String> = ["__aeabi_fmul", "__sync_val_compare_and_swap_4", "_RNvNtCs1_4core9panicking5panic"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let found = forbidden(&symbols, true);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|f| !f.starts_with("floating point")));
+        let slicer = BUILDS.iter().filter(|build| build.float_allowed).map(|build| build.name).collect::<Vec<_>>();
+        assert_eq!(slicer, ["slicer"]);
     }
 }

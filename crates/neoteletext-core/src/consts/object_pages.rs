@@ -72,6 +72,20 @@ pub const MOT_LEVEL_35_LAST_PACKET: u8 = 24;
 pub const MOT_OBJECT_LINK_FIRST_BYTE: usize = 6;
 /// Bytes of an object link (Table 21).
 pub const MOT_OBJECT_LINK_BYTES: usize = 10;
+/// Within an object link (Table 21): the page tens digit.
+pub const MOT_LINK_TENS: usize = 1;
+/// The page units digit.
+pub const MOT_LINK_UNITS: usize = 2;
+/// The sub-page count.
+pub const MOT_LINK_SUBPAGES: usize = 3;
+/// The fallback and side-panel flags.
+pub const MOT_LINK_FALLBACK: usize = 4;
+/// The types of the two default objects.
+pub const MOT_LINK_DEFAULT_TYPES: usize = 5;
+/// The first default object's number, two bytes.
+pub const MOT_LINK_DEFAULT_FIRST: usize = 6;
+/// The second default object's number, two bytes.
+pub const MOT_LINK_DEFAULT_SECOND: usize = 8;
 /// Object links in one packet (Table 20).
 pub const MOT_OBJECT_LINKS_PER_PACKET: usize = 4;
 /// Packets X/1 to X/24 of a Magazine Organization Table (clause 10.6.1).

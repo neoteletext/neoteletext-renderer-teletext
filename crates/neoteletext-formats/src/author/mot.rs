@@ -7,9 +7,9 @@ use std::boxed::Box;
 use std::collections::BTreeMap;
 
 use neoteletext_core::consts::{
-    DATA_BYTES, DATA_START, LINK_NULL_PAGE, MAGAZINE_MASK, MOT_OBJECT_LINK_BYTES, MOT_OBJECT_LINK_FIRST_BYTE,
-    MOT_OBJECT_LINKS_LEVEL_25, MOT_OBJECT_LINKS_LEVEL_35, MOT_OBJECT_LINKS_PER_PACKET, MOT_TOTALS_BYTE,
-    PACKET_FIRST_BYTE_NUMBER, PAGE_FUNCTION_MOT, PAGE_MOT,
+    DATA_BYTES, DATA_FIRST_BYTE_NUMBER, LINK_NULL_PAGE, MAGAZINE_MASK, MOT_OBJECT_LINK_BYTES,
+    MOT_OBJECT_LINK_FIRST_BYTE, MOT_OBJECT_LINKS_LEVEL_25, MOT_OBJECT_LINKS_LEVEL_35, MOT_OBJECT_LINKS_PER_PACKET,
+    MOT_TOTALS_BYTE, PAGE_FUNCTION_MOT, PAGE_MOT,
 };
 use neoteletext_core::packet::{MotObjectLink, MotPageEntry, MotTotals, encode, mot_position};
 use neoteletext_core::types::{FallbackFields, Magazine, PageAddress, PageNumber, SidePanelFields, SubCode};
@@ -21,12 +21,9 @@ use crate::consts::{
 use crate::encode::nibble_row;
 use crate::page::{PageFile, PageFunction};
 
-/// The packet byte number of the first data byte, byte 6: the tables give
-/// positions as packet byte numbers.
-const DATA_FIRST_BYTE_NUMBER: usize = PACKET_FIRST_BYTE_NUMBER + DATA_START;
-/// Object links at one level: the global link and links 1 to 7 (Table
-/// 20).
-const LINKS: usize = 8;
+/// Object links at one level: the global link and links 1 to 7, in two
+/// packets of four (Table 20).
+const LINKS: usize = MOT_OBJECT_LINKS_LEVEL_25.len() * MOT_OBJECT_LINKS_PER_PACKET;
 
 /// The level whose links a table packet carries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]

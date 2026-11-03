@@ -1,7 +1,7 @@
 //! The packet-level records of a page file: packets X/26, the other packed
 //! enhancement lines, and the X/27/0 links.
 
-use neoteletext_core::consts::TRIPLETS_PER_PACKET;
+use neoteletext_core::consts::{EDITORIAL_LINKS, TRIPLETS_PER_PACKET};
 use neoteletext_core::packet::Triplet;
 use neoteletext_core::types::{PageAddress, SubCode};
 
@@ -12,7 +12,7 @@ use crate::consts::TTI_PACKED_CHARACTERS;
 pub const RAW_PACKETS: usize = 16;
 
 /// Number of X/27/0 links (clause 9.6.1).
-pub const FASTEXT_LINKS: usize = 6;
+pub const FASTEXT_LINKS: usize = EDITORIAL_LINKS;
 
 /// One packet X/26 of a page.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

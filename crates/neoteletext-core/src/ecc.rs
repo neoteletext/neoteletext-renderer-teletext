@@ -5,6 +5,7 @@
 //! bit b8 is bit 7.
 
 use crate::consts::{CODE_MASK_7BIT, NIBBLE_MASK, TRIPLET_DATA_MASK};
+use crate::consts::{TRIPLET_BITS, TRIPLET_P6_SHIFT};
 
 /// The outcome of decoding a protected value.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -138,10 +139,6 @@ const TRIPLET_DATA_SHIFTS: [u32; 18] = [2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 16
 /// make tests A to E odd; test n covers every position whose 1-based index
 /// has bit n set.
 const TRIPLET_TEST_BITS: [u32; 5] = [0, 1, 2, 3, 4];
-/// Shift of P6 at position 24, which makes test F odd.
-const TRIPLET_P6_SHIFT: u32 = 23;
-/// Positions in a triplet word.
-const TRIPLET_POSITIONS: u32 = 24;
 
 fn triplet_word(bytes: [u8; 3]) -> u32 {
     let [low, middle, high] = bytes;
@@ -151,7 +148,7 @@ fn triplet_word(bytes: [u8; 3]) -> u32 {
 /// Parity of the positions covered by test `test` (A to E are 0 to 4), or
 /// of all 24 positions for test F when `test` is `None` (clause 8.3).
 fn test_parity(word: u32, test: Option<u32>) -> u32 {
-    (0..TRIPLET_POSITIONS)
+    (0..TRIPLET_BITS)
         .filter(|&shift| match test {
             // Tests A to E cover B1 to B23 only; B24 (P6) is in test F alone.
             Some(bit) => shift != TRIPLET_P6_SHIFT && (shift.wrapping_add(1) >> bit) & 1 == 1,
@@ -205,7 +202,7 @@ pub fn hamming2418_decode(bytes: [u8; 3]) -> (u32, Status) {
         // Tests A to E disagree but F passes: a double error.
         return (0, Status::Uncorrectable);
     }
-    if syndrome > TRIPLET_POSITIONS {
+    if syndrome > TRIPLET_BITS {
         return (0, Status::Uncorrectable);
     }
     let corrected = word ^ (1 << syndrome.wrapping_sub(1));

@@ -6,9 +6,9 @@ use std::boxed::Box;
 use std::vec::Vec;
 
 use neoteletext_core::consts::{
-    COLUMNS, COMPOSITIONAL_LINKS, DESIGNATION_CODES, DESIGNATION_LEVEL_35_DATA, DESIGNATION_LINKS_LEVEL_25,
-    DESIGNATION_LINKS_LEVEL_35, DESIGNATION_PAGE_DATA, HEADER_DISPLAY_COLUMN, LINK_NULL_PAGE, LINKS_FIXED_ROLES,
-    PACKET_LINKS, PACKET_PAGE_ENHANCEMENT, ROWS, SPACE, TRIPLETS_PER_PACKET,
+    COLUMNS, COMPOSITIONAL_LINKS, DESIGNATION_LEVEL_35_DATA, DESIGNATION_LINKS_LEVEL_25, DESIGNATION_LINKS_LEVEL_35,
+    DESIGNATION_PAGE_DATA, HEADER_DISPLAY_COLUMN, LEVEL_BIT_25, LEVEL_BIT_35, LINK_NULL_PAGE, LINKS_FIXED_ROLES,
+    LOCAL_TRIPLETS, PACKET_LINKS, PACKET_PAGE_ENHANCEMENT, ROWS, SPACE, TRIPLETS_PER_PACKET,
 };
 use neoteletext_core::packet::{
     CompositionalLink, ObjectKind, ObjectNumber, ObjectSource, ObjectUsage, PageFormat, Triplet, TripletFunction,
@@ -25,7 +25,7 @@ use crate::consts::{
 use crate::page::{EnhancementPacket, PageFile, PageFunction};
 
 /// Triplets that the sixteen packets X/26 of a page can carry.
-pub const PAGE_TRIPLETS: usize = DESIGNATION_CODES * TRIPLETS_PER_PACKET;
+pub const PAGE_TRIPLETS: usize = LOCAL_TRIPLETS as usize;
 
 /// Shift of a local object's designation code in its number: N7 to N4
 /// (Table 28).
@@ -63,11 +63,11 @@ impl LinkFunction {
 
 /// Page validity of a link (Table 15, bits 4 and 3): required at Level 2.5
 /// only.
-pub const VALID_LEVEL_25: u8 = 0b01;
+pub const VALID_LEVEL_25: u8 = LEVEL_BIT_25;
 /// Required at Level 3.5 only.
-pub const VALID_LEVEL_35: u8 = 0b10;
+pub const VALID_LEVEL_35: u8 = LEVEL_BIT_35;
 /// Required at both levels.
-pub const VALID_BOTH: u8 = 0b11;
+pub const VALID_BOTH: u8 = LEVEL_BIT_25 | LEVEL_BIT_35;
 
 /// A Format 1 compositional link to `target`, with the sub-pages whose S1
 /// bit is set in `subpages` (Table 15).

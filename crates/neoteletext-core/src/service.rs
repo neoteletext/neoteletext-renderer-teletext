@@ -3,6 +3,7 @@
 use crate::consts::{
     DEFAULT_INITIAL_PAGE, MJD_REFERENCE, NIBBLE_MASK, SERVICE_DIGIT_OFFSET, SERVICE_FORMAT_2_BIT, STATUS_MESSAGE_BYTES,
 };
+use crate::consts::{SERVICE_TIME_OFFSET_HALF_HOURS_MASK, SERVICE_TIME_OFFSET_NEGATIVE};
 use crate::limits::{LINK_NULL_PAGE, MPP_MAGAZINE_SHIFT};
 use crate::packet::ServicePacket;
 use crate::types::{PageAddress, SubCode};
@@ -81,14 +82,9 @@ pub fn initial_page(info: Option<&ServiceInfo>) -> PageAddress {
         .unwrap_or(PageAddress { magazine: crate::types::Magazine::from_bits(1), page: crate::types::PageNumber(0) })
 }
 
-/// Bit 7 of the time offset byte marks a negative offset; bits 2 to 6 hold
-/// half-hours (Table 18, numbering bits from 1).
-const OFFSET_NEGATIVE: u8 = 0x40;
-const OFFSET_HALF_HOURS_MASK: u8 = 0x1F;
-
 fn offset(byte: u8) -> i8 {
-    let half_hours = ((byte >> 1) & OFFSET_HALF_HOURS_MASK).cast_signed();
-    if byte & OFFSET_NEGATIVE == 0 { half_hours } else { half_hours.wrapping_neg() }
+    let half_hours = ((byte >> 1) & SERVICE_TIME_OFFSET_HALF_HOURS_MASK).cast_signed();
+    if byte & SERVICE_TIME_OFFSET_NEGATIVE == 0 { half_hours } else { half_hours.wrapping_neg() }
 }
 
 /// The digits of bytes 16 to 21, high nibble first. Digit order verified

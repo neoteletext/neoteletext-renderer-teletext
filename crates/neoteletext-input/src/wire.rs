@@ -72,7 +72,12 @@ impl<'a> Writer<'a> {
     /// When the buffer is full.
     pub fn bytes(&mut self, bytes: &[u8]) -> Result<(), WireError> {
         let end = self.used.checked_add(bytes.len()).ok_or(WireError::Full)?;
-        self.out.get_mut(self.used..end).ok_or(WireError::Full)?.copy_from_slice(bytes);
+        let room = self.out.get_mut(self.used..end).ok_or(WireError::Full)?;
+        // Byte by byte: `copy_from_slice` links a panic path for unequal
+        // lengths, which REQ-GEN-019 forbids, though these are equal.
+        for (to, &from) in room.iter_mut().zip(bytes) {
+            *to = from;
+        }
         self.used = end;
         Ok(())
     }

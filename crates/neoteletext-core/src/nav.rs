@@ -1,6 +1,7 @@
 //! Navigation (area NAV, layer L6): page arithmetic, links and history.
 
 use crate::acq::{PageStore, StoredPage};
+use crate::consts::EDITORIAL_INDEX_LINK;
 use crate::consts::{FIRST_PAGE, LAST_PAGE, LINK_NULL_PAGE, MAGAZINE_ZERO_MEANS};
 use crate::limits::{
     DECIMAL_DIGIT_MAX, KEYABLE_PAGES, MPP_MAGAZINE_SHIFT, PAGE_DIGIT_MAX, PAGE_NUMBERS, PAGE_TENS_SHIFT, S2_MASK,
@@ -32,17 +33,13 @@ pub struct PageLinks {
     pub index: Option<LinkTarget>,
 }
 
-/// Link positions in X/27/0: links 0 to 3 are the coloured keys and link 5
-/// the Index key (Annex H, REQ-NAV-003); link 4 is not a viewer link.
-const X27_INDEX_LINK: usize = 5;
-
 impl PageLinks {
     /// The links of a broadcast page, from packet X/27/0 (REQ-NAV-003).
     #[must_use]
     pub fn from_page(page: &StoredPage) -> Self {
         let Some(links) = page.links else { return Self::default() };
         let target = |index: usize| link_target(links.links.get(index).copied().flatten());
-        Self { keys: [target(0), target(1), target(2), target(3)], index: target(X27_INDEX_LINK) }
+        Self { keys: [target(0), target(1), target(2), target(3)], index: target(EDITORIAL_INDEX_LINK) }
     }
 
     /// True when no coloured key has a link.

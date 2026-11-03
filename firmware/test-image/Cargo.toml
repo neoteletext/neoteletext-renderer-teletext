@@ -14,6 +14,9 @@ neoteletext-formats = { path = "../../crates/neoteletext-formats", default-featu
 neoteletext-web = { path = "../../crates/neoteletext-web", default-features = false }
 neoteletext-opus = { path = "../../crates/neoteletext-opus", optional = true }
 neoteletext-audio = { path = "../../crates/neoteletext-audio", default-features = false, optional = true }
+neoteletext-slicer = { path = "../../crates/neoteletext-slicer", optional = true }
+neoteletext-image = { path = "../../crates/neoteletext-image", default-features = false, optional = true }
+neoteletext-input = { path = "../../crates/neoteletext-input", optional = true }
 
 [features]
 # Each feature roots the entry points of one optional area, and enables it.
@@ -45,6 +48,14 @@ opus = ["dep:neoteletext-opus"]
 # carriage with Opus alone (decision E.131).
 audio-microcontroller = ["dep:neoteletext-audio", "neoteletext-audio/idl", "neoteletext-audio/pcm16", "neoteletext-audio/ima"]
 audio-desktop = ["dep:neoteletext-audio", "neoteletext-audio/idl", "neoteletext-audio/opus"]
+# The software data slicer (area SLC), whose floating point REQ-GEN-016
+# allows; the size check leaves its build out of the float check by name.
+slicer = ["dep:neoteletext-slicer"]
+# The pixel and image helpers of `neoteletext-image` that build without
+# allocation: conversion, scaling, the palettes, and the PNG and PPM writers.
+image = ["dep:neoteletext-image", "render"]
+# The input protocol's client of area INT.
+input = ["dep:neoteletext-input"]
 # REQ-GEN-019: a deliberate floating-point operation, so that the symbol
 # check can be shown to fail.
 float-probe = []

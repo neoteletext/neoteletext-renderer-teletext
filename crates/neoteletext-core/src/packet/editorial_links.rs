@@ -3,6 +3,10 @@
 
 use super::{Packet, nibble};
 use crate::consts::{DATA_BYTES, DATA_START, LINK_NULL_PAGE, LINK_NULL_SUBCODE, MAGAZINE_MASK, PACKET_BYTES};
+use crate::consts::{
+    EDITORIAL_LINK_CHECKSUM, EDITORIAL_LINK_CONTROL, EDITORIAL_LINK_CONTROL_ROW_24, EDITORIAL_LINK_START,
+    PAGE_LINK_BYTES,
+};
 use crate::limits::sub_code;
 use crate::types::{Magazine, PageNumber, SubCode};
 
@@ -49,22 +53,11 @@ pub(super) fn page_reference(packet: &Packet, start: usize) -> Option<(PageNumbe
     Some((page, subcode, magazine_bits & MAGAZINE_MASK))
 }
 
-/// Index of link 0 (packet byte 7) and the bytes per link.
-pub(super) const LINK_START: usize = 3;
-pub(super) const LINK_BYTES: usize = 6;
-/// Index of the link control byte (packet byte 43).
-pub(super) const LINK_CONTROL: usize = 39;
-/// Data bit 4 of the link control byte: display row 24 (Table 14). Only
-/// this bit is read; the reserved bits beside it are ignored (REQ-PKT-009).
-const LINK_CONTROL_ROW_24: u8 = 0x8;
-/// Index of the first checksum byte (packet byte 44).
-const LINK_CHECKSUM: usize = 40;
-
 /// Decodes packet X/27/0 (REQ-PKT-005).
 pub(super) fn decode_links(packet: &Packet, magazine: Magazine) -> Links {
     let mut links = [None; 6];
     for (index, slot) in links.iter_mut().enumerate() {
-        let start = LINK_START.saturating_add(index.saturating_mul(LINK_BYTES));
+        let start = EDITORIAL_LINK_START.saturating_add(index.saturating_mul(PAGE_LINK_BYTES));
         *slot = page_reference(packet, start).and_then(|(page, subcode, relative)| {
             if page.0 == LINK_NULL_PAGE && subcode.value() == LINK_NULL_SUBCODE {
                 return None;
@@ -74,8 +67,9 @@ pub(super) fn decode_links(packet: &Packet, magazine: Magazine) -> Links {
             Some(Link { magazine: linked, page, subcode })
         });
     }
-    let display_row_24 = nibble(packet, LINK_CONTROL).is_some_and(|control| control & LINK_CONTROL_ROW_24 != 0);
-    let checksum_bytes = [packet.byte(LINK_CHECKSUM), packet.byte(LINK_CHECKSUM.saturating_add(1))];
+    let display_row_24 =
+        nibble(packet, EDITORIAL_LINK_CONTROL).is_some_and(|control| control & EDITORIAL_LINK_CONTROL_ROW_24 != 0);
+    let checksum_bytes = [packet.byte(EDITORIAL_LINK_CHECKSUM), packet.byte(EDITORIAL_LINK_CHECKSUM.saturating_add(1))];
     Links { magazine, links, display_row_24, checksum_bytes }
 }
 
@@ -96,8 +90,12 @@ pub fn decode_links_from_data(bytes: &[u8; DATA_BYTES], magazine: Magazine) -> L
 /// The encoder of X/27/0: the inverse of [`decode_links`].
 pub(super) mod encode {
     use super::super::encode::{address, set};
-    use super::{LINK_BYTES, LINK_CHECKSUM, LINK_CONTROL, LINK_CONTROL_ROW_24, LINK_START, Packet};
+    use super::Packet;
     use crate::consts::DATA_START;
+    use crate::consts::{
+        EDITORIAL_LINK_CHECKSUM, EDITORIAL_LINK_CONTROL, EDITORIAL_LINK_CONTROL_ROW_24, EDITORIAL_LINK_START,
+        PAGE_LINK_BYTES,
+    };
     use crate::ecc::hamming84_encode;
     use crate::limits::{S2_MASK, s1, s2, s3, s4};
     use crate::types::{Magazine, PageNumber, SubCode};
@@ -133,7 +131,7 @@ pub(super) mod encode {
         let mut packet = address(magazine, crate::consts::PACKET_LINKS);
         set(&mut packet, DATA_START, hamming84_encode(0));
         for (index, link) in links.iter().enumerate() {
-            let start = LINK_START.saturating_add(index.saturating_mul(LINK_BYTES));
+            let start = EDITORIAL_LINK_START.saturating_add(index.saturating_mul(PAGE_LINK_BYTES));
             match link {
                 Some((target, page, subcode)) => {
                     let relative = magazine.bits() ^ target.bits();
@@ -149,11 +147,11 @@ pub(super) mod encode {
             }
         }
         // Table 14: bits 1 to 3 should be 1 without a local code of practice.
-        let control = 0x7 | if display_row_24 { LINK_CONTROL_ROW_24 } else { 0 };
-        set(&mut packet, LINK_CONTROL, hamming84_encode(control));
+        let control = 0x7 | if display_row_24 { EDITORIAL_LINK_CONTROL_ROW_24 } else { 0 };
+        set(&mut packet, EDITORIAL_LINK_CONTROL, hamming84_encode(control));
         let [high, low] = checksum.to_be_bytes();
-        set(&mut packet, LINK_CHECKSUM, high);
-        set(&mut packet, LINK_CHECKSUM.saturating_add(1), low);
+        set(&mut packet, EDITORIAL_LINK_CHECKSUM, high);
+        set(&mut packet, EDITORIAL_LINK_CHECKSUM.saturating_add(1), low);
         packet
     }
 }

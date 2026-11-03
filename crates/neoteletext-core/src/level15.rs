@@ -11,9 +11,9 @@ use crate::level1::{CharSource, Glyph, Grid, PageRows, Size};
 use crate::packet::{Triplet, TripletFunction};
 use crate::trace::{Machine, TraceSink};
 
-/// The designation code X/26/15, which the "SAA5246A" profile skips
-/// (decision E.2).
-const LAST_DESIGNATION: u8 = 15;
+/// The designation code X/26/15, the last (clause 9.4.2), which the
+/// "SAA5246A" profile skips (decision E.2).
+const LAST_DESIGNATION: u8 = (DESIGNATION_CODES - 1) as u8;
 
 /// States of the triplet walk (REQ-FSM-007).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

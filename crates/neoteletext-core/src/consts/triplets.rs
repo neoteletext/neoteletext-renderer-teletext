@@ -137,6 +137,19 @@ pub const OBJECT_ADDRESS_N8_N7_MASK: u8 = 0x03;
 pub const OBJECT_NUMBER_BITS: u32 = 9;
 /// Shift of N8 N7 within an object number: N6 to N0 are the data field.
 pub const OBJECT_NUMBER_HIGH_SHIFT: u32 = 7;
+/// The fields of an object number (Table 28): the low nibble, the triplet
+/// number within its packet.
+pub const OBJECT_NUMBER_NIBBLE: u16 = 0x0F;
+/// The shift of bit N4 of an object number, and of its second nibble.
+pub const OBJECT_NUMBER_N4_SHIFT: u32 = 4;
+/// The shift of bits N6 and N5.
+pub const OBJECT_NUMBER_N6_N5_SHIFT: u32 = 5;
+/// A two-bit field of an object number.
+pub const OBJECT_NUMBER_TWO_BITS: u16 = 0x03;
+/// The shift of bit N8.
+pub const OBJECT_NUMBER_N8_SHIFT: u32 = 8;
+/// The shift of bits N8 and N7.
+pub const OBJECT_NUMBER_N8_N7_SHIFT: u32 = 7;
 /// The Level 2.5 bit of a two-bit level field: S0 of an Object Definition's
 /// usage, and the low bit of an X/27/4 page validity
 /// (Tables 15 and 28: 01 Level 2.5, 10 Level 3.5, 11 both).

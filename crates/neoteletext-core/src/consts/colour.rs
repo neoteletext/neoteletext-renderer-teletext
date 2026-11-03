@@ -30,6 +30,16 @@ pub const CLUT_ENTRIES: usize = COLOURS;
 pub const CLUTS: usize = 4;
 /// Entries of the Colour Map: Colour Map index = 8 × CLUT + entry.
 pub const COLOUR_MAP_ENTRIES: usize = CLUTS * CLUT_ENTRIES;
+/// The first of the receiver's own colour indices in the resolved mode
+/// (REQ-SEC-005, REQ-SEC-024, DEC-2464): indices 32 to 39 follow the
+/// Colour Map's 32 and are the eight Level 1 colours of Table 30's CLUT 0,
+/// which no page can redefine. The status area (row 0, columns 0 to 7) and
+/// a row 24 the receiver draws are drawn in them, so X/28/4 or M/29/4
+/// redefining CLUT 0 cannot hide or forge them.
+pub const RECEIVER_COLOUR_BASE: u8 = COLOUR_MAP_ENTRIES as u8;
+/// Indices the resolved mode writes: the Colour Map's, then the receiver's
+/// eight. A port's palette for the resolved mode has this many entries.
+pub const RESOLVED_COLOURS: usize = COLOUR_MAP_ENTRIES + COLOURS;
 /// Shift of the CLUT number in a Colour Map index.
 pub const CLUT_SHIFT: u32 = 3;
 /// Mask of the entry number in a Colour Map index.

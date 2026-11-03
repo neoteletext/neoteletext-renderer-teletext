@@ -9,7 +9,7 @@
 //! The channel's readers ask for its fixed file names, so these files change
 //! nothing they do, and `NNN/` is never read as a channel (REQ-1725 item 4).
 
-use super::contents::{Folder, Found, pages_of, read_folder, skipped_files};
+use super::contents::{Folder, Found, decode_folder, pages_of, read_folder, skipped_files};
 use super::{io_failure, sandbox_writable};
 use crate::image::png_picture;
 use neoteletext_app::bounded_file::read_bounded;
@@ -45,12 +45,17 @@ fn public_pages(public: &[String]) -> Result<BTreeSet<PageAddress>, Failure> {
         .collect()
 }
 
-/// The channel's name, from its entry file, read to its reader's limit.
-fn channel_name(folder: &Path, address: &str) -> Result<String, Failure> {
+/// The channel's entry file, read to its reader's limit before the sandbox.
+fn read_entry_file(folder: &Path) -> Result<Vec<u8>, Failure> {
+    read_bounded(&folder.join(SETTINGS_FILE), DEFAULT_DESCRIPTOR_LIMIT)
+}
+
+/// The channel's name, parsed from its entry file under the sandbox
+/// (REQ-SEC-017).
+fn channel_name(folder: &Path, bytes: &[u8], address: &str) -> Result<String, Failure> {
     let path = folder.join(SETTINGS_FILE);
-    let bytes = read_bounded(&path, DEFAULT_DESCRIPTOR_LIMIT)?;
     let base = Url::parse(address).map_err(|error| (exit::USAGE, format!("{address}: {error:?}")))?;
-    let descriptor = Descriptor::parse_channel(&bytes, &base)
+    let descriptor = Descriptor::parse_channel(bytes, &base)
         .map_err(|error| (exit::INPUT, format!("{}: {error:?}", path.display())))?;
     Ok(descriptor.name.as_str().to_owned())
 }
@@ -108,9 +113,11 @@ pub fn html(options: &Options, address: &str, public: &[String]) -> Result<(), F
     let folder = Path::new(&options.input);
     parse_address(address).map_err(|error| (exit::USAGE, format!("{address}: not a channel's address: {error:?}")))?;
     let public = public_pages(public)?;
-    let name = channel_name(folder, address)?;
-    let mut read = read_folder(options, |_| true)?;
+    let entry_file = read_entry_file(folder)?;
+    let unparsed = read_folder(options, |_| true)?;
     sandbox_writable(Some(folder), options.no_sandbox)?;
+    let name = channel_name(folder, &entry_file, address)?;
+    let mut read = decode_folder(options, unparsed);
     let pages = pages_of(&mut read);
     if let Some(page) = public.iter().find(|page| !pages.contains_key(page)) {
         return Err((

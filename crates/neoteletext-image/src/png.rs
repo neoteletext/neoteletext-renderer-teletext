@@ -209,7 +209,11 @@ fn compress_rows<S: Sink>(
                 position = position.saturating_add(1);
             }
         }
-        previous.copy_from_slice(current);
+        // Byte by byte: `copy_from_slice` links a panic path for unequal
+        // lengths, which REQ-GEN-019 forbids.
+        for (to, &from) in previous.iter_mut().zip(current.iter()) {
+            *to = from;
+        }
     }
     let (code, bits) = literal_code(END_OF_BLOCK);
     writer.code(sink, code, bits)?;

@@ -28,8 +28,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "neoteletext-image"
+version = "0.1.0"
+dependencies = [
+ "neoteletext-core",
+]
+
+[[package]]
+name = "neoteletext-input"
+version = "0.1.0"
+dependencies = [
+ "neoteletext-audio",
+ "neoteletext-core",
+]
+
+[[package]]
 name = "neoteletext-opus"
 version = "0.1.0"
+
+[[package]]
+name = "neoteletext-slicer"
+version = "0.1.0"
+dependencies = [
+ "neoteletext-core",
+]
 
 [[package]]
 name = "neoteletext-test-image"
@@ -38,7 +60,10 @@ dependencies = [
  "neoteletext-audio",
  "neoteletext-core",
  "neoteletext-formats",
+ "neoteletext-image",
+ "neoteletext-input",
  "neoteletext-opus",
+ "neoteletext-slicer",
  "neoteletext-web",
 ]
 

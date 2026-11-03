@@ -11,12 +11,14 @@ use neoteletext_core::level1::Grid;
 use neoteletext_core::viewer::Viewer;
 
 /// Each state type, its size in bytes on this target, and the most it may
-/// be: the size measured on 3 November 2026 (the `Decoder` and `Viewer` on
-/// 4 November) on `x86_64` Linux with every
-/// feature and with only `level15`, `render` and `viewer` (the same in both), rounded up to the next 64 bytes, so that a change that grows
-/// one is seen and the published table is revisited. The decoder's grew
-/// to 1,936 bytes on 4 November 2026 with its configuration's fixed
-/// designation and SAA5246A ROM variant (DEC-2430).
+/// be: the size measured on 3 November 2026 on `x86_64` Linux with every
+/// feature and with only `level15`, `render` and `viewer` (the same in
+/// both), rounded up to the next 64 bytes, so that a change that grows one
+/// is seen and the published table is revisited. Measured again on 4
+/// November 2026, after the merges of that day: `Decoder` 1,936 bytes (its
+/// configuration's fixed designation and SAA5246A ROM variant, DEC-2430),
+/// `Grid` 16,104 and `Viewer` 320 (its transitions kept for the trace,
+/// DEC-2446).
 #[test]
 fn every_state_type_has_a_bounded_size() {
     let sizes: [(&str, usize, usize); 7] = [

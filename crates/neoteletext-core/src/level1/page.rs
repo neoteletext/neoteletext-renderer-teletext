@@ -87,6 +87,7 @@ fn build(
     out.designation = designation;
     out.designation_fallback = fallback;
     out.mix = options.mix;
+    out.receiver_row_24 = options.row24.is_some();
     let control = page.map_or(0, |page| page.control.0);
     // REQ-L1-011, REQ-ACQ-015, decision E.22: box membership matters only
     // on newsflash and subtitle pages, or when the viewer asks for it.

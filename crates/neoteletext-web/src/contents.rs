@@ -204,7 +204,10 @@ fn date(field: &str) -> Result<Date, Fault> {
 /// A linked channel's target: `name:mpp` with a name of letters, digits
 /// and hyphens, or the address of a channel's folder or page file.
 fn target(field: &str) -> Result<&str, Fault> {
-    if field.contains("://") {
+    // A byte search, as `channel.rs` does: `str::contains` with a string
+    // pattern brings in the `core` searcher's panic paths, which a
+    // microcontroller build must not link (REQ-GEN-019).
+    if field.as_bytes().windows(3).any(|window| window == b"://") {
         let address = channel::parse_address(field).map_err(|_| Fault::Target)?;
         return match address.file {
             None | Some(channel::ChannelFile::Page { .. }) => Ok(field),

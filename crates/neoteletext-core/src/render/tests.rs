@@ -290,3 +290,36 @@ fn a_flashing_concealed_cell_changes_range_with_reveal() {
     assert_eq!(foreground_index(&both, &grid, false), PALETTE_CONCEAL_BASE + pair);
     assert_eq!(foreground_index(&both, &grid, true), PALETTE_FLASH_BASE + pair);
 }
+
+/// The index of the first pixel of `column` in the first line of `row`,
+/// drawn in the resolved mode.
+fn resolved_index(grid: &Grid, row: usize, column: usize) -> u8 {
+    let options = RenderOptions { colour: ColourMode::Resolved(FlashPhase::STEADY), ..options() };
+    let mut pixels = vec![0u8; PAGE_WIDTH * options.row_height()];
+    let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut pixels, stride: PAGE_WIDTH };
+    render_row(grid, row, Field::Both, &GlyphSet::noto_teletext(), options, &mut buffer).unwrap();
+    pixels[column * crate::consts::CELL_WIDTH]
+}
+
+/// REQ-SEC-005, REQ-SEC-024, DEC-2464: at Level 3.5 a page can redefine
+/// CLUT 0, so the status area and a receiver-drawn row 24 are drawn in the
+/// receiver's own colour indices, 32 to 39, which no page redefines; the
+/// page's own cells keep their Colour Map indices. Before, the status area
+/// drew index 1 for red, whatever colour the page had made it.
+#[test]
+fn the_receivers_cells_are_drawn_in_its_own_colours() {
+    use crate::consts::{RECEIVER_COLOUR_BASE, RESOLVED_COLOURS};
+    let red = COLOUR_RED_BIT;
+    let mut grid = Grid::EMPTY;
+    for row in [0, 1, ROWS - 1] {
+        grid.cells[row][2].background = red;
+    }
+    // The page makes red black: the receiver's cells do not follow it.
+    grid.colour_map.entries[usize::from(red)] = grid.colour_map.entries[0];
+    assert_eq!(resolved_index(&grid, 0, 2), RECEIVER_COLOUR_BASE + red, "the status area");
+    assert_eq!(resolved_index(&grid, 1, 2), red, "the page's own row");
+    assert_eq!(resolved_index(&grid, ROWS - 1, 2), red, "the page's own row 24");
+    grid.receiver_row_24 = true;
+    assert_eq!(resolved_index(&grid, ROWS - 1, 2), RECEIVER_COLOUR_BASE + red, "a receiver row 24");
+    assert!(usize::from(RECEIVER_COLOUR_BASE + red) < RESOLVED_COLOURS);
+}

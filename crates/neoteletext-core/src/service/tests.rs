@@ -23,7 +23,7 @@ fn live_teefax_packet_decodes() {
     assert_eq!((time.year, time.month, time.day), (2026, 10, 9));
     assert_eq!((time.hour, time.minute, time.second), (22, 47, 44));
     assert_eq!(offset(0x85), 2);
-    assert_eq!(offset(0x85 | OFFSET_NEGATIVE), -2);
+    assert_eq!(offset(0x85 | SERVICE_TIME_OFFSET_NEGATIVE), -2);
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn service_packet(designation: u8) -> ServicePacket {
         designation,
         initial_page: Some((Magazine::from_bits(0), PageNumber(0xA5), SubCode::new(0x3F7F))),
         network_id: 0x2C2F,
-        time_offset: 0x85 | OFFSET_NEGATIVE,
+        time_offset: 0x85 | SERVICE_TIME_OFFSET_NEGATIVE,
         date_time: [0x07, 0x24, 0x33, 0x33, 0x58, 0x55],
         pdc: [0x15; 13],
         status,

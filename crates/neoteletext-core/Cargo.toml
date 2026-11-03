@@ -160,4 +160,9 @@ required-features = ["level15", "level25", "viewer", "objects"]
 
 [[example]]
 name = "minimal_port"
-required-features = ["level15", "render"]
+required-features = ["level15", "render", "viewer"]
+
+[[test]]
+name = "minimal_port"
+# Runs the minimal port example's code on a small stream (REQ-31).
+required-features = ["level15", "render", "viewer"]

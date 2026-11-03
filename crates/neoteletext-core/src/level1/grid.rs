@@ -15,6 +15,9 @@ use crate::consts::{
 /// Everything a row needs travels in the grid, so a row is rendered from
 /// the grid alone (decision E.29). It is 40 columns at every level
 /// (REQ-1644).
+// Boxed mode, mix, the designation's fallback and the receiver's row 24
+// are separate facts of the page on screen, each set and read alone.
+#[allow(clippy::struct_excessive_bools, reason = "four independent facts of the page on screen")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Grid {
     /// The cells, row by row.
@@ -38,6 +41,10 @@ pub struct Grid {
     pub screen_colour: ColourIndex,
     /// The full row colour of each row (decision E.45).
     pub row_colours: [ColourIndex; ROWS],
+    /// Row 24 is the receiver's own (REQ-NAV-011), drawn from links, not
+    /// the page's: the renderer draws it in the receiver's colours
+    /// ([`RECEIVER_COLOUR_BASE`](crate::consts::RECEIVER_COLOUR_BASE)).
+    pub receiver_row_24: bool,
 }
 
 /// The character sets of an empty grid: Latin with the English national
@@ -61,8 +68,27 @@ impl Grid {
         let row = self.cells.last().filter(|_| !self.boxed_mode).map_or(&[][..], |row| &row[..]);
         FASTEXT_COLOURS.map(|colour| {
             let mut drawn = row.iter().filter(|cell| cell.foreground == colour && !cell.glyph.is_blank()).peekable();
-            drawn.peek().is_some() && drawn.all(|cell| !cell.conceal && !cell.flash && cell.background != colour)
+            drawn.peek().is_some()
+                && drawn.all(|cell| {
+                    !cell.conceal && !cell.flash && cell.background != colour && self.drawn_as_itself(colour, cell)
+                })
         })
+    }
+
+    /// True when a prompt cell in the key's colour `colour` is drawn in
+    /// that colour, apart from its background (REQ-SEC-024, DEC-2464). A
+    /// receiver-drawn row 24 is drawn in the receiver's fixed colours, so
+    /// its indices are its colours. On a page's own row 24, the page may
+    /// have redefined CLUT 0 (X/28/4, M/29/4): the cell's Colour Map entry
+    /// must still hold the key's colour of Table 30, and its background's
+    /// entry another colour.
+    fn drawn_as_itself(&self, colour: u8, cell: &Cell) -> bool {
+        if self.receiver_row_24 {
+            return true;
+        }
+        let entry = |index: u8| self.colour_map.entries.get(usize::from(index)).copied();
+        let expected = ColourMap::DEFAULT.entries.get(usize::from(colour)).copied();
+        expected.is_some() && entry(cell.foreground) == expected && entry(cell.background) != expected
     }
 
     /// An empty grid.
@@ -87,6 +113,7 @@ impl Grid {
             colour_map: ColourMap::DEFAULT,
             screen_colour: COLOUR_BLACK,
             row_colours: [COLOUR_BLACK; ROWS],
+            receiver_row_24: false,
         }
     }
 
@@ -103,6 +130,7 @@ impl Grid {
         self.colour_map = ColourMap::DEFAULT;
         self.screen_colour = COLOUR_BLACK;
         self.row_colours = [COLOUR_BLACK; ROWS];
+        self.receiver_row_24 = false;
     }
 
     /// The cell at a position.
