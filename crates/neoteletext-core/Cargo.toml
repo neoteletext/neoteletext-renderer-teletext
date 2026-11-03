@@ -146,6 +146,11 @@ name = "reordering"
 required-features = ["level15", "level25", "objects"]
 
 [[test]]
+name = "render_harness"
+# The reference caller of REQ-RND-021 over pages of every level.
+required-features = ["level15", "level25", "objects", "render"]
+
+[[test]]
 name = "reporting"
 # Its pages invoke objects, which are not default (decision E.105).
 required-features = ["level15", "level25", "viewer", "objects"]
