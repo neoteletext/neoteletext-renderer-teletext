@@ -196,11 +196,7 @@ pub fn objects_of(row_triplets: &[Vec<u32>]) -> Result<Vec<Vec<u32>>, Error> {
 }
 
 /// The lines of an enhanced page, and the object sub-pages it used.
-#[allow(
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    reason = "positions within the page and its object page"
-)]
+#[allow(clippy::arithmetic_side_effects, reason = "positions within the page and its object page")]
 pub fn enhanced_lines(page: &Enhanced<'_>) -> Result<(Vec<String>, usize), Error> {
     let mut lines = page_start();
     let enhancement = PACKET_PAGE_ENHANCEMENT;

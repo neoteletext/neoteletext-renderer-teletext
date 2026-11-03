@@ -1,4 +1,8 @@
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::unwrap_used, reason = "tests")]
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses arithmetic on small values it chose, where an overflow would also fail it and `unwrap` on results it expects to be good"
+)]
 
 use super::*;
 
