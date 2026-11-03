@@ -3,7 +3,7 @@
 
 use neoteletext_core::charset::{
     CharRef, CharSet, G0, G0Set, G2Set, JoinForm, NationalOption, compositions, extended_compositions, glyph_key,
-    joined_forms,
+    joined_forms, standard_set_compositions,
 };
 use neoteletext_core::glyphs::SPACING_MARKS;
 use std::collections::{BTreeMap, BTreeSet};
@@ -112,7 +112,10 @@ fn required() -> BTreeMap<char, Vec<String>> {
             u32::from(mark)
         ));
     }
-    for &(base, mark, composed) in extended_compositions() {
+    // The standard sets' gaps (DEC-2370) keep the extended compositions'
+    // name: the font's selection of them is unchanged, only where the
+    // compiled font puts their glyphs (see `standard_characters`).
+    for &(base, mark, composed) in standard_set_compositions().iter().chain(extended_compositions()) {
         out.entry(composed).or_default().push(format!(
             "{EXTENDED_COMPOSED} U+{:04X}+U+{:04X}",
             u32::from(base),
@@ -123,12 +126,13 @@ fn required() -> BTreeMap<char, Vec<String>> {
 }
 
 /// The characters a build without `extended-sets` draws: those of the
-/// standard's sets, the spacing marks and the Latin compositions. The rest
+/// standard's sets, the spacing marks, the Latin compositions and the
+/// letters a page in a standard set reaches by a mark (DEC-2370). The rest
 /// of the font is compiled only with that feature (REQ-FNT-001).
 pub(super) fn standard_characters() -> BTreeSet<char> {
     let used = sets().into_iter().filter(|set| set.standard).flat_map(|set| set.characters).map(|(_, c)| c);
     let spacing = SPACING_MARKS.iter().map(|&(_, spacing)| spacing);
-    let composed = compositions().iter().map(|&(_, _, composed)| composed);
+    let composed = compositions().iter().chain(standard_set_compositions()).map(|&(_, _, composed)| composed);
     used.chain(spacing).chain(composed).collect()
 }
 

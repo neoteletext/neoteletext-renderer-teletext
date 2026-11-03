@@ -300,13 +300,10 @@ pub(super) const COMPOSITIONS: [(char, char, char); 289] = [
 ];
 
 /// The precompositions neoteletext's own sets add (REQ-CHR-014): the hook
-/// above on the Latin vowels, the marks on the letters of the Vietnamese
-/// and Igbo sets, Cyrillic ё, which the Cyrillic sets
-/// without it reach as е with a diaeresis by X/26 (Russian, Kyrgyz and
-/// Mongolian, Tatar), and Greek Ό, the one capital with tonos the
-/// standard's Greek set lacks, reached as Ο with the acute (DEC-2370).
-/// Generated and sorted as [`COMPOSITIONS`] is.
-pub(super) const EXTENDED_COMPOSITIONS: [(char, char, char); 77] = [
+/// above on the Latin vowels and the marks on the letters of the Vietnamese
+/// and Igbo sets. Their glyphs are compiled only with `extended-sets`
+/// (REQ-FNT-001). Generated and sorted as [`COMPOSITIONS`] is.
+pub(super) const EXTENDED_COMPOSITIONS: [(char, char, char); 74] = [
     ('\u{0041}', '\u{0309}', '\u{1EA2}'), // Ả
     ('\u{0045}', '\u{0309}', '\u{1EBA}'), // Ẻ
     ('\u{0049}', '\u{0309}', '\u{1EC8}'), // Ỉ
@@ -379,11 +376,23 @@ pub(super) const EXTENDED_COMPOSITIONS: [(char, char, char); 77] = [
     ('\u{01B0}', '\u{0303}', '\u{1EEF}'), // ữ
     ('\u{01B0}', '\u{0309}', '\u{1EED}'), // ử
     ('\u{01B0}', '\u{0323}', '\u{1EF1}'), // ự
+    ('\u{1ECC}', '\u{0302}', '\u{1ED8}'), // Ộ
+    ('\u{1ECD}', '\u{0302}', '\u{1ED9}'), // ộ
+];
+
+/// The precompositions that letters the standard's own sets lack are
+/// reached by on a page in those sets (DEC-2370): Greek Ό, the one capital
+/// with tonos neither the Greek G0 set (Table 47) nor its G2 set (Table 43)
+/// holds, as Ο with the acute, and Cyrillic Ё and ё, which the standard's
+/// Russian set (Cyrillic option 2, Table 37) lacks, as Е and е with the
+/// diaeresis, all placed by an X/26 diacritical mark. A page in a standard
+/// set is drawn by every build, so their glyphs are compiled in every build
+/// with the font, not only with `extended-sets` (REQ-FNT-001). Sorted as
+/// [`COMPOSITIONS`] is.
+pub(super) const STANDARD_SET_COMPOSITIONS: [(char, char, char); 3] = [
     ('\u{039F}', '\u{0301}', '\u{038C}'), // Ό
     ('\u{0415}', '\u{0308}', '\u{0401}'), // Ё
     ('\u{0435}', '\u{0308}', '\u{0451}'), // ё
-    ('\u{1ECC}', '\u{0302}', '\u{1ED8}'), // Ộ
-    ('\u{1ECD}', '\u{0302}', '\u{1ED9}'), // ộ
 ];
 
 pub(super) fn search(table: &[(char, char, char)], base: char, combining: char) -> Option<char> {
@@ -395,7 +404,9 @@ pub(super) fn search(table: &[(char, char, char)], base: char, combining: char) 
 }
 
 pub(super) fn compose(base: char, combining: char) -> Option<char> {
-    search(&COMPOSITIONS, base, combining).or_else(|| search(&EXTENDED_COMPOSITIONS, base, combining))
+    search(&COMPOSITIONS, base, combining)
+        .or_else(|| search(&STANDARD_SET_COMPOSITIONS, base, combining))
+        .or_else(|| search(&EXTENDED_COMPOSITIONS, base, combining))
 }
 
 /// U+0323, the combining dot below.

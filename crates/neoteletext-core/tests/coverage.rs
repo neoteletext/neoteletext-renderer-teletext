@@ -8,7 +8,7 @@
     reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
 )]
 
-use neoteletext_core::charset::{CharRef, CharSet, compositions, glyph_key, to_unicode};
+use neoteletext_core::charset::{CharRef, CharSet, compositions, glyph_key, standard_set_compositions, to_unicode};
 #[cfg(feature = "extended-sets")]
 use neoteletext_core::charset::{extended_compositions, joined_forms};
 use neoteletext_core::glyphs::conformance::FONT_SETS;
@@ -63,8 +63,13 @@ fn every_mark_and_composed_letter_is_in_the_font() {
     let spacing: Vec<char> =
         SPACING_MARKS.iter().map(|&(_, spacing)| spacing).filter(|&c| font.lookup(c).is_none()).collect();
     assert_eq!(spacing, []);
-    let composed: Vec<char> = compositions().iter().map(|&(_, _, c)| c).filter(|&c| font.lookup(c).is_none()).collect();
-    assert_eq!(composed, []);
+    let composed: Vec<char> = compositions()
+        .iter()
+        .chain(standard_set_compositions())
+        .map(|&(_, _, c)| c)
+        .filter(|&c| font.lookup(c).is_none())
+        .collect();
+    assert_eq!(composed, [], "every build with the font draws the letters a standard set reaches (DEC-2370)");
 }
 
 /// REQ-CHR-014, REQ-CHR-015: the composed letters of neoteletext's own sets

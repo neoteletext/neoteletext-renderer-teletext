@@ -13,7 +13,7 @@
 #[cfg(test)]
 use crate::charset::*;
 use crate::charset::code_table::base_unicode;
-use crate::charset::composition::{COMPOSITIONS, EXTENDED_COMPOSITIONS, search};
+use crate::charset::composition::{COMPOSITIONS, EXTENDED_COMPOSITIONS, STANDARD_SET_COMPOSITIONS, search};
 use crate::charset::diacritics::{COMBINING_MARKS, diacritic_combining};
 use crate::charset::test_tables::*;
 use crate::consts::SPACE;
@@ -158,12 +158,16 @@ fn composition_table_is_sorted_and_uses_known_marks() {
         // Composition keeps the case of the base letter.
         assert_eq!(composed.is_uppercase(), base.is_uppercase(), "{composed}");
     }
-    for pair in EXTENDED_COMPOSITIONS.windows(2) {
-        assert!((pair[0].0, pair[0].1) < (pair[1].0, pair[1].1), "{pair:?}");
+    for table in [&STANDARD_SET_COMPOSITIONS[..], &EXTENDED_COMPOSITIONS[..]] {
+        for pair in table.windows(2) {
+            assert!((pair[0].0, pair[0].1) < (pair[1].0, pair[1].1), "{pair:?}");
+        }
     }
-    for (base, mark, composed) in EXTENDED_COMPOSITIONS {
+    for (base, mark, composed) in STANDARD_SET_COMPOSITIONS.into_iter().chain(EXTENDED_COMPOSITIONS) {
         assert!(marks.contains(&mark));
         assert_eq!(search(&COMPOSITIONS, base, mark), None, "{composed} is in one table only");
+        let elsewhere = search(&STANDARD_SET_COMPOSITIONS, base, mark).xor(search(&EXTENDED_COMPOSITIONS, base, mark));
+        assert_eq!(elsewhere, Some(composed), "{composed} is in one table only");
         assert_eq!(compose(base, mark), Some(composed));
         assert_eq!(composed.is_uppercase(), base.is_uppercase(), "{composed}");
     }

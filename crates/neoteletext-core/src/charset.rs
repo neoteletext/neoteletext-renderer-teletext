@@ -480,6 +480,14 @@ pub const fn extended_compositions() -> &'static [(char, char, char)] {
     &composition::EXTENDED_COMPOSITIONS
 }
 
+/// The precompositions of letters the standard's own sets lack, which a page
+/// in those sets reaches by an X/26 diacritical mark (DEC-2370): Greek Ό and
+/// Cyrillic Ё and ё. Base, mark, composed.
+#[must_use]
+pub const fn standard_set_compositions() -> &'static [(char, char, char)] {
+    &composition::STANDARD_SET_COMPOSITIONS
+}
+
 /// Text decoded with the Latin G0 set and no national option, for data
 /// that carries no character set designation, such as the 8/30 status
 /// message (REQ-SVC-005). Control codes show as spaces.
