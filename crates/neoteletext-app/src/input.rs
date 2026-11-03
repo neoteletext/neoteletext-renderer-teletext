@@ -37,6 +37,8 @@ pub struct Options {
     pub program: Option<u16>,
     /// Seconds to collect pages from a live feed before acting.
     pub duration: u64,
+    /// Walk a live feed's whole service (REQ-186).
+    pub walk: bool,
     /// Pages and sub-pages to keep in memory.
     pub pages: usize,
     /// The Table 32 group 0 to 15 (decision E.4), overriding the
@@ -230,6 +232,7 @@ mod tests {
             pid: None,
             program: None,
             duration: 0,
+            walk: false,
             pages: 0,
             region: None,
             parity: None,

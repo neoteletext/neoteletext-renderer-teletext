@@ -30,6 +30,13 @@ impl FormatChoice {
     }
 }
 
+/// Seconds a live feed is collected for by default (REQ-CLI-002).
+pub const DURATION_SECONDS: u64 = 20;
+/// Seconds a walk of a live feed's service is collected for by default
+/// (DEC-2456): ten minutes, enough for a few hundred pages at the walk's
+/// pace, which holds each page until its rows settle or its time limit.
+pub const WALK_DURATION_SECONDS: u64 = 600;
+
 impl Common {
     /// The application layer's options for these arguments.
     pub fn options(&self) -> Options {
@@ -39,7 +46,8 @@ impl Common {
             profile: self.profile.clone(),
             pid: self.pid,
             program: self.program,
-            duration: self.duration,
+            duration: self.duration.unwrap_or(if self.walk { WALK_DURATION_SECONDS } else { DURATION_SECONDS }),
+            walk: self.walk,
             pages: self.pages,
             region: self.region,
             parity: self.parity.map(|parity| match parity {

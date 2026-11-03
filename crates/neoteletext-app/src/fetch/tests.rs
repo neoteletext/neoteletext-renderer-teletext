@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "a test")]
 
 use super::wakes::{Wake, Wakes};
-use super::zxnet::live_loop;
+use super::zxnet::{LoopOptions, live_loop};
 use neoteletext_core::types::Instant;
 use neoteletext_web::port::{ConnectionId, LinkState, Received, Security, Transport};
 use neoteletext_web::url::IpAddress;
@@ -29,6 +29,8 @@ enum Script {
     Silent,
     /// Refuses the service name, which stops the feed.
     WrongName,
+    /// Lists two pages that exist and keeps the connection alive.
+    Walk,
 }
 
 #[derive(Default)]
@@ -37,6 +39,20 @@ struct Server {
     to_client: VecDeque<u8>,
     opened_at: Option<StdInstant>,
     closed_at: Option<StdInstant>,
+    /// The client's frames after the upgrade, unmasked.
+    from_client: Vec<Vec<u8>>,
+}
+
+/// RFC 6455 section 5.2: a client's frame of fewer than 126 bytes, its
+/// payload unmasked.
+fn unmasked(frame: &[u8]) -> Vec<u8> {
+    const LENGTH: u8 = 0x7F;
+    const HEAD: usize = 2;
+    const MASK: usize = 4;
+    let length = usize::from(frame.get(1).copied().unwrap_or(0) & LENGTH);
+    let mask = frame.get(HEAD..HEAD + MASK).unwrap_or(&[0; MASK]).to_vec();
+    let key = |index: usize| mask.get(index % MASK).copied().unwrap_or(0);
+    frame.iter().skip(HEAD + MASK).take(length).enumerate().map(|(index, byte)| byte ^ key(index)).collect()
 }
 
 struct Fake {
@@ -62,6 +78,7 @@ impl Transport for Fake {
     fn send(&mut self, _: ConnectionId, bytes: &[u8]) -> Result<(), Self::Error> {
         let mut server = self.server.lock().unwrap();
         if server.opened_at.is_some() {
+            server.from_client.push(unmasked(bytes));
             return Ok(());
         }
         // The upgrade request: answer it, then follow the script.
@@ -77,6 +94,12 @@ impl Transport for Fake {
             String::from_utf8_lossy(&accept)
         );
         server.to_client.extend(head.bytes());
+        if self.script == Script::Walk {
+            for message in [&br#"["pageExists", 0, 1, 0]"#[..], br#"["pageExists", 0, 1, 1]"#] {
+                server.to_client.extend([TEXT_FRAME, u8::try_from(message.len()).unwrap()]);
+                server.to_client.extend(message);
+            }
+        }
         if self.script == Script::WrongName {
             let message = br#"["wrongname"]"#;
             server.to_client.extend([TEXT_FRAME, u8::try_from(message.len()).unwrap()]);
@@ -120,7 +143,11 @@ fn start(script: Script) -> (Arc<Mutex<Server>>, Arc<std::sync::atomic::AtomicUs
     let server = Arc::new(Mutex::new(Server::default()));
     let fake = Fake { server: server.clone(), script, wake: wake.clone() };
     let channel = neoteletext_web::zxnet::Channel::from_address("wss://feed.example/live", "test").unwrap();
-    std::thread::spawn(move || live_loop(&channel, &mut wakes, fake, &[], false, &mut |_| Ok(())));
+    let walk = script == Script::Walk;
+    std::thread::spawn(move || {
+        let options = LoopOptions { allow_local: &[], proxied: false, walk };
+        live_loop(&channel, &mut wakes, fake, &options, &mut |_| Ok(()));
+    });
     (server, waits, wake)
 }
 
@@ -202,4 +229,21 @@ fn a_feed_is_named_by_short_name_identifier_or_address() {
     assert_eq!(super::feed("zxnet:nosuchfeed").unwrap().map(|_| ()), Err(ChannelError::UnknownName));
     assert_eq!(super::feed("wss://feed.example/").unwrap().map(|_| ()), Err(ChannelError::Json));
     assert!(super::feed("https://feed.example/").is_none(), "a web address is no feed");
+}
+
+// Verifies REQ-186: with the walk asked for, the loop asks the server for
+// the first page of the pageExists list once the list arrives; the feed's
+// own replay test holds each later page in turn.
+#[test]
+fn the_walk_asks_for_the_first_page_the_service_lists() {
+    let (server, _, wake) = start(Script::Walk);
+    let started = StdInstant::now();
+    let asked = |text: &str| {
+        server.lock().unwrap().from_client.iter().any(|frame| String::from_utf8_lossy(frame).starts_with(text))
+    };
+    while !asked("pagesearch,0,1,0,") {
+        assert!(started.elapsed() < LIMIT, "{:?}", server.lock().unwrap().from_client);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = wake.send(Wake::Ended);
 }

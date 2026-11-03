@@ -106,7 +106,8 @@ In a transport stream, the first teletext stream is used unless `--pid` names on
 
 A live input runs in two processes (REQ-SEC-018). A fetcher process does the networking and TLS; the decoder process never touches the network. Both sandbox themselves on Linux with Landlock and seccomp. On macOS the processes are separated but not sandboxed (Phase 2).
 
-- `--duration SECONDS` sets how long the non-interactive commands collect pages from a live feed before acting. The default is 20 seconds. `show` and `text` stop as soon as the requested page is complete.
+- `--duration SECONDS` sets how long the non-interactive commands collect pages from a live feed before acting. The default is 20 seconds, and 600 with `--walk`. `show` and `text` stop as soon as the requested page is complete.
+- `--walk` walks a zxnet feed's whole service: the feed asks the server for each page its list of pages names, in turn, holding each until its rows have arrived or its time is up, at the pace a person browsing would go, and the command collects what comes, as in `neottx list zxnet:teefax --walk`. These are hobby servers, so the walk is never faster (REQ-186, DEC-2456). A web service or channel has no walk, and says so.
 - Web services on local-network addresses are refused (REQ-SEC-006). `--allow-local 127.0.0.1` allows one address, for example a test server.
 - `--proxy http://host:port` or `--proxy socks5://host:port` sends every connection through that proxy, TLS still end to end (REQ-WEB-032); with a proxy, `localhost`, names of one label such as `router`, and names under `.local`, `.internal`, `.home.arpa`, `.lan`, `.corp`, `.intranet`, `.private` and `.localdomain` are refused too, since the proxy resolves the rest and only the name can be checked. A proxy that needs a password is not supported.
 - Plain `http://` works, by the owner's decision E.32. The viewer marks pages that arrived unencrypted.

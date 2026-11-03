@@ -146,6 +146,11 @@ impl<R: RandomSource> ZxnetFeed<'_, R> {
                     *byte |= 1 << (index % 8);
                 }
                 event(sink, LiveEvent::PageExists(address));
+                // REQ-186: a walk asked for before the list came starts on
+                // its first page, without waiting for the walk's time limit.
+                if self.walk.is_some_and(|walk| walk.current.is_none()) {
+                    self.walk_next(now, None, sink);
+                }
             }
             Message::InitialPage { page, subcode, status, len } => {
                 event(sink, LiveEvent::InitialPage { page, subcode, status: status.get(..len).unwrap_or(&[]) });

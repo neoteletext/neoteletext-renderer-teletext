@@ -83,8 +83,8 @@ pub fn run() -> ExitCode {
             Err(neoteletext_app::not_in_build("qr and keyboard", "keyboard"))
         }
         Command::SandboxTest => sandbox::self_test(),
-        Command::Fetch { address, no_sandbox, allow_local, proxy } => {
-            commands::fetch(&address, no_sandbox, &allow_local, proxy.as_deref())
+        Command::Fetch { address, no_sandbox, allow_local, proxy, walk } => {
+            commands::fetch(&address, no_sandbox, &allow_local, proxy.as_deref(), walk)
         }
     };
     match result {

@@ -395,6 +395,19 @@ fn page_walk_holds_each_page_until_its_rows_arrive() {
     assert!(harness.feed.page_exists(PageAddress::from_mpp(0x888).unwrap()));
 }
 
+/// REQ-186: a walk asked for as the feed starts, before the server has sent
+/// its pageExists list, asks for the first page as soon as the list says
+/// it exists, not after the walk's time limit.
+#[test]
+fn a_walk_asked_for_before_the_list_starts_when_it_comes() {
+    let mut harness = connected("teefax");
+    harness.input(LiveInput::Walk(true));
+    assert!(!harness.client_messages().iter().any(|message| message.starts_with("pagesearch")));
+    harness.server(&[r#"["pageExists", 0, 1, 0]"#]);
+    assert!(has_event(&harness.take(), "WalkPage(PageAddress { magazine: Magazine(1), page: PageNumber(0) })"));
+    assert_eq!(harness.client_messages().last().unwrap(), "pagesearch,0,1,0,16255,true,false,false");
+}
+
 /// Replays the recorded sessions of the corpus (REQ-TST-063; REQ-TST-022
 /// keeps captures out of the repository). Each line of
 /// `$NEOTELETEXT_CORPUS/zxnet/*.jsonl` is one server message.

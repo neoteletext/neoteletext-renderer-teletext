@@ -34,9 +34,14 @@ pub struct Common {
     /// Transport stream programme whose first teletext stream to use.
     #[arg(long)]
     pub program: Option<u16>,
-    /// Seconds to collect pages from a live feed before acting (REQ-CLI-002).
-    #[arg(long, default_value_t = 20)]
-    pub duration: u64,
+    /// Seconds to collect pages from a live feed before acting (REQ-CLI-002):
+    /// 20, or 600 with `--walk`.
+    #[arg(long)]
+    pub duration: Option<u64>,
+    /// Walk a zxnet feed's whole service, page by page, at the feed's own
+    /// pace (REQ-186, DEC-2456).
+    #[arg(long)]
+    pub walk: bool,
     /// Pages and sub-pages to keep in memory.
     #[arg(long, default_value_t = neoteletext_app::session::DEFAULT_PAGES)]
     pub pages: usize,
@@ -298,6 +303,9 @@ pub(crate) enum Command {
         /// The proxy.
         #[arg(long)]
         proxy: Option<String>,
+        /// Walk a live feed's whole service (REQ-186).
+        #[arg(long)]
+        walk: bool,
     },
     /// Write a channel's contents.txt, to standard output, from a folder
     /// of page files (REQ-CLI-008).

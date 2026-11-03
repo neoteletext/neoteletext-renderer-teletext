@@ -23,7 +23,15 @@ pub use wakes::Wake;
 const RESOLVER_PATHS: [&str; 6] = ["/etc", "/run/systemd/resolve", "/usr/lib", "/lib", "/usr/lib64", "/lib64"];
 
 /// Runs the fetcher for `address` until the decoder process goes away.
-pub fn run(address: &str, no_sandbox: bool, allow_local: &[IpAddr], proxy: Option<&str>) -> Result<(), (u8, String)> {
+/// With `walk`, a live feed walks its whole service (REQ-186); a web
+/// service or channel has no such walk, and says so.
+pub fn run(
+    address: &str,
+    no_sandbox: bool,
+    allow_local: &[IpAddr],
+    proxy: Option<&str>,
+    walk: bool,
+) -> Result<(), (u8, String)> {
     let proxy = proxy.map(Proxy::parse).transpose().map_err(|message| (crate::exit::USAGE, message))?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let (wake, receiver) = mpsc::channel();
@@ -38,12 +46,15 @@ pub fn run(address: &str, no_sandbox: bool, allow_local: &[IpAddr], proxy: Optio
         no_sandbox,
     )
     .map_err(|message| (crate::exit::INPUT, message))?;
-    match feed(address) {
-        Some(channel) => {
-            let channel = channel.map_err(|error| (crate::exit::USAGE, format!("unknown live feed: {error:?}")))?;
-            zxnet::run_zxnet(&channel, &mut wakes, wake, allow_local, proxy);
+    if let Some(channel) = feed(address) {
+        let channel = channel.map_err(|error| (crate::exit::USAGE, format!("unknown live feed: {error:?}")))?;
+        zxnet::run_zxnet(&channel, &mut wakes, wake, allow_local, proxy, walk);
+    } else {
+        if walk {
+            let note = "--walk walks a zxnet feed's service; a web service or channel is read as asked";
+            let _ = decoder_link::send(&crate::pipe::Frame::Notice(crate::pipe::Notice::Message(note.into())));
         }
-        None => web::run_web(address, &mut wakes, wake, allow_local, proxy),
+        web::run_web(address, &mut wakes, wake, allow_local, proxy);
     }
     Ok(())
 }

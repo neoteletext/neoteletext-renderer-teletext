@@ -17,6 +17,7 @@ pub fn open(
     allow_local: &[std::net::IpAddr],
     proxy: Option<&str>,
     region_named: bool,
+    walk: bool,
 ) -> Result<Box<dyn Source>, Failure> {
     let address = crate::input::link_address(address).map_err(|message| (exit::USAGE, message))?;
     let program = std::env::current_exe().map_err(|error| (exit::INPUT, error.to_string()))?;
@@ -30,6 +31,9 @@ pub fn open(
     }
     if let Some(proxy) = proxy {
         command.arg("--proxy").arg(proxy);
+    }
+    if walk {
+        command.arg("--walk");
     }
     let mut child = command.spawn().map_err(|error| (exit::INPUT, format!("cannot start the fetcher: {error}")))?;
     let requests = child.stdin.take().ok_or((exit::INPUT, "no pipe to the fetcher".to_string()))?;

@@ -99,6 +99,7 @@ fn live_source(options: &Options) -> Result<Box<dyn Source>, Failure> {
         &options.allow_local,
         options.proxy.as_deref(),
         options.region.is_some(),
+        options.walk,
     )
 }
 

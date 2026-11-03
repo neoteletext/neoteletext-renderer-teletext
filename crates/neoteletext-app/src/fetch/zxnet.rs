@@ -22,10 +22,23 @@ pub(super) fn run_zxnet(
     wake: Sender<Wake>,
     allow_local: &[IpAddr],
     proxy: Option<Proxy>,
+    walk: bool,
 ) {
     let proxied = proxy.is_some();
     let transport = StdTransport::new(allow_local, wake, proxy);
-    live_loop(channel, wakes, transport, allow_local, proxied, &mut |frame| send(frame));
+    let options = LoopOptions { allow_local, proxied, walk };
+    live_loop(channel, wakes, transport, &options, &mut |frame| send(frame));
+}
+
+/// How the live feed's loop runs.
+pub(super) struct LoopOptions<'a> {
+    /// The local addresses the feed may reach.
+    pub(super) allow_local: &'a [IpAddr],
+    /// Every connection goes through a proxy.
+    pub(super) proxied: bool,
+    /// Walk the whole service's `pageExists` list (REQ-186), at the feed's
+    /// own pace, holding each page until its rows arrive or its time ends.
+    pub(super) walk: bool,
 }
 
 /// The live feed's loop over any transport, sending what it receives
@@ -34,12 +47,11 @@ pub(super) fn live_loop<T: Transport>(
     channel: &Channel,
     wakes: &mut Wakes,
     transport: T,
-    allow_local: &[IpAddr],
-    proxied: bool,
+    options: &LoopOptions<'_>,
     emit: &mut dyn FnMut(&Frame) -> std::io::Result<()>,
 ) {
     let mut storage = Box::new(LiveStorage::default());
-    let mut feed = new_feed(channel, &mut storage, allow_local, proxied);
+    let mut feed = new_feed(channel, &mut storage, options.allow_local, options.proxied);
     let mut pump = Pump::new(transport);
     let start = StdInstant::now();
     let mut buffer = vec![0u8; SOCKET_READ];
@@ -62,6 +74,11 @@ pub(super) fn live_loop<T: Transport>(
         deadline.get()
     };
     let mut next_tick = step(LiveInput::Start, &mut pump);
+    // REQ-186: the walk waits for the list the server sends, and asks for
+    // each page in turn once the connection is open.
+    if options.walk {
+        next_tick = step(LiveInput::Walk(true), &mut pump);
+    }
     while !broken.get() && !wakes.ended() {
         wakes.turn();
         let mut busy = false;
@@ -125,6 +142,9 @@ fn forward(
         LiveOutput::Event(LiveEvent::InitialPage { page, .. }) => emit(&Frame::Notice(Notice::InitialPage(page.mpp()))),
         LiveOutput::Event(LiveEvent::GaveUp) => {
             emit(&Frame::Notice(Notice::Message("live feed: gave up reconnecting".into())))
+        }
+        LiveOutput::Event(LiveEvent::WalkComplete) => {
+            emit(&Frame::Notice(Notice::Message("live feed: walked every page the service lists".into())))
         }
         LiveOutput::Event(LiveEvent::WrongName) => {
             emit(&Frame::Notice(Notice::Message("live feed: wrong service name".into())))
