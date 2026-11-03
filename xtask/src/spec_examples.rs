@@ -24,6 +24,7 @@ use neoteletext_input::MAX_MESSAGE;
 use neoteletext_input::event::{Event, Item, Select, write};
 
 mod charsets;
+mod languages;
 mod wire;
 
 /// The version of the file's format.
@@ -434,6 +435,7 @@ fn all_examples() -> Result<Vec<Example>, String> {
     ];
     examples.append(&mut wire::examples()?);
     examples.append(&mut charsets::examples());
+    examples.push(languages::example());
     Ok(examples)
 }
 
