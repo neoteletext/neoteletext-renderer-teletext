@@ -8,7 +8,7 @@ use crate::colour::{self, ColourIndex, ColourMap, PagePresentation, Presentation
 use crate::config::{Config, PresentationLevel};
 use crate::consts::{
     C5_NEWSFLASH, C6_SUBTITLE, COLUMNS, PAGE_FUNCTION_DRCS, PAGE_FUNCTION_GDRCS, PAGE_FUNCTION_GPOP, PAGE_FUNCTION_MOT,
-    PAGE_FUNCTION_POP, PAGE_MOT, RECEIVER_COLUMNS, ROWS,
+    PAGE_FUNCTION_POP, PAGE_MOT, ROWS,
 };
 use crate::level1::{Cell, DisplayOptions, Grid, PageRows, Size, resolve_designation};
 use crate::objects::{self, EnhancementLinks};
@@ -210,9 +210,6 @@ fn rebuild_rows(
     report: &mut EnhancementReport,
     mut trace: Option<&mut TraceSink<'_>>,
 ) {
-    let receiver_area: [Cell; RECEIVER_COLUMNS] = core::array::from_fn(|column| {
-        grid.cells.first().and_then(|row| row.get(column)).copied().unwrap_or(Cell::BLANK)
-    });
     let mut cells = RowCells::new();
     let mut lower = false;
     for row in 0..ROWS {
@@ -243,12 +240,11 @@ fn rebuild_rows(
             }
         }
         for (column, cell) in cells.cells.iter().enumerate() {
-            let mut cell = cell.unwrap_or_else(|| fill.get(column).copied().unwrap_or(Cell::BLANK));
-            // REQ-L25-050: row 0 columns 0 to 7 stay the receiver's.
-            if row == 0
-                && let Some(receiver) = receiver_area.get(column)
-            {
-                cell = *receiver;
+            let cell = cell.unwrap_or_else(|| fill.get(column).copied().unwrap_or(Cell::BLANK));
+            // REQ-L25-050, REQ-SEC-005: the receiver's cells keep what the
+            // Level 1 pass drew there; nothing the page enhances reaches them.
+            if crate::policy::is_receiver_column(row, column) {
+                continue;
             }
             if let Some(target) = grid.cell_mut(row, column) {
                 *target = cell;

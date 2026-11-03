@@ -10,8 +10,9 @@ use crate::colour::ColourMap;
 use crate::config::{Config, ParityPolicy, Row24Policy};
 use crate::consts::{
     C5_NEWSFLASH, C6_SUBTITLE, C7_SUPPRESS_HEADER, C10_INHIBIT_DISPLAY, CLOCK_COLUMN, CODE_MASK_7BIT, COLOUR_GREEN,
-    COLOUR_WHITE, COLUMNS, HEADER_DISPLAY_COLUMN, RECEIVER_COLUMNS, ROWS, SPACE, STATUS_ATTRIBUTE_COLUMN,
+    COLOUR_WHITE, COLUMNS, HEADER_DISPLAY_COLUMN, ROWS, SPACE, STATUS_ATTRIBUTE_COLUMN,
 };
+use crate::policy::is_receiver_column;
 use crate::trace::TraceSink;
 
 /// The 7-bit codes and parity-failure mask of a stored row under the parity
@@ -143,7 +144,8 @@ const RECEIVER_SET: CharSet =
 /// designates, so that a Cyrillic, Arabic-script or Japanese page cannot turn
 /// "P100" into other letters, join it or draw it from a font without it.
 fn draw_receiver_columns_in_receiver_set(cells: &mut [Cell; COLUMNS]) {
-    for cell in cells.iter_mut().take(RECEIVER_COLUMNS) {
+    let receiver = cells.iter_mut().enumerate().take_while(|&(column, _)| is_receiver_column(0, column));
+    for (_, cell) in receiver {
         if let Glyph::Char(character) = &mut cell.glyph {
             *character = CharRef::new(RECEIVER_SET, character.code);
         }
@@ -294,7 +296,8 @@ fn hide_header(grid: &mut Grid, keep_status: bool) {
 /// newsflash or subtitle page among them.
 fn box_receiver_columns(grid: &mut Grid) {
     if let Some(cells) = grid.cells.get_mut(0) {
-        for cell in cells.iter_mut().take(RECEIVER_COLUMNS) {
+        let receiver = cells.iter_mut().enumerate().take_while(|&(column, _)| is_receiver_column(0, column));
+        for (_, cell) in receiver {
             cell.boxed = true;
         }
     }

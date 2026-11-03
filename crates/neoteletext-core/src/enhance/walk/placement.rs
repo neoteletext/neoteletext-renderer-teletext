@@ -8,7 +8,7 @@ use super::super::attributes::{ATTRIBUTES, Flash, flash_of};
 use super::super::characters::EnhChar;
 use super::super::planes::Plane;
 use crate::charset::{self, G0Set, G2Set};
-use crate::consts::{COLUMNS, MODE_ROW_SET, RECEIVER_COLUMNS, ROWS, TRIPLET_AT_SIGN_CODE, TRIPLET_FIRST_CHARACTER};
+use crate::consts::{COLUMNS, MODE_ROW_SET, ROWS, TRIPLET_AT_SIGN_CODE, TRIPLET_FIRST_CHARACTER};
 use crate::packet::TripletFunction;
 
 impl<'s> Walker<'_, 's> {
@@ -17,7 +17,7 @@ impl<'s> Walker<'_, 's> {
     /// 24 or columns 0 to 39 is discarded, and the source continues.
     fn placeable(&mut self, frame: &Frame<'s>) -> Option<(usize, usize)> {
         let (row, column) = frame.position();
-        let receiver = row == 0 && column < RECEIVER_COLUMNS;
+        let receiver = crate::policy::is_receiver_column(row, column);
         if row >= ROWS || column >= COLUMNS || receiver {
             self.report.faults.discarded_writes = self.report.faults.discarded_writes.saturating_add(1);
             return None;

@@ -4,8 +4,8 @@
 use crate::charset::{CharRef, CharSet, Designation, G0};
 use crate::config::{Config, PresentationLevel};
 use crate::consts::{
-    COLUMNS, DESIGNATION_CODES, DIACRITIC_NONE, PACKET_ROW_24, RECEIVER_COLUMNS, ROW_ADDRESS_BASE, ROW_ADDRESS_LAST,
-    ROW_ADDRESS_ROW_24, TRIPLET_AT_SIGN_CODE, TRIPLET_FIRST_CHARACTER,
+    COLUMNS, DESIGNATION_CODES, DIACRITIC_NONE, PACKET_ROW_24, ROW_ADDRESS_BASE, ROW_ADDRESS_LAST, ROW_ADDRESS_ROW_24,
+    TRIPLET_AT_SIGN_CODE, TRIPLET_FIRST_CHARACTER,
 };
 use crate::level1::{CharSource, Glyph, Grid, PageRows, Size};
 use crate::packet::{Triplet, TripletFunction};
@@ -306,7 +306,7 @@ fn write(grid: &mut Grid, row: u8, column: u8, character: CharRef, rows: PageRow
     let (row, column) = (usize::from(row), usize::from(column));
     // (i), REQ-L1-014 to REQ-L1-016: nothing is drawn into a row not showing
     // the page; (j): row 0 columns 0 to 7 belong to the receiver (REQ-SEC-005).
-    if !rows.shows(row) || (row == 0 && column < RECEIVER_COLUMNS) || column >= COLUMNS {
+    if !rows.shows(row) || crate::policy::is_receiver_column(row, column) || column >= COLUMNS {
         return;
     }
     // (f): the row below a double-height row is not transmitted content,
