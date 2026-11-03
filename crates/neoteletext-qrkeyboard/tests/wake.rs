@@ -1,4 +1,4 @@
-//! The screen's wait (REQ-INT-009, decision E.106): it ends the moment the relay sends
+//! Tests of the screen's wait (REQ-INT-009, decision E.106): it ends the moment the relay sends
 //! something or a waker wakes it, and otherwise sleeps until its limit,
 //! against a relay played here: its instance answer and its WebSocket.
 //!

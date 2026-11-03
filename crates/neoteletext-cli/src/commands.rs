@@ -42,7 +42,7 @@ pub use check::check;
 pub use contents::contents;
 pub use convert::convert;
 pub use fetch::fetch;
-pub use font::{convert_font, font_sets};
+pub use font::{convert_font, font_library, font_sets};
 pub use html::html;
 #[cfg(feature = "keyboard")]
 pub use keyboard::{KeyboardOptions, keyboard};
@@ -145,7 +145,7 @@ fn grid_of(session: &mut Session, key: PageKey) -> Result<Grid, Failure> {
 /// command may still write in; `no_sandbox` is `--no-sandbox`.
 fn sandbox_writable(writable: Option<&Path>, no_sandbox: bool) -> Result<(), Failure> {
     sandbox::apply(Policy { writable_directory: writable, network: false, readable: &[] }, no_sandbox)
-        .map_err(|message| (exit::INPUT, message))
+        .map_err(|error| (exit::INPUT, error.to_string()))
 }
 
 /// Applies the sandbox with nothing left to write and no network: every

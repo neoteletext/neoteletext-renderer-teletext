@@ -230,6 +230,9 @@ pub fn write_log_line(level: crate::log::LogLevel, text: &str, out: &mut dyn Wri
 /// Writes sub-pages as one TTI file (REQ-INP-014): the first page's
 /// description and source at the top, then each sub-page from its `PN`
 /// line. Reading the file reproduces the pages.
+///
+/// # Errors
+/// The writer's error, when it fails.
 pub fn write_tti(pages: &[&PageFile], out: &mut dyn Write) -> io::Result<()> {
     let Some(first) = pages.first() else { return Ok(()) };
     if !first.description.is_empty() {

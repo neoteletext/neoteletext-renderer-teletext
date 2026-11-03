@@ -10,8 +10,7 @@ use std::io::Write;
 
 /// `neottx list`.
 pub fn list(options: &Options) -> Result<(), Failure> {
-    let mut session = input::load(options)?;
-    sandbox_closed(options.no_sandbox)?;
+    let mut session = input::load_sandboxed(options, None, || sandbox_closed(options.no_sandbox))?;
     let mut out = std::io::stdout().lock();
     // DOC-1955: a live channel's index says what the channel has, which is
     // more than the pages its connection sent.
@@ -44,18 +43,17 @@ pub fn list(options: &Options) -> Result<(), Failure> {
         );
         index = index.saturating_add(subpages.len());
     }
-    // REQ-L25-051: enhancement faults are met only when a page is built, so
-    // every page is built once to count them.
+    // REQ-L25-051, REQ-72: enhancement faults and designation fallbacks are
+    // met only when a page is built, so every page is built once to count
+    // them.
     let enhanced = session.decoder().config().level.is_enhanced();
-    if enhanced {
-        for key in keys {
-            let _ = session.grid(key, None);
-        }
+    for key in keys {
+        let _ = session.grid(key, None);
     }
     let stats = session.decoder().statistics();
     let _ = writeln!(
         out,
-        "\n{} page(s); packets per magazine 1-8: {:?}; address failures {}; parity failures {}; Hamming 8/4 corrected {}, failed {}; Hamming 24/18 corrected {}, failed {}; discarded {}",
+        "\n{} page(s); packets per magazine 1-8: {:?}; address failures {}; parity failures {}; Hamming 8/4 corrected {}, failed {}; Hamming 24/18 corrected {}, failed {}; discarded {}; designation fallbacks {}",
         page_count,
         [1, 2, 3, 4, 5, 6, 7, 0].map(|m| stats.per_magazine.get(m).copied().unwrap_or(0)),
         stats.address_failures,
@@ -64,7 +62,8 @@ pub fn list(options: &Options) -> Result<(), Failure> {
         stats.hamming84_failures,
         stats.hamming2418_corrected,
         stats.hamming2418_failures,
-        stats.discarded
+        stats.discarded,
+        stats.designation_fallbacks
     );
     if enhanced {
         let faults = &stats.enhancement;

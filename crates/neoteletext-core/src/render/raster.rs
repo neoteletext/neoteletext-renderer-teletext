@@ -6,7 +6,7 @@ use super::CellLine;
 use super::colours::{background_index, foreground_index, resolved_colours};
 use super::options::{ColourMode, RenderOptions};
 use crate::config::CellMode;
-use crate::consts::{CELL_DOTS, CELL_HEIGHT, CELL_WIDTH, MOSAIC_ROW_TENTHS};
+use crate::consts::{CELL_DOTS, CELL_HEIGHT, CELL_HEIGHT_SMALL, CELL_WIDTH, MOSAIC_ROW_TENTHS};
 use crate::glyphs::{CharClass, GlyphRows, GlyphSet, class};
 use crate::level1::{Cell, CellAttributes, Glyph, Grid, Size, Width};
 
@@ -29,19 +29,43 @@ const MOSAIC_RIGHT: u16 = 0b0000_0011_1111;
 /// (decision E.14: half-dot columns 0, 1, 6 and 7).
 pub(super) const SEPARATED_COLUMNS: u16 = 0b1100_0011_0000;
 
+/// The line after the last of each mosaic block row in a cell of
+/// `height` lines, with block rows 3/10, 4/10 and 3/10 of the cell
+/// (decision E.14). Evaluated at compile time for the two cell heights, so
+/// that drawing a mosaic divides nothing: the Cortex-M0 has no divide
+/// instruction (REQ-GEN-016).
+const fn block_bottoms(height: usize) -> [usize; MOSAIC_ROW_TENTHS.len()] {
+    let [first, second, third] = MOSAIC_ROW_TENTHS;
+    let first = block_lines(first, height);
+    let second = first.saturating_add(block_lines(second, height));
+    [first, second, second.saturating_add(block_lines(third, height))]
+}
+
+/// The lines of a block row `tenths` of a cell of `height` lines high.
+const fn block_lines(tenths: usize, height: usize) -> usize {
+    match tenths.saturating_mul(height).checked_div(TENTHS) {
+        Some(lines) => lines,
+        None => 0,
+    }
+}
+
+/// `MOSAIC_ROW_TENTHS` counts in tenths of a cell.
+const TENTHS: usize = 10;
+
+/// The block rows' bottoms in a cell of the SAA5050's height and of the
+/// SAA5246A's (`RenderOptions::row_height`).
+const BOTTOMS: [usize; MOSAIC_ROW_TENTHS.len()] = block_bottoms(CELL_HEIGHT);
+const BOTTOMS_SMALL: [usize; MOSAIC_ROW_TENTHS.len()] = block_bottoms(CELL_HEIGHT_SMALL);
+
 /// The mosaic block row (0 to 2) of line `line` in a cell of `height`
-/// lines, with block rows 3/10, 4/10 and 3/10 of the cell (decision E.14),
-/// and whether the line is the block's last (blank when separated).
+/// lines (`CELL_HEIGHT` or `CELL_HEIGHT_SMALL`), and whether the line is the
+/// block's last (blank when separated).
 pub(super) fn mosaic_block(line: usize, height: usize) -> (usize, bool) {
-    let mut top = 0usize;
-    for (block, &tenths) in MOSAIC_ROW_TENTHS.iter().enumerate() {
-        let rows = tenths.saturating_mul(height) / 10;
-        let bottom = top.saturating_add(rows);
+    let (bottoms, last_lines) = if height >= CELL_HEIGHT { (&BOTTOMS, 2) } else { (&BOTTOMS_SMALL, 1) };
+    for (block, &bottom) in bottoms.iter().enumerate() {
         if line < bottom {
-            let last_lines = if height >= CELL_HEIGHT { 2 } else { 1 };
             return (block, line >= bottom.saturating_sub(last_lines));
         }
-        top = bottom;
     }
     (2, true)
 }

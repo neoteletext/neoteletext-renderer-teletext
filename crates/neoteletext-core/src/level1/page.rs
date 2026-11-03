@@ -46,8 +46,9 @@ pub fn build_grid(
     options: &DisplayOptions,
 ) {
     out.clear();
-    let (designation, second, _) = resolve_designation(page, magazine, config);
+    let (designation, second, fallback) = resolve_designation(page, magazine, config);
     out.designation = designation;
+    out.designation_fallback = fallback;
     out.mix = options.mix;
     let control = page.map_or(0, |page| page.control.0);
     // REQ-L1-011, REQ-ACQ-015, decision E.22: box membership matters only
@@ -73,6 +74,9 @@ pub fn build_grid(
         }
         if row == 0 && suppress_header {
             hide_header(out, config.status_on_suppressed_header || options.security_indicator);
+        }
+        if row == 0 && out.boxed_mode && options.security_indicator {
+            box_receiver_columns(out);
         }
         if visible && has_double {
             out.double_height_rows |= 1u32.checked_shl(row as u32).unwrap_or(0);
@@ -236,6 +240,18 @@ fn hide_header(grid: &mut Grid, keep_status: bool) {
             if !(keep_status && column <= STATUS_ATTRIBUTE_COLUMN) {
                 *cell = Cell::BLANK;
             }
+        }
+    }
+}
+
+/// On a boxed page everything outside a box is the picture (REQ-L1-011),
+/// so the receiver's own cells are boxed while a security indicator is on:
+/// REQ-SEC-005 and REQ-SEC-008 require it to show on every page, a
+/// newsflash or subtitle page among them.
+fn box_receiver_columns(grid: &mut Grid) {
+    if let Some(cells) = grid.cells.get_mut(0) {
+        for cell in cells.iter_mut().take(RECEIVER_COLUMNS) {
+            cell.boxed = true;
         }
     }
 }

@@ -47,6 +47,13 @@ pub trait Source {
         Vec::new()
     }
 
+    /// Whether `page` last came over plain HTTP (`Some(true)`) or encrypted
+    /// (`Some(false)`), for the unencrypted marker of the page on screen
+    /// (REQ-SEC-008); `None` when the source does not know, such as a file.
+    fn came_unencrypted(&self, _page: PageAddress) -> Option<bool> {
+        None
+    }
+
     /// Extension data of a page: links, the drawn link row, input modes.
     fn extras(&self, _page: PageAddress, _subcode: SubCode) -> Option<&PageExtras> {
         None

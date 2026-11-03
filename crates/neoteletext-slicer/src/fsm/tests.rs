@@ -1,4 +1,4 @@
-//! The REQ-FSM-002 table: every state and event pair has one row.
+//! Tests of the REQ-FSM-002 table: every state and event pair has one row.
 
 use super::{SlicerAction as A, SlicerEvent as E, SlicerState as S, slicer_transition};
 

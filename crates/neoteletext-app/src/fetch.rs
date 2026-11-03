@@ -25,6 +25,11 @@ const RESOLVER_PATHS: [&str; 6] = ["/etc", "/run/systemd/resolve", "/usr/lib", "
 /// Runs the fetcher for `address` until the decoder process goes away.
 /// With `walk`, a live feed walks its whole service (REQ-186); a web
 /// service or channel has no such walk, and says so.
+///
+/// # Errors
+/// The exit status and the message for the user (DEC-2451): a proxy
+/// that is not `http://host:port` or `socks5://host:port`, a sandbox that
+/// cannot be applied, or an unknown zxnet live feed.
 pub fn run(
     address: &str,
     no_sandbox: bool,
@@ -32,7 +37,7 @@ pub fn run(
     proxy: Option<&str>,
     walk: bool,
 ) -> Result<(), (u8, String)> {
-    let proxy = proxy.map(Proxy::parse).transpose().map_err(|message| (crate::exit::USAGE, message))?;
+    let proxy = proxy.map(Proxy::parse).transpose().map_err(|error| (crate::exit::USAGE, error.to_string()))?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let (wake, receiver) = mpsc::channel();
     decoder_link::requests(wake.clone());
@@ -45,7 +50,7 @@ pub fn run(
         crate::sandbox::Policy { writable_directory: None, network: true, readable: &readable },
         no_sandbox,
     )
-    .map_err(|message| (crate::exit::INPUT, message))?;
+    .map_err(|error| (crate::exit::INPUT, error.to_string()))?;
     if let Some(channel) = feed(address) {
         let channel = channel.map_err(|error| (crate::exit::USAGE, format!("unknown live feed: {error:?}")))?;
         zxnet::run_zxnet(&channel, &mut wakes, wake, allow_local, proxy, walk);

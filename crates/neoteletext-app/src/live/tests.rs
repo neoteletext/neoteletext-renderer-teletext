@@ -89,7 +89,7 @@ fn link(address: &str) -> String {
 /// scheme in either case, and nothing else.
 #[test]
 fn a_link_from_outside_unwraps_to_its_address() {
-    use crate::input::{is_live, link_address};
+    use crate::input::{OpeningError, is_live, link_address};
     let https = link("https://a.example/demo/");
     assert_eq!(link_address(&https), Ok("https://a.example/demo/"));
     let http = link("http://a.example/demo/?id=7");
@@ -105,7 +105,8 @@ fn a_link_from_outside_unwraps_to_its_address() {
         &format!("{LINK_SCHEME}https://a.example/"),
         "wss://a.example/",
     ] {
-        assert!(link_address(&link(refused)).is_err(), "{refused}");
+        // REQ-155: the refusal is its variant of an error enumeration.
+        assert_eq!(link_address(&link(refused)), Err(OpeningError::LinkWrapsNoWebAddress), "{refused}");
     }
     assert!(is_live(&https));
     assert!(
@@ -189,7 +190,7 @@ fn a_page_file_fills_only_its_page() {
 /// rest; a service's descriptor and a channel's own file name no place.
 #[test]
 fn an_address_says_where_a_viewer_opens() {
-    use crate::input::{Opening, opening};
+    use crate::input::{Opening, OpeningError, link_address, opening};
     use neoteletext_core::types::{PageAddress, SubCode};
     use neoteletext_web::channel::SETTINGS_FILE;
     let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
@@ -221,7 +222,10 @@ fn an_address_says_where_a_viewer_opens() {
         &format!("https://a.example/home/{SETTINGS_FILE}#302"),
         &link("https://a.example/home/#WALL"),
     ] {
-        assert!(opening(address).is_err(), "{address}");
+        // REQ-155: the refusal is its variant of an error enumeration.
+        // A link is refused for the address it wraps.
+        let refused = link_address(address).unwrap().to_owned();
+        assert_eq!(opening(address), Err(OpeningError::NotAChannelAddress(refused)), "{address}");
     }
 }
 
@@ -278,4 +282,32 @@ fn a_page_files_other_pages_are_left_out_and_said() {
     assert!(session.page(PageAddress::from_mpp(0x200).unwrap(), SubCode::ANY).is_none());
     let said: Vec<Notice> = live.notices();
     assert!(said.iter().any(|notice| matches!(notice, Notice::Message(text) if text.ends_with(": 200"))), "{said:?}");
+}
+
+/// REQ-421 (REQ-SEC-008): the unencrypted marker follows the page on
+/// screen, so what is known of a page is how it last came: a secure page
+/// after a plain one clears it, a plain one after a secure one sets it, and
+/// a pushed page, whose connection the fetcher reports, leaves it.
+#[test]
+fn how_a_page_came_follows_its_latest_arrival() {
+    let (sender, frames) = mpsc::channel();
+    let mut live = routed(frames, Box::new(std::io::sink()));
+    let mut session = Session::new(neoteletext_core::config::Config::default(), 8);
+    let page = PageAddress::from_mpp(0x100).unwrap();
+    let other = PageAddress::from_mpp(0x200).unwrap();
+    let arrive = |live: &mut Live, session: &mut Session, secure: bool, origin: Origin| {
+        let bytes = b"PN,10000\nOL,1,HELLO\n".to_vec();
+        sender.send(Frame::Tti(PageData { secure, origin, bytes })).unwrap();
+        live.poll(session, Instant(0));
+    };
+    assert_eq!(live.came_unencrypted(page), None, "nothing is known before it arrives");
+    arrive(&mut live, &mut session, false, Origin::FrontDoor);
+    assert_eq!(live.came_unencrypted(page), Some(true));
+    arrive(&mut live, &mut session, true, Origin::FrontDoor);
+    assert_eq!(live.came_unencrypted(page), Some(false), "a secure page clears the marker");
+    arrive(&mut live, &mut session, false, Origin::Push);
+    assert_eq!(live.came_unencrypted(page), Some(false), "a pushed page leaves it");
+    arrive(&mut live, &mut session, false, Origin::FrontDoor);
+    assert_eq!(live.came_unencrypted(page), Some(true));
+    assert_eq!(live.came_unencrypted(other), None);
 }

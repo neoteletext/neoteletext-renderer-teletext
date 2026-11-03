@@ -44,6 +44,7 @@ The design documents are:
 | `design/porting.md` | What a port supplies, and nothing else |
 | `design/audio.md` | The teletext audio profile: its sources, its records, carriage and control, and where it departs from the standards (area AUD) |
 | `design/audio-platforms.md` | How the audio profile is built on each platform: the engine crates, NeoTeletext on desktops, and microcontrollers through tellyboy |
+| `design/pictures.md` | How a picture becomes a page of mosaic graphics in `neoteletext-picture`, and where its untrusted input is handled (DEC-2325) |
 | `design/hmi.md` | A proposal, not yet a requirement: how the code takes input from different controls |
 
 **Only the requirements are normative.** A requirement wins over anything in the decisions or the design documents. The decisions are binding choices, recorded in rdm before the behaviour they govern is committed (REQ-DOC-004). rdm links each requirement to the tests that name it (REQ-DOC-003).

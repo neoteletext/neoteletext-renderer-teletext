@@ -96,3 +96,75 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
         assert!(read(&mut &bad[..]).is_err(), "{bad:?}");
     }
 }
+
+// REQ-431: the decoder validates every frame it receives, so a frame of a
+// retired kind must be refused, never read as the frame that once had it.
+#[test]
+fn a_frame_of_every_retired_kind_is_refused() {
+    for kind in codec::RETIRED_KINDS {
+        for payload in [&[][..], &[0], &[0, 0, 0, 0]] {
+            let length = u32::try_from(payload.len()).unwrap().to_be_bytes();
+            let frame = [&[kind][..], &length, payload].concat();
+            assert!(read(&mut frame.as_slice()).is_err(), "retired kind {:?} was read", char::from(kind));
+        }
+    }
+}
+
+// REQ-431 (TODO-1135): the kinds are a small fixed set, each distinct and none
+// retired; the build asserts that over `KINDS`, so every kind written must be
+// in `KINDS`.
+#[test]
+fn every_frame_written_has_a_listed_kind() {
+    let frames = [
+        Frame::Packet([0; 42]),
+        Frame::Tti(PageData { secure: true, origin: Origin::Page, bytes: vec![] }),
+        Frame::T42(PageData { secure: true, origin: Origin::Page, bytes: vec![] }),
+        Frame::Undeclared(PageData { secure: true, origin: Origin::Page, bytes: vec![] }),
+        Frame::Notice(Notice::InitialPage(0x100)),
+        Frame::Notice(Notice::Unencrypted),
+        Frame::Notice(Notice::Message(String::new())),
+        Frame::Notice(Notice::Service(vec![])),
+        Frame::Notice(Notice::Region(None)),
+        Frame::Notice(Notice::Current(0x100)),
+        Frame::Notice(Notice::Offline(0x100)),
+        Frame::Request(0x100, 0),
+        Frame::Input(vec![]),
+        Frame::Notice(Notice::Input(true)),
+        Frame::Follow(String::new(), 0x100, 0),
+        Frame::Notice(Notice::RedirectToOtherChannel(String::new())),
+        Frame::Notice(Notice::PageRedirect(0x100, 0, None)),
+        Frame::Notice(Notice::Denied(404, String::new())),
+        Frame::Notice(Notice::PushStopped(String::new())),
+        Frame::Notice(Notice::ServiceName(String::new())),
+        Frame::Notice(Notice::Bundle(0x100)),
+        Frame::Notice(Notice::Aliases(vec![])),
+        Frame::Notice(Notice::Refresh(0)),
+        Frame::SubPages(0x100, 0),
+        Frame::Notice(Notice::SubPagesMissing(0x100, 0)),
+        Frame::Notice(Notice::SubPages(ListPart {
+            page: 0x100,
+            part: 0,
+            total: 1,
+            version: String::new(),
+            subcodes: vec![],
+        })),
+        Frame::Notice(Notice::Index(IndexPart { generation: 0, pages: vec![] })),
+        Frame::Notice(Notice::IndexComplete(0)),
+        Frame::Notice(Notice::SubPageList(LiveList { page: 0x100, version: 0, subcodes: vec![] })),
+        Frame::Notice(Notice::SubPageListComplete(0x100, 0)),
+        Frame::Notice(Notice::SubPageListRefused(0x100, 0)),
+        Frame::Notice(Notice::Links(vec![])),
+    ];
+    let mut kinds = Vec::new();
+    for frame in &frames {
+        let mut buffer = Vec::new();
+        write(&mut buffer, frame).unwrap();
+        let kind = *buffer.first().unwrap();
+        assert!(codec::KINDS.contains(&kind), "{frame:?} is written with kind {:?}, not in KINDS", char::from(kind));
+        kinds.push(kind);
+    }
+    kinds.sort_unstable();
+    let mut listed = codec::KINDS.to_vec();
+    listed.sort_unstable();
+    assert_eq!(kinds, listed, "a kind in KINDS is written by no frame");
+}

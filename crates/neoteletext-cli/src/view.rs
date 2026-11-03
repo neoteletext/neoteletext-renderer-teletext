@@ -15,7 +15,7 @@ use neoteletext_app::extras::PageExtras;
 use neoteletext_app::input::Opening;
 use neoteletext_app::session::Session;
 use neoteletext_app::source::Source;
-use neoteletext_core::acq::{EnhancementReport, StoredPage};
+use neoteletext_core::acq::{EnhancementReport, PageBuild, StoredPage};
 use neoteletext_core::config::Config;
 use neoteletext_core::consts::COLUMNS;
 use neoteletext_core::level1::{Grid, Zoom};
@@ -77,6 +77,9 @@ struct ViewState {
     // A sub-page step waiting for a part of the page's list: forward or
     // back (REQ-1888).
     pending_step: Option<bool>,
+    // The build of the last grid built and whether its designation fell
+    // back (REQ-72), recorded with the report above.
+    unrecorded_designation: Option<(PageBuild, bool)>,
 }
 
 /// What a turn knows about the page it shows, for the steps after the
@@ -118,6 +121,7 @@ impl ViewState {
             trace_withheld: false,
             unrecorded: None,
             pending_step: None,
+            unrecorded_designation: None,
         }
     }
 

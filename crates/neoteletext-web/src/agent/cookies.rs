@@ -103,6 +103,11 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     /// Saves the cookies that may be kept (REQ-SEC-013), when the
     /// configuration allows it and calendar time is known. Returns the
     /// number saved. `scratch` holds the encoded data.
+    ///
+    /// # Errors
+    /// `Err(None)` when the encoded cookies do not fit in `scratch`; nothing
+    /// is saved then. `Err(Some(error))` carries the storage's own error
+    /// when [`CookieStorage::save`] fails.
     pub fn save_cookies<S: CookieStorage>(
         &self,
         now: Instant,
@@ -121,6 +126,12 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
 
     /// Restores saved cookies, when the configuration allows it and
     /// calendar time is known. Returns the number restored.
+    ///
+    /// # Errors
+    /// The storage's own error, when [`CookieStorage::load`] fails. Saved
+    /// data the jar cannot read is not an error: data of another format
+    /// version restores nothing, and reading stops at the first record
+    /// that cannot be parsed, keeping those before it.
     pub fn load_cookies<S: CookieStorage>(
         &mut self,
         now: Instant,

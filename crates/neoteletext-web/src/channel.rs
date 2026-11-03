@@ -185,6 +185,10 @@ pub fn page_folder(name: &str) -> Option<PageAddress> {
 }
 
 /// Writes a file's name (REQ-WEB-019).
+///
+/// # Errors
+/// [`Overflow`] when the writer runs out of room; the part of the name
+/// that fitted stays written. Every name fits in [`MAX_FILE_NAME`] bytes.
 pub fn write_file_name(writer: &mut Writer<'_>, file: ChannelFile) -> Result<(), Overflow> {
     match file {
         ChannelFile::Page { page, t42 } => {
@@ -210,7 +214,7 @@ pub fn write_file_name(writer: &mut Writer<'_>, file: ChannelFile) -> Result<(),
 }
 
 /// Checks one folder segment (REQ-WEB-023).
-fn check_segment(segment: &[u8]) -> Result<(), ChannelError> {
+pub(crate) fn check_segment(segment: &[u8]) -> Result<(), ChannelError> {
     if segment.is_empty() {
         return Err(ChannelError::EmptySegment);
     }
@@ -230,6 +234,19 @@ fn check_segment(segment: &[u8]) -> Result<(), ChannelError> {
 
 /// Checks a folder path as written: `/`, or `/` followed by segments each
 /// ending in `/` (REQ-WEB-023).
+///
+/// # Errors
+/// - [`ChannelError::TooLong`] when the path is longer than
+///   [`MAX_FOLDER_PATH`].
+/// - [`ChannelError::EmptySegment`] when the path does not start with `/`,
+///   does not end with `/`, or has a doubled slash.
+/// - [`ChannelError::DotSegment`] for a segment that is only dots.
+/// - [`ChannelError::LongSegment`] for a segment longer than
+///   [`MAX_SEGMENT`].
+/// - [`ChannelError::Character`] for a character outside the unreserved set
+///   of RFC 3986 section 2.3.
+/// - [`ChannelError::TooDeep`] when the path has more than
+///   [`MAX_SEGMENTS`] segments.
 pub fn check_folder_path(path: &str) -> Result<(), ChannelError> {
     if path.len() > MAX_FOLDER_PATH {
         return Err(ChannelError::TooLong);
@@ -299,6 +316,18 @@ pub struct ChannelAddress {
 /// (REQ-WEB-023). The rules are checked on the address as written; the
 /// strict parser then checks the rest. An address without a path is the
 /// root folder.
+///
+/// # Errors
+/// - [`ChannelError::Address`] when the strict parser refuses the address,
+///   carrying its [`UrlError`]; [`UrlError::Fragment`] when the address has
+///   a fragment, since a channel's folder has none.
+/// - [`ChannelError::Scheme`] for a scheme other than `http` or `https`.
+/// - [`ChannelError::Query`] when the address has a query.
+/// - [`ChannelError::NotChannelFile`] when the last segment names no file of
+///   a channel, or names a file inside a folder that is a place of the map.
+/// - Any error of [`check_folder_path`] for the channel's folder.
+/// - [`ChannelError::DotSegment`] when the parser's normalised path differs
+///   from the path checked, as dot segments make it.
 pub fn parse_address(text: &str) -> Result<ChannelAddress, ChannelError> {
     let url = Url::parse(text).map_err(ChannelError::Address)?;
     if !matches!(url.scheme(), Scheme::Http | Scheme::Https) {
@@ -405,6 +434,12 @@ pub fn redirect_keeps_channel(folder: &Url, url: &Url) -> bool {
 }
 
 /// The address of a file of the channel.
+///
+/// # Errors
+/// [`UrlError::TooLong`] when the folder's address and the file's name
+/// together are longer than [`crate::consts::MAX_URL_LENGTH`]. Every file's
+/// name fits in [`MAX_FILE_NAME`] and is made of characters an address may
+/// hold, so the other errors of [`Url::join`] do not arise.
 pub fn file_url(folder: &Url, file: ChannelFile) -> Result<Url, UrlError> {
     let mut buffer = [0u8; MAX_FILE_NAME];
     let mut writer = Writer::new(&mut buffer);
@@ -415,6 +450,10 @@ pub fn file_url(folder: &Url, file: ChannelFile) -> Result<Url, UrlError> {
 
 /// The channel's live connection, from any address in its folder: `wss` or
 /// `ws`, as the folder's own security says.
+///
+/// # Errors
+/// [`UrlError::TooLong`] when the folder's address with [`PUSH_NAME`]
+/// added is longer than [`crate::consts::MAX_URL_LENGTH`].
 pub fn push_url(folder: &Url) -> Result<Url, UrlError> {
     let url = folder.join(PUSH_NAME)?;
     url.with_scheme(if url.is_secure() { Scheme::Wss } else { Scheme::Ws })

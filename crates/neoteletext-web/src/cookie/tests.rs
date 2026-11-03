@@ -347,6 +347,8 @@ fn expires_needs_calendar_time() {
     assert_eq!(record.expires, None, "kept as a session cookie");
 }
 
+/// REQ-420 (REQ-SEC-007): a host once reached over HTTPS is remembered, so
+/// that a later plain connection to it is a downgrade.
 #[test]
 fn secure_history_for_downgrade() {
     let mut jar = Jar::new();

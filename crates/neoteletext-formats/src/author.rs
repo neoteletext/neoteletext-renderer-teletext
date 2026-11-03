@@ -87,6 +87,10 @@ pub const fn colour(clut: u8, entry: u8) -> u8 {
 }
 
 /// A page address from its `mpp` form, such as `0x1A0`.
+///
+/// # Errors
+/// [`AuthorError::BadPosition`] when `mpp` is not a page address: a
+/// magazine digit above 8 or a page number above FF.
 pub fn address(mpp: u16) -> Result<PageAddress> {
     PageAddress::from_mpp(mpp).ok_or(AuthorError::BadPosition)
 }
@@ -186,6 +190,10 @@ impl MagazinePackets {
     }
 
     /// The page mFF that carries the packets.
+    ///
+    /// # Errors
+    /// [`AuthorError::PageFull`] when the packets need more lines than a page
+    /// file keeps.
     pub fn build(&self) -> Result<Box<PageFile>> {
         let magazine = self.magazine;
         let mut page =
@@ -277,6 +285,9 @@ impl Stream {
     }
 
     /// Writes the stream as T42.
+    ///
+    /// # Errors
+    /// The writer's error, when it fails.
     pub fn write_t42(&self, out: &mut dyn Write) -> io::Result<()> {
         out.write_all(&self.t42())
     }
@@ -284,6 +295,10 @@ impl Stream {
     /// Every page as one TTI file, in the order of Annex B.7, so that a
     /// reader that encodes pages as it reads them stores the enhancement
     /// pages before the pages that use them.
+    ///
+    /// # Errors
+    /// Never in practice: the file is written to memory, and only a writer
+    /// can fail.
     pub fn tti(&self) -> io::Result<Vec<u8>> {
         let mut out = Vec::new();
         write_tti(&self.in_transmission_order(), &mut out)?;
@@ -292,6 +307,10 @@ impl Stream {
 
     /// One TTI file per page address, named `mpp.tti`, holding its
     /// sub-pages in order.
+    ///
+    /// # Errors
+    /// Never in practice: the files are written to memory, and only a writer
+    /// can fail.
     pub fn tti_files(&self) -> io::Result<Vec<(String, Vec<u8>)>> {
         let mut addresses: Vec<PageAddress> = Vec::new();
         for page in self.in_transmission_order() {

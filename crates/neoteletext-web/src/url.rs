@@ -189,6 +189,28 @@ pub(crate) fn check_fragment(text: &[u8]) -> Result<(), UrlError> {
 
 impl Url {
     /// Parses an absolute address.
+    ///
+    /// # Errors
+    /// The first rule of REQ-WEB-016 the address breaks:
+    /// - [`UrlError::TooLong`] when the text, or its normalised form, is
+    ///   longer than [`MAX_URL_LENGTH`];
+    /// - [`UrlError::Backslash`] for a backslash anywhere;
+    /// - [`UrlError::BadCharacter`] for white space, a control character or
+    ///   a byte outside ASCII;
+    /// - [`UrlError::Scheme`] when the scheme is not `http`, `https`, `ws` or
+    ///   `wss`, or is not followed by `//`;
+    /// - [`UrlError::UserInfo`] when the authority holds a user name or
+    ///   password;
+    /// - [`UrlError::Host`] for an empty or malformed host name, a label
+    ///   longer than [`crate::consts::MAX_LABEL_LENGTH`], or a host longer
+    ///   than [`crate::consts::MAX_HOST_NAME_LENGTH`];
+    /// - [`UrlError::Ipv4`] for a host ending in a numeric label that is not
+    ///   strict dotted decimal;
+    /// - [`UrlError::Ipv6`] for a malformed bracketed address;
+    /// - [`UrlError::Port`] for a port that is empty, not decimal, written
+    ///   with a leading zero, zero, or above 65535;
+    /// - [`UrlError::Path`] for a character the path, query or fragment may
+    ///   not hold, or malformed percent-encoding.
     pub fn parse(text: &str) -> Result<Self, UrlError> {
         let bytes = text.as_bytes();
         check_characters(bytes)?;
@@ -276,6 +298,19 @@ impl Url {
 
     /// Checks a host on its own, as stored without brackets and in lower
     /// case: a DNS name, a dotted IPv4 address or an IPv6 address.
+    ///
+    /// # Errors
+    /// - [`UrlError::Host`] for a capital letter, or a host name that is
+    ///   empty, malformed, has a label longer than
+    ///   [`crate::consts::MAX_LABEL_LENGTH`] or is longer than
+    ///   [`crate::consts::MAX_HOST_NAME_LENGTH`];
+    /// - [`UrlError::TooLong`], [`UrlError::Backslash`] or
+    ///   [`UrlError::BadCharacter`] for text that breaks the character rules
+    ///   every address keeps to;
+    /// - [`UrlError::Ipv6`] for text holding a colon that is not a valid
+    ///   IPv6 address;
+    /// - [`UrlError::Ipv4`] for a host ending in a numeric label that is not
+    ///   strict dotted decimal.
     pub fn parse_host_only(host: &str) -> Result<Option<IpAddress>, UrlError> {
         let bytes = host.as_bytes();
         if bytes.iter().any(u8::is_ascii_uppercase) {
@@ -291,6 +326,12 @@ impl Url {
 
     /// Resolves `reference` against this address (RFC 3986 section 5.2.2)
     /// and parses the result again (REQ-WEB-016).
+    ///
+    /// # Errors
+    /// [`UrlError::TooLong`] when the reference, or the resolved address,
+    /// is longer than [`MAX_URL_LENGTH`]; otherwise any error of
+    /// [`Url::parse`] for the resolved address, which is checked by the same
+    /// rules as one written out whole.
     pub fn join(&self, reference: &str) -> Result<Self, UrlError> {
         let bytes = reference.as_bytes();
         check_characters(bytes)?;
@@ -352,6 +393,11 @@ impl Url {
     }
 
     /// The same address under another scheme.
+    ///
+    /// # Errors
+    /// [`UrlError::TooLong`] when the longer scheme name takes the address
+    /// past [`MAX_URL_LENGTH`]. The rest of the address was already checked,
+    /// so no other error of [`Url::parse`] arises.
     pub fn with_scheme(&self, scheme: Scheme) -> Result<Self, UrlError> {
         let mut buffer = [0u8; MAX_URL_LENGTH];
         let mut writer = Writer::new(&mut buffer);

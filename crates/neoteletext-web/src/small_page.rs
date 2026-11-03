@@ -162,6 +162,20 @@ fn structured_data(title: &str, canonical: &str) -> String {
     )
 }
 
+/// The Open Graph tags a link preview reads (<https://ogp.me/>, "Basic
+/// Metadata" and "Optional Metadata"): the page's title, its type, its
+/// address and the channel's name, each already escaped. No `og:image`,
+/// since a preview needs the image at an address of its own and REQ-1728
+/// item 4 keeps the picture inside the answer; no `og:description`, since
+/// the page's text is the hidden part the JSON-LD marks as not free
+/// (DEC-2427).
+fn link_preview(name: &str, title: &str, canonical: &str) -> String {
+    format!(
+        "<meta property=\"og:type\" content=\"website\">\n<meta property=\"og:title\" content=\"{title}\">\n\
+         <meta property=\"og:url\" content=\"{canonical}\">\n<meta property=\"og:site_name\" content=\"{name}\">\n"
+    )
+}
+
 /// The inline image of `png`, a page's picture (REQ-1728 item 4): inside the
 /// answer, so that no new address is added to the URL map.
 fn image(png: &[u8], width: usize, height: usize, title: &str) -> String {
@@ -184,7 +198,8 @@ pub fn public_page(name: &str, address: &str, page: &PublicPage<'_>) -> String {
     let (name, title, text, canonical) =
         (escaped(name), escaped(page.title), escaped(page.text), escaped(page.canonical));
     let head = format!(
-        "<link rel=\"canonical\" href=\"{canonical}\">\n<style>{STYLESHEET}</style>\n<script type=\"application/ld+json\">{}</script>\n",
+        "<link rel=\"canonical\" href=\"{canonical}\">\n{}<style>{STYLESHEET}</style>\n<script type=\"application/ld+json\">{}</script>\n",
+        link_preview(&name, &title, &canonical),
         structured_data(page.title, page.canonical)
     );
     let picture = page.picture.map_or_else(String::new, |(png, width, height)| image(png, width, height, &title));

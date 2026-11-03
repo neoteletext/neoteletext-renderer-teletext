@@ -52,7 +52,7 @@ const fn bits_in(bytes: usize) -> i32 {
 const _: () = assert!(8 * MAX_PACKET < i32::MAX as usize);
 
 /// Why a packet produced no frame.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DecodeError {
     /// The packet is outside the profile; nothing was decoded and the decoder is unchanged.
     Packet(PacketError),
@@ -238,6 +238,12 @@ impl Decoder {
     /// Decode `packet` into `pcm`. A packet outside the profile is refused before anything
     /// changes. A frame of a byte or less is one the encoder left out, and is concealed
     /// (RFC 6716 §3.2.1).
+    ///
+    /// # Errors
+    /// [`DecodeError::Packet`] when the packet is outside the profile; nothing was decoded and
+    /// the decoder is unchanged. [`DecodeError::Corrupt`] when the frame used more bits than it
+    /// holds or SILK could not decode it; the decoder has moved on and `pcm` holds what was
+    /// decoded.
     pub fn decode(&mut self, packet: &[u8], pcm: &mut [i16; FRAME_SAMPLES]) -> Result<(), DecodeError> {
         let packet = Packet::parse(packet).map_err(DecodeError::Packet)?;
         if packet.frame.len() <= 1 {
@@ -248,6 +254,11 @@ impl Decoder {
     }
 
     /// Decode a received frame of two bytes or more.
+    ///
+    /// Kept whole, past the source conventions' 80 lines a function: it follows one
+    /// routine of the reference decoder step for step, so that it can be read against
+    /// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+    /// comparison would be harder and the parts would have no meaning of their own.
     fn decode_frame(&mut self, packet: &Packet<'_>, pcm: &mut [i16; FRAME_SAMPLES]) -> Result<(), DecodeError> {
         let Self { layers, previous, side, final_range } = self;
         let mode = packet.mode;

@@ -617,3 +617,36 @@ fn only_a_prompt_shown_whole_keeps_its_key() {
     boxed.boxed_mode = true;
     assert_eq!(boxed.prompts_shown(), [false; 4], "only boxed areas show");
 }
+
+/// REQ-418 (REQ-SEC-005) and REQ-421 (REQ-SEC-008): on a newsflash or
+/// subtitle page, where everything outside a box is the picture, the
+/// receiver's status area still shows while a security indicator is on,
+/// and is the picture like the rest of row 0 when none is.
+#[cfg(feature = "render")]
+#[test]
+fn a_boxed_page_shows_the_status_area_while_an_indicator_is_on() {
+    use crate::consts::{
+        ALPHA_RED, C5_NEWSFLASH, C6_SUBTITLE, C7_SUPPRESS_HEADER, PALETTE_TRANSPARENT, RECEIVER_COLUMNS,
+    };
+    use crate::render::{background_index, foreground_index};
+    use crate::types::ControlBits;
+    let mut page = page_with_rows(&[(1, b"NEWS")]);
+    let marked =
+        DisplayOptions { status: [ALPHA_RED, b'1', b'0', b'0', b' ', b'!', b' '], ..DisplayOptions::default() };
+    for control in [C5_NEWSFLASH | C7_SUPPRESS_HEADER, C6_SUBTITLE | C7_SUPPRESS_HEADER, C5_NEWSFLASH] {
+        page.control = ControlBits(control);
+        let mut grid = Grid::EMPTY;
+        let indicator = DisplayOptions { security_indicator: true, ..marked };
+        build_grid(&mut grid, Some(&page), &MagazineData::default(), &Config::default(), &indicator);
+        assert!(grid.boxed_mode);
+        for cell in &grid.cells[0][..RECEIVER_COLUMNS] {
+            assert_ne!(background_index(cell, &grid), PALETTE_TRANSPARENT, "control {control:#06X}: {cell:?}");
+        }
+        let exclamation = &grid.cells[0][5];
+        assert_ne!(foreground_index(exclamation, &grid, false), PALETTE_TRANSPARENT, "the marker is drawn");
+        assert!(grid.cells[0][RECEIVER_COLUMNS..].iter().all(|cell| !cell.boxed), "the header stays picture");
+
+        build_grid(&mut grid, Some(&page), &MagazineData::default(), &Config::default(), &marked);
+        assert!(grid.cells[0].iter().all(|cell| foreground_index(cell, &grid, false) == PALETTE_TRANSPARENT));
+    }
+}

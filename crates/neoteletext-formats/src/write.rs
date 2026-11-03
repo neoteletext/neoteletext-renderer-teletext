@@ -76,6 +76,9 @@ impl<W: Write> T42Writer<W> {
 
     /// Writes a received packet if the filter passes it. Returns whether it
     /// was written.
+    ///
+    /// # Errors
+    /// The writer's error, when it fails.
     pub fn write_packet(&mut self, packet: &Packet) -> io::Result<bool> {
         if !self.passes(packet) {
             return Ok(false);

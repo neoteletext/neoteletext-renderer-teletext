@@ -85,3 +85,21 @@ fn hex(bytes: &[u8]) -> String {
         out
     })
 }
+
+// DEC-640 item 4: the comparison of secret-derived bytes gives the right
+// answer for equal strings, a difference in the first or the last byte, and
+// strings of different lengths.
+#[test]
+fn constant_time_equal_answers_rightly() {
+    let secret: [u8; 32] = core::array::from_fn(|index| 0x40 + index as u8);
+    assert!(constant_time_equal(&secret, &secret.clone()));
+    let mut first = secret;
+    first[0] ^= 1;
+    assert!(!constant_time_equal(&secret, &first));
+    let mut last = secret;
+    last[31] ^= 0x80;
+    assert!(!constant_time_equal(&secret, &last));
+    assert!(!constant_time_equal(&secret, &secret[..31]));
+    assert!(!constant_time_equal(&secret[..1], &secret));
+    assert!(constant_time_equal(&[], &[]));
+}

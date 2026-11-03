@@ -58,7 +58,8 @@ readonly NO_PANIC_ROOTS=(crates/neoteletext-core/src/lib.rs crates/neoteletext-f
     crates/neoteletext-input/src/lib.rs
     crates/neoteletext-transport/src/lib.rs crates/neoteletext-qrkeyboard/src/lib.rs
     crates/neoteletext-app/src/lib.rs crates/neoteletext-cli/src/lib.rs
-    crates/neoteletext-cli/src/main.rs)
+    crates/neoteletext-cli/src/main.rs crates/neoteletext-picture/src/lib.rs
+    crates/neoteletext-picture-cli/src/main.rs)
 
 check_no_panic_lists() {
     local first="" root list listed
@@ -221,14 +222,16 @@ linux_steps() {
         grep -E "^TOTAL" coverage.log'
 
     # REQ-TST-040: every target for a fixed time on each change, after
-    # replaying every input that has ever found a fault.
+    # replaying every input that has ever found a fault, with debug
+    # assertions and overflow checks (-a), since REQ-GEN-008 forbids an
+    # overflow and a release build hides one (DEC-2384).
     seconds="${NEOTELETEXT_FUZZ_SECONDS:-20}"
-    step "fuzzing on $linux_host, $seconds seconds per target (REQ-TST-040)"
+    step "fuzzing on $linux_host, $seconds seconds per target, with overflow checks (REQ-TST-040, DEC-2384)"
     ssh "$linux_host" "cd neoteletext-check && . ~/.cargo/env && . scripts/tools.sh && cd fuzz && \
         cargo +$FUZZ_NIGHTLY clippy --quiet -- -D warnings && \
         for target in \$(cargo +$FUZZ_NIGHTLY fuzz list); do \
             mkdir -p corpus/\$target regressions/\$target && \
-            cargo +$FUZZ_NIGHTLY fuzz run \$target corpus/\$target regressions/\$target -- \
+            cargo +$FUZZ_NIGHTLY fuzz run -a \$target corpus/\$target regressions/\$target -- \
                 -max_total_time=$seconds -timeout=10 -rss_limit_mb=2048 > fuzz.log 2>&1 \
                 || { tail -40 fuzz.log; exit 1; }; \
             echo \"\$target: \$(tail -1 fuzz.log)\"; \
@@ -255,13 +258,17 @@ full_steps() {
     # REQ-TST-022: the files of the corpus that can be fetched are, once, and
     # the tests that read only those run. The other corpus tests stay ignored:
     # no machine holds their recordings (TODO-2081).
-    step "the corpus tests whose recordings can be fetched (REQ-TST-012, REQ-TST-022, REQ-L25-010)"
+    step "the corpus tests whose recordings can be fetched, and the CLDR letter check (REQ-TST-012, REQ-TST-022, REQ-L25-010, REQ-82)"
     local corpus="${NEOTELETEXT_CORPUS:-$PWD/target/corpus}"
     NEOTELETEXT_CORPUS="$corpus" cargo xtask corpus
     NEOTELETEXT_CORPUS="$corpus" cargo test --quiet -p neoteletext-formats --test corpus -- \
         --ignored --exact national_option_order_matches_broadcast_languages
     NEOTELETEXT_CORPUS="$corpus" cargo test --quiet -p neoteletext-cli --test level25_corpus -- \
         --ignored --exact polish_letter_from_x26
+    # REQ-82, DEC-2411, DEC-2443: every letter Unicode CLDR gives each
+    # language is written by the page writer, or its refusal is listed.
+    NEOTELETEXT_CORPUS="$corpus" cargo test --quiet -p neoteletext-formats --features std,tti,write-text \
+        --test cldr -- --ignored --exact every_cldr_letter_is_written_or_its_refusal_listed
 
     step "release tests, including the exhaustive error-code tests"
     cargo test --workspace --all-features --release --quiet
@@ -277,6 +284,11 @@ full_steps() {
 
     step "cargo-deny: licences and advisories (REQ-GEN-017, REQ-SEC-014)"
     cargo deny check
+
+    # The fuzz targets are a workspace of their own (fuzz/Cargo.toml says why),
+    # with their own lockfile, which the main workspace's check never reads.
+    step "cargo-deny: the fuzz workspace's licences and advisories (REQ-GEN-017, REQ-SEC-014)"
+    cargo deny --config deny.toml --manifest-path fuzz/Cargo.toml check
 }
 
 if [[ "${1:-}" == full ]]; then check_full_tools; fi

@@ -1,0 +1,143 @@
+# The letters of Unicode CLDR 48.0.0 that the page writer cannot write
+# for a language (REQ-82, DEC-2411), checked by tests/cldr.rs: the
+# language's tag, the letter, and the record that explains it, separated
+# by tabs.
+ar	ً	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	ٌ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	ٍ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	َ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	ُ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	ِ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	ّ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	ْ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ar	ٰ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+bal	َ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+bal	ُ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+bal	ِ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+bal	ّ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+bal	ْ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+bal	ۆ	TODO-1988: a letter the set lacks, for a reader of the language to decide
+bal	ێ	TODO-1988: a letter the set lacks, for a reader of the language to decide
+ee	Ɔ̀	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	Ɔ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	Ɔ̃	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	Ɛ̀	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	Ɛ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	Ɛ̃	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	ɔ̀	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	ɔ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	ɔ̃	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	ɛ̀	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	ɛ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ee	ɛ̃	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+el	Ϊ́	DEC-2443 item 6: Greek capitals take no tonos; Unicode has no capital iota or upsilon with dialytika and tonos
+el	Ϋ́	DEC-2443 item 6: Greek capitals take no tonos; Unicode has no capital iota or upsilon with dialytika and tonos
+fa	ً	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+fa	ٌ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+fa	ٍ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+fa	ّ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+fa	ٔ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ja	ぁ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ぃ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ぅ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ぇ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ぉ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ゎ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ゐ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ゑ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ゝ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ゞ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ヮ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ヰ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ヱ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ヵ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ヶ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ヽ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ja	ヾ	DEC-2187: the kana sets leave out the small and obsolete kana and the iteration marks
+ka	Ა	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ბ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Გ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Დ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ე	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ვ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ზ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Თ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ი	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Კ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ლ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Მ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ნ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ო	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Პ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ჟ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Რ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ს	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ტ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Უ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ფ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ქ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ღ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ყ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Შ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ჩ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ც	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ძ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Წ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ჭ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ხ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ჯ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ka	Ჰ	DEC-2443 item 6: Georgian is written in one case; the set holds the Mkhedruli letters, not the Mtavruli capitals
+ln	Ɔ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	Ɔ̂	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	Ɔ̌	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	Ɛ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	Ɛ̂	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	Ɛ̌	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	ɔ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	ɔ̂	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	ɔ̌	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	ɛ́	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	ɛ̂	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+ln	ɛ̌	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	A̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	E̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	I̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	O̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	a̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	e̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	i̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	o̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	Ɔ̈	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	Ɔ̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	Ɛ̈	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	Ɛ̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	Ɛ̱̈	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	ɔ̈	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	ɔ̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	ɛ̈	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	ɛ̱	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+nus	ɛ̱̈	REQ-CHR-002 and TODO-1988: an X/26 mark falls only on a Latin base letter, never on a national option character such as ɔ or ɛ, and G2 has no macron below
+prs	ً	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+prs	ٌ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+prs	ٍ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+prs	ّ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+prs	ٔ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ً	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ٌ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ٍ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	َ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ُ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ِ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ّ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ْ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ٔ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	ٰ	DEC-603 and TODO-1988: the Arabic-script sets hold plain letters; vowel signs, shadda and hamza above are left out
+ps	گ	TODO-1988: a letter the set lacks, for a reader of the language to decide
+ro	Ș	DEC-2370: Romanian is written with the cedilla letters of Table 36
+ro	ș	DEC-2370: Romanian is written with the cedilla letters of Table 36
+ro	Ț	DEC-2370: Romanian is written with the cedilla letters of Table 36
+ro	ț	DEC-2370: Romanian is written with the cedilla letters of Table 36
+tzm	Gʷ	TODO-1988: the labialisation mark ʷ is in no set, for a reader of the language to decide
+tzm	Kʷ	TODO-1988: the labialisation mark ʷ is in no set, for a reader of the language to decide
+tzm	gʷ	TODO-1988: the labialisation mark ʷ is in no set, for a reader of the language to decide
+tzm	kʷ	TODO-1988: the labialisation mark ʷ is in no set, for a reader of the language to decide

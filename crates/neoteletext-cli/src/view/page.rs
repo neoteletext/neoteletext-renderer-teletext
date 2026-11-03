@@ -4,7 +4,7 @@
 use super::{Shown, ViewState};
 use neoteletext_app::extras;
 use neoteletext_app::session::Session;
-use neoteletext_core::acq::{Event, StoredPage};
+use neoteletext_core::acq::{Event, PageBuild, StoredPage};
 use neoteletext_core::fsm::PageState;
 use neoteletext_core::trace::TraceSink;
 use neoteletext_core::types::{PageAddress, SubCode};
@@ -72,6 +72,8 @@ impl ViewState {
         self.walk_trace.extend(entries);
         if let Composed::Built(report) = composed {
             self.unrecorded = report;
+            self.unrecorded_designation =
+                shown.page.map(|page| (PageBuild::of(page, shown.config.level), self.grid.designation_fallback));
         }
         if self.prompt.is_none()
             && let Some((_, marks)) = shown.extras.and_then(|extras| extras.row24.as_ref())

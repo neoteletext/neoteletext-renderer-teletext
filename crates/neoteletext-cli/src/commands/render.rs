@@ -1,6 +1,6 @@
 //! `neottx render` (REQ-RND-007): one page, or all, as image files.
 
-use super::font::read_table;
+use super::font::{parse_sha256, parse_table, read_table_file};
 use super::io_failure;
 use super::{ImageFormat, Selection, grid_of, page_file_name, parse_selection, sandbox_writable, scale_for, selected};
 use crate::args::RasterArgs;
@@ -22,14 +22,7 @@ pub fn render(
     image: ImageFormat,
 ) -> Result<(), Failure> {
     let selection = parse_selection(page)?;
-    let mut session = input::load_for(options, selection.page())?;
-    let frame = Frame::still(session.decoder().config(), raster_args.reveal);
-    let scale = scale_for(raster_args, None, (0, 0));
-    let table = raster_args.font.as_deref().map(read_table).transpose()?;
-    let loaded =
-        table.as_deref().map(LoadedFont::new).transpose().map_err(|error| (exit::INPUT, format!("{error:?}")))?;
-    let glyphs = GlyphSet::noto_teletext().with_fonts(loaded, [None; FONT_SET_COUNT]);
-    let pages = selected(&session, selection)?;
+    let expected = raster_args.font_sha256.as_deref().map(parse_sha256).transpose()?;
     let directory: PathBuf = if selection == Selection::All {
         std::fs::create_dir_all(output).map_err(|error| io_failure(output, error))?;
         output.to_path_buf()
@@ -39,7 +32,19 @@ pub fn render(
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
     };
-    sandbox_writable(Some(&directory), options.no_sandbox)?;
+    // The font file is read, within its bound, before the sandbox, and
+    // parsed after it with the input (REQ-SEC-017).
+    let font_file =
+        raster_args.font.as_deref().map(|path| read_table_file(path).map(|bytes| (path, bytes))).transpose()?;
+    let mut session =
+        input::load_sandboxed(options, selection.page(), || sandbox_writable(Some(&directory), options.no_sandbox))?;
+    let frame = Frame::still(session.decoder().config(), raster_args.reveal);
+    let scale = scale_for(raster_args, None, (0, 0));
+    let table = font_file.map(|(path, bytes)| parse_table(path, &bytes, expected.as_ref())).transpose()?;
+    let loaded =
+        table.as_deref().map(LoadedFont::new).transpose().map_err(|error| (exit::INPUT, format!("{error:?}")))?;
+    let glyphs = GlyphSet::noto_teletext().with_fonts(loaded, [None; FONT_SET_COUNT]);
+    let pages = selected(&session, selection)?;
     let extension = match image {
         ImageFormat::Png => "png",
         ImageFormat::Ppm => "ppm",

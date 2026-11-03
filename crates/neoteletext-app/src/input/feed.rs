@@ -19,18 +19,44 @@ fn after_prefix<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
     start.eq_ignore_ascii_case(prefix).then(|| text.get(prefix.len()..)).flatten()
 }
 
+/// Why an input cannot be opened as an address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OpeningError {
+    /// A link (`neottx:`, the core's `LINK_SCHEME`) that wraps no `http`
+    /// or `https` address (REQ-1672 item 2).
+    LinkWrapsNoWebAddress,
+    /// A channel's address that the map refuses (REQ-1693 item 4): the
+    /// address, which the message repeats.
+    NotAChannelAddress(String),
+}
+
+impl core::fmt::Display for OpeningError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::LinkWrapsNoWebAddress => write!(
+                formatter,
+                "{LINK_SCHEME} wraps an http or https address, as in {LINK_SCHEME}https://example.org/channel/"
+            ),
+            Self::NotAChannelAddress(address) => write!(formatter, "{address:?} is not an address of a channel"),
+        }
+    }
+}
+
+impl std::error::Error for OpeningError {}
+
 /// The address to open for `input`: a link's wrapped
 /// address, which then goes as a plain address does, and any other input
 /// as it is (REQ-1672, TODO-1679).
 ///
 /// # Errors
-/// A link that wraps no `http` or `https` address.
-pub fn link_address(input: &str) -> Result<&str, String> {
+/// [`OpeningError::LinkWrapsNoWebAddress`] for a link that wraps no `http`
+/// or `https` address.
+pub fn link_address(input: &str) -> Result<&str, OpeningError> {
     let Some(wrapped) = after_prefix(input, LINK_SCHEME) else { return Ok(input) };
     if LINK_TARGETS.iter().any(|scheme| after_prefix(wrapped, scheme).is_some()) {
         Ok(wrapped)
     } else {
-        Err(format!("{LINK_SCHEME} wraps an http or https address, as in {LINK_SCHEME}https://example.org/channel/"))
+        Err(OpeningError::LinkWrapsNoWebAddress)
     }
 }
 
@@ -49,17 +75,18 @@ pub struct Opening {
 /// map, normalised as it says; anything else that opens names no place.
 ///
 /// # Errors
-/// A channel's address the map refuses (REQ-1693 item 4), or a link that
-/// wraps no `http` or `https` address.
+/// [`OpeningError::NotAChannelAddress`] for a channel's address the map
+/// refuses (REQ-1693 item 4), [`OpeningError::LinkWrapsNoWebAddress`] for
+/// a link that wraps no `http` or `https` address.
 #[cfg(feature = "live")]
-pub fn opening(input: &str) -> Result<Opening, String> {
+pub fn opening(input: &str) -> Result<Opening, OpeningError> {
     use neoteletext_web::channel::is_channel_address;
     use neoteletext_web::map::{MapAddress, Place};
     let address = link_address(input)?;
     if !is_channel_address(address) {
         return Ok(Opening::default());
     }
-    let read = MapAddress::read_opened(address).map_err(|_| format!("{address:?} is not an address of a channel"))?;
+    let read = MapAddress::read_opened(address).map_err(|_| OpeningError::NotAChannelAddress(address.to_owned()))?;
     Ok(match read.place {
         Some(Place::Page { page, subcode, parameters }) => Opening {
             page: Some((page, subcode.unwrap_or(SubCode::ANY))),
@@ -76,7 +103,7 @@ pub fn opening(input: &str) -> Result<Opening, String> {
 /// # Errors
 /// Never.
 #[cfg(not(feature = "live"))]
-pub fn opening(_input: &str) -> Result<Opening, String> {
+pub fn opening(_input: &str) -> Result<Opening, OpeningError> {
     Ok(Opening::default())
 }
 
@@ -165,6 +192,11 @@ pub(super) fn load_live(options: &Options, wanted: Option<PageAddress>) -> Resul
 }
 
 /// Opens an input for a viewer: a file read whole, or a live feed.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when the file cannot be read, or the live feed's fetcher cannot be
+/// started.
 pub fn open_live(options: &Options) -> Result<(Session, Box<dyn Source>), Failure> {
     if is_live(&options.input) {
         let config = config(options)?;

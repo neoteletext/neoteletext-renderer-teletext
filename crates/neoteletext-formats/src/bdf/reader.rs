@@ -96,6 +96,11 @@ struct Header<'a> {
 /// (1,024 is always enough). On success the first [`Font::characters`]
 /// entries hold the glyphs, sorted by code point; on failure the table's
 /// contents are meaningless.
+///
+/// # Errors
+/// [`FontError`], with the line at fault (0 for the file as a whole) and
+/// its [`FontErrorKind`]: each kind is one rule of the profile of
+/// REQ-FNT-002 the file breaks.
 pub fn read<'a>(bytes: &'a [u8], glyphs: &mut [FontGlyph]) -> Result<Font<'a>, FontError> {
     if bytes.len() > FONT_MAX_FILE_BYTES {
         return Err(FontError { line: 0, kind: FontErrorKind::TooLarge });

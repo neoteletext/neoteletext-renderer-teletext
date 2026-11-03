@@ -294,6 +294,16 @@ fn header(line: &[u8]) -> Option<(u16, Validator)> {
 }
 
 /// Checks a part's size and its header, and returns its rows.
+///
+/// # Errors
+/// - [`SubPagesError::TooLarge`] when the part is longer than
+///   [`MAX_BYTES`].
+/// - [`SubPagesError::Header`] when the first line is not a count of
+///   sub-pages from 1 to [`MAX_ENTRIES`], a tab and a valid
+///   [`Validator`].
+///
+/// A faulty row is not an error of the part: each row's fault is given by
+/// the iterator of rows, and the row is ignored.
 pub fn read(bytes: &[u8]) -> Result<ListPart<'_>, SubPagesError> {
     if bytes.len() > MAX_BYTES {
         return Err(SubPagesError::TooLarge);
@@ -320,6 +330,10 @@ pub fn parse_subcode(field: &[u8]) -> Option<SubCode> {
 }
 
 /// Writes a sub-code as four capital hexadecimal digits.
+///
+/// # Errors
+/// [`Overflow`] when the four digits do not fit in the writer; the digits
+/// that fitted stay written.
 pub fn write_subcode(writer: &mut Writer<'_>, subcode: SubCode) -> Result<(), Overflow> {
     writer.hex(u32::from(subcode.value()), SUBCODE_HEX_DIGITS)
 }
@@ -375,6 +389,10 @@ impl<'a> Iterator for Entries<'a> {
 }
 
 /// Writes a part's header, ended by a line feed.
+///
+/// # Errors
+/// [`Overflow`] when the header does not fit in the writer; the part that
+/// fitted stays written.
 pub fn write_header(writer: &mut Writer<'_>, total: u16, version: &Validator) -> Result<(), Overflow> {
     writer.decimal(u64::from(total))?;
     writer.byte(TAB)?;
@@ -387,6 +405,10 @@ pub fn write_header(writer: &mut Writer<'_>, total: u16, version: &Validator) ->
 /// become one, the ends are trimmed and the rest cut to [`MAX_TITLE`]; a
 /// title left empty is not written. Nothing is written when the row does
 /// not fit.
+///
+/// # Errors
+/// [`Overflow`] when the row, with its line feed, does not fit in the
+/// writer; the writer is then left as it was.
 pub fn write_entry(
     writer: &mut Writer<'_>,
     subcode: SubCode,

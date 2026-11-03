@@ -73,6 +73,11 @@ pub struct Live {
     /// and the pages the sending in progress listed, with its generation.
     index: std::collections::BTreeMap<u16, (u16, String)>,
     index_sending: Option<(u16, std::collections::BTreeSet<u16>)>,
+    /// Whether each page, `0xMPP`, last came over plain HTTP (true) or
+    /// encrypted (false), so that the unencrypted marker follows the page
+    /// on screen (REQ-SEC-008). Pushed pages leave it as it is: the push
+    /// connection's own security is reported by the fetcher.
+    plain: HashMap<u16, bool>,
 }
 
 /// Bounds of a service's refresh interval, in seconds (concept decision 13).
@@ -110,6 +115,7 @@ impl Live {
             channel_lists: list::LiveLists::default(),
             index: std::collections::BTreeMap::new(),
             index_sending: None,
+            plain: HashMap::new(),
         }
     }
 
@@ -128,16 +134,17 @@ impl Live {
 
     /// Decodes page bytes into the session, keeping each page's extension
     /// data; with no `format`, the bytes say which it is (REQ-INP-005).
-    /// Returns the first page the bytes held.
+    /// Returns the first page the bytes held, and every page they held.
     fn feed_page(
         &mut self,
         session: &mut Session,
         format: Option<Format>,
         page: &PageData,
         now: Instant,
-    ) -> Option<PageAddress> {
+    ) -> (Option<PageAddress>, Vec<u16>) {
         let mut reader = Box::new(AutoReader::new(AutoConfig { format, encode_pages: true, ..AutoConfig::default() }));
         let mut packets: Vec<(Packet, PacketMeta)> = Vec::new();
+        let mut held = Vec::new();
         let mut first = None;
         let services = self.service_names.clone();
         let allowed = if page.origin == Origin::Page { Fill::Asked(&self.asked) } else { Fill::Any };
@@ -175,8 +182,12 @@ impl Live {
                 && let Ok(Decoded::Header(header)) = decode(packet)
             {
                 let page = header.page.map(|number| PageAddress { magazine: header.magazine, page: number });
+                let taken = page.filter(|page| allowed.allows(*page));
                 if let Some(state) = filling.get_mut(slot) {
-                    *state = page.is_some_and(|page| allowed.allows(page));
+                    *state = taken.is_some();
+                }
+                if let Some(page) = taken {
+                    held.push(page.mpp());
                 }
             }
             let magazine_wide = address.number >= PACKET_MAGAZINE_ENHANCEMENT;
@@ -186,7 +197,7 @@ impl Live {
         }
         // A fetched page is complete once its bytes are in.
         session.tick(Instant(now.0.saturating_add(neoteletext_core::consts::PAGE_COMPLETION_TIMEOUT_US * 2)));
-        first
+        (first, held)
     }
 
     /// A record of a live channel's index: its pages are shown at once;
@@ -227,11 +238,13 @@ impl Live {
     }
 
     fn receive(&mut self, session: &mut Session, format: Option<Format>, page: &PageData, now: Instant) {
-        if !page.secure && page.origin != Origin::Push {
-            self.notices.push(Notice::Unencrypted);
-        }
         self.offline_since = None;
-        let first = self.feed_page(session, format, page, now);
+        let (first, held) = self.feed_page(session, format, page, now);
+        if page.origin != Origin::Push {
+            for mpp in held {
+                self.plain.insert(mpp, !page.secure);
+            }
+        }
         if let Some(address) = first
             && page.origin == Origin::Page
         {
@@ -272,6 +285,7 @@ impl Source for Live {
                     session.restart();
                     self.extras.clear();
                     self.last_bytes.clear();
+                    self.plain.clear();
                     self.list = None;
                     self.channel_lists = list::LiveLists::default();
                     self.index.clear();
@@ -289,7 +303,7 @@ impl Source for Live {
                     // again: it is current, and not stale (REQ-WEB-009).
                     self.offline_since = None;
                     if let Some((format, page)) = self.last_bytes.get(&mpp).cloned() {
-                        self.feed_page(session, format, &page, now);
+                        let _ = self.feed_page(session, format, &page, now);
                     }
                 }
                 Frame::Notice(Notice::Offline(mpp)) => {
@@ -381,6 +395,10 @@ impl Source for Live {
 
     fn notices(&mut self) -> Vec<Notice> {
         std::mem::take(&mut self.notices)
+    }
+
+    fn came_unencrypted(&self, page: PageAddress) -> Option<bool> {
+        self.plain.get(&page.mpp()).copied()
     }
 
     fn extras(&self, page: PageAddress, subcode: SubCode) -> Option<&PageExtras> {

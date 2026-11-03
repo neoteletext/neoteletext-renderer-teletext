@@ -20,12 +20,6 @@ const CURRENT: u8 = b'K';
 const OFFLINE: u8 = b'O';
 const REQUEST: u8 = b'R';
 const FOLLOW: u8 = b'L';
-// b'Z' carried the glyph choice until decision E.72 removed it; the
-// browser's frames used b'k', b'V', b'Q', b'Y', b'X', b'J', b'v', b'q',
-// b'o', b'f', b'g', b'h', b'i', b'j' and b'l' until it left the repository;
-// and b'A', b'D', b'G', b'F' and b'C' carried form submissions, their
-// confirmation and their outcome until decision E.126 withdrew forms. They
-// are not reused.
 const REDIRECT: u8 = b'W';
 const PAGE_REDIRECT: u8 = b'w';
 const SERVICE_NAME: u8 = b'M';
@@ -44,9 +38,83 @@ const INDEX: u8 = b'c';
 const INDEX_COMPLETE: u8 = b'u';
 const LIVE_LIST: u8 = b't';
 const LIVE_LIST_COMPLETE: u8 = b'z';
-// Every letter but H is taken or retired.
+// Every letter but H is taken or retired (KINDS, RETIRED_KINDS).
 const LIVE_LIST_REFUSED: u8 = b'!';
 const LINKS: u8 = b'H';
+
+/// Every kind a frame may have. A kind written by [`write`] and missing here
+/// fails `every_frame_written_has_a_listed_kind`, so none is added unlisted.
+pub(super) const KINDS: [u8; 32] = [
+    PACKET,
+    TTI,
+    T42,
+    UNDECLARED,
+    INITIAL,
+    UNENCRYPTED,
+    MESSAGE,
+    SERVICE,
+    CURRENT,
+    OFFLINE,
+    REQUEST,
+    FOLLOW,
+    REDIRECT,
+    PAGE_REDIRECT,
+    SERVICE_NAME,
+    BUNDLE,
+    ALIASES,
+    REFRESH,
+    DENIED,
+    PUSH_STOPPED,
+    KEY,
+    INPUT,
+    REGION,
+    SUB_PAGES,
+    SUB_PAGES_MISSING,
+    SUB_PAGES_REQUEST,
+    INDEX,
+    INDEX_COMPLETE,
+    LIVE_LIST,
+    LIVE_LIST_COMPLETE,
+    LIVE_LIST_REFUSED,
+    LINKS,
+];
+
+/// Kinds once used and never to be used again, so that an old peer's frame
+/// is refused rather than read as something else (REQ-431: each side validates
+/// what it receives). `b'Z'` carried the glyph choice until decision E.72
+/// removed it; the browser's frames used `b'k'`, `b'V'`, `b'Q'`, `b'Y'`,
+/// `b'X'`, `b'J'`, `b'v'`, `b'q'`, `b'o'`, `b'f'`, `b'g'`, `b'h'`, `b'i'`,
+/// `b'j'` and `b'l'` until it left the repository (decision E.76); and `b'A'`,
+/// `b'D'`, `b'G'`, `b'F'` and `b'C'` carried form submissions, their
+/// confirmation and their outcome until decision E.126 withdrew forms.
+pub(super) const RETIRED_KINDS: [u8; 21] = *b"ZkVQYXJvqofghijlADGFC";
+
+/// Whether `kind` is in `list`.
+const fn contains(mut list: &[u8], kind: u8) -> bool {
+    while let [first, rest @ ..] = list {
+        if *first == kind {
+            return true;
+        }
+        list = rest;
+    }
+    false
+}
+
+/// Whether every kind is distinct from the others and from every retired kind.
+const fn kinds_are_distinct_and_unretired() -> bool {
+    let mut rest: &[u8] = &KINDS;
+    while let [kind, others @ ..] = rest {
+        if contains(others, *kind) || contains(&RETIRED_KINDS, *kind) {
+            return false;
+        }
+        rest = others;
+    }
+    true
+}
+
+// A kind given twice, or a retired kind given again, would be read as
+// another frame; the build itself refuses it (TODO-1135).
+const _: () = assert!(kinds_are_distinct_and_unretired(), "a frame kind is repeated or retired");
 /// The most strings one frame may carry.
 const MAX_STRINGS: usize = 256;
 
@@ -136,6 +204,9 @@ fn page_data(payload: &[u8]) -> io::Result<PageData> {
 }
 
 /// Writes one frame.
+///
+/// # Errors
+/// The writer's error, when it fails.
 pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
     match frame {
         Frame::Packet(bytes) => put(out, PACKET, bytes),
@@ -278,6 +349,11 @@ fn list_part(cursor: &mut Cursor<'_>) -> io::Result<ListPart> {
 }
 
 /// Reads one frame; `None` at the end of the stream.
+///
+/// # Errors
+/// The reader's error when it fails, and [`io::ErrorKind::Other`] for a
+/// frame longer than [`MAX_FRAME`](super::MAX_FRAME) or one whose contents
+/// are malformed: the other process is not trusted (REQ-SEC-018).
 pub fn read(input: &mut dyn Read) -> io::Result<Option<Frame>> {
     let mut head = [0u8; 5];
     match input.read_exact(&mut head) {
