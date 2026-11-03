@@ -50,6 +50,9 @@ const BUILDS: &[Build] = &[
     // The same with the compiled font's standard sets, as a port that
     // draws links it (REQ-FNT-001).
     Build { name: "level15-font", features: "level15 render font viewer", budget: None, float_allowed: false },
+    // The Level 1.5 build with the glyph line cache of REQ-392 (TODO-2068),
+    // a feature a port names, so the budgeted build above stays without it.
+    Build { name: "level15-cache", features: "level15 render viewer glyph-cache", budget: None, float_allowed: false },
     // The same at Level 3.5, with every capability (decision E.71).
     Build { name: "level35", features: "level15 capabilities render viewer", budget: None, float_allowed: false },
     // The same with only the modern-classic profile's capabilities

@@ -115,6 +115,23 @@ mod render {
     static RENDER: fn(&Grid, usize, &GlyphSet, RenderOptions, &mut IndexBuffer<'_>) = render;
 }
 
+/// The glyph line cache of REQ-392, filled by the port in memory it
+/// provides and handed to the renderer.
+#[cfg(feature = "glyph-cache")]
+mod glyph_cache {
+    use super::black_box;
+    use neoteletext_core::charset::CharSet;
+    use neoteletext_core::glyphs::{GlyphLineCache, GlyphSet};
+
+    fn fill(cache: &mut GlyphLineCache, glyphs: &GlyphSet<'_>, set: CharSet) {
+        cache.fill(glyphs, set);
+        let _ = black_box(glyphs.with_line_cache(cache));
+    }
+
+    #[used]
+    static FILL: fn(&mut GlyphLineCache, &GlyphSet<'_>, CharSet) = fill;
+}
+
 /// Noto Teletext, the one compiled font, as a port that draws links it. The
 /// glyph set's address is passed on so that the tables stay in the image.
 #[cfg(feature = "font")]
