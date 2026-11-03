@@ -248,6 +248,133 @@ fn the_test_server_points_from_the_web_to_its_channel() {
     assert!(text.contains("Location: /regional/") && text.contains("Vary: Accept"), "{text}");
 }
 
+// Verifies REQ-502 (REQ-WEB-013), a behaviour only a real socket shows: a
+// server that closes each kept-alive connection after its answer without
+// saying so is met with a new connection for the next request, and the page
+// arrives.
+#[test]
+fn a_server_that_closes_its_kept_alive_connection_is_reconnected_to() {
+    let server = server();
+    let url = format!("http://127.0.0.1:{}/closing/service.json", server.port);
+    let (ok, text, errors) = neottx(&["text", &url, "200", "--allow-local", "127.0.0.1", "--duration", "15"]);
+    assert!(ok, "neottx failed: {errors}");
+    assert!(text.contains("Sunny, 21 degrees."), "{text}");
+    let asked = get_accepting(server.port, "/requests", "text/plain");
+    let asked = String::from_utf8_lossy(&asked).into_owned();
+    let asked: Vec<&str> = asked.rsplit("\r\n\r\n").next().unwrap_or_default().lines().collect();
+    assert_eq!(asked, ["/closing/service.json", "/closing/pages/200.tti"]);
+}
+
+/// The status line, the head's fields and the body of a GET of `path` from
+/// the test server.
+fn get(port: u16, path: &str) -> (String, Vec<(String, String)>, Vec<u8>) {
+    let answer = get_accepting(port, path, "*/*");
+    let split = answer.windows(4).position(|window| window == b"\r\n\r\n").expect("a head") + 4;
+    let (head, body) = answer.split_at(split);
+    let head = String::from_utf8_lossy(head).into_owned();
+    let mut lines = head.lines();
+    let status = lines.next().unwrap_or_default().to_owned();
+    let fields = lines
+        .filter_map(|line| line.split_once(": "))
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.to_owned()))
+        .collect();
+    (status, fields, body.to_vec())
+}
+
+fn field<'a>(fields: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    fields.iter().find(|(field, _)| field == name).map(|(_, value)| value.as_str())
+}
+
+// Verifies REQ-501 (REQ-WEB-012) and REQ-502 (REQ-WEB-013): the test server
+// publishes a channel as a folder, as the guidance tells a publisher to:
+// each file under its fixed name with its media type and a validator; a
+// contents file and a page's list of sub-pages in parts that the engine's
+// readers take without a fault, the list's validators those of the files it
+// names; 404 for a file the channel does not have; and a moved page's old
+// name redirected inside the folder.
+#[test]
+fn the_test_server_publishes_a_channel_as_a_folder() {
+    use neoteletext_web::subpages::{self, Validator};
+    let server = server();
+    let t42 = "application/x-teletext-t42";
+    let files = [
+        ("channel.ttx", "application/json"),
+        ("index.t42", t42),
+        ("contents.txt", "text/plain"),
+        ("100.t42", t42),
+        ("200.t42", t42),
+        ("400.t42", t42),
+        ("400/0.sub", "text/plain"),
+        ("400/0001.t42", t42),
+        ("400/0002.t42", t42),
+        ("400/0003.t42", t42),
+    ];
+    for (name, media) in files {
+        let (status, fields, _) = get(server.port, &format!("/channel/{name}"));
+        assert!(status.contains(" 200 "), "{name}: {status}");
+        assert_eq!(field(&fields, "content-type"), Some(media), "{name}");
+        assert!(field(&fields, "etag").is_some(), "{name} has no validator");
+    }
+    let (_, _, contents) = get(server.port, "/channel/contents.txt");
+    let entries: Vec<_> = neoteletext_web::contents::read(&contents).expect("a contents file").collect();
+    assert!(entries.iter().all(Result::is_ok), "{entries:?}");
+    let pages = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Ok(neoteletext_web::contents::Entry::Page { page, .. }) => Some(page.mpp()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(pages, [0x100, 0x200, 0x300, 0x400]);
+    let (_, _, list) = get(server.port, "/channel/400/0.sub");
+    let part = subpages::read(&list).expect("a part of a list");
+    let sub_pages: Vec<Vec<u8>> =
+        (1..=3).map(|subcode| get(server.port, &format!("/channel/400/{subcode:04X}.t42")).2).collect();
+    assert_eq!(part.total, 3);
+    assert_eq!(part.version, Validator::of_page(sub_pages.iter().map(Vec::as_slice)));
+    let rows: Vec<_> = part.entries.map(|row| row.expect("a good row")).collect();
+    let listed: Vec<_> = rows.iter().map(|row| (row.subcode.value(), row.validator)).collect();
+    let expected: Vec<_> = (1..=3_u16).zip(sub_pages.iter().map(|file| Validator::of(file))).collect();
+    assert_eq!(listed, expected);
+    for missing in ["500.t42", "400/0009.t42", "400/1.sub", "nothing"] {
+        let (status, _, _) = get(server.port, &format!("/channel/{missing}"));
+        assert!(status.contains(" 404 "), "{missing}: {status}");
+    }
+    let (status, fields, _) = get(server.port, "/channel/300.t42");
+    assert!(status.contains(" 302 "), "{status}");
+    assert_eq!(field(&fields, "location"), Some("/channel/moved/300.t42"));
+}
+
+// Verifies REQ-502 (REQ-WEB-013) and REQ-501: neottx opens the test server's
+// folder channel: a page from its bundle, a page whose old name redirects
+// inside the folder, a missing page answered 404, and a sub-page found
+// through the page's list and fetched from its own file.
+#[test]
+fn neottx_reads_the_test_servers_folder_channel() {
+    let server = server();
+    let url = format!("http://127.0.0.1:{}/channel/", server.port);
+    let text = |page: &str| neottx(&["text", &url, page, "--allow-local", "127.0.0.1", "--duration", "15"]);
+    let (ok, page, errors) = text("100");
+    assert!(ok, "{errors}");
+    assert!(page.contains("NEOTELETEXT TEST SERVICE"), "{page}");
+    let (ok, page, errors) = text("300");
+    assert!(ok, "{errors}");
+    assert!(page.contains("TEST NEWS"), "the moved page: {page}");
+    let (ok, _, errors) = text("500");
+    assert!(!ok);
+    assert!(errors.contains("page 500 not found"), "{errors}");
+    let (_, said, errors) =
+        neottx(&["probe", &url, "--allow-local", "127.0.0.1", "--no-sandbox", "--select", "400/0002"]);
+    assert!(said.contains("selection   400/0002: a page in"), "{said}{errors}");
+    let asked = get_accepting(server.port, "/requests", "text/plain");
+    let asked = String::from_utf8_lossy(&asked).into_owned();
+    let asked: Vec<&str> = asked.rsplit("\r\n\r\n").next().unwrap_or_default().lines().collect();
+    for path in ["/channel/channel.ttx", "/channel/index.t42", "/channel/moved/300.t42", "/channel/400/0.sub"] {
+        assert!(asked.contains(&path), "{path} was not asked for: {asked:?}");
+    }
+    assert!(asked.contains(&"/channel/400/0002.t42"), "the sub-page's own file: {asked:?}");
+}
+
 #[cfg(feature = "view")]
 #[test]
 fn viewer_shows_pages_and_follows_links() {
