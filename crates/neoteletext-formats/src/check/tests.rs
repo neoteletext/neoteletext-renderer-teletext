@@ -123,3 +123,18 @@ fn font_lines_are_withdrawn_commands() {
         assert!(check(page.as_bytes()).contains(&(Severity::Error, Problem::WithdrawnCommand, 2)), "{page}");
     }
 }
+
+/// REQ-CLI-006: an `LK` or `LT` target naming a service the descriptor does
+/// not list is an error, as an `LN` target is; one it lists is not.
+#[test]
+fn number_and_text_link_targets_are_resolved_against_the_descriptor() {
+    let services: &[&[u8]] = &[b"news"];
+    let options = CheckOptions { services: Some(services) };
+    let page = b"PN,10000\nOL,4,Sport 400 News 100\nLK,400,sport:100\nLT,4,0,5,sport:200\nLK,100,news:100\n";
+    let unknown: Vec<u32> = findings(page, &options)
+        .into_iter()
+        .filter(|(severity, problem, _)| (*severity, *problem) == (Severity::Error, Problem::UnknownService))
+        .map(|(_, _, line)| line)
+        .collect();
+    assert_eq!(unknown, [3, 4]);
+}

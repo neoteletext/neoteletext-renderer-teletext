@@ -143,6 +143,18 @@ fn check_links(page: &PageFile, options: &CheckOptions<'_>, report: &mut dyn FnM
             report(Severity::Warning, Problem::Warning(Warning::PageNumberNotShown), link.line);
         }
     }
+    // An `LK` or `LT` target is a link like an `LN` one, so a service it
+    // names must be in the descriptor too (REQ-CLI-006).
+    let destinations = page.number_links.as_slice().iter().map(|link| (&link.destination, link.line));
+    let destinations = destinations.chain(page.text_links.as_slice().iter().map(|link| (&link.destination, link.line)));
+    if let Some(services) = options.services {
+        for (destination, line) in destinations {
+            let named = destination.service.as_bytes();
+            if !named.is_empty() && !services.iter().any(|service| service.eq_ignore_ascii_case(named)) {
+                report(Severity::Error, Problem::UnknownService, line);
+            }
+        }
+    }
     // A page that links a number it does not show makes typing that
     // number mean something the viewer cannot see
     // (the web-native concept section 5).
