@@ -250,3 +250,24 @@ path = "fuzz_targets/input_session.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "channel_records"
+path = "fuzz_targets/channel_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "subpages_record"
+path = "fuzz_targets/subpages_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "push_reader"
+path = "fuzz_targets/push_reader.rs"
+test = false
+doc = false
+bench = false
