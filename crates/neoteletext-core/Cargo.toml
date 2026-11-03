@@ -141,6 +141,11 @@ name = "flash_cost"
 required-features = ["level25", "render"]
 
 [[test]]
+name = "reordering"
+# The orders of REQ-FSM-008 at Levels 1.5, 2.5 and 3.5, objects among them.
+required-features = ["level15", "level25", "objects"]
+
+[[test]]
 name = "reporting"
 # Its pages invoke objects, which are not default (decision E.105).
 required-features = ["level15", "level25", "viewer", "objects"]
