@@ -195,8 +195,8 @@ const JOINING_TYPES: [(char, JoiningType); 95] = [
 
 /// The code point drawn for each joined form: an Arabic Presentation
 /// Form, or the core's own in Supplementary Private Use Area-A from
-/// U+F0000 where Unicode has none (REQ-CHR-015). Sorted by letter, then
-/// form.
+/// U+F0000 where Unicode has none (REQ-CHR-015), allocated append-only
+/// (REQ-2166). Sorted by letter, then form.
 pub(super) const JOINED_FORMS: [(char, JoinForm, char); 211] = [
     ('\u{0622}', JoinForm::Final, '\u{FE82}'),
     ('\u{0623}', JoinForm::Final, '\u{FE84}'),

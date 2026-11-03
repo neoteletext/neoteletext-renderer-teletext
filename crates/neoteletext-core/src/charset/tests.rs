@@ -368,3 +368,31 @@ fn no_private_use_allocation_lies_in_the_retired_range() {
         }
     }
 }
+
+/// REQ-2166 item 4, REQ-84: no private-use code point leaves the core as
+/// text. Every code of every set fonts draw, in every joined form and with
+/// every diacritical mark, gives `to_unicode` a base and a mark outside
+/// Supplementary Private Use Area-A, where the core's joined forms are.
+#[cfg(all(feature = "extended-sets", feature = "render"))]
+#[test]
+fn to_unicode_never_gives_a_private_use_code_point() {
+    use crate::consts::DIACRITIC_HOOK_ABOVE;
+    const PRIVATE_USE: core::ops::RangeInclusive<char> = '\u{F0000}'..='\u{FFFFD}';
+    let forms = [JoinForm::Isolated, JoinForm::Final, JoinForm::Initial, JoinForm::Medial];
+    assert!(joined_forms().iter().any(|&(_, _, point)| PRIVATE_USE.contains(&point)), "some form is private-use");
+    for &(name, set) in &crate::glyphs::conformance::FONT_SETS {
+        for code in 0x20u8..=0x7F {
+            for form in forms {
+                for diacritic in 0..=DIACRITIC_HOOK_ABOVE {
+                    let character = CharRef { set, code, diacritic, form };
+                    let text = to_unicode(character);
+                    assert!(
+                        !PRIVATE_USE.contains(&text.base)
+                            && !text.combining.is_some_and(|mark| PRIVATE_USE.contains(&mark)),
+                        "{name} {code:#04x} {form:?} mark {diacritic}: {text:?}"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -8,7 +8,8 @@ the eight code tables, the joining type of every letter and the code point
 drawn for each joined form (decision E.79, REQ-CHR-013 and REQ-CHR-015,
 rdm DEC-603, REQ-82 and REQ-84).
 
-    uv run scripts/arabic-sets.py
+    uv run scripts/arabic-sets.py            # write the tables
+    uv run scripts/arabic-sets.py --check    # change nothing; fail if they differ
 
 Each table: Table 44's punctuation in columns 2 and 3, with guillemets at
 2/6 and 2/7 in place of its presentation-form fragments and no mirroring;
@@ -18,15 +19,27 @@ the language's digits at 3/0 to 3/9; the letters in alphabet order from
 Joining types come from Unicode's ArabicShaping.txt, downloaded once to a
 cache outside the repository and checked against its SHA-256. A joined form
 is drawn from its Arabic Presentation Form where Unicode has one, otherwise
-from a private-use code point allocated in order from U+F0000.
+from a private-use code point from U+F0000 (REQ-2166).
+
+The private-use allocation is append-only (REQ-2166 item 2). The committed
+`JOINED_FORMS` table is the record of it: every private-use code point it
+gives keeps its meaning, a new form takes the next code point after the
+highest ever given, and a form no letter uses any more keeps its row, so its
+code point is never given again. A fresh run therefore reproduces the
+committed allocation as a prefix of its own.
 
 The script replaces the text between the two marker lines of `TARGET` (the
 `BEGIN` and `END` lines below, around the generated tables) and nothing
-else. Run `cargo xtask glyphs` afterwards to rewrite `forms.txt` and
-`required.txt`, then `third_party/noto/convert.py` to redraw the fonts.
+else. With `--check` it writes nothing, and exits non-zero naming the first
+line that differs when the committed text is not what it would write
+(REQ-2164). It is step 1 of the pipeline that makes Noto Teletext; the steps
+and their order are written once, in `third_party/noto/PROVENANCE.md`, "How
+the fonts are made" (REQ-2163).
 """
 
+import argparse
 import hashlib
+import re
 import sys
 import unicodedata
 import urllib.request
@@ -62,6 +75,9 @@ LAM_ALEF_FINAL = "ﻼ"
 TATWEEL = "ـ"
 BLOCK = "■"
 PRIVATE_FORMS_START = 0xF0000
+# REQ-2166 item 3: the Arabic forms' range ends here; U+F0100 to U+F017F are
+# retired (DEC-2241) and nothing is allocated in them.
+PRIVATE_FORMS_END = 0xF00FF
 CODES = 96
 LETTER_CODES = 63  # 4/0 to 7/E
 FORMS = ["final", "initial", "medial"]
@@ -72,8 +88,11 @@ TYPE_NAMES = {"D": "Dual", "R": "Right", "U": "None", "C": "Causing"}
 def shaping_text():
     if not CACHE.exists():
         CACHE.parent.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(SHAPING_URL) as response:
-            CACHE.write_bytes(response.read())
+        try:
+            with urllib.request.urlopen(SHAPING_URL) as response:
+                CACHE.write_bytes(response.read())
+        except OSError as error:
+            sys.exit(f"{CACHE} is not cached and {SHAPING_URL} could not be fetched ({error}): it is needed")
     data = CACHE.read_bytes()
     if hashlib.sha256(data).hexdigest() != SHAPING_SHA256:
         sys.exit(f"{CACHE}: SHA-256 differs from {SHAPING_SHA256}")
@@ -103,6 +122,42 @@ def presentation_forms():
     return forms
 
 
+# One row of the committed `JOINED_FORMS` table, as `generated` writes it.
+JOINED_FORM_ROW = re.compile(r"\('\\u\{([0-9A-F]+)\}', JoinForm::(\w+), '\\u\{([0-9A-F]+)\}'\),")
+
+
+def committed_allocation(text):
+    """The private-use code point each joined form has in the committed
+    tables, by (letter, form): the record the allocation only appends to."""
+    allocation = {}
+    for match in JOINED_FORM_ROW.finditer(text):
+        letter, form, point = chr(int(match[1], 16)), match[2].lower(), int(match[3], 16)
+        if PRIVATE_FORMS_START <= point <= PRIVATE_FORMS_END:
+            allocation[(letter, form)] = chr(point)
+    return allocation
+
+
+def allocate(wanted, presentation, committed):
+    """The code point drawn for each (letter, form) of `wanted`, and of every
+    form `committed` gives a private-use code point, so that none is reused.
+    A form keeps its committed code point; otherwise it takes its
+    presentation form, or the next private-use code point after the highest
+    ever given, in (letter, form) order (REQ-2166)."""
+    points = dict(committed)
+    next_point = max((ord(point) for point in committed.values()), default=PRIVATE_FORMS_START - 1) + 1
+    for key in sorted(wanted):
+        if key in points:
+            continue
+        if key in presentation:
+            points[key] = presentation[key]
+            continue
+        if next_point > PRIVATE_FORMS_END:
+            sys.exit(f"the joined forms' private-use range ends at U+{PRIVATE_FORMS_END:X} (REQ-2166 item 3)")
+        points[key] = chr(next_point)
+        next_point += 1
+    return points
+
+
 def code_table(letters, digits, stop):
     cells = [" ", "!", '"', "#", "$", "%", "«", "»", "(", ")", "*", "+", "،", "-", stop, "/"]
     cells += [*digits, ":", "؛", "<", "=", ">", "؟"]
@@ -118,7 +173,7 @@ def literal(character):
     return f"'\\u{{{ord(character):04X}}}'"
 
 
-def generated():
+def generated(committed):
     shaping = joining_types()
     forms = presentation_forms()
     out = []
@@ -138,15 +193,10 @@ def generated():
             out.append("    " + ", ".join(literal(c) for c in cells[row * 16 : (row + 1) * 16]) + ", //")
         out.append("];")
         out.append("")
-    private = PRIVATE_FORMS_START
-    form_rows = []
-    for letter in sorted(types):
-        for form in WANTED_FORMS[types[letter]]:
-            point = forms.get((letter, form))
-            if point is None:
-                point = chr(private)
-                private += 1
-            form_rows.append((letter, form, point))
+    wanted = [(letter, form) for letter in types for form in WANTED_FORMS[types[letter]]]
+    points = allocate(wanted, forms, committed)
+    form_rows = [(letter, form, point) for (letter, form), point in points.items()]
+    private = sum(1 for point in points.values() if PRIVATE_FORMS_START <= ord(point) <= PRIVATE_FORMS_END)
     out.append("/// Each joining letter of group 1001 and its joining type (Unicode")
     out.append("/// `ArabicShaping.txt`, 16.0), sorted by letter for binary search.")
     out.append(f"const JOINING_TYPES: [(char, JoiningType); {len(types)}] = [")
@@ -156,23 +206,45 @@ def generated():
     out.append("")
     out.append("/// The code point drawn for each joined form: an Arabic Presentation")
     out.append("/// Form, or the core's own in Supplementary Private Use Area-A from")
-    out.append("/// U+F0000 where Unicode has none (REQ-CHR-015). Sorted by letter, then")
-    out.append("/// form.")
+    out.append("/// U+F0000 where Unicode has none (REQ-CHR-015), allocated append-only")
+    out.append("/// (REQ-2166). Sorted by letter, then form.")
     out.append(f"pub(super) const JOINED_FORMS: [(char, JoinForm, char); {len(form_rows)}] = [")
     for letter, form, point in sorted(form_rows, key=lambda row: (row[0], FORMS.index(row[1]))):
         out.append(f"    ({literal(letter)}, JoinForm::{form.capitalize()}, {literal(point)}),")
     out.append("];")
-    print(f"{len(types)} joining letters, {len(form_rows)} forms, {private - PRIVATE_FORMS_START} private", file=sys.stderr)
+    print(f"{len(types)} joining letters, {len(form_rows)} forms, {private} private", file=sys.stderr)
     return "\n".join(out) + "\n"
 
 
-def main():
-    text = TARGET.read_text()
+def first_difference(old, new):
+    """The first line, numbered from 1 within the generated text, where the
+    committed and the generated text differ, with both versions."""
+    old_lines, new_lines = old.splitlines(), new.splitlines()
+    for number, (was, wanted) in enumerate(zip(old_lines, new_lines), start=1):
+        if was != wanted:
+            return number, was, wanted
+    number = min(len(old_lines), len(new_lines)) + 1
+    return number, "\n".join(old_lines[number - 1 : number]), "\n".join(new_lines[number - 1 : number])
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Write the Arabic-script tables of group 1001.")
+    parser.add_argument("--check", action="store_true", help="write nothing; fail if the tables differ")
+    parser.add_argument("--target", type=Path, default=TARGET, help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    text = args.target.read_text()
     if text.count(BEGIN) != 1 or text.count(END) != 1:
-        sys.exit(f"{TARGET}: expected one each of the marker lines")
+        sys.exit(f"{args.target}: expected one each of the marker lines")
     head, rest = text.split(BEGIN)
-    _, tail = rest.split(END)
-    TARGET.write_text(head + BEGIN + generated() + END + tail)
+    committed, tail = rest.split(END)
+    fresh = generated(committed_allocation(committed))
+    if args.check:
+        if fresh != committed:
+            number, was, wanted = first_difference(committed, fresh)
+            sys.exit(f"{args.target}: generated line {number} differs from scripts/arabic-sets.py's\n- {was}\n+ {wanted}")
+        print(f"{args.target}: the tables are what scripts/arabic-sets.py writes", file=sys.stderr)
+        return
+    args.target.write_text(head + BEGIN + fresh + END + tail)
 
 
 if __name__ == "__main__":
