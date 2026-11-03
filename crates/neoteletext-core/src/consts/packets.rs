@@ -9,6 +9,9 @@ pub const PACKET_HEADER: u8 = 0;
 pub const PACKET_FIRST_ROW: u8 = 1;
 /// Row 24, used for Fastext prompts (Annex H).
 pub const PACKET_ROW_24: u8 = 24;
+/// The last row of a page's own text: rows 1 to 23 lie between the header
+/// and row 24, which Annex H gives the Fastext prompts.
+pub const PACKET_LAST_TEXT_ROW: u8 = PACKET_ROW_24 - 1;
 /// Packet X/25: key-word search labels, stored but not displayed (Part G).
 pub const PACKET_ROW_25: u8 = 25;
 /// Page enhancement data packet X/26 (clause 9.4.1).

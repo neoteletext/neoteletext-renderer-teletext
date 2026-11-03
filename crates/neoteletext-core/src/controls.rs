@@ -19,7 +19,8 @@
 
 use crate::acq::StoredPage;
 use crate::consts::{
-    ADJACENT_CLUT_FLIP, COLUMNS, CONTROL_JOINED, CONTROL_WIDTH_MASK, LOCAL_TRIPLETS, MODE_CONTROL, ROW_ADDRESS_LAST,
+    ADJACENT_CLUT_FLIP, COLUMNS, CONTROL_JOINED, CONTROL_WIDTH_MASK, LOCAL_TRIPLETS, MODE_CONTROL, PACKET_FIRST_ROW,
+    PACKET_LAST_TEXT_ROW, ROW_ADDRESS_LAST,
 };
 use crate::level1::Grid;
 use crate::objects::{Body, Fetch, row_of};
@@ -33,9 +34,9 @@ use crate::types::FixedVec;
 pub const MAX_CONTROLS: usize = 32;
 /// The first row a control may lie on: row 0 is the header, as a page's
 /// `LT` links begin at row 1 (TTI Link Extension section E.1.2).
-pub const FIRST_CONTROL_ROW: u8 = 1;
+pub const FIRST_CONTROL_ROW: u8 = PACKET_FIRST_ROW;
 /// The last: row 24 is the Fastext row, whose prompts the receiver draws.
-pub const LAST_CONTROL_ROW: u8 = 23;
+pub const LAST_CONTROL_ROW: u8 = PACKET_LAST_TEXT_ROW;
 
 /// One control: a rectangle of cells, as wide as its triplets say and as
 /// tall as the rows they join.

@@ -56,11 +56,11 @@ pub use sets::SETS;
 
 /// The first display row the writer fills; row 0 is the header.
 #[cfg(all(feature = "std", feature = "tti"))]
-const FIRST_ROW: u8 = 1;
+const FIRST_ROW: u8 = neoteletext_core::consts::PACKET_FIRST_ROW;
 /// The last display row the writer fills: row 24 is left for Fastext
 /// prompts (clause 9.3.1).
 #[cfg(all(feature = "std", feature = "tti"))]
-const LAST_ROW: u8 = 23;
+const LAST_ROW: u8 = neoteletext_core::consts::PACKET_LAST_TEXT_ROW;
 
 /// What the page's sets can write.
 struct Sets {

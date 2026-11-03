@@ -5,16 +5,14 @@
 use std::vec::Vec;
 
 use neoteletext_core::consts::{
-    CONCEAL, DOUBLE_HEIGHT, END_BOX, FLASH, MODE_DRCS_CHARACTER, MODE_TERMINATION, MOSAIC_WHITE, ROW_ADDRESS_LAST,
-    ROW_ADDRESS_RESERVED_DEFAULT, START_BOX,
+    CONCEAL, DOUBLE_HEIGHT, DRCS_SOURCE_NORMAL, END_BOX, FLASH, MODE_DRCS_CHARACTER, MODE_ROW_DRCS, MODE_TERMINATION,
+    MOSAIC_WHITE, ROW_ADDRESS_LAST, ROW_ADDRESS_RESERVED_DEFAULT, START_BOX,
 };
 use neoteletext_core::packet::{ColourData, DisplayAttributes, ObjectKind, Triplet, TripletFunction};
 
 use crate::author::{DisplayPage, FlashMode, FlashRate, FontStyle, Result, RowScope, colour, row_address};
 
-use super::{
-    BLUE, BOTH, DRCS_INVALID_CHARACTER, DRCS_MODE, DRCS_MODE_DATA, DRCS_NORMAL, GERMAN, GREEN, RED, page, text_body,
-};
+use super::{BLUE, BOTH, DRCS_INVALID_CHARACTER, DRCS_MODE_DATA, GERMAN, GREEN, RED, page, text_body};
 
 /// 109: double height, width and size, underline, invert, conceal and
 /// boxing as Display Attributes (Table 29, mode 01100; Annex C.3).
@@ -150,8 +148,8 @@ pub(super) fn every_mode() -> Result<DisplayPage> {
     local.g3(11, 0x41).attributes(12, DisplayAttributes { underline: true, ..DisplayAttributes::default() });
     // DRCS Mode and DRCS Character Invocation, sent as a service would
     // and not acted on (decision E.95): the second moves the column only.
-    local.raw(Triplet { address: ROW_ADDRESS_RESERVED_DEFAULT, mode: DRCS_MODE, data: DRCS_MODE_DATA });
-    local.raw(Triplet { address: 13, mode: MODE_DRCS_CHARACTER, data: DRCS_NORMAL });
+    local.raw(Triplet { address: ROW_ADDRESS_RESERVED_DEFAULT, mode: MODE_ROW_DRCS, data: DRCS_MODE_DATA });
+    local.raw(Triplet { address: 13, mode: MODE_DRCS_CHARACTER, data: DRCS_SOURCE_NORMAL });
     // Font Style, bold, sent as a service would and not acted on (decision
     // E.96): it moves the column only.
     local.font_style(14, FontStyle { bold: true, ..FontStyle::default() }, 0)?;
@@ -164,7 +162,7 @@ pub(super) fn every_mode() -> Result<DisplayPage> {
     local.position(3, 0)?;
     local.function(TripletFunction::ForegroundColour { column: 1, colour: ColourData { index: GREEN, high: 0b01 } });
     local.function(TripletFunction::AdditionalFlash { column: 2, mode: 1, rate: 0b111, reserved: 0b11 });
-    local.raw(Triplet { address: 3, mode: MODE_DRCS_CHARACTER, data: DRCS_NORMAL | DRCS_INVALID_CHARACTER });
+    local.raw(Triplet { address: 3, mode: MODE_DRCS_CHARACTER, data: DRCS_SOURCE_NORMAL | DRCS_INVALID_CHARACTER });
     local.position_address(row_address(4)?, 45);
     // Reserved row modes and Programme Delivery Control, which do not move
     // the Active Position (decision E.46).

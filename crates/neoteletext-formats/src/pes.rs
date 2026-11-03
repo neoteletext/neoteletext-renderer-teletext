@@ -16,14 +16,6 @@ mod units;
 /// Bytes of the PES header the parser holds: the fixed part and the three
 /// bytes of the optional header up to `PES_header_data_length`.
 const HEADER_BYTES: usize = PES_FIXED_HEADER_BYTES + PES_OPTIONAL_HEADER_BYTES;
-/// Index of `stream_id` in the header.
-const STREAM_ID_INDEX: usize = 3;
-/// Index of the first `PES_packet_length` byte.
-const LENGTH_INDEX: usize = 4;
-/// Index of the flag byte holding `PTS_DTS_flags`.
-const FLAGS_INDEX: usize = 7;
-/// Index of `PES_header_data_length`.
-const HEADER_DATA_LENGTH_INDEX: usize = 8;
 /// The largest data unit: its header and a one-byte length's worth of data.
 const UNIT_CAPACITY: usize = DATA_UNIT_HEADER_BYTES + u8::MAX as usize;
 

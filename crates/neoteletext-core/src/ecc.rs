@@ -5,7 +5,7 @@
 //! bit b8 is bit 7.
 
 use crate::consts::{CODE_MASK_7BIT, NIBBLE_MASK, TRIPLET_DATA_MASK};
-use crate::consts::{TRIPLET_BITS, TRIPLET_P6_SHIFT};
+use crate::consts::{TRIPLET_BITS, TRIPLET_DATA_SHIFTS, TRIPLET_P6_SHIFT, TRIPLET_TEST_BITS};
 
 /// The outcome of decoding a protected value.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -130,15 +130,6 @@ pub fn hamming84(byte: u8) -> Option<u8> {
     let (value, status) = hamming84_decode(byte);
     if status.is_usable() { Some(value & NIBBLE_MASK) } else { None }
 }
-
-/// Bit shifts of data bits D1 to D18 within a Hamming 24/18 word, where
-/// position B1 is shift 0 (clause 8.3): every position that is not a power
-/// of two and not B24.
-const TRIPLET_DATA_SHIFTS: [u32; 18] = [2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22];
-/// Shifts of protection bits P1 to P5 (positions 1, 2, 4, 8 and 16), which
-/// make tests A to E odd; test n covers every position whose 1-based index
-/// has bit n set.
-const TRIPLET_TEST_BITS: [u32; 5] = [0, 1, 2, 3, 4];
 
 fn triplet_word(bytes: [u8; 3]) -> u32 {
     let [low, middle, high] = bytes;

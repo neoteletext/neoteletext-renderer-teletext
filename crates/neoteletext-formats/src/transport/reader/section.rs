@@ -10,10 +10,6 @@ use super::Section;
 
 /// The most significant bit of the CRC register.
 const CRC_TOP_BIT: u32 = 1 << 31;
-/// `section_syntax_indicator`, bit 7 of the second section byte.
-pub(super) const SECTION_SYNTAX: u8 = 0x80;
-/// `current_next_indicator`, bit 0 of the version byte.
-pub(super) const SECTION_CURRENT: u8 = 0x01;
 
 impl Section {
     pub(super) const fn new() -> Self {

@@ -29,6 +29,13 @@ const fn table_32(group: u8, national: u8) -> u8 {
     (group << super::DESIGNATION_GROUP_SHIFT) | national
 }
 
+/// Table 32's Arabic entry, group 1000 and national option 111, whose G0
+/// set is Table 44.
+pub const DESIGNATION_ARABIC_TABLE_44: u8 = table_32(0b1000, 0b111);
+/// The last character code a G0 set prints: 7/F is the block in every G0
+/// set (clause 15.6).
+pub const G0_LAST_PRINTABLE: u8 = 0x7E;
+
 /// One national option ROM variant of the SAA5246A: the Table 32 value its
 /// ROM gives for each of the eight values of C12 C13 C14, `None` where the
 /// variant has no set for that value, and the value of the language every

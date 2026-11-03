@@ -14,7 +14,7 @@ use super::fields::{Args, decimal, hex, page_address, set_value};
 use super::targets::link_destination;
 
 /// The last row a text link may be on: rows 1 to 23 are the page's text.
-const TEXT_LINK_LAST_ROW: u8 = 23;
+const TEXT_LINK_LAST_ROW: u8 = neoteletext_core::consts::PACKET_LAST_TEXT_ROW;
 
 impl TtiReader {
     pub(super) fn fastext_line(&mut self, args: &[u8], out: &mut dyn FnMut(Item<'_>)) {

@@ -69,11 +69,11 @@ pub const SETS: [(&str, u8, u8); 48] = [
 /// (REQ-2188 item 4).
 const LATIN_ENGLISH: u8 = 0;
 /// The standard's Arabic set, Table 44 (REQ-2190).
-const ARABIC_TABLE_44: u8 = (0b1000 << DESIGNATION_GROUP_SHIFT) | 0b111;
+const ARABIC_TABLE_44: u8 = neoteletext_core::consts::DESIGNATION_ARABIC_TABLE_44;
 
 /// The last character code of a set; 7/F is the block in every G0 set
 /// (clause 15.6) and is never written from text.
-pub(super) const LAST_CODE: u8 = 0x7E;
+pub(super) const LAST_CODE: u8 = neoteletext_core::consts::G0_LAST_PRINTABLE;
 /// The highest diacritical mark number (Table 29, modes 10001 to 11111).
 const LAST_MARK: u8 = MODE_DIACRITIC_MASK;
 

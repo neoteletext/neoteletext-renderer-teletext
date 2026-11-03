@@ -8,7 +8,7 @@ use std::vec::Vec;
 use neoteletext_core::consts::{
     COLUMNS, COMPOSITIONAL_LINKS, DESIGNATION_LEVEL_35_DATA, DESIGNATION_LINKS_LEVEL_25, DESIGNATION_LINKS_LEVEL_35,
     DESIGNATION_PAGE_DATA, HEADER_DISPLAY_COLUMN, LEVEL_BIT_25, LEVEL_BIT_35, LINK_NULL_PAGE, LINKS_FIXED_ROLES,
-    LOCAL_TRIPLETS, PACKET_LINKS, PACKET_PAGE_ENHANCEMENT, ROWS, SPACE, TRIPLETS_PER_PACKET,
+    LOCAL_TRIPLETS, OBJECT_NUMBER_N4_SHIFT, PACKET_LINKS, PACKET_PAGE_ENHANCEMENT, ROWS, SPACE, TRIPLETS_PER_PACKET,
 };
 use neoteletext_core::packet::{
     CompositionalLink, ObjectKind, ObjectNumber, ObjectSource, ObjectUsage, PageFormat, Triplet, TripletFunction,
@@ -26,10 +26,6 @@ use crate::page::{EnhancementPacket, PageFile, PageFunction};
 
 /// Triplets that the sixteen packets X/26 of a page can carry.
 pub const PAGE_TRIPLETS: usize = LOCAL_TRIPLETS as usize;
-
-/// Shift of a local object's designation code in its number: N7 to N4
-/// (Table 28).
-const LOCAL_DESIGNATION_SHIFT: u32 = 4;
 
 /// The function of a compositional link to an object page (Table 15,
 /// bits 2 and 1). Links to DRCS pages are not written (decision E.95).
@@ -308,7 +304,7 @@ impl DisplayPage {
         let number = |place: usize| -> ObjectNumber {
             let designation = place.checked_div(TRIPLETS_PER_PACKET).unwrap_or(0);
             let triplet = place.checked_rem(TRIPLETS_PER_PACKET).unwrap_or(0);
-            ObjectNumber(((designation as u16) << LOCAL_DESIGNATION_SHIFT) | triplet as u16)
+            ObjectNumber(((designation as u16) << OBJECT_NUMBER_N4_SHIFT) | triplet as u16)
         };
         let resolve = |object: LocalObject, kind: ObjectKind| -> Result<Triplet> {
             let place = places.get(object.index).copied().ok_or(AuthorError::UnknownLocalObject)?;

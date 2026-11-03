@@ -12,42 +12,14 @@ use neoteletext_core::consts::FIELD_PERIOD_US;
 use neoteletext_core::packet::{Packet, PacketMeta};
 use neoteletext_core::trace::TraceEntry;
 
-use crate::consts::MAX_LINE_SAMPLES;
+use crate::consts::{
+    BT8X8_FIRST_LINES, BT8X8_SEQUENCE_BYTES, CX88_USED, FIELDS_PER_FRAME, LINES_16, LINES_CX88, LINES_TBC,
+    MAX_LINE_SAMPLES, RATE_8_FSC_PAL, RATE_SAA7131, RATE_TBC, SAMPLES_8_FSC, SAMPLES_SAA7131, SAMPLES_TBC, TBC_USED,
+};
 use crate::slicer::{Config, Line, SampleFormat, Slicer};
 
 /// The most bytes of one line: [`MAX_LINE_SAMPLES`] 16-bit samples.
 pub const MAX_LINE_BYTES: usize = MAX_LINE_SAMPLES * 2;
-/// Fields per frame.
-const FIELDS_PER_FRAME: usize = 2;
-/// The PAL sampling rate of the bt8x8 and cx88 drivers: 8 × the PAL colour
-/// subcarrier, hertz (REQ-INP-011 table).
-const RATE_8_FSC_PAL: u32 = 35_468_950;
-/// The saa7131 sampling rate, hertz (REQ-INP-011 table).
-const RATE_SAA7131: u32 = 27_000_000;
-/// The ld-decode time-base-corrected rate, hertz (REQ-INP-011 table).
-const RATE_TBC: u32 = 17_730_000;
-/// Samples per line of the bt8x8 and cx88 captures (REQ-INP-011 table).
-const SAMPLES_8_FSC: usize = 2048;
-/// Samples per line of the saa7131 capture (REQ-INP-011 table).
-const SAMPLES_SAA7131: usize = 1440;
-/// Samples per line of the tbc captures (REQ-INP-011 table).
-const SAMPLES_TBC: usize = 1135;
-/// Lines per field of the bt8x8, saa7131 and tbc-vbi captures.
-const LINES_16: usize = 16;
-/// Lines per field of the cx88 capture.
-const LINES_CX88: usize = 18;
-/// Lines per field of a full tbc field.
-const LINES_TBC: usize = 313;
-/// Lines used of the cx88 capture: indices 1 to 16.
-const CX88_USED: (usize, usize) = (1, 16);
-/// Lines used of a full tbc field: indices 6 to 21.
-const TBC_USED: (usize, usize) = (6, 21);
-/// Television line numbers of the first bt8x8 line of each field: lines 7
-/// to 22 and 320 to 335 (REQ-INP-011 table).
-const BT8X8_FIRST_LINES: [u16; 2] = [7, 320];
-/// Bytes of the frame sequence number the Linux bt8x8 driver may write at
-/// the end of each frame (REQ-INP-011).
-const BT8X8_SEQUENCE_BYTES: usize = 4;
 
 /// The capture presets of REQ-INP-011.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

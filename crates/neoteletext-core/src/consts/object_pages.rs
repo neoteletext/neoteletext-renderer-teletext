@@ -26,8 +26,31 @@ pub const OBJECT_TRIPLET_LAST: u16 = 506;
 /// number (clause 10.5.1.2).
 pub const OBJECT_TRIPLETS_IN_ROWS: u16 =
     (PACKET_ROW_25 - OBJECT_DEFINITION_FIRST_PACKET + 1) as u16 * TRIPLETS_PER_PACKET as u16;
+/// Pointers in one pointer triplet: the even-numbered and the odd-numbered
+/// object (clause 10.5.1.2).
+pub const OBJECT_POINTERS_PER_TRIPLET: usize = 2;
 /// Pointers in one pointer packet: two in each of triplets 1 to 12.
-pub const OBJECT_POINTERS_PER_PACKET: usize = 24;
+pub const OBJECT_POINTERS_PER_PACKET: usize = OBJECTS_PER_POINTER_PACKET * OBJECT_TYPES;
+/// Objects of one type in a pointer packet: two in each of the four
+/// pointer triplets of that type (clause 10.5.1.2).
+pub const OBJECTS_PER_POINTER_PACKET: usize = OBJECT_POINTERS_PER_TRIPLET * OBJECT_POINTER_TRIPLETS_PER_TYPE;
+/// Pointer triplets of one type in a pointer packet: one in each of the
+/// four groups of triplets 1 to 12 (clause 10.5.1.2).
+pub const OBJECT_POINTER_TRIPLETS_PER_TYPE: usize = 4;
+/// Objects of one type on one object sub-page: packets 1 to 4
+/// (clause 10.5.1.1).
+pub const OBJECTS_PER_TYPE: usize = 32;
+/// The Magazine Organization Table packets that end each level's part,
+/// X/21 for Level 2.5 and X/24 for Level 3.5, which carry the totals
+/// (clause 10.6.6) after eight four-byte links to pattern pages (Tables 22
+/// and 23). Those links are written unused, page FF (decision E.95).
+pub const MOT_TOTALS_PACKETS: [u8; 2] = [21, 24];
+/// Packet byte of the first pattern page link of X/21 and X/24 (Table 22).
+pub const MOT_PATTERN_LINK_FIRST_BYTE: usize = 6;
+/// Bytes of a pattern page link (Table 23).
+pub const MOT_PATTERN_LINK_BYTES: usize = 4;
+/// Pattern page links in X/21 and X/24 (Table 22).
+pub const MOT_PATTERN_LINKS: usize = 8;
 
 /// Packets an enhancement sub-page can hold: X/1 to X/25 and X/26/0 to
 /// X/26/15 (clause 10.5.1.1).

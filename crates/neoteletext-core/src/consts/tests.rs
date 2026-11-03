@@ -78,3 +78,22 @@ fn receiver_colours_follow_the_colour_map() {
     const { assert!(RECEIVER_COLOUR_BASE & CLUT_ENTRY_MASK == 0) };
     assert_eq!(usize::from(RECEIVER_COLOUR_BASE) + COLOURS, RESOLVED_COLOURS);
 }
+
+/// REQ-158: the Hamming 24/18 layout is clause 8.3's: the data bits are
+/// every position that is not a protection bit, P1 to P5 at the powers of
+/// two and P6 at B24, and there is one test for each of P1 to P5.
+#[test]
+fn hamming_2418_layout_is_clause_8_3() {
+    let protection = |shift: u32| (shift + 1).is_power_of_two() || shift == TRIPLET_P6_SHIFT;
+    let mut data = (0..TRIPLET_BITS).filter(|&shift| !protection(shift));
+    for &shift in &TRIPLET_DATA_SHIFTS {
+        assert_eq!(data.next(), Some(shift));
+    }
+    assert_eq!(data.next(), None);
+    let mut tests =
+        (0..TRIPLET_BITS).filter(|&shift| (shift + 1).is_power_of_two()).map(|shift| (shift + 1).trailing_zeros());
+    for &test in &TRIPLET_TEST_BITS {
+        assert_eq!(tests.next(), Some(test));
+    }
+    assert_eq!(tests.next(), None);
+}

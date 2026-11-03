@@ -6,8 +6,9 @@ use std::collections::BTreeMap;
 use std::vec::Vec;
 
 use neoteletext_core::consts::{
-    OBJECT_DEFINITION_FIRST_PACKET, OBJECT_POINTER_BITS, OBJECT_POINTER_DATA_BIT, OBJECT_POINTER_UNUSED,
-    OBJECT_TRIPLET_LAST, PAGE_FUNCTION_GPOP, PAGE_FUNCTION_POP, TRIPLETS_PER_PACKET,
+    OBJECT_DEFINITION_FIRST_PACKET, OBJECT_NUMBER_N4_SHIFT, OBJECT_NUMBER_N6_N5_SHIFT, OBJECT_NUMBER_N8_N7_SHIFT,
+    OBJECT_POINTER_BITS, OBJECT_POINTER_DATA_BIT, OBJECT_POINTER_UNUSED, OBJECT_POINTERS_PER_TRIPLET,
+    OBJECT_TRIPLET_LAST, OBJECT_TYPES, PAGE_FUNCTION_GPOP, PAGE_FUNCTION_POP, TRIPLETS_PER_PACKET,
 };
 use neoteletext_core::packet::{
     ObjectKind, ObjectNumber, ObjectSource, ObjectUsage, Triplet, TripletFunction, TripletLocation, encode,
@@ -26,17 +27,6 @@ use crate::page::{EnhancementPacket, PageFile, PageFunction};
 
 /// The highest S1 of a sub-page: four bits (Annex A.1).
 const SUBPAGE_LAST: u8 = 0xF;
-/// Shifts of the fields of a public object number (Table 28): N4, N6 N5
-/// and N8 N7.
-const NUMBER_ODD_SHIFT: u32 = 4;
-const NUMBER_GROUP_SHIFT: u32 = 5;
-const NUMBER_PACKET_SHIFT: u32 = 7;
-/// Pointers in one pointer triplet: the even-numbered and odd-numbered
-/// object (clause 10.5.1.2).
-const POINTERS_PER_TRIPLET: usize = 2;
-/// Pointer triplets of the three types in each group of a pointer packet:
-/// Active, Adaptive, Passive (clause 10.5.1.2).
-const TYPES: usize = 3;
 
 /// The offset of a type within a group of pointer triplets.
 const fn type_offset(kind: ObjectKind) -> usize {
@@ -80,12 +70,12 @@ pub struct ObjectPage {
 pub fn public_number(s1: u8, index: usize) -> ObjectNumber {
     let packet = index.checked_div(OBJECTS_PER_POINTER_PACKET).unwrap_or(0) as u16;
     let within = index.checked_rem(OBJECTS_PER_POINTER_PACKET).unwrap_or(0);
-    let group = within.checked_div(POINTERS_PER_TRIPLET).unwrap_or(0) as u16;
-    let odd = within.checked_rem(POINTERS_PER_TRIPLET).unwrap_or(0) as u16;
+    let group = within.checked_div(OBJECT_POINTERS_PER_TRIPLET).unwrap_or(0) as u16;
+    let odd = within.checked_rem(OBJECT_POINTERS_PER_TRIPLET).unwrap_or(0) as u16;
     ObjectNumber(
-        packet << NUMBER_PACKET_SHIFT
-            | group << NUMBER_GROUP_SHIFT
-            | odd << NUMBER_ODD_SHIFT
+        packet << OBJECT_NUMBER_N8_N7_SHIFT
+            | group << OBJECT_NUMBER_N6_N5_SHIFT
+            | odd << OBJECT_NUMBER_N4_SHIFT
             | u16::from(s1 & SUBPAGE_LAST),
     )
 }
@@ -96,9 +86,13 @@ pub fn public_number(s1: u8, index: usize) -> ObjectNumber {
 pub fn pointer_place(kind: ObjectKind, index: usize) -> (u8, usize, bool) {
     let packet = index.checked_div(OBJECTS_PER_POINTER_PACKET).unwrap_or(0);
     let within = index.checked_rem(OBJECTS_PER_POINTER_PACKET).unwrap_or(0);
-    let group = within.checked_div(POINTERS_PER_TRIPLET).unwrap_or(0);
-    let triplet = 1usize.saturating_add(group.saturating_mul(TYPES)).saturating_add(type_offset(kind));
-    (u8::try_from(packet).unwrap_or(0).saturating_add(1), triplet, within.checked_rem(POINTERS_PER_TRIPLET) == Some(1))
+    let group = within.checked_div(OBJECT_POINTERS_PER_TRIPLET).unwrap_or(0);
+    let triplet = 1usize.saturating_add(group.saturating_mul(OBJECT_TYPES)).saturating_add(type_offset(kind));
+    (
+        u8::try_from(packet).unwrap_or(0).saturating_add(1),
+        triplet,
+        within.checked_rem(OBJECT_POINTERS_PER_TRIPLET) == Some(1),
+    )
 }
 
 impl ObjectPage {

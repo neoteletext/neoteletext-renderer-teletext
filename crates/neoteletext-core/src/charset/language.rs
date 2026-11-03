@@ -91,7 +91,7 @@ const LETTISH_LITHUANIAN: u8 = value(0b0100, 0b011);
 const RUSSIAN_BULGARIAN: u8 = value(0b0100, 0b100);
 const CYRILLIC_UKRAINIAN: u8 = value(0b0100, 0b101);
 const GREEK: u8 = value(0b0110, 0b111);
-const ARABIC_TABLE_44: u8 = value(0b1000, 0b111);
+const ARABIC_TABLE_44: u8 = crate::consts::DESIGNATION_ARABIC_TABLE_44;
 const HEBREW: u8 = value(0b1010, 0b101);
 
 /// Every language NeoTeletext writes (DEC-602 item 1, DEC-2184,

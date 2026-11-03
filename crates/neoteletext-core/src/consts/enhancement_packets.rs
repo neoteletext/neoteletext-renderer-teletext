@@ -46,6 +46,22 @@ pub const PAGE_FUNCTION_MPT_EX: u8 = 0xB;
 pub const PAGE_FUNCTION_TRIGGER: u8 = 0xC;
 /// Page coding 000: 7 data bits with odd parity (Table 3).
 pub const PAGE_CODING_PARITY: u8 = 0x0;
+/// Page coding 010 (Table 3): per packet one Hamming 8/4 byte, then
+/// thirteen Hamming 24/18 triplets. Object pages use it.
+pub const PAGE_CODING_TRIPLETS: u8 = 0x2;
+/// Page coding 011 (Table 3): every byte Hamming 8/4. The Magazine
+/// Organization Table uses it (clause 10.6.1).
+pub const PAGE_CODING_NIBBLES: u8 = 0x3;
+/// Table 6: for a page function other than basic Level 1 and data
+/// broadcasting, bits 8 to 18 of X/28/0 triplet 1 are "11111111100". The
+/// string is read in the order the table names the bits, bit 8 first, so
+/// bits 8 to 16 are 1 and bits 17 and 18 are 0. Either reading makes bits 9
+/// to 14 non-zero, which is what keeps EN 300 708 decoders away (ETS 300
+/// 708 clause 5.4.1, Table 6).
+pub const NOT_TEXT_PAGE_MARKER: u32 = 0x1FF << 7;
+/// The last packet number of an enhancement page sent up to X/26 with
+/// designation code d is this plus d (Annex A.1).
+pub const LAST_PACKET_ENHANCEMENT_BASE: u8 = 26;
 /// Mask of the M/29 packet function, triplet 1 bits 1 to 7; only 0000000
 /// is defined (Tables 11 and 13).
 pub const PACKET_FUNCTION_MASK: u32 = 0x7F;

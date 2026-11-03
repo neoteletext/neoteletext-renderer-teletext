@@ -1,7 +1,7 @@
 //! Constants of the slicer, each defined once (REQ-GEN-014).
 //!
 //! Teletext values already in `neoteletext_core::consts` are reused, never
-//! restated; the derived values below are computed from them. Three groups
+//! restated; the derived values below are computed from them. Four groups
 //! follow:
 //!
 //! - **Signal values of EN 300 706**, re-exported from the core, where
@@ -9,6 +9,8 @@
 //! - **Video standard values** (ITU-R BT.470 / BT.1700 for 625-line PAL, and
 //!   ITU-R BT.601 sample coding), used to find the back porch and by the
 //!   test signal generator.
+//! - **Capture devices** of the raw sampled line files (REQ-INP-011): the
+//!   rates and line counts of their drivers and datasheets (DEC-2472).
 //! - **Tuning values** of this slicer, each with its reason.
 
 use neoteletext_core::consts::{PACKET_BITS, PACKET_BYTES, PACKET_BYTES_WITH_FRAMING, PACKET_BYTES_WITH_RUN_IN};
@@ -85,6 +87,43 @@ pub const NOMINAL_AMPLITUDE_8BIT: f32 =
 pub const NOMINAL_AMPLITUDE_16BIT: f32 = NOMINAL_AMPLITUDE_8BIT * SAMPLE_16_PER_8 as f32;
 
 // ---------------------------------------------------------------------------
+// Capture devices of the raw sampled line files (REQ-INP-011): their drivers'
+// and datasheets' rates and line counts, not teletext's
+// ---------------------------------------------------------------------------
+
+/// Fields per frame of 625-line television (ITU-R BT.470).
+pub const FIELDS_PER_FRAME: usize = 2;
+/// The PAL sampling rate of the bt8x8 and cx88 drivers: 8 × the PAL colour
+/// subcarrier, hertz (REQ-INP-011 table).
+pub const RATE_8_FSC_PAL: u32 = 35_468_950;
+/// The saa7131 sampling rate, hertz (REQ-INP-011 table).
+pub const RATE_SAA7131: u32 = 27_000_000;
+/// The ld-decode time-base-corrected rate, hertz (REQ-INP-011 table).
+pub const RATE_TBC: u32 = 17_730_000;
+/// Samples per line of the bt8x8 and cx88 captures (REQ-INP-011 table).
+pub const SAMPLES_8_FSC: usize = 2048;
+/// Samples per line of the saa7131 capture (REQ-INP-011 table).
+pub const SAMPLES_SAA7131: usize = 1440;
+/// Samples per line of the tbc captures (REQ-INP-011 table).
+pub const SAMPLES_TBC: usize = 1135;
+/// Lines per field of the bt8x8, saa7131 and tbc-vbi captures.
+pub const LINES_16: usize = 16;
+/// Lines per field of the cx88 capture.
+pub const LINES_CX88: usize = 18;
+/// Lines per field of a full tbc field: the longer field of a frame.
+pub const LINES_TBC: usize = MAX_LINES_PER_FIELD;
+/// Lines used of the cx88 capture: indices 1 to 16.
+pub const CX88_USED: (usize, usize) = (1, 16);
+/// Lines used of a full tbc field: indices 6 to 21.
+pub const TBC_USED: (usize, usize) = (6, 21);
+/// Television line numbers of the first bt8x8 line of each field: lines 7
+/// to 22 and 320 to 335 (REQ-INP-011 table).
+pub const BT8X8_FIRST_LINES: [u16; 2] = [7, 320];
+/// Bytes of the frame sequence number the Linux bt8x8 driver may write at
+/// the end of each frame (REQ-INP-011).
+pub const BT8X8_SEQUENCE_BYTES: usize = 4;
+
+// ---------------------------------------------------------------------------
 // Slicer tuning
 // ---------------------------------------------------------------------------
 
@@ -152,7 +191,7 @@ pub const MAX_LINES_PER_FIELD: usize = 313;
 /// Lines whose expectation of teletext is tracked: every line number of a
 /// 625-line frame (1 to 625, slot 0 unused), or every position of either
 /// field when only the position is known (DEC-1092).
-pub const EXPECTED_LINE_SLOTS: usize = 2 * MAX_LINES_PER_FIELD;
+pub const EXPECTED_LINE_SLOTS: usize = FIELDS_PER_FRAME * MAX_LINES_PER_FIELD;
 /// Fields for which a line stays expected to carry teletext after its last
 /// packet with an exact framing code, and the most fields between the exact
 /// packets that make it expected (DEC-1092, DEC-2431): one second at

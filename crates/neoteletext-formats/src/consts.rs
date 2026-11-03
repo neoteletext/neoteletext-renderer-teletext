@@ -85,6 +85,11 @@ pub const PMT_DESCRIPTORS_START: usize = 12;
 pub const PMT_STREAM_HEADER_BYTES: usize = 5;
 /// Offset of `version_number`'s byte in a long-form section.
 pub const SECTION_VERSION_BYTE: usize = 5;
+/// `section_syntax_indicator`, bit 7 of the second section byte
+/// (clause 2.4.4.3, Table 2-30).
+pub const SECTION_SYNTAX: u8 = 0x80;
+/// `current_next_indicator`, bit 0 of the version byte (clause 2.4.4.3).
+pub const SECTION_CURRENT: u8 = 0x01;
 /// Shift and mask of `version_number` in that byte.
 pub const SECTION_VERSION_SHIFT: u32 = 1;
 /// Mask of the 5-bit `version_number`.
@@ -131,6 +136,17 @@ pub const PES_FIXED_HEADER_BYTES: usize = 6;
 /// Bytes of the optional header before `PES_header_data_length`'s data:
 /// the two flag bytes and `PES_header_data_length` itself.
 pub const PES_OPTIONAL_HEADER_BYTES: usize = 3;
+/// Index of `stream_id` in a PES header: after the start code (Table
+/// 2-21).
+pub const PES_STREAM_ID_INDEX: usize = PES_START_CODE.len();
+/// Index of the first `PES_packet_length` byte (Table 2-21).
+pub const PES_LENGTH_INDEX: usize = PES_STREAM_ID_INDEX + 1;
+/// Index of the second flag byte, which holds `PTS_DTS_flags` (Table
+/// 2-21): after the fixed part and the first flag byte.
+pub const PES_FLAGS_INDEX: usize = PES_FIXED_HEADER_BYTES + 1;
+/// Index of `PES_header_data_length` (Table 2-21), the last byte of the
+/// optional header's fixed part.
+pub const PES_HEADER_DATA_LENGTH_INDEX: usize = PES_FIXED_HEADER_BYTES + PES_OPTIONAL_HEADER_BYTES - 1;
 /// `PTS_DTS_flags` bit meaning a PTS is present, in the second flag byte.
 pub const PES_PTS_PRESENT: u8 = 0x80;
 /// Bytes of a coded PTS.
@@ -222,56 +238,16 @@ pub const TTI_PS_C12_BIT: u32 = 7;
 // Pages of Levels 2.5 and 3.5 in files and streams (REQ-INP-023 to 025)
 // ---------------------------------------------------------------------------
 
-/// Page coding 010 (Table 3): per packet one Hamming 8/4 byte, then
-/// thirteen Hamming 24/18 triplets. Object pages use it.
-pub const PAGE_CODING_TRIPLETS: u8 = 0x2;
-/// Page coding 011 (Table 3): every byte Hamming 8/4. The Magazine
-/// Organization Table uses it (clause 10.6.1).
-pub const PAGE_CODING_NIBBLES: u8 = 0x3;
-/// Table 6: for a page function other than basic Level 1 and data
-/// broadcasting, bits 8 to 18 of X/28/0 triplet 1 are "11111111100". The
-/// string is read in the order the table names the bits, bit 8 first, so
-/// bits 8 to 16 are 1 and bits 17 and 18 are 0. Either reading makes bits 9
-/// to 14 non-zero, which is what keeps EN 300 708 decoders away (ETS 300
-/// 708 clause 5.4.1, Table 6).
-pub const NOT_TEXT_PAGE_MARKER: u32 = 0x1FF << 7;
-/// Termination Marker types, data bits D2 D1 D0 (Table 28, mode 11111):
-/// intermediate object sub-page, end of an object, more follow.
-pub const TERMINATION_INTERMEDIATE_MORE: u8 = 0b000;
-/// Intermediate object sub-page, end of the last object.
-pub const TERMINATION_INTERMEDIATE_LAST: u8 = 0b001;
-/// Last object sub-page, end of an object, more follow.
-pub const TERMINATION_FINAL_MORE: u8 = 0b010;
-/// Last object sub-page, end of the last object.
-pub const TERMINATION_FINAL_LAST: u8 = 0b011;
-/// Local Object definitions, end of an object, more follow.
-pub const TERMINATION_LOCAL_OBJECT_MORE: u8 = 0b100;
-/// Local Object definitions, end of the last object.
-pub const TERMINATION_LOCAL_OBJECT_LAST: u8 = 0b101;
-/// Local enhancement data ends; Local Object definitions follow.
-pub const TERMINATION_LOCAL_DATA_OBJECTS_FOLLOW: u8 = 0b110;
-/// Local enhancement data ends; no Local Object definitions follow.
-pub const TERMINATION_LOCAL_DATA_END: u8 = 0b111;
-/// Objects of one type in a pointer packet: two in each of the four
-/// pointer triplets of that type (clause 10.5.1.2).
-pub const OBJECTS_PER_POINTER_PACKET: usize = 8;
-/// Objects of one type on one object sub-page: packets 1 to 4
-/// (clause 10.5.1.1).
-pub const OBJECTS_PER_TYPE: usize = 32;
-/// The last packet number of an enhancement page sent up to X/26 with
-/// designation code d is this plus d (Annex A.1).
-pub const LAST_PACKET_ENHANCEMENT_BASE: u8 = 26;
-/// The Magazine Organization Table packets that end each level's part,
-/// X/21 for Level 2.5 and X/24 for Level 3.5, which carry the totals
-/// (clause 10.6.6) after eight four-byte links to pattern pages (Tables 22
-/// and 23). Those links are written unused, page FF (decision E.95).
-pub const MOT_TOTALS_PACKETS: [u8; 2] = [21, 24];
-/// Packet byte of the first pattern page link of X/21 and X/24 (Table 22).
-pub const MOT_PATTERN_LINK_FIRST_BYTE: usize = 6;
-/// Bytes of a pattern page link (Table 23).
-pub const MOT_PATTERN_LINK_BYTES: usize = 4;
-/// Pattern page links in X/21 and X/24 (Table 22).
-pub const MOT_PATTERN_LINKS: usize = 8;
+// Teletext values of these pages are the core's (REQ-GEN-014); the names
+// the readers and writers here use are re-exported so that each is
+// defined once.
+pub use neoteletext_core::consts::{
+    LAST_PACKET_ENHANCEMENT_BASE, MOT_PATTERN_LINK_BYTES, MOT_PATTERN_LINK_FIRST_BYTE, MOT_PATTERN_LINKS,
+    MOT_TOTALS_PACKETS, NOT_TEXT_PAGE_MARKER, OBJECTS_PER_POINTER_PACKET, OBJECTS_PER_TYPE, PAGE_CODING_NIBBLES,
+    PAGE_CODING_TRIPLETS, TERMINATION_FINAL_LAST, TERMINATION_FINAL_MORE, TERMINATION_INTERMEDIATE_LAST,
+    TERMINATION_INTERMEDIATE_MORE, TERMINATION_LOCAL_DATA_END, TERMINATION_LOCAL_DATA_OBJECTS_FOLLOW,
+    TERMINATION_LOCAL_OBJECT_LAST, TERMINATION_LOCAL_OBJECT_MORE,
+};
 
 // ---------------------------------------------------------------------------
 // EP1 page files (notes-formats.md section 6.1)

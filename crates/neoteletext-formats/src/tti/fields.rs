@@ -7,10 +7,11 @@ use neoteletext_core::types::{PageAddress, SubCode};
 use crate::page::SERVICE_NAME_BYTES;
 use crate::text::Text;
 
-/// Highest region and page function values.
-pub(super) const REGION_LAST: u32 = 0xF;
+/// Highest region and page function values: four bits each (X/28/0
+/// format 1, Table 4).
+pub(super) const REGION_LAST: u32 = neoteletext_core::consts::PAGE_FUNCTION_MASK;
 /// Page coding is 3 bits (Table 3).
-pub(super) const CODING_LAST: u32 = 0x7;
+pub(super) const CODING_LAST: u32 = neoteletext_core::consts::PAGE_CODING_MASK;
 
 /// Sets `target` to as much of `value` as it holds, and returns whether
 /// all of it was kept. A cut can land just after a carriage return in the

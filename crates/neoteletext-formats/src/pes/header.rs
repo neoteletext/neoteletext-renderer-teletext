@@ -7,7 +7,8 @@ use crate::consts::{
 };
 use crate::item::{Diagnostic, DiagnosticKind, Item};
 
-use super::{FLAGS_INDEX, HEADER_BYTES, HEADER_DATA_LENGTH_INDEX, LENGTH_INDEX, PesParser, STREAM_ID_INDEX, State};
+use super::{HEADER_BYTES, PesParser, State};
+use crate::consts::{PES_FLAGS_INDEX, PES_HEADER_DATA_LENGTH_INDEX, PES_LENGTH_INDEX, PES_STREAM_ID_INDEX};
 
 impl PesParser {
     pub(super) fn hunt(&mut self, byte: u8, offset: u64) {
@@ -47,12 +48,12 @@ impl PesParser {
         }
         if self.header_len == PES_FIXED_HEADER_BYTES {
             self.report_skipped(out);
-            let high = self.header.get(LENGTH_INDEX).copied().unwrap_or(0);
-            let low = self.header.get(LENGTH_INDEX.saturating_add(1)).copied().unwrap_or(0);
+            let high = self.header.get(PES_LENGTH_INDEX).copied().unwrap_or(0);
+            let low = self.header.get(PES_LENGTH_INDEX.saturating_add(1)).copied().unwrap_or(0);
             // REQ-GEN-007: assembled big-endian, as ISO/IEC 13818-1 orders it.
             let length = usize::from(u16::from_be_bytes([high, low]));
             self.remaining = if length == 0 { None } else { Some(length) };
-            let stream_id = self.header.get(STREAM_ID_INDEX).copied().unwrap_or(0);
+            let stream_id = self.header.get(PES_STREAM_ID_INDEX).copied().unwrap_or(0);
             if stream_id != STREAM_ID_PRIVATE_1 {
                 out(Item::Diagnostic(Diagnostic::at(offset, DiagnosticKind::NotPrivateStream { stream_id })));
                 if self.remaining.is_none() {
@@ -70,11 +71,11 @@ impl PesParser {
         }
         self.count_byte();
         if self.header_len == HEADER_BYTES && self.state == State::Header {
-            let flags = self.header.get(FLAGS_INDEX).copied().unwrap_or(0);
+            let flags = self.header.get(PES_FLAGS_INDEX).copied().unwrap_or(0);
             self.pts_wanted = flags & PES_PTS_PRESENT != 0;
             self.pts_len = 0;
             self.timestamp = None;
-            self.header_data_left = usize::from(self.header.get(HEADER_DATA_LENGTH_INDEX).copied().unwrap_or(0));
+            self.header_data_left = usize::from(self.header.get(PES_HEADER_DATA_LENGTH_INDEX).copied().unwrap_or(0));
             if self.header_data_left == 0 {
                 self.finish_header();
             } else {

@@ -95,6 +95,19 @@ pub const MODE_DISPLAY_ATTRIBUTES: u8 = 0x0C;
 /// Column mode 01101: DRCS Character Invocation (Table 29), recognised only
 /// to move the active position (decision E.95).
 pub const MODE_DRCS_CHARACTER: u8 = 0x0D;
+/// Row mode 11000: DRCS Mode (Table 28). The decoder treats it as
+/// reserved (decision E.95); it is named so that authored test streams can
+/// send it and show that it is not acted on.
+pub const MODE_ROW_DRCS: u8 = 0x18;
+/// Data bit D6 of DRCS Mode and of DRCS Character Invocation, S: 1 for the
+/// normal DRCS sub-table, 0 for the global one (Tables 28 and 29).
+pub const DRCS_SOURCE_NORMAL: u8 = 0x40;
+/// Data bits D5 D4 of DRCS Mode, L1 L0 = 11: the DRCS data is used at
+/// Levels 2.5 and 3.5 (Table 28).
+pub const DRCS_USAGE_BOTH_LEVELS: u8 = 0x30;
+/// The highest valid DRCS character number, D5 to D0 of DRCS Character
+/// Invocation (Table 29: 0 to 47).
+pub const DRCS_CHARACTER_LAST: u8 = 47;
 /// Column mode 01110: Font Style, Level 3.5 only (Table 29), recognised
 /// only to move the active position (decision E.96).
 pub const MODE_FONT_STYLE: u8 = 0x0E;
@@ -158,6 +171,23 @@ pub const LEVEL_BIT_25: u8 = 0b01;
 pub const LEVEL_BIT_35: u8 = 0b10;
 /// Mask of the Termination Marker type, data bits D2 to D0 (Table 28).
 pub const TERMINATION_TYPE_MASK: u8 = 0x07;
+/// Termination Marker types, data bits D2 D1 D0 (Table 28, mode 11111):
+/// intermediate object sub-page, end of an object, more follow.
+pub const TERMINATION_INTERMEDIATE_MORE: u8 = 0b000;
+/// Intermediate object sub-page, end of the last object.
+pub const TERMINATION_INTERMEDIATE_LAST: u8 = 0b001;
+/// Last object sub-page, end of an object, more follow.
+pub const TERMINATION_FINAL_MORE: u8 = 0b010;
+/// Last object sub-page, end of the last object.
+pub const TERMINATION_FINAL_LAST: u8 = 0b011;
+/// Local Object definitions, end of an object, more follow.
+pub const TERMINATION_LOCAL_OBJECT_MORE: u8 = 0b100;
+/// Local Object definitions, end of the last object.
+pub const TERMINATION_LOCAL_OBJECT_LAST: u8 = 0b101;
+/// Local enhancement data ends; Local Object definitions follow.
+pub const TERMINATION_LOCAL_DATA_OBJECTS_FOLLOW: u8 = 0b110;
+/// Local enhancement data ends; no Local Object definitions follow.
+pub const TERMINATION_LOCAL_DATA_END: u8 = 0b111;
 /// Mask of the flash mode, D1 D0 of Additional Flash Functions (Table 29).
 pub const FLASH_MODE_MASK: u8 = 0x03;
 /// Shift of the flash rate and phase, D4 to D2 (Table 29).

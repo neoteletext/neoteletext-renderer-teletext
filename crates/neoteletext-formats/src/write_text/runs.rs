@@ -47,13 +47,13 @@ use crate::consts::TERMINATION_LOCAL_DATA_END;
 /// Latin English (REQ-2214 item 4).
 pub const LATIN_ENGLISH_TAG: &str = "en";
 /// The first row a run may be on: row 0 is the header.
-pub const FIRST_TEXT_ROW: u8 = 1;
+pub const FIRST_TEXT_ROW: u8 = neoteletext_core::consts::PACKET_FIRST_ROW;
 /// The last row a run may be on, 24, the Fastext row.
-pub const LAST_TEXT_ROW: u8 = 24;
+pub const LAST_TEXT_ROW: u8 = neoteletext_core::consts::PACKET_ROW_24;
 /// Line numbers in the page writer's refusals: a run is one line.
 const LINE: usize = 1;
 /// The last code a row shows as itself; 7/F is the block in every set.
-const LAST_PRINTABLE: u8 = 0x7E;
+const LAST_PRINTABLE: u8 = neoteletext_core::consts::G0_LAST_PRINTABLE;
 
 /// One run of text: where it starts and what it says.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

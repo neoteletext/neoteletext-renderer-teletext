@@ -23,7 +23,10 @@
 
 use std::vec::Vec;
 
-use neoteletext_core::consts::{ALPHA_BLACK, ALPHA_YELLOW, COLOUR_BLUE_BIT, COLOUR_GREEN_BIT};
+use neoteletext_core::consts::{
+    ALPHA_BLACK, ALPHA_YELLOW, COLOUR_BLUE_BIT, COLOUR_GREEN_BIT, DRCS_CHARACTER_LAST, DRCS_SOURCE_NORMAL,
+    DRCS_USAGE_BOTH_LEVELS,
+};
 use neoteletext_core::packet::{ObjectUsage, TripletFunction};
 use neoteletext_core::types::{ColourWords, Magazine, PageAddress, Rgb12, SubCode};
 
@@ -45,15 +48,12 @@ use magazine_packets::magazine_packets;
 const BOTH: ObjectUsage = ObjectUsage(0b11);
 /// Objects required at Level 3.5 only.
 const LEVEL_35: ObjectUsage = ObjectUsage(0b10);
-/// Row mode 11000, DRCS Mode (Table 28), with data choosing the normal
-/// table's sub-table 0 at both levels, as page 113 sends it to show that
-/// it is not acted on (decision E.95).
-const DRCS_MODE: u8 = 0b11000;
-const DRCS_MODE_DATA: u8 = 0x70;
-/// Data bit D6 of DRCS Character Invocation: the normal table (Table 29).
-const DRCS_NORMAL: u8 = 0x40;
-/// A DRCS character number above 47, which Table 29 makes invalid.
-const DRCS_INVALID_CHARACTER: u8 = 50;
+/// DRCS Mode's data choosing the normal table's sub-table 0 at both
+/// levels, as page 113 sends it to show that it is not acted on (decision
+/// E.95).
+const DRCS_MODE_DATA: u8 = DRCS_SOURCE_NORMAL | DRCS_USAGE_BOTH_LEVELS;
+/// A DRCS character number above the last valid one (Table 29).
+const DRCS_INVALID_CHARACTER: u8 = DRCS_CHARACTER_LAST + 3;
 /// Level 1 colours as Colour Map indices (decision E.43).
 const RED: u8 = colour(0, 1);
 const GREEN: u8 = colour(0, 2);
