@@ -149,6 +149,11 @@ impl Sessions {
     /// gives back the key of the session it replaced, or as the error the
     /// new session's own key when there is no room, for the caller to
     /// delete.
+    ///
+    /// # Errors
+    /// The new session's own [`KeyHandle`], when it replaces no session and
+    /// all [`MAX_SESSIONS`] slots are taken; the session is not kept, and
+    /// the caller must delete its key.
     pub fn insert(&mut self, session: Session) -> Result<Option<KeyHandle>, KeyHandle> {
         if let Some(slot) = self.find(&session.origin, session.id.as_bytes()) {
             let old = self.slots.get_mut(slot).and_then(|slot| slot.replace(session));

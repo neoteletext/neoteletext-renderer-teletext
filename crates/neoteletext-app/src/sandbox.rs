@@ -84,6 +84,10 @@ pub fn apply(policy: Policy<'_>, allow_unsandboxed: bool) -> Result<(), SandboxE
 
 /// The REQ-SEC-017 verification: after the sandbox is applied, opening a
 /// file, starting a program and connecting to the network must all fail.
+///
+/// # Errors
+/// The exit status and the message for the user (DEC-2451): the
+/// sandbox's [`SandboxError`], or a check that was not blocked.
 pub fn self_test() -> Result<(), (u8, String)> {
     apply(Policy { writable_directory: None, network: false, readable: &[] }, false)
         .map_err(|error| (crate::exit::INPUT, error.to_string()))?;

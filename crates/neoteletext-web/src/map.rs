@@ -95,6 +95,10 @@ impl<'a> Place<'a> {
     }
 
     /// Writes the place's canonical text.
+    ///
+    /// # Errors
+    /// [`Overflow`] when the text does not fit in the writer; the part that
+    /// fitted stays written.
     pub fn write(&self, writer: &mut Writer<'_>) -> Result<(), Overflow> {
         match *self {
             Self::Page { page, subcode, parameters } => {
@@ -206,6 +210,17 @@ impl<'a> MapAddress<'a> {
     /// `<channel>302/0002.tti` as `<channel>302/0002`, and a final slash after
     /// a place is removed. A file only receivers use is refused: a viewer
     /// never sees one (REQ-1693 item 2).
+    ///
+    /// # Errors
+    /// - [`MapError::Place`] when the address has a fragment, a query that
+    ///   is not `name=value` pairs joined by `&` with no name empty, or a
+    ///   query on the contents or the wall (REQ-1693 item 4).
+    /// - [`MapError::Channel`] when the address does not name a channel,
+    ///   carrying the [`ChannelError`] of [`parse_address`]; a whole address
+    ///   the strict parser refuses is [`ChannelError::Address`].
+    /// - [`MapError::ReceiverFile`] when it names a channel's file that only
+    ///   receivers use, such as its `channel.ttx`, bundle, contents file or a
+    ///   part of a page's list of sub-pages.
     pub fn read(text: &'a str) -> Result<Self, MapError> {
         Self::read_with(text, false)
     }
@@ -215,6 +230,11 @@ impl<'a> MapAddress<'a> {
     /// it opens its channel (DEC-1710), as `neottx https://h.example/a/channel.ttx`
     /// does. A fragment the map refuses is refused here as well, so no
     /// address opens with one ignored (REQ-1693 item 4).
+    ///
+    /// # Errors
+    /// [`MapError::Place`] and [`MapError::Channel`] as for
+    /// [`MapAddress::read`]. [`MapError::ReceiverFile`] does not arise:
+    /// such a file opens its channel instead.
     pub fn read_opened(text: &'a str) -> Result<Self, MapError> {
         Self::read_with(text, true)
     }
@@ -249,6 +269,10 @@ impl<'a> MapAddress<'a> {
 
     /// Writes the channel's own address, and the query of an address that
     /// names no place.
+    ///
+    /// # Errors
+    /// [`Overflow`] when the address does not fit in the writer; the part
+    /// that fitted stays written.
     pub fn write_channel(&self, writer: &mut Writer<'_>) -> Result<(), Overflow> {
         writer.put(self.folder.as_str().as_bytes())?;
         if let Some(query) = self.query {
@@ -259,6 +283,10 @@ impl<'a> MapAddress<'a> {
     }
 
     /// Writes the canonical address (REQ-1693 item 3).
+    ///
+    /// # Errors
+    /// [`Overflow`] when the address does not fit in the writer; the part
+    /// that fitted stays written.
     pub fn write(&self, writer: &mut Writer<'_>) -> Result<(), Overflow> {
         self.write_channel(writer)?;
         self.place.as_ref().map_or(Ok(()), |place| place.write(writer))

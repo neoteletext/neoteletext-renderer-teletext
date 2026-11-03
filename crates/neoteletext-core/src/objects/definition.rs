@@ -76,6 +76,13 @@ fn check_definition<'s>(
 
 /// Finds a local object (REQ-OBJ-003): N7 to N4 name the packet X/26 and N3
 /// to N0 the triplet. N8 shall be 0, and triplets 13 to 15 do not exist.
+///
+/// # Errors
+/// [`Absent::BadNumber`] when N8 is set or the number names triplet 13 to
+/// 15, [`Absent::NotReceived`] when the packet X/26 it names is missing,
+/// [`Absent::NotDefinition`] when the triplet is damaged or is not an
+/// Object Definition of the kind invoked, and [`Absent::WrongLevel`] when
+/// the definition excludes `level`.
 pub fn find_local(
     page: &StoredPage,
     kind: ObjectKind,
@@ -103,7 +110,16 @@ const fn type_offset(kind: ObjectKind) -> u8 {
 
 /// Finds a public or global object through its object page (REQ-OBJ-004):
 /// the sub-page S1 = N3 to N0, pointer packet 1 + N8 N7, pointer triplet
-/// 1 + 3 × N6 N5 + type, and the half that N4 selects.
+/// 1 + 3 × N6 N5 + type, and the half that N4 selects. The object found
+/// borrows the object page from `lookup`.
+///
+/// # Errors
+/// [`Absent::NoLink`] when the page names no object page for the source,
+/// [`Absent::NotReceived`] when that page, its sub-page or a packet it needs
+/// is not stored, [`Absent::NoPointer`] when the pointer is not there or
+/// unused, [`Absent::NotDefinition`] when the triplet it points to is not
+/// an Object Definition of the kind invoked, and [`Absent::WrongLevel`]
+/// when the definition excludes `level`.
 pub fn find_public<'s>(
     lookup: &EnhancementLookup<'s>,
     link: Option<PageLink>,
@@ -167,6 +183,10 @@ pub struct Extent {
 /// position addressed bounds the object's open area (Annex A.8). In
 /// Adaptive and Passive objects, Full Row Colour and Address Display Row 0
 /// are ignored entirely (decision E.51), so they move nothing here either.
+///
+/// # Errors
+/// [`Absent::NotReceived`] when a packet the body needs before its end was
+/// not received: the object is then treated as absent (REQ-OBJ-006).
 pub fn prescan(object: &ObjectRef<'_>, page: &StoredPage) -> Result<Extent, Absent> {
     let restricted = matches!(object.kind, ObjectKind::Adaptive | ObjectKind::Passive);
     let limit = object.first.saturating_add(OBJECT_BODY_TRIPLETS).min(object.body.capacity());

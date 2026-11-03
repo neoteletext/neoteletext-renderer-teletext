@@ -180,6 +180,11 @@ pub(super) fn load_live(options: &Options, wanted: Option<PageAddress>) -> Resul
 }
 
 /// Opens an input for a viewer: a file read whole, or a live feed.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when the file cannot be read, or the live feed's fetcher cannot be
+/// started.
 pub fn open_live(options: &Options) -> Result<(Session, Box<dyn Source>), Failure> {
     if is_live(&options.input) {
         let config = config(options)?;

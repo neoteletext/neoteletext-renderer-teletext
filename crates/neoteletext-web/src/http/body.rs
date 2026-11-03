@@ -45,6 +45,10 @@ pub struct BodyDecoder {
 
 impl BodyDecoder {
     /// A decoder for `framing` that accepts at most `limit` body bytes.
+    ///
+    /// # Errors
+    /// [`HttpError::BodyTooLarge`] when the response's `Content-Length` is
+    /// over `limit`, so that the body is refused before any of it is read.
     pub fn new(framing: Framing, limit: usize) -> Result<Self, HttpError> {
         let (remaining, done) = match framing {
             Framing::None => (0, true),
@@ -87,6 +91,11 @@ impl BodyDecoder {
 
     /// The connection closed: completes a close-delimited body, and is an
     /// error for any other unfinished body.
+    ///
+    /// # Errors
+    /// [`HttpError::Truncated`] when the body is unfinished and its framing
+    /// is a `Content-Length` or chunked: the connection closed before the
+    /// whole body arrived.
     pub fn finish_at_close(&mut self) -> Result<(), HttpError> {
         if self.done {
             return Ok(());
@@ -100,6 +109,17 @@ impl BodyDecoder {
     }
 
     /// Decodes from `input`, returning at most one run of body data.
+    ///
+    /// # Errors
+    /// The body is refused, and the connection must be dropped, when:
+    /// - [`HttpError::BodyTooLarge`]: the body, or the chunk announced, would
+    ///   take the bytes received past the decoder's limit;
+    /// - [`HttpError::BadChunk`]: a chunked body breaks RFC 9112 section
+    ///   7.1: a chunk-size line or trailer line longer than
+    ///   [`MAX_CHUNK_LINE`], a size that is empty, not hexadecimal or longer
+    ///   than [`MAX_CHUNK_SIZE_DIGITS`] digits, a control character in a
+    ///   chunk extension, a line not ended by CR LF or holding another CR,
+    ///   or chunk data not followed directly by CR LF.
     pub fn feed<'a>(&mut self, input: &'a [u8]) -> Result<BodyStep<'a>, HttpError> {
         if self.done {
             return Ok(BodyStep { consumed: 0, data: &[], done: true });

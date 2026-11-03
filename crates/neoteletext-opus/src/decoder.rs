@@ -238,6 +238,12 @@ impl Decoder {
     /// Decode `packet` into `pcm`. A packet outside the profile is refused before anything
     /// changes. A frame of a byte or less is one the encoder left out, and is concealed
     /// (RFC 6716 §3.2.1).
+    ///
+    /// # Errors
+    /// [`DecodeError::Packet`] when the packet is outside the profile; nothing was decoded and
+    /// the decoder is unchanged. [`DecodeError::Corrupt`] when the frame used more bits than it
+    /// holds or SILK could not decode it; the decoder has moved on and `pcm` holds what was
+    /// decoded.
     pub fn decode(&mut self, packet: &[u8], pcm: &mut [i16; FRAME_SAMPLES]) -> Result<(), DecodeError> {
         let packet = Packet::parse(packet).map_err(DecodeError::Packet)?;
         if packet.frame.len() <= 1 {

@@ -39,6 +39,11 @@ pub struct FontText<'a> {
 /// when they are tall and 12 by 10 otherwise. A line that would be longer
 /// than REQ-FNT-002 allows, more glyphs than it allows, or glyphs of two
 /// heights, is an error and nothing more is written.
+///
+/// # Errors
+/// [`io::ErrorKind::InvalidInput`] for more glyphs than
+/// [`FONT_MAX_CHARACTERS`], glyphs of two heights or a line longer than
+/// REQ-FNT-002 allows, and the writer's error when it fails.
 pub fn write_font(out: &mut dyn Write, text: &FontText<'_>, glyphs: &[FontGlyph]) -> io::Result<()> {
     if glyphs.len() > FONT_MAX_CHARACTERS {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "more than 1,024 characters"));

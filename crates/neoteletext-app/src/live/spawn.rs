@@ -11,6 +11,11 @@ use std::sync::mpsc;
 
 /// Starts the fetcher process for `address`. Must run before sandboxing:
 /// starting a program is blocked afterwards.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// for a link that wraps no web address, or when the fetcher program cannot
+/// be found or started.
 pub fn open(
     address: &str,
     no_sandbox: bool,

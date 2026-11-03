@@ -84,6 +84,19 @@ fn in_page_order<'a, 'b>(sub_pages: &'a [SubPageFile<'b>]) -> Vec<&'a SubPageFil
 /// The files of one page: `NNN.t42` for a page of one sub-page; otherwise
 /// `NNN.t42` holding the first, then each sub-page's `NNN/SSSS.t42` and the
 /// parts of its list `NNN/P.sub`, in the page's order (REQ-1887, REQ-1888).
+///
+/// # Errors
+/// No file is made when:
+/// - [`LayoutError::Empty`]: `sub_pages` is empty;
+/// - [`LayoutError::TooMany`]: there are more than [`MAX_ENTRIES`]
+///   sub-pages;
+/// - [`LayoutError::Duplicate`]: two sub-pages have one sub-code;
+/// - [`LayoutError::SubCode`]: on a page of several sub-pages, a sub-code
+///   names no sub-page's file, such as 3F7F;
+/// - [`LayoutError::Content`]: a sub-page's T42 is not whole packets with
+///   valid addresses, or is longer than its file may be: [`MAX_SUBPAGE_FILE`]
+///   for a sub-page's own file, [`DEFAULT_PAGE_LIMIT`] for a page of one
+///   sub-page.
 pub fn page_files(page: PageAddress, sub_pages: &[SubPageFile<'_>]) -> Result<Vec<(String, Vec<u8>)>, LayoutError> {
     let sub_pages = in_page_order(sub_pages);
     let Some(first) = sub_pages.first() else { return Err(LayoutError::Empty) };
@@ -155,6 +168,10 @@ impl ChannelFiles {
 
     /// Adds a page's files ([`page_files`]), with its first sub-page for the
     /// bundle.
+    ///
+    /// # Errors
+    /// [`LayoutError::PageTwice`] when the page was already added, and
+    /// otherwise the errors of [`page_files`]; nothing is added then.
     pub fn add_page(&mut self, page: PageAddress, sub_pages: &[SubPageFile<'_>]) -> Result<(), LayoutError> {
         if self.pages.contains_key(&page) {
             return Err(LayoutError::PageTwice(page));
@@ -169,6 +186,13 @@ impl ChannelFiles {
     /// `NNN.t42` holding all of them, to be bundled whole: an enhancement
     /// data page, whose sub-pages a display page asks for together
     /// (REQ-WEB-022) and which are never listed as sub-pages (REQ-NUM-022).
+    ///
+    /// # Errors
+    /// Nothing is added when:
+    /// - [`LayoutError::PageTwice`]: the page was already added;
+    /// - [`LayoutError::Content`] with no sub-code: the T42 is longer than
+    ///   [`DEFAULT_PAGE_LIMIT`], or is not whole packets with valid
+    ///   addresses.
     pub fn add_whole_page(&mut self, page: PageAddress, t42: &[u8]) -> Result<(), LayoutError> {
         if self.pages.contains_key(&page) {
             return Err(LayoutError::PageTwice(page));

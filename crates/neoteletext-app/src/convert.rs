@@ -38,6 +38,11 @@ pub const EDITTF_ADDRESS_PREFIX: &[u8] = b"https://edit.tf/#";
 /// sub-page (REQ-INP-014, REQ-INP-018). The output and the input are
 /// opened, then the sandbox is applied, before the input is parsed
 /// (REQ-SEC-017).
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when an input or output cannot be opened, the sandbox cannot be applied,
+/// the input holds no teletext, or the page asked for is not in it.
 pub fn convert(
     options: &Options,
     output: &Path,

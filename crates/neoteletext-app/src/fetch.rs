@@ -23,6 +23,11 @@ pub use wakes::Wake;
 const RESOLVER_PATHS: [&str; 6] = ["/etc", "/run/systemd/resolve", "/usr/lib", "/lib", "/usr/lib64", "/lib64"];
 
 /// Runs the fetcher for `address` until the decoder process goes away.
+///
+/// # Errors
+/// The exit status and the message for the user (DEC-2451): a proxy
+/// that is not `http://host:port` or `socks5://host:port`, a sandbox that
+/// cannot be applied, or an unknown zxnet live feed.
 pub fn run(address: &str, no_sandbox: bool, allow_local: &[IpAddr], proxy: Option<&str>) -> Result<(), (u8, String)> {
     let proxy = proxy.map(Proxy::parse).transpose().map_err(|error| (crate::exit::USAGE, error.to_string()))?;
     let _ = rustls::crypto::ring::default_provider().install_default();
