@@ -350,6 +350,8 @@ The receiver keeps the newest 32 blocks of a live sound and joins at the newest 
 
 A live sound fades out after its **stall time** without new blocks. That is EN 300 708 §6.7.1.1's mute, with the time this profile defines: 2 seconds.
 
+A sender writes a live sound's blocks with one `encode::LiveEncoder` for the life of the sound, handing it samples as they come in batches of any length. The encoder keeps the IMA ADPCM step index where the last block ended, holds samples too few for a block until the next batch, and numbers the blocks on, so the blocks are byte for byte those of the whole sound encoded at once; `finish` pads the last part block with silence. An encoder made afresh for each batch would start every batch from the smallest step, losing 2 to 7 dB of signal-to-noise ratio at each restart as the server measured, and would pad every part block with silence in the middle of the sound (DEC-2467).
+
 ---
 
 ## 9. Music

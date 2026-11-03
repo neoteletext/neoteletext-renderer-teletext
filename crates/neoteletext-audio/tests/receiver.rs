@@ -5,7 +5,7 @@
 //! REQ-AUD-020).
 #![cfg(feature = "encode")]
 
-use neoteletext_audio::encode::{Command, Sound, packets};
+use neoteletext_audio::encode::{Command, LiveEncoder, Sound, packets};
 use neoteletext_audio::ima::decode_block;
 use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
@@ -377,11 +377,9 @@ fn live_sound() -> Sound {
 /// value `n` in every sample, one block a record.
 #[cfg(feature = "pcm16")]
 fn live_blocks(sound: &Sound, first: u16, count: u16) -> Vec<Packet> {
+    let mut encoder = LiveEncoder::new(sound, first).unwrap();
     let records: Vec<Vec<u8>> = (0..count)
-        .flat_map(|offset| {
-            let index = first.wrapping_add(offset);
-            sound.live_records(index, &[i16::try_from(index % 1000).unwrap(); 50])
-        })
+        .flat_map(|offset| encoder.records(&[i16::try_from(first.wrapping_add(offset) % 1000).unwrap(); 50]))
         .collect();
     packets(0, 0, &records).0
 }
@@ -552,8 +550,8 @@ fn ramps(got: &[i16], level: i16, rising: bool) -> bool {
 /// The packets of live blocks `first..first + count`, every sample `level`.
 #[cfg(feature = "pcm16")]
 fn level_blocks(sound: &Sound, first: u16, count: u16, level: i16) -> Vec<Packet> {
-    let records: Vec<Vec<u8>> =
-        (0..count).flat_map(|offset| sound.live_records(first.wrapping_add(offset), &[level; 50])).collect();
+    let mut encoder = LiveEncoder::new(sound, first).unwrap();
+    let records: Vec<Vec<u8>> = (0..count).flat_map(|_| encoder.records(&[level; 50])).collect();
     packets(0, 0, &records).0
 }
 
@@ -1222,9 +1220,11 @@ mod ima_to_the_sink {
         receiver.push_record(&sound.object_record().unwrap(), &mut sink);
         receiver.push_record(&play(0, 1, &sound, None).record(), &mut sink);
         // Block 2 is lost for good.
+        let mut encoder = LiveEncoder::new(&sound, 0).unwrap();
         for (index, block) in (0_u16..).zip(pcm.chunks(per_block)) {
+            let records = encoder.records(block);
             if index != 2 {
-                for record in sound.live_records(index, block) {
+                for record in records {
                     receiver.push_record(&record, &mut sink);
                 }
             }
@@ -1235,5 +1235,52 @@ mod ima_to_the_sink {
         assert!(sink.given[2].3, "the third block given is block 3, after the silence");
         assert_eq!(sink.silences, 1, "block 2 as silence");
         assert_eq!(sink.samples_calls, 0);
+    }
+}
+
+/// REQ-AUD-014: a live sound encoded in many calls is the sound encoded in
+/// one. Before the live encoder, each call started the IMA ADPCM step index
+/// afresh, so a sine wave sent one block a call differed from block 1 on;
+/// and a call that ended part way through a block padded it with silence.
+#[test]
+fn a_live_sound_encoded_in_batches_equals_the_sound_encoded_in_one_call() {
+    // A sine wave of about 89 hertz at 8 kilohertz: 2 pi times 89 over
+    // 8,000 radians a sample, at a level of 12,000 so the steps adapt.
+    let sine = |n: usize| {
+        let radians = f64::from(u32::try_from(n).unwrap()) * 2.0 * std::f64::consts::PI * 89.0 / 8_000.0;
+        let level = (radians.sin() * 12_000.0).round();
+        // Within the range of i16 by the level above.
+        #[allow(clippy::cast_possible_truncation, reason = "the level is at most 12,000")]
+        let sample = level as i16;
+        sample
+    };
+    for codec in [Codec::ImaAdpcm, Codec::Pcm16] {
+        let block = if codec == Codec::ImaAdpcm { IMA_BLOCK_SMALL } else { 100 };
+        let sound = Sound::live(7, 1, codec, 8_000, block).unwrap();
+        let per_block = usize::try_from(sound.samples_per_block()).unwrap();
+        let pcm: Vec<i16> = (0..per_block * 6 + per_block / 3).map(sine).collect();
+        let mut whole = LiveEncoder::new(&sound, 40).unwrap();
+        let mut one = whole.records(&pcm);
+        one.extend(whole.finish());
+        // One block a call, and then batches of an awkward length that end
+        // part way through blocks.
+        for batch in [per_block, per_block / 2 + 7] {
+            let mut encoder = LiveEncoder::new(&sound, 40).unwrap();
+            let mut many: Vec<Vec<u8>> = pcm.chunks(batch).flat_map(|samples| encoder.records(samples)).collect();
+            many.extend(encoder.finish());
+            assert_eq!(many, one, "{codec:?} in batches of {batch} samples");
+            assert_eq!(encoder.next_block(), 47, "seven blocks numbered from 40");
+        }
+        // And the blocks decode to the sine wave, each on its own.
+        if codec == Codec::ImaAdpcm {
+            let header = neoteletext_audio::record::DATA_FIXED;
+            let mut out = vec![0_i16; per_block];
+            for (record, samples) in one.iter().zip(pcm.chunks(per_block)) {
+                let (_, body) = neoteletext_audio::record::split(record).unwrap();
+                assert_eq!(decode_block(&body[header..], &mut out).unwrap(), per_block);
+                let error: i64 = samples.iter().zip(&out).map(|(&a, &b)| (i64::from(a) - i64::from(b)).abs()).sum();
+                assert!(error / i64::try_from(samples.len()).unwrap() < 600, "a mean error of {error}");
+            }
+        }
     }
 }
