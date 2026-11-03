@@ -103,6 +103,23 @@ pub trait VoiceSink {
     /// sink plays nothing differently for it, and may ignore it.
     fn concealed(&mut self, _sound: SoundId, _block: u16, _samples: u32) {}
 
+    /// Where the voice on `channel` has got to in the stored sound it plays:
+    /// the sample of that sound it plays next, as near as the sink knows to
+    /// what is being heard (`design/audio.md` section 10.1; tellyboy's
+    /// `tb_audio_voice_position`; DEC-2470). `None` when the sink does not
+    /// know, the voice plays a live sound or nothing, or the sound has not
+    /// started; the provided answer is `None`.
+    ///
+    /// When it answers, the receiver judges a stored sound's blocks late by
+    /// it rather than by its own clock, so a sink's output latency, or a port
+    /// that ticks late, does not report a block concealed that arrives
+    /// before the voice reaches it (REQ-AUD-013); and an Opus sound's
+    /// samples decoded after a gap the voice has already entered are faded
+    /// in from where the voice is.
+    fn position(&self, _channel: u8) -> Option<u32> {
+        None
+    }
+
     /// Whether the sink decodes IMA ADPCM itself (REQ-AUD-018, DEC-2449).
     /// When it does, an IMA ADPCM sound's blocks come to
     /// [`VoiceSink::ima_samples`] and [`VoiceSink::ima_stream`] undecoded,

@@ -193,6 +193,22 @@ impl Mixer {
         self.master.to(target, MIN_RAMP_MS, self.rate_hz);
     }
 
+    /// Where the voice plays its stored sound: the sample it plays next, for
+    /// a port's `VoiceSink::position` (`neoteletext-audio`, DEC-2470). `None`
+    /// for a voice that is silent, stopping or playing a live sound, whose
+    /// position counts its ring and not the sound. It is the mixer's
+    /// position: a port whose output buffer lies between the mixer and the
+    /// listener subtracts what that buffer holds.
+    #[must_use]
+    pub fn position(&self, voice: usize) -> Option<u32> {
+        let playing = self.voices.get(voice)?.playing.filter(|playing| !playing.stopping)?;
+        let sound = self.sounds.iter().find(|sound| sound.key() == playing.key)?;
+        if sound.is_live() {
+            return None;
+        }
+        u32::try_from(playing.whole.max(0)).ok()
+    }
+
     /// Whether any voice is sounding or about to.
     #[must_use]
     pub fn active(&self) -> bool {

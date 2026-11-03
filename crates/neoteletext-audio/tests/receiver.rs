@@ -33,6 +33,9 @@ struct Recorder {
     /// The samples received, per sound, assembled.
     pcm: Vec<(SoundId, Vec<i16>)>,
     channels: u8,
+    /// What it answers for every channel's voice position, as a sink that
+    /// knows its own output would (DEC-2470); `None` as one that does not.
+    position: Option<u32>,
 }
 
 impl Recorder {
@@ -92,6 +95,9 @@ impl VoiceSink for Recorder {
     }
     fn concealed(&mut self, sound: SoundId, block: u16, samples: u32) {
         self.calls.push(Call::Concealed(sound, block, samples));
+    }
+    fn position(&self, _channel: u8) -> Option<u32> {
+        self.position
     }
 }
 
@@ -661,6 +667,62 @@ fn a_progressive_play_reports_each_block_not_there_when_it_is_due() {
     assert_eq!(receiver.statistics().concealed, 1);
 }
 
+/// REQ-AUD-013 (DEC-2470, TODO-1146): a sink that reports its voice's
+/// position is believed over the receiver's clock. Its voice runs 500
+/// samples behind that clock, as a sink with 62.5 ms of output latency
+/// would, so block 2 is not due when the clock says it is, and arrives in
+/// time; nothing is reported concealed. Before the sink was asked, block 2
+/// was reported concealed at 1,125 ms though the voice never met it
+/// missing.
+#[cfg(feature = "pcm16")]
+#[test]
+fn a_sink_behind_the_receivers_clock_is_judged_by_its_own_position() {
+    let (sound, data) = level_sound(1000);
+    let mut command = play(0, 1, &sound, None);
+    command.flags = FLAG_PROGRESSIVE;
+    let mut arena = vec![0; ARENA];
+    let mut receiver = Receiver::<8, 2>::new(&mut arena);
+    let mut sink = Recorder::new();
+    receiver.tick(1_000, &mut sink);
+    let records = [sound.object_record().unwrap(), command.record(), data[0].clone(), data[1].clone()];
+    push(&mut receiver, &packets(0, 0, &records).0, &mut sink);
+    // By the clock, block 2 starts 1 000 samples in: 125 ms at 8 kHz.
+    assert_eq!(receiver.next_tick_ms(), Some(1_125));
+    sink.position = Some(500);
+    receiver.tick(1_125, &mut sink);
+    let concealed = |sink: &Recorder| sink.calls.iter().filter(|call| matches!(call, Call::Concealed(..))).count();
+    assert_eq!(concealed(&sink), 0, "the voice is 500 samples short of block 2");
+    // From the voice at 500, block 2 is 500 samples, 62.5 ms, away.
+    assert_eq!(receiver.next_tick_ms(), Some(1_188));
+    push(&mut receiver, &packets(0, 7, &data[2..4]).0, &mut sink);
+    sink.position = Some(1_900);
+    receiver.tick(1_400, &mut sink);
+    assert_eq!(concealed(&sink), 0);
+    assert_eq!(receiver.statistics().concealed, 0);
+}
+
+/// REQ-AUD-013 (DEC-2470, TODO-1146): a sink whose voice runs ahead of the
+/// receiver's clock is believed too, so a missing block is reported when
+/// the voice reaches it, before the clock would have said.
+#[cfg(feature = "pcm16")]
+#[test]
+fn a_sink_ahead_of_the_receivers_clock_has_a_missing_block_reported_sooner() {
+    let (sound, data) = level_sound(1000);
+    let id = SoundId { handle: 3, generation: 1 };
+    let mut command = play(0, 1, &sound, None);
+    command.flags = FLAG_PROGRESSIVE;
+    let mut arena = vec![0; ARENA];
+    let mut receiver = Receiver::<8, 2>::new(&mut arena);
+    let mut sink = Recorder::new();
+    receiver.tick(1_000, &mut sink);
+    let records = [sound.object_record().unwrap(), command.record(), data[0].clone(), data[1].clone()];
+    push(&mut receiver, &packets(0, 0, &records).0, &mut sink);
+    sink.position = Some(1_010);
+    receiver.tick(1_050, &mut sink);
+    let concealed: Vec<Call> = sink.calls.iter().filter(|call| matches!(call, Call::Concealed(..))).cloned().collect();
+    assert_eq!(concealed, [Call::Concealed(id, 2, 500)]);
+}
+
 /// An IMA ADPCM sound, its records and a play of it, as a carousel sends them.
 fn ima_records() -> (Sound, Vec<Vec<u8>>) {
     let sound = Sound::new(1, 1, Codec::ImaAdpcm, 8_000, IMA_BLOCK_SMALL, &tone(3000)).unwrap();
@@ -880,6 +942,47 @@ mod opus {
             &mut sink,
         );
         assert_eq!(assembled(&sink, &sound), want, "whole once block 3 is here");
+    }
+
+    /// REQ-AUD-013 (DEC-2470, TODO-1146): when block 3 comes after the voice
+    /// has passed the faded end of block 2 into silence, the samples the
+    /// voice meets are faded in from where it is, so it does not step from
+    /// silence into a sample mid-block. Before the sink was asked where its
+    /// voice was, they were written whole.
+    #[test]
+    fn a_stored_opus_sound_resumed_behind_its_voice_fades_in_where_the_voice_is() {
+        const FADE_48_KHZ: usize = 240;
+        let data = packets(8, 5);
+        let sound = Sound::opus(5, 1, PACKET, &data, 8 * 960).unwrap();
+        let packet_bytes = usize::from(PACKET);
+        let mut start = play(0, 1, &sound, None);
+        start.flags = PROGRESSIVE;
+        let mut arena = vec![0; ARENA];
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        let mut sink = Recorder::new();
+        let mut records = vec![sound.object_record().unwrap(), start.record()];
+        records.extend(sound.packet_records(0, &data[..3 * packet_bytes]).unwrap());
+        records.extend(sound.packet_records(4, &data[4 * packet_bytes..]).unwrap());
+        push(&mut receiver, &neoteletext_audio::encode::packets(0, 0, &records).0, &mut sink);
+        let expected: Vec<Option<&[u8]>> = data.chunks(packet_bytes).map(Some).collect();
+        let want = decoded(&expected);
+        // The voice is 100 samples into the silence where block 3 belongs.
+        let voice = 3 * 960 + 100;
+        sink.position = Some(u32::try_from(voice).unwrap());
+        let late = sound.packet_records(3, &data[3 * packet_bytes..4 * packet_bytes]).unwrap();
+        push(&mut receiver, &neoteletext_audio::encode::packets(0, 9, &late).0, &mut sink);
+        let held = assembled(&sink, &sound);
+        assert_eq!(held[voice + FADE_48_KHZ..], want[voice + FADE_48_KHZ..], "whole after the fade");
+        let length = i32::try_from(FADE_48_KHZ).unwrap();
+        for (n, (&got, &whole)) in (0..).zip(held[voice..voice + FADE_48_KHZ].iter().zip(&want[voice..])) {
+            let faded = i32::from(whole) * (n + 1) / (length + 1);
+            // The ramp is in 16-bit fixed point: within half a per cent.
+            assert!(
+                (i32::from(got) - faded).abs() <= i32::from(whole).abs() / 200 + 2,
+                "sample {n} after the voice: {got} for {whole}, want {faded}"
+            );
+        }
+        assert!(want[voice..voice + 10].iter().any(|&sample| sample.abs() > 200), "the sound is not silent there");
     }
 
     // Verifies REQ-AUD-005 and REQ-AUD-013 for Opus (TODO-1146 item 3): a
