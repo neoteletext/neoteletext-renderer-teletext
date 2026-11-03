@@ -502,3 +502,7 @@ pub fn latin_text<const N: usize>(codes: &[u8; N]) -> [char; N] {
 #[cfg(test)]
 #[rustfmt::skip]
 mod test_tables;
+
+// The standard's G0 and G2 tables transcribed whole (REQ-464).
+#[cfg(test)]
+mod standard_tables;
