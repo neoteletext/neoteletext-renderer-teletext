@@ -169,6 +169,10 @@ pub struct Written {
     pub triplets: usize,
 }
 
+/// U+200C, which keeps two Arabic-script letters from joining (DEC-2396).
+#[cfg(all(feature = "std", feature = "tti"))]
+const ZERO_WIDTH_NON_JOINER: char = '\u{200C}';
+
 /// Writes `text` as page `mpp` in the set `choice` names, for `level`
 /// (REQ-CLI-010, REQ-2151).
 ///
@@ -191,6 +195,14 @@ pub fn write_text(choice: Choice<'_>, level: Level, mpp: u16, text: &str) -> Res
     };
     let sets = page_sets(value, own_level).ok_or_else(unknown)?;
     let text = kana::normalise(text);
+    // DEC-2396: in a set whose letters the receiver joins, a cell between
+    // two letters is the only way to keep them apart, so the zero-width
+    // non-joiner takes a space cell; every other set refuses it.
+    let text = if matches!(sets.default, CharSet::G0(G0 { set, .. }) if set.is_joined()) {
+        text.replace(ZERO_WIDTH_NON_JOINER, " ")
+    } else {
+        text
+    };
     let text = if matches!(sets.default, CharSet::G0(G0 { set: G0Set::Arabic, .. })) {
         table44::join(&text, |character| sets.holds(character) || sets.g2_holds(character))
     } else {
