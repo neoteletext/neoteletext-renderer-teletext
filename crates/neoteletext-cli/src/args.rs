@@ -386,7 +386,8 @@ pub(crate) enum Command {
         /// The gain, 0 to 100 per cent.
         #[arg(long, default_value_t = 80)]
         gain: u8,
-        /// `ima` (IMA ADPCM, a quarter of the size) or `pcm`.
+        /// `ima` (IMA ADPCM, a quarter of the size) or `pcm`, from a WAVE
+        /// file; or `opus`, an encoder's packets from an Ogg Opus file.
         #[arg(long, default_value = "ima")]
         codec: String,
         /// The sound's handle, 0 to 255.
@@ -406,7 +407,9 @@ pub(crate) enum Command {
         /// With `--live`, the packets a second the file is played at.
         #[arg(long, default_value_t = crate::commands::PLAYER_PACKETS_PER_SECOND)]
         pace: u32,
-        /// A WAVE file of 16-bit PCM at one of the profile's rates.
+        /// A WAVE file of 16-bit PCM at one of the profile's rates, or with
+        /// `--codec opus` an Ogg Opus file of the profile: mono, 20 ms
+        /// constant-rate packets of 1 to 160 bytes.
         input: PathBuf,
         /// The T42 file to write.
         output: PathBuf,

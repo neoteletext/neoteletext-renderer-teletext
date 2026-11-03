@@ -77,7 +77,7 @@ fn unpad(bytes: &[u8]) -> Result<&[u8], PacketError> {
 }
 
 /// Why a packet was refused.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PacketError {
     /// No bytes at all: a loss is told with `Decoder::conceal`.
     Empty,
@@ -91,6 +91,16 @@ pub enum PacketError {
     Malformed,
     /// A frame other than 20 ms.
     NotTwentyMs,
+}
+
+/// Checks that `bytes` is a packet of the profile (REQ-AUD-022), as the
+/// decoder checks it before its state changes, without decoding it: for a
+/// publishing tool that carries an encoder's packets.
+///
+/// # Errors
+/// The reason the decoder would refuse it.
+pub fn check_packet(bytes: &[u8]) -> Result<(), PacketError> {
+    Packet::parse(bytes).map(|_| ())
 }
 
 /// A packet that fits the profile: its frame's mode and bandwidth, and the frame's bytes.
@@ -171,37 +181,37 @@ mod tests {
 
     #[test]
     fn a_bare_frame_is_the_bytes_after_the_toc() {
-        let packet = Packet::parse(&[HYBRID_FB_20, 1, 2, 3]).ok().expect("profile packet");
+        let packet = Packet::parse(&[HYBRID_FB_20, 1, 2, 3]).expect("profile packet");
         assert!(packet.mode == Mode::Hybrid && packet.frame == [1, 2, 3]);
     }
 
     #[test]
     fn a_padded_frame_loses_its_count_lengths_and_padding() {
         // Count 1 with 3 bytes of padding, and count 1 without.
-        let packet = Packet::parse(&[HYBRID_FB_20 | CODE_3, 0x41, 3, 7, 8, 0, 0, 0]).ok().expect("profile packet");
+        let packet = Packet::parse(&[HYBRID_FB_20 | CODE_3, 0x41, 3, 7, 8, 0, 0, 0]).expect("profile packet");
         assert_eq!(packet.frame, [7, 8]);
-        let packet = Packet::parse(&[HYBRID_FB_20 | CODE_3, 0x01, 7, 8]).ok().expect("profile packet");
+        let packet = Packet::parse(&[HYBRID_FB_20 | CODE_3, 0x01, 7, 8]).expect("profile packet");
         assert_eq!(packet.frame, [7, 8]);
         // A length byte of 255 is 254 bytes and another length: more than a packet can hold.
         let mut long = [0u8; MAX_PACKET];
         long[..4].copy_from_slice(&[HYBRID_FB_20 | CODE_3, 0x41, 255, 0]);
-        assert!(refusal(&long) == Some(PacketError::Malformed));
+        assert_eq!(refusal(&long), Some(PacketError::Malformed));
     }
 
     /// REQ-AUD-022: every refusal.
     #[test]
     fn everything_outside_the_profile_is_refused() {
-        assert!(refusal(&[]) == Some(PacketError::Empty));
-        assert!(refusal(&[HYBRID_FB_20; MAX_PACKET + 1]) == Some(PacketError::TooLong));
-        assert!(refusal(&[HYBRID_FB_20 | 0x04, 0]) == Some(PacketError::Stereo));
-        assert!(refusal(&[HYBRID_FB_20 | 1, 0, 0]) == Some(PacketError::SeveralFrames));
-        assert!(refusal(&[HYBRID_FB_20 | 2, 0, 0]) == Some(PacketError::SeveralFrames));
-        assert!(refusal(&[HYBRID_FB_20 | CODE_3, 0x02, 0, 0]) == Some(PacketError::SeveralFrames));
-        assert!(refusal(&[HYBRID_FB_20 | CODE_3]) == Some(PacketError::Malformed));
-        assert!(refusal(&[HYBRID_FB_20 | CODE_3, 0x00, 0]) == Some(PacketError::Malformed));
-        assert!(refusal(&[HYBRID_FB_20 | CODE_3, 0x41]) == Some(PacketError::Malformed));
-        assert!(refusal(&[HYBRID_FB_20 | CODE_3, 0x41, 5, 0]) == Some(PacketError::Malformed));
-        assert!(refusal(&[HYBRID_FB_20 | CODE_3, 0x41, 255]) == Some(PacketError::Malformed));
+        assert_eq!(refusal(&[]), Some(PacketError::Empty));
+        assert_eq!(refusal(&[HYBRID_FB_20; MAX_PACKET + 1]), Some(PacketError::TooLong));
+        assert_eq!(refusal(&[HYBRID_FB_20 | 0x04, 0]), Some(PacketError::Stereo));
+        assert_eq!(refusal(&[HYBRID_FB_20 | 1, 0, 0]), Some(PacketError::SeveralFrames));
+        assert_eq!(refusal(&[HYBRID_FB_20 | 2, 0, 0]), Some(PacketError::SeveralFrames));
+        assert_eq!(refusal(&[HYBRID_FB_20 | CODE_3, 0x02, 0, 0]), Some(PacketError::SeveralFrames));
+        assert_eq!(refusal(&[HYBRID_FB_20 | CODE_3]), Some(PacketError::Malformed));
+        assert_eq!(refusal(&[HYBRID_FB_20 | CODE_3, 0x00, 0]), Some(PacketError::Malformed));
+        assert_eq!(refusal(&[HYBRID_FB_20 | CODE_3, 0x41]), Some(PacketError::Malformed));
+        assert_eq!(refusal(&[HYBRID_FB_20 | CODE_3, 0x41, 5, 0]), Some(PacketError::Malformed));
+        assert_eq!(refusal(&[HYBRID_FB_20 | CODE_3, 0x41, 255]), Some(PacketError::Malformed));
         // Every configuration but the 20 ms ones (RFC 6716 §3.1, Table 2).
         for config in 0..32u8 {
             let twenty_ms = matches!(config, 1 | 5 | 9 | 13 | 15 | 19 | 23 | 27 | 31);

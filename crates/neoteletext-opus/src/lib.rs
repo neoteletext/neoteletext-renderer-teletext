@@ -39,4 +39,4 @@ mod silk;
 mod slices;
 
 pub use decoder::{DecodeError, Decoder, FRAME_SAMPLES, SAMPLE_RATE};
-pub use packet::{MAX_PACKET, PacketError};
+pub use packet::{MAX_PACKET, PacketError, check_packet};

@@ -668,6 +668,7 @@ dependencies = [
  "neoteletext-formats",
  "neoteletext-image",
  "neoteletext-input",
+ "neoteletext-opus",
  "neoteletext-qrkeyboard",
  "neoteletext-web",
  "unicode-normalization",

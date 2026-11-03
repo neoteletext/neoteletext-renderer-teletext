@@ -59,6 +59,9 @@ pub mod idl;
 // kept for microcontroller ports, which build it with the `ima` feature.
 #[cfg(feature = "ima")]
 pub mod ima;
+// Reading an encoder's Ogg Opus file needs the decoder's packet check.
+#[cfg(all(feature = "encode", feature = "opus"))]
+pub mod ogg;
 pub mod port;
 mod profile;
 pub mod receiver;

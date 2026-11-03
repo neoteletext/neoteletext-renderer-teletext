@@ -129,7 +129,7 @@ The owner chose Opus (RFC 6716, with RFC 8251's corrections) for sound beside PC
 
 - **One packet a block, all one length.** The OBJECT's block bytes are the packet length, 1 to 160, the same for every block: a constant-rate encoder writes them so (`ffmpeg -c:a libopus -b:a 16k -vbr off -frame_duration 20`, 40 bytes a packet). A block holds 960 samples; the final block is whole. Rate code 7 only. A DATA record holds 25 packets of 40 bytes.
 - **Decoded in order** (REQ-AUD-025): the receiver keeps two decoders, each following one sound; a stored sound is decoded from its first block as far as its blocks have arrived without a gap; a live sound's lost packet is concealed by its decoder, not given as silence.
-- **Not encoded by the engine:** a publisher's encoder writes the packets, and the publishing tools carry them as they are.
+- **Not encoded by the engine:** a publisher's encoder writes the packets, and the publishing tools carry them as they are. `neottx sound --codec opus` reads them from an encoder's Ogg Opus file (RFC 3533, RFC 7845) with the engine's own bounded reader, `neoteletext_audio::ogg`: one logical stream, every page's CRC and sequence checked, a mono header of mapping family 0, every packet of the profile and of one length; the last granule position trims the final frame, and the pre-skip is played, since the profile has no field for it (DEC-2448).
 
 The decoder, `neoteletext-opus`:
 

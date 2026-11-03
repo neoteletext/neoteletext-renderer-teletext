@@ -18,7 +18,8 @@ neoteletext-core = { path = "../crates/neoteletext-core" }
 neoteletext-formats = { path = "../crates/neoteletext-formats", features = ["default", "std"] }
 neoteletext-slicer = { path = "../crates/neoteletext-slicer" }
 neoteletext-web = { path = "../crates/neoteletext-web", features = ["default", "dbsc"] }
-neoteletext-audio = { path = "../crates/neoteletext-audio" }
+# `encode` for the Ogg Opus reader of the publishing tools (TODO-1228).
+neoteletext-audio = { path = "../crates/neoteletext-audio", features = ["default", "encode"] }
 neoteletext-opus = { path = "../crates/neoteletext-opus" }
 neoteletext-input = { path = "../crates/neoteletext-input" }
 
@@ -268,6 +269,13 @@ bench = false
 [[bin]]
 name = "push_reader"
 path = "fuzz_targets/push_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ogg_opus"
+path = "fuzz_targets/ogg_opus.rs"
 test = false
 doc = false
 bench = false

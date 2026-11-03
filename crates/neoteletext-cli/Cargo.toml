@@ -21,7 +21,7 @@ neoteletext-app.workspace = true
 # with `neottx html`'s pages.
 neoteletext-web = { workspace = true, features = ["alloc"] }
 # Writing sounds as the audio profile's packets (REQ-CLI-011).
-neoteletext-audio = { workspace = true, features = ["encode"], optional = true }
+neoteletext-audio = { workspace = true, features = ["encode", "opus"], optional = true }
 # DEVELOPMENT.md section 7: an application crate pins its own
 # dependencies exactly, each with its licence.
 # MIT or Apache-2.0: the command line.
@@ -40,9 +40,13 @@ unicode-normalization = { version = "=0.1.25", optional = true }
 
 [dev-dependencies]
 # The tests read `neottx sound`'s output back through the receiver, which
-# decodes PCM16 only with the `pcm16` feature (decision E.131); the program
-# itself only writes sounds, which needs no decoder.
-neoteletext-audio = { workspace = true, features = ["encode", "pcm16"] }
+# decodes PCM16 only with the `pcm16` feature and Opus with `opus` (decision
+# E.131), and compare an Opus sound with what the workspace's own decoder
+# gives for its packets. The program itself only writes sounds; its `opus`
+# feature is for the decoder's packet check, which an Ogg Opus input's
+# packets pass (TODO-1228).
+neoteletext-audio = { workspace = true, features = ["encode", "pcm16", "opus"] }
+neoteletext-opus.workspace = true
 
 [features]
 # Decision E.61: coarse, additive areas, all on by default. The commands

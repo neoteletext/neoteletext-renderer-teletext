@@ -510,6 +510,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `store/`: the arena sounds are defined in, and a live sound's ring.
 - `receiver/`: the broadcast and network carriages, the file carriage, starting plays, sending samples to the sink, the fades at a lost block (`fade`) and the `concealed` report (`loss`).
 - `ttau`: the `.ttau` file's records, framed by their lengths.
+- `ogg` (features `encode` and `opus`): an encoder's Ogg Opus file read into the profile's packets for `neottx sound`, every page bounded and checked (DEC-2448).
 - `mixer/` (`neoteletext-audio-mix`): live sounds in the mixer.
 
 **`neoteletext-opus`**
