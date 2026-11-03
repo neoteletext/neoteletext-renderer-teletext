@@ -18,6 +18,7 @@ A licence is acceptable if, used the way we use it, it puts no conditions on our
 | **Data compiled into our programs** | Unicode-3.0 (Unicode's tables), on REQ-GEN-017's list since DEC-1093 (confirmed by the owner on 31 October 2026), because more than one crate carries Unicode's data; CDLA-Permissive-2.0 (Mozilla's root certificates) | Permissive data licences with no copyleft | Unicode-3.0 is allowed for any crate; CDLA-Permissive-2.0 for `webpki-roots` alone, as a per-crate exception in `deny.toml` (decision 32 of IMPLEMENTATION-LOG.md, DEC-1093) |
 | **Fonts compiled into our programs** | SIL Open Font License 1.1 (Noto Teletext, converted from Noto) | The OFL binds the font, not the program that draws it. A modified font must stay under the OFL, but the program's code is untouched | Ship the OFL text and copyright lines with any binary that holds the font (`third_party/noto/OFL.txt`); never sell the font on its own |
 | **System libraries loaded at run time and not shipped** | LGPL-2.1-or-later (glibc, ALSA's `libasound`), GPL with the GCC Runtime Library Exception (`libgcc_s`) | Linked dynamically from the user's own system, so the user can always replace them, which is all the LGPL asks. The GCC exception exists to allow any program to link the runtime | Never link them statically and never bundle them (see section 3) |
+| **Test tools, built and run only on the build host and never shipped** | NCSA (the University of Illinois/NCSA Open Source License), for `libfuzzer-sys` alone, which bundles LLVM's libFuzzer for the fuzz targets in `fuzz/` | Permissive, with no copyleft; and nothing built with it is distributed, so no one receives it from us | A per-crate exception in `deny.toml`; never in a crate linked into a shipped program (DEC-2434, waiting for the owner's confirmation) |
 | **A choice of licences** | For example `r-efi` (MIT, Apache-2.0 or LGPL-2.1-or-later) or `byteorder` (Unlicense or MIT) | We take it under the permissive choice | None beyond that choice's own |
 
 The owner accepted LGPL system libraries on 19 October 2026: the system's `libasound` for sound on Linux (decision D3 of `docs/spec/design/audio-platforms.md`, and NeoTeletext's decision 40).
@@ -33,7 +34,7 @@ The owner accepted LGPL system libraries on 19 October 2026: the system's `libas
 
 ## 4. How it is enforced
 
-- **Crates:** `cargo-deny` checks every crate's licence against the allow list in `deny.toml` on every full gate (`scripts/check.sh full`). An exception names one crate and one licence, with its reason.
+- **Crates:** `cargo-deny` checks every crate's licence against the allow list in `deny.toml` on every full gate (`scripts/check.sh full`), in the main workspace and in the fuzz workspace (`fuzz/`, which has its own lockfile), both against the one `deny.toml`. An exception names one crate and one licence, with its reason.
 - **System libraries** are outside cargo-deny's view. A new one is recorded here before it is used.
 - **Bundled material** (`third_party/`) keeps its licence and provenance beside it, and is credited in CREDITS.md.
 

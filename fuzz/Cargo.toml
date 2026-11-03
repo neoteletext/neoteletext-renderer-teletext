@@ -6,6 +6,8 @@ name = "neoteletext-fuzz"
 version = "0.0.0"
 edition = "2024"
 publish = false
+# The project's licence (LICENSE): cargo-deny refuses a crate with none.
+license = "MIT"
 
 [package.metadata]
 cargo-fuzz = true
@@ -28,6 +30,7 @@ neoteletext-app = { path = "../crates/neoteletext-app", default-features = false
 # The qrkeyboard client's readers of what the relay and the phone send
 # (REQ-SEC-003).
 neoteletext-qrkeyboard = { path = "../crates/neoteletext-qrkeyboard" }
+neoteletext-picture = { path = "../crates/neoteletext-picture" }
 
 [workspace]
 members = ["."]
@@ -231,6 +234,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "font_library"
+path = "fuzz_targets/font_library.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "subpages"
 path = "fuzz_targets/subpages.rs"
 test = false
@@ -303,6 +313,13 @@ bench = false
 [[bin]]
 name = "qrkeyboard_pairing"
 path = "fuzz_targets/qrkeyboard_pairing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "picture_convert"
+path = "fuzz_targets/picture_convert.rs"
 test = false
 doc = false
 bench = false

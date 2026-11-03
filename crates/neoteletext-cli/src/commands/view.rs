@@ -26,7 +26,7 @@ pub fn view(
     colours8: bool,
 ) -> Result<(), Failure> {
     use neoteletext_core::consts::PAGE_WIDTH;
-    let opening = input::opening(&options.input).map_err(|message| (exit::USAGE, message))?;
+    let opening = input::opening(&options.input).map_err(|error| (exit::USAGE, error.to_string()))?;
     let (mut session, mut source) = input::open_live(options)?;
     let (display, _) = terminal::detect(display(graphics), std::io::stdout().is_terminal());
     let area = if display == Display::Iterm2 { terminal::text_area() } else { None };

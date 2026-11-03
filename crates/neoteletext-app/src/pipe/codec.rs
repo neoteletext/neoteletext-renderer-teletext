@@ -182,6 +182,9 @@ fn page_data(payload: &[u8]) -> io::Result<PageData> {
 }
 
 /// Writes one frame.
+///
+/// # Errors
+/// The writer's error, when it fails.
 pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
     match frame {
         Frame::Packet(bytes) => put(out, PACKET, bytes),
@@ -243,6 +246,11 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
 }
 
 /// Reads one frame; `None` at the end of the stream.
+///
+/// # Errors
+/// The reader's error when it fails, and [`io::ErrorKind::Other`] for a
+/// frame longer than [`MAX_FRAME`](super::MAX_FRAME) or one whose contents
+/// are malformed: the other process is not trusted (REQ-SEC-018).
 pub fn read(input: &mut dyn Read) -> io::Result<Option<Frame>> {
     let mut head = [0u8; 5];
     match input.read_exact(&mut head) {

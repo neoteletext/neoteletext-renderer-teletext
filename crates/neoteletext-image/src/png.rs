@@ -85,6 +85,13 @@ fn chunk<S: Sink>(sink: &mut S, kind: [u8; 4], data: &[u8]) -> Result<(), PngErr
 /// bytes of palette indices). `scratch` needs at least `2 × (width + 1)`
 /// bytes. `palette` has 1 to 144 entries, and every index must be below
 /// its length.
+///
+/// # Errors
+/// [`PngError::BadSize`] for an empty image, rows longer than the deflate
+/// window or a palette that is empty or longer than 144 entries,
+/// [`PngError::ScratchTooSmall`] when `scratch` is shorter than two rows
+/// and two bytes, and [`PngError::Sink`] with the sink's error when it
+/// fails.
 pub fn write<S: Sink>(
     sink: &mut S,
     width: usize,

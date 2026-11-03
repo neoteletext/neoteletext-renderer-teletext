@@ -15,7 +15,7 @@ use std::net::IpAddr;
 
 mod feed;
 
-pub use feed::{Opening, is_live, link_address, open_live, opening};
+pub use feed::{Opening, OpeningError, is_live, link_address, open_live, opening};
 
 /// What to read and how to decode it: the options every `neottx` command
 /// accepts (REQ-CLI-002), free of any argument parser.
@@ -64,6 +64,10 @@ pub struct Options {
 pub const CHUNK: usize = 64 * 1024;
 
 /// The configuration from the profile and the overrides (REQ-PRF-005).
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// for a profile name that is not one the engine knows.
 pub fn config(options: &Options) -> Result<Config, Failure> {
     let mut config = Config::profile(&options.profile)
         .ok_or_else(|| (exit::USAGE, format!("unknown profile {:?} (en300706, saa5050, saa5246a)", options.profile)))?;
@@ -87,6 +91,11 @@ pub fn config(options: &Options) -> Result<Config, Failure> {
 }
 
 /// Opens the input: a file, or standard input for `-`.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when the file cannot be opened, or a live input is given where only a
+/// file can be read.
 pub fn open(options: &Options) -> Result<Box<dyn Read>, Failure> {
     if is_live(&options.input) {
         return Err((exit::USAGE, "this command needs a file or standard input, not a live feed".into()));
@@ -100,6 +109,10 @@ pub fn open(options: &Options) -> Result<Box<dyn Read>, Failure> {
 }
 
 /// Feeds every chunk of `input` to `reader`.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when reading the input fails.
 pub fn pump(input: &mut dyn Read, reader: &mut dyn Reader, out: &mut dyn FnMut(Item<'_>)) -> Result<(), Failure> {
     let mut buffer = vec![0u8; CHUNK];
     loop {
@@ -130,12 +143,20 @@ pub fn reader(options: &Options, encode_pages: bool) -> Box<AutoReader> {
 }
 
 /// Reads the whole input into a new session.
+///
+/// # Errors
+/// As [`load_for`].
 pub fn load(options: &Options) -> Result<Session, Failure> {
     load_for(options, None)
 }
 
 /// Reads the whole input into a new session; for live feeds, asks for and
 /// waits for `wanted`.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when the input cannot be opened or read, the sandbox cannot be applied,
+/// the input holds no teletext, or nothing arrives from a live feed.
 pub fn load_for(options: &Options, wanted: Option<PageAddress>) -> Result<Session, Failure> {
     if is_live(&options.input) {
         return feed::load_live(options, wanted);
@@ -178,7 +199,7 @@ pub fn sandbox(options: &Options, writable: Option<&std::path::Path>) -> Result<
         crate::sandbox::Policy { writable_directory: writable, network: false, readable: &[] },
         options.no_sandbox,
     )
-    .map_err(|message| (exit::INPUT, message))
+    .map_err(|error| (exit::INPUT, error.to_string()))
 }
 
 /// Reads all of an opened file or standard input into a new session.

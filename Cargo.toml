@@ -6,6 +6,8 @@ members = [
     "crates/neoteletext-slicer",
     "crates/neoteletext-web",
     "crates/neoteletext-image",
+    "crates/neoteletext-picture",
+    "crates/neoteletext-picture-cli",
     "crates/neoteletext-audio",
     "crates/neoteletext-audio-mix",
     "crates/neoteletext-opus",
@@ -35,6 +37,7 @@ neoteletext-formats = { path = "crates/neoteletext-formats", default-features = 
 neoteletext-slicer = { path = "crates/neoteletext-slicer" }
 neoteletext-web = { path = "crates/neoteletext-web", default-features = false }
 neoteletext-image = { path = "crates/neoteletext-image" }
+neoteletext-picture = { path = "crates/neoteletext-picture" }
 neoteletext-audio = { path = "crates/neoteletext-audio", default-features = false }
 neoteletext-audio-mix = { path = "crates/neoteletext-audio-mix" }
 neoteletext-opus = { path = "crates/neoteletext-opus" }
@@ -61,8 +64,9 @@ pedantic = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
 # Module and type names repeat by design (charset::Charset, packet::Packet).
 module_name_repetitions = "allow"
-# Error docs are written per type, not per function.
-missing_errors_doc = "allow"
+# REQ-DOC-001 (REQ-99): every function that returns a Result says in its
+# `# Errors` section which errors it returns and when.
+missing_errors_doc = "warn"
 # neoteletext-common DEVELOPMENT.md section 6: debugging output and
 # unfinished code never reach a commit.
 dbg_macro = "warn"
@@ -76,6 +80,11 @@ codegen-units = 1
 
 [profile.dev]
 panic = "abort"
+
+# The picture encoder's dynamic programmes run about twenty times slower
+# unoptimised: its tests took 201 seconds and 11 optimised on 3 November 2026.
+[profile.dev.package.neoteletext-picture]
+opt-level = 3
 
 # Fast rebuilds while behaviour is being shaped (README.md): release
 # optimisation without link-time optimisation, built incrementally.

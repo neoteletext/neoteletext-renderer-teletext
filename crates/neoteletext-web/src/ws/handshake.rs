@@ -41,6 +41,11 @@ pub fn accept_for(key: &[u8]) -> [u8; WEBSOCKET_ACCEPT_TEXT] {
 /// names one. The caller adds the `Cookie` header, if any, and the empty line
 /// that ends the request. A receiver never sends `Origin`, which is how a
 /// server tells it from a web page's script (DEC-1759 lesson 18).
+///
+/// # Errors
+/// [`Overflow`] when the request line and headers do not fit in the
+/// writer; the part that fitted stays written, so the caller abandons the
+/// request.
 pub fn write_handshake_headers(
     writer: &mut Writer<'_>,
     url: &Url,
@@ -75,6 +80,10 @@ pub fn offers_subprotocol(value: &[u8], subprotocol: &str) -> bool {
 /// `Connection: Upgrade`, the right accept value, no extension, since none
 /// were requested, and exactly the subprotocol asked for, or none when none
 /// was (DEC-1759 lesson 14).
+///
+/// # Errors
+/// [`WsError::Handshake`] when any of those checks fails; the connection
+/// is not a WebSocket and must be closed.
 pub fn check_handshake(head: &ResponseHead, key: &HandshakeKey, subprotocol: Option<&str>) -> Result<(), WsError> {
     let accepted = head.status == STATUS_SWITCHING_PROTOCOLS
         && head.upgrade_websocket

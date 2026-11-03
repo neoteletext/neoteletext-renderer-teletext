@@ -155,12 +155,19 @@ impl DisplayPage {
 
     /// Writes one code, a character or a spacing attribute, at a row 1 to
     /// 24 and column 0 to 39 of the Level 1 page.
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for a row or a column outside those ranges.
     pub fn put(&mut self, row: u8, column: u8, code: u8) -> Result<&mut Self> {
         self.text(row, column, &[code])
     }
 
     /// Writes codes from a row and column of the Level 1 page; they must
     /// fit within the row.
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for row 0, a row past the last, or codes
+    /// that run past column 39.
     pub fn text(&mut self, row: u8, column: u8, codes: &[u8]) -> Result<&mut Self> {
         let row = usize::from(row);
         let start = usize::from(column);
@@ -212,6 +219,10 @@ impl DisplayPage {
 
     /// Sets link `position` (0 to 5) of X/27/4 (`designation` 4) or X/27/5
     /// (5). The other links of the packet are "no particular page".
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for a designation other than 4 or 5, or a
+    /// position outside the packet's six links.
     pub fn compositional_link(
         &mut self,
         designation: u8,
@@ -238,6 +249,9 @@ impl DisplayPage {
 
     /// Sets the X/27/4 link of a function at the position Table 16 fixes
     /// for it, valid at both levels, to sub-pages `subpages` of `target`.
+    ///
+    /// # Errors
+    /// As [`Self::compositional_link`].
     pub fn link_level_25(&mut self, function: LinkFunction, target: PageAddress, subpages: u16) -> Result<&mut Self> {
         self.compositional_link(
             DESIGNATION_LINKS_LEVEL_25,
@@ -331,6 +345,13 @@ impl DisplayPage {
 
     /// The page file: the Level 1 rows, the packets X/26 laid out, and the
     /// packets 27 and 28 as `OL` lines.
+    ///
+    /// # Errors
+    /// [`AuthorError::LocalDataFull`] when the enhancements and Local Objects
+    /// need more than the 208 triplets of sixteen packets X/26,
+    /// [`AuthorError::UnknownLocalObject`] for an invocation of a Local Object
+    /// the page does not define, and [`AuthorError::PageFull`] when the packets
+    /// need more lines than a page file keeps.
     pub fn build(&self) -> Result<Box<PageFile>> {
         let mut page = self.page.clone();
         if self.raw_enhancements.is_empty() {

@@ -95,6 +95,14 @@ fn check_mode(grid: &Grid, row: usize, options: RenderOptions) -> Result<(), Ren
 /// (REQ-RND-017). In the 12-by-20 mode this draws 20 lines for
 /// [`Field::Both`] and 10 for one field. Each line is [`PAGE_WIDTH`] pixels.
 /// On an error the buffer's contents are unspecified.
+///
+/// # Errors
+/// [`RenderError::OutOfRange`] for `row` not below [`ROWS`],
+/// [`RenderError::NeedsResolvedMode`] when the palette mode is asked for a
+/// row that needs the resolved mode, [`RenderError::BufferTooSmall`] when
+/// the buffer does not hold the row's lines at its stride, and
+/// [`RenderError::IndexTooWide`] when the 4-bit format is asked to hold an
+/// index above 15.
 pub fn render_row(
     grid: &Grid,
     row: usize,
@@ -128,6 +136,14 @@ pub fn render_row(
 
 /// Renders screen line `y` (0 to 499 in the 12-by-20 mode) into `out`,
 /// applying page zoom (REQ-L1-020).
+///
+/// # Errors
+/// [`RenderError::OutOfRange`] when `y` is past the page's last line for
+/// `zoom`, [`RenderError::NeedsResolvedMode`] when the palette mode is
+/// asked for a row that needs the resolved mode, [`RenderError::BufferTooSmall`]
+/// when `out` is shorter than a line in `format`, and
+/// [`RenderError::IndexTooWide`] when the 4-bit format is asked to hold an
+/// index above 15.
 pub fn render_line(
     grid: &Grid,
     y: usize,
@@ -163,6 +179,11 @@ pub const ZOOM_ROWS: usize = 12;
 /// of rows to draw. Each row is [`PAGE_WIDTH`] pixels wide from the start of
 /// the framebuffer's lines; filling any border beyond it with
 /// [`border_index`](super::border_index) is for the caller.
+///
+/// # Errors
+/// [`RenderError::BufferTooSmall`] when the framebuffer does not hold every
+/// row asked for at its stride, and [`render_row`]'s other errors for a
+/// row; rows before it are drawn, the rest are not.
 pub fn render_screen(
     grid: &Grid,
     rows: u32,

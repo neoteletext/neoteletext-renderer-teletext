@@ -51,7 +51,16 @@ pub struct LoadedGlyph {
 }
 
 impl<'a> LoadedFont<'a> {
-    /// The font of a table, after checking its shape.
+    /// The font of a table, after checking its shape. The font borrows
+    /// `glyphs` for as long as it lives.
+    ///
+    /// # Errors
+    /// [`FontTableError::TooMany`] for more than [`FONT_MAX_CHARACTERS`]
+    /// glyphs, [`FontTableError::Order`] when the code points are not in
+    /// strictly increasing order, [`FontTableError::Code`] for a code point
+    /// that is not a Unicode scalar value, [`FontTableError::Width`] for a
+    /// dot beyond the cell's 12, and [`FontTableError::Height`] for glyphs
+    /// of mixed heights or a 12 by 10 glyph with lines beyond its tenth.
     pub fn new(glyphs: &'a [FontGlyph]) -> Result<Self, FontTableError> {
         if glyphs.len() > FONT_MAX_CHARACTERS {
             return Err(FontTableError::TooMany);

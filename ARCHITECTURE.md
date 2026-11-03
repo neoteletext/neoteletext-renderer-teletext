@@ -202,6 +202,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
   - the service descriptor;
   - channels: which addresses name a channel's folder and files, and the checks a channel's file must pass (`channel`, decision E.70);
   - the contents file's reader (`contents`, REQ-WEB-025);
+  - a font library's index, `fonts.txt` (`font_library`, REQ-124, DEC-2428): its bounded reader of `f` and `c` lines, which checks a `c` line's set names with a function the port passes (the names are the core's glyph layer's, which this crate may not use), the address a listed font is fetched from, and the check of a font's bytes against the SHA-256 its library names (REQ-123);
   - a page's list of sub-pages in parts, `NNN/P.sub` (`subpages`, REQ-1888): its bounded reader and its writer, the validator of a file and a page's version, and, with the feature `std`, the layout of a channel's pages as files (`NNN.t42`, and in the page's folder `NNN/SSSS.t42` and the parts `NNN/P.sub`, with an `index.t42` of first sub-pages); the agent asks for a part of a page's list when the port asks, and then for a sub-page's own file only when that sub-page is asked for (REQ-WEB-019);
   - push subscriptions;
   - the channel's records on the push connection (`records`, DOC-1951): the index, LOG, `SET_COOKIE`, LINKS, SUBPAGES, REDIRECT and DENIED records' encoders and readers, the reassembly of a record from its fragments (`RecordReader`), and the one reassembly of each kind of sending that spans records, which every receiver uses in place of its own: `index::Progress`, `links::Sending`, held to a sub-page's totals of links over its parts (DOC-1958), and `subpages::Sending`, held to a page's list's count and order over its parts (DOC-1959); a sending that breaks its totals is refused and its packets counted invalid (REQ-1462);
@@ -250,6 +251,10 @@ Sound carried with teletext sits beside the page layers, as the web user agent d
 ### Input — `neoteletext-input` (area INT)
 
 The input system's protocol (DOC-1781 of `neoteletext-common/PROTOCOL.html`), beside the page layers as audio is: it shares the packet type with L1 and the record frame and data-line carriage with `neoteletext-audio`. `no_std`, with no allocation, so a microcontroller can be a receiver or a channel. `event` encodes and decodes the input stream, MOUSE's device and gone, HOVER, TOUCH and RESUME among it; `cursor` and `control` the channel's records, WELCOME with a session's token; `session::SessionOf` is a receiver's side of a session, the rate and the input count, and with RESUME the unacknowledged messages kept to send again (`ResumableSession`; `Session` keeps none); `pace::Pacer` paces the pointer's moves at 60 a second, one slot a contact, and `contacts::Contacts` numbers a touch screen's contacts (decision E.133). The browser's trusted core and `neottx` use them alike; the web agent carries the messages and knows only that a message is a contact's move.
+
+### Pictures — `neoteletext-picture`, `neoteletext-picture-cli` (DEC-2325)
+
+The picture-to-page converter sits beside the page layers, as audio and input do: it writes pages, and shares only Foundation's constants with the core and the TTI reader and T42 writer with L0. `neoteletext-picture` is a sans-IO `std` library (REQ-2327): `convert` takes a picture file's bytes and an `Options` value and returns the page as TTI text, and `Page::t42` the same page as T42 packets. `decode` reads the five formats of DEC-2114 through the `image` crate within fixed bounds (REQ-2330), `raster` holds the picture and its fixed-point resampler, `fit` places it on the page and averages the sixels (REQ-2331 to REQ-2334), `quant` reduces it to starting palettes, `level1` and `enhanced` are the encoders of Levels 1 and 1.5 and of 2.5 and 3.5 (REQ-2335), and `tti` writes the page file. It opens nothing, so a program may run it in a confined process, as the browser does. `neoteletext-picture-cli` is the program `neottx-picture` (REQ-2337), which reads the file and writes the page; it is not part of `neottx` (DEC-2325 item 2).
 
 ### Cross-cutting modules — `neoteletext-core::{policy, config, trace}`
 
@@ -346,7 +351,7 @@ Field groups shared with the presentation layer are foundation types in `types`:
 
 **What each phase built.**
 
-- Phase (a): `compose::compose_level` dispatches on `Config::level` (through `PresentationLevel::available`, decision E.61): nothing at Level 1, `level15::apply` at Level 1.5, and `enhance::apply` at Levels 2.5 and 3.5; `viewer::Viewer::compose` and the command-line program's `Session::grid` both call it, and `ComposeContext` carries the `EnhancementLookup`. `enhance::apply` returns an `acq::EnhancementReport`: the `PageBuild`, the `EnhancementFaults` it met, the objects it ran and the triplets it read. `Viewer::compose` returns it in `Composed::Built`, for the port to record; `Session::grid` records it itself, and `neottx list` builds every page at Levels 2.5 and 3.5 to show the counts.
+- Phase (a): `compose::compose_level` dispatches on `Config::level` (through `PresentationLevel::available`, decision E.61): nothing at Level 1, `level15::apply` at Level 1.5, and `enhance::apply` at Levels 2.5 and 3.5; `viewer::Viewer::compose` and the command-line program's `Session::grid` both call it, and `ComposeContext` carries the `EnhancementLookup`. `enhance::apply` returns an `acq::EnhancementReport`: the `PageBuild`, the `EnhancementFaults` it met, the objects it ran and the triplets it read. `Viewer::compose` returns it in `Composed::Built`, for the port to record; `Session::grid` records it itself, and `neottx list` builds every page once to show the counts. Building a grid also sets `Grid::designation_fallback` when the page's Table 32 entry is reserved; the port passes it, with the page's `PageBuild`, to `Decoder::record_designation`, which counts it in `Statistics::designation_fallbacks` once per build at every level (REQ-72).
 - Trace (REQ-FSM-010): `compose::compose_level_traced`, `level15::apply_traced` and `enhance::apply_traced` take a `trace::TraceSink` (the build time and a `&mut dyn FnMut(TraceEntry)`) and, when `Config::trace` is on, report the transitions of `Machine::TripletWalk` or of the page-level run of `Machine::EnhancementWalk`, with state, event and action names from `level15::walk_*_name`, `enhance::walk_*_name` and `TripletFunction::name`. A transition that met a fault names it as its action. The untraced functions are unchanged; `Session::grid` uses the traced one, so that `neottx -vv` prints the walk with the other traces.
 - `enhance::apply` rebuilds each shown row from `level1::row_codes` and the walk's events, keeping row 0 columns 0 to 7 from the Level 1 grid. The walk runs once for the page-level colours and once for each row that has events, keeping only that row's events, so that a grid needs one row of event storage (decision E.41, principle 5); the limits of Annex A.8 are checked before an object is looked for, which bounds the work by `enhance::MAX_WALK_STEPS`. `objects` finds links, definitions and bodies.
 - `level1::resolve_designation` follows the order of Annex C.4 and decision E.50 at each level, and the Level 1.5 pass reads every triplet through `TripletFunction` (REQ-PKT-010).
@@ -429,6 +434,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | L7 to L0 across processes | TTI or T42 bytes and framed control messages | Both sides validate; the decoder process has no rights (REQ-SEC-018) |
 | L5 to the terminal | Text and escape sequences | Allow-list sanitising (REQ-SEC-010) |
 | Fonts from a file | BDF files and library indexes | Read by strict, bounded, fuzzed readers; the decoder checks the glyph table's shape before drawing with it (REQ-FNT-002, REQ-FNT-003, REQ-FNT-008) |
+| Untrusted picture files into `neoteletext-picture` | PNG, JPEG, GIF, BMP and WebP bytes | Bounded file, sides and decoder memory before pixels are decoded; no panicking constructs on the input's sizes; fuzzing (REQ-2330) |
 | Untrusted bytes into the audio receiver | Independent data lines, records from a network or a file | Bounded records and fragments, CRCs, no panicking constructs, fuzzing (REQ-AUD-021) |
 | L8, the port contract | Everything the platform supplies | Narrow traits; the library holds no ambient authority (REQ-SEC-016) |
 
@@ -450,6 +456,8 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | `neoteletext-audio` | Audio (area AUD, section 3, "Audio"): carriage, records, store, control, PCM16, IMA ADPCM and Opus | `no_std`, no allocation; the `encode` feature allocates |
 | `neoteletext-audio-mix` | Audio: the software mixer for ports with an operating system's audio output | `no_std` with `alloc` |
 | `neoteletext-opus` | Audio: the Opus decoder of the audio profile (decision E.123) | `no_std`, no allocation, integer only |
+| `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages | `std`, sans-IO |
+| `neoteletext-picture-cli` | L9: the program `neottx-picture` | `std` |
 | `neoteletext-transport` | L9: a client's sockets: the reader thread, the TLS pump, the blocking writes and the connection through a proxy, shared by `neoteletext-app`, `neoteletext-qrkeyboard` and the browser's fetcher (DEC-1905) | `std` |
 | `neoteletext-app` | L9: the application layer of `neottx` and any other viewer program: sessions, inputs, live mode's two processes, sandboxing | `std` |
 | `neoteletext-cli` | L9 (and text output of L5) | `std` |
@@ -495,6 +503,9 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 
 **`neoteletext-image`**
 - `png/`: the PNG writer's deflate encoder.
+
+**`neoteletext-picture`**
+- `raster/`: the resampler's tests against stored output.
 
 **`neoteletext-web`**
 - `http/`: the response head parser, the head as the profile reads it, and the body's framing.
@@ -634,7 +645,7 @@ A module may use the modules listed for it, and nothing else. The cross-cutting 
 | `glyphs` | L4 | Foundation, `charset` (character references) |
 | `render` | L4 | Foundation, `glyphs`, `level1` (grid types), `colour` (Colour Map) |
 | `viewer` | L6 | Foundation, `acq`, `level1`, `compose` (the grid of the page on screen), `colour`, `render` (change tracking), `service`, `nav`, `charset` (the receiver's own text) |
-| `nav` | L6 | Foundation, `acq` (the stored pages it steps through), `packet` (the editorial link type, `Link`, that `link_target` turns into a viewer link) |
+| `nav` | L6 | Foundation, `acq` (the stored pages it steps through), `packet` (the editorial link type whose meaning `link_target` gives, DEC-2344) |
 | `controls` | L6 | Foundation, `acq` (read-only stored page types), `objects` (the local enhancement data's triplets and row addresses), `packet` (triplet functions), `level1` (grid types, for the looks; decision E.127) |
 | `port` | L8 | Foundation |
 
@@ -650,6 +661,7 @@ What each library crate may use of `neoteletext-core`, which `cargo xtask check-
 | `neoteletext-input` | Foundation, `packet` |
 | `neoteletext-audio-mix` | — |
 | `neoteletext-opus` | — |
+| `neoteletext-picture` | Foundation (the page's geometry, attributes, triplet fields and the Colour Map's defaults) |
 
 The application crates use whatever they need of it.
 

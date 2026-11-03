@@ -53,6 +53,11 @@ impl Mip {
     /// is refused for any other code, and a counted code needs one that
     /// fits it: below 2^12 for a code whose D12 is 0, from 2^12 for one
     /// whose D12 is 1 (codes 51, D1 and E1).
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for a count given to a code that is not
+    /// counted, a counted code without a count, or a count outside the range
+    /// its code allows.
     pub fn page(&mut self, page: PageNumber, code: PageCode, count: Option<u16>) -> Result<&mut Self> {
         match (code.is_counted(), count) {
             (false, None) => {}
@@ -71,6 +76,11 @@ impl Mip {
 
     /// The page file: every packet of X/1 to X/14 that holds a code other
     /// than 00, and every packet of counts that holds a count.
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] when a page's code or count falls outside
+    /// the table's packets, and [`AuthorError::PageFull`] when the packets need
+    /// more lines than a page file keeps.
     pub fn build(&self) -> Result<Box<PageFile>> {
         let mut rows: BTreeMap<u8, [u8; DATA_BYTES]> = BTreeMap::new();
         for (&page, &(code, _)) in &self.codes {

@@ -206,7 +206,7 @@ pub fn keyboard(options: &KeyboardOptions) -> Result<(), Failure> {
         .as_deref()
         .map(neoteletext_web::proxy::Proxy::parse)
         .transpose()
-        .map_err(|message| (exit::USAGE, message))?;
+        .map_err(|error| (exit::USAGE, error.to_string()))?;
     let config = ScreenConfig {
         name: options.name.clone(),
         layout: Layout::Terminal,

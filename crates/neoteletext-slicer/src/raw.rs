@@ -171,6 +171,13 @@ impl RawGeometry {
     }
 
     /// Checks that the geometry is usable.
+    ///
+    /// # Errors
+    /// [`GeometryError::LineLength`] for a line that is empty or longer than
+    /// [`MAX_LINE_BYTES`], [`GeometryError::NoLines`] for a field of no
+    /// lines, [`GeometryError::UsedLines`] when the used lines are out of
+    /// order or outside the field, and [`GeometryError::Trailer`] for a frame
+    /// trailer as long as a line or longer.
     pub const fn validate(&self) -> Result<(), GeometryError> {
         let bytes = self.line_bytes();
         if bytes == 0 || bytes > MAX_LINE_BYTES {
@@ -221,6 +228,10 @@ pub struct RawReader {
 
 impl RawReader {
     /// A reader for `geometry` that slices with `config`.
+    ///
+    /// # Errors
+    /// The geometry's [`GeometryError`], as [`RawGeometry::validate`] gives
+    /// it.
     pub fn new(geometry: RawGeometry, config: Config) -> Result<Self, GeometryError> {
         geometry.validate()?;
         Ok(Self {

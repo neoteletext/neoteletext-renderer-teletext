@@ -9,8 +9,12 @@ rust-version.workspace = true
 license = "MIT AND BSD-3-Clause"
 publish.workspace = true
 
-# REQ-GEN-017 and decision E.123: no dependencies, and no features; the profile is the whole
-# decoder.
+# REQ-GEN-017 and decision E.123: no dependencies, and no features that change decoding; the
+# profile is the whole decoder.
+[features]
+# REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types, which needs
+# `core::fmt`; it adds no decoding.
+error-trait = []
 
 [lints]
 workspace = true

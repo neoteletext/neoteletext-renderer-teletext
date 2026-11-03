@@ -13,7 +13,7 @@
 use super::connection::READS_AHEAD;
 use super::*;
 use neoteletext_web::port::Received;
-use neoteletext_web::proxy::{Proxy, ProxyKind};
+use neoteletext_web::proxy::{Proxy, ProxyError, ProxyKind, TunnelError};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -351,7 +351,13 @@ fn a_tunnel_gives_the_hosts_first_bytes_with_its_socket() {
 fn a_refusing_proxy_is_said_for_the_user() {
     let (proxy, played) = played_proxy(b"HTTP/1.1 403 Forbidden\r\n\r\n");
     let refused = open_tunnel(&proxy, "news.example", 443).unwrap_err();
-    assert!(refused.contains("the proxy refused the connection to news.example"), "{refused}");
+    // REQ-155: the error is an enumeration, and its message is the user's.
+    assert!(
+        matches!(&refused, ReachError::Tunnel { host, error: TunnelError::Proxy(ProxyError::Refused(403)) } if host == "news.example"),
+        "{refused:?}"
+    );
+    let message = refused.to_string();
+    assert!(message.starts_with("the proxy refused the connection to news.example: "), "{message}");
     played.join().unwrap();
 }
 
@@ -360,7 +366,10 @@ fn a_connect_failure_names_what_the_user_knows() {
     // A port just given up, which nothing listens on.
     let target = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
     let failure = connect_within_limit(&target, "my.proxy").unwrap_err();
-    assert!(failure.starts_with("my.proxy: "), "{failure}");
+    // REQ-155: the error is an enumeration, and its message is the user's.
+    assert!(matches!(&failure, ReachError::Connect { name, .. } if name == "my.proxy"), "{failure:?}");
+    let message = failure.to_string();
+    assert!(message.starts_with("my.proxy: "), "{message}");
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! Typing back through the fetcher process (REQ-INT-008, REQ-INT-112,
+//! Tests of typing back through the fetcher process (REQ-INT-008, REQ-INT-112,
 //! decisions E.94 and E.97): an
 //! input message from the decoder goes to the channel's push WebSocket at
 //! once, and the channel's answer comes back at once. The fetcher sleeps

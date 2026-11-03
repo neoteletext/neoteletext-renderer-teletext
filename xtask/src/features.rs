@@ -51,6 +51,7 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-formats", features: "std,tti" },
     Build { package: "neoteletext-formats", features: "write-text" },
     Build { package: "neoteletext-formats", features: "write-text,std,tti" },
+    Build { package: "neoteletext-formats", features: "error-trait" },
     Build { package: "neoteletext-web", features: "" },
     Build { package: "neoteletext-web", features: "push" },
     Build { package: "neoteletext-web", features: "cookies" },
@@ -72,12 +73,15 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio", features: "opus" },
     Build { package: "neoteletext-audio", features: "pcm16" },
     Build { package: "neoteletext-audio", features: "encode" },
+    Build { package: "neoteletext-audio", features: "error-trait" },
     // The desktop build (Windows, macOS, Linux): PCM16 and IMA ADPCM
     // compiled out, Opus alone (decision E.131).
     Build { package: "neoteletext-audio", features: "idl,opus" },
     Build { package: "neoteletext-opus", features: "" },
+    Build { package: "neoteletext-opus", features: "error-trait" },
     Build { package: "neoteletext-audio-mix", features: "" },
     Build { package: "neoteletext-input", features: "" },
+    Build { package: "neoteletext-input", features: "error-trait" },
     Build { package: "neoteletext-transport", features: "" },
     Build { package: "neoteletext-qrkeyboard", features: "" },
     Build { package: "neoteletext-app", features: "" },

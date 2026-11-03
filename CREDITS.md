@@ -51,6 +51,22 @@ Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozill
 - *Licence:* MIT OR Apache-2.0, the project's own terms.
 - *Effect on neoteletext's licence:* none.
 
+**Pillow 13.0.0** — Jeffrey A. Clark and contributors, on the Python Imaging Library of Secret Labs AB
+and Fredrik Lundh, <https://python-pillow.org/>
+- *What it provides:* the picture converter's resampler and starting palettes, ported step for step
+  into `neoteletext-picture` (DEC-2142, DEC-2325). The problem it solved: the converter's pages had
+  been made with Pillow by `scripts/image-to-teletext.py`, and the port had to reproduce them, so
+  `raster.rs` follows Pillow's fixed-point resampler (its box and Lanczos filters, rounding and which
+  pass runs first) and `quant.rs` its three quantizers, median cut, maximum coverage and the fast
+  octree, hash table and heap included, since their iteration order decides the palette. The one
+  departure is the octree's ties, which keep bucket order (DEC-2142 item 3). The port made the same
+  pages as the Python script for all 2,605 crop and scale pages measured on 2 November 2026
+  (TODO-2132).
+- *Licence:* MIT-CMU (the Historical Permission Notice and Disclaimer form). Its copyright notice and
+  permission notice travel with the ported source in `crates/neoteletext-picture/LICENSE-Pillow` and
+  must appear in the documentation of any binary distribution.
+- *Effect on neoteletext's licence:* none; the notice is kept as the licence asks.
+
 ## Used at test time only (never copied, never linked into a release)
 
 These programs are run as separate programs or test oracles, in containers with no network access

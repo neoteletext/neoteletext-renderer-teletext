@@ -129,3 +129,30 @@ fn a_private_page_is_the_small_page_with_noindex() {
     );
     assert!(!channel_page("News", "https://h.example/news/").contains("noindex"));
 }
+
+/// TODO-1992 item 2, DEC-2427: a public page carries exactly the Open Graph
+/// tags of a link preview, title, type, address and channel name, each
+/// escaped, with no image and no description; a page that is not public
+/// carries none.
+#[test]
+fn a_public_page_carries_exactly_the_link_preview_tags() {
+    let page = public_page(
+        "News & <Views>",
+        ADDRESS,
+        &PublicPage { title: "Rain \"today\"", text: "secret words", canonical: ADDRESS, picture: None },
+    );
+    let tags: vec::Vec<&str> = page.lines().filter(|line| line.starts_with("<meta property=\"og:")).collect();
+    assert_eq!(
+        tags,
+        [
+            "<meta property=\"og:type\" content=\"website\">",
+            "<meta property=\"og:title\" content=\"Rain &quot;today&quot;\">",
+            "<meta property=\"og:url\" content=\"https://h.example/news/110\">",
+            "<meta property=\"og:site_name\" content=\"News &amp; &lt;Views&gt;\">",
+        ]
+    );
+    assert_eq!(page.matches("secret words").count(), 1, "the text only in its hidden element");
+    for page in [private_page("News", ADDRESS), channel_page("News", ADDRESS)] {
+        assert!(!page.contains("og:"));
+    }
+}

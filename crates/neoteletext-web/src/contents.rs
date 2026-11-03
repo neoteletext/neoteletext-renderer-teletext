@@ -139,6 +139,15 @@ fn is_line_end(byte: &u8) -> bool {
 }
 
 /// Checks a contents file's size and length, and returns its entries.
+///
+/// # Errors
+/// - [`ContentsError::TooLarge`] when the file is longer than
+///   [`MAX_BYTES`].
+/// - [`ContentsError::TooManyLines`] when it has more than [`MAX_LINES`]
+///   lines, a last line without its line feed counted.
+///
+/// A faulty line is not an error of the file: each line's [`Fault`] is
+/// given by the iterator of entries, and the line is ignored.
 pub fn read(bytes: &[u8]) -> Result<Entries<'_>, ContentsError> {
     if bytes.len() > MAX_BYTES {
         return Err(ContentsError::TooLarge);
