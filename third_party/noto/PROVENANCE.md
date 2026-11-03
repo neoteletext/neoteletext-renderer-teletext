@@ -19,12 +19,31 @@ Noto is licensed under the SIL Open Font License 1.1, which `OFL.txt` reproduces
 
 ## How the fonts are made
 
-```sh
-cargo build --profile iterate -p neoteletext-cli
-uv run third_party/noto/convert.py --neottx target/iterate/neottx
-```
+Noto Teletext is made by one pipeline, always in this order (REQ-2163). This section is the one place the order is written; the converter, the Arabic-script generator and `xtask`'s glyph generator point here.
 
-The converter writes every font of `settings.txt`, then `fonts.txt`, then the checksums below. Then `cargo xtask glyphs` compiles the files into the core. `cargo xtask check-noto`, run by every gate, fails if a committed font differs from its checksum here, if a font and its line do not match, or if the folder holds a file it does not account for, and a test of `xtask` fails if the compiled table is not these files.
+1. **The character tables.** The code tables in `crates/neoteletext-core/src/charset/` are the input: they decide which characters exist, never the fonts. They are written by hand from the standards and datasheets, except the Arabic-script tables of group 1001, which `uv run scripts/arabic-sets.py` writes between its marker lines in `charset/arabic_script.rs` (REQ-2164). `uv run scripts/arabic-sets.py --check` changes nothing and fails, naming the first line that differs, when the committed tables are not what the script would write.
+2. **The lists for the converter.** `cargo xtask glyphs` writes `crates/neoteletext-core/src/glyphs/required.txt` (every character a glyph set must draw) and `forms.txt` (the code point drawn for each joined form) from the tables.
+3. **The fonts.** The converter draws every character of those lists from the pinned Noto sources (REQ-2165):
+
+   ```sh
+   cargo build --profile iterate -p neoteletext-cli
+   uv run third_party/noto/convert.py --neottx target/iterate/neottx
+   ```
+
+   It writes the four BDF files, `fonts.txt` with each font's conformance, and the checksums below.
+4. **The compiled table.** `cargo xtask glyphs` again, which compiles the four files into `crates/neoteletext-core/src/glyphs/noto.rs`.
+5. **The checks.** `cargo xtask check-noto`, run by every gate, fails if a committed font differs from its checksum here, if a font and its line in `fonts.txt` do not match, or if the folder holds a file it does not account for. `xtask`'s tests fail if a stored `noto.rs`, `required.txt`, `forms.txt` or G3 table differs from what they regenerate, and the push gate runs `scripts/arabic-sets.py --check`.
+
+**When it runs.** From the first step a change affects, and the commit carries every file the run changes:
+
+- a change to a character table: from step 1;
+- a change to `xtask`'s generators: from step 2;
+- a change to `settings.txt` or `convert.py`: from step 3;
+- a new Noto source, or a move of the pin in `sources.txt`: from step 3.
+
+A glyph is never edited by hand in a BDF file or in `noto.rs`: a change to glyph data is made by changing a table, `settings.txt` or the converter and running the pipeline.
+
+**Moving the source pin.** `sources.txt` names each source by its address in the google/fonts repository at one commit, with its SHA-256. Moving the pin changes the commit and every checksum together, in a commit of its own that says what changed in the fonts.
 
 ## Checksums
 
