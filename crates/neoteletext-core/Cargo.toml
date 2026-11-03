@@ -137,6 +137,18 @@ required-features = [
 ]
 
 [[test]]
+name = "level25_rules"
+# Each rule of decisions E.43 to E.48 and E.50 in a test of its own
+# (REQ-468), with the non-spacing attributes and objects some rules need.
+required-features = [
+    "nonspacing-attributes",
+    "level15",
+    "level25",
+    "objects",
+    "level35-32colors",
+]
+
+[[test]]
 name = "objects"
 required-features = ["level25", "objects"]
 
