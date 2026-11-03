@@ -225,6 +225,7 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `cell_mode` | REQ-RND-002, REQ-RND-003 | 12 by 20 |
 | `trace` | REQ-FSM-010 | Off |
 | `status_on_suppressed_header` | REQ-L1-014 | Off |
+| `row_set_triplets` | REQ-2180, DEC-2179: NeoTeletext's row set triplet, column mode 01010, read; off, the mode is reserved as Table 29 has it | On |
 
 ## Examples
 
