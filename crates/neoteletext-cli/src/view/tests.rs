@@ -627,3 +627,81 @@ fn a_text_rows_height_needs_rows_that_divide_the_height() {
     assert_eq!(TextArea { width: 800, height: 604, rows: 30 }.text_row_pixels(), None, "padding");
     assert_eq!(TextArea { width: 800, height: 600, rows: 0 }.text_row_pixels(), None);
 }
+
+/// REQ-295 (REQ-NAV-010), DEC-2477: the keys given for Back and Forward act
+/// as Back and Forward, typed without Control or Alt, and a key the viewer
+/// already uses, a key that is not printable, or one key for both is
+/// refused.
+#[test]
+fn the_keys_given_for_back_and_forward_act_as_them() {
+    use super::RemoteKeys;
+    use neoteletext_core::viewer::Key;
+    let keys = RemoteKeys::new(Some('b'), Some('f')).unwrap();
+    let typed = |character, modifiers| keys.key(KeyEvent::new(KeyCode::Char(character), modifiers));
+    assert_eq!(typed('b', KeyModifiers::NONE), Some(Key::Back));
+    assert_eq!(typed('f', KeyModifiers::NONE), Some(Key::Forward));
+    assert_eq!(typed('b', KeyModifiers::CONTROL), None);
+    assert_eq!(typed('x', KeyModifiers::NONE), None);
+    assert_eq!(
+        RemoteKeys::default().key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)),
+        None,
+        "none by default"
+    );
+    for refused in [(Some('i'), None), (None, Some('q')), (Some('7'), None), (Some(' '), None), (Some('b'), Some('b'))]
+    {
+        assert!(RemoteKeys::new(refused.0, refused.1).is_err(), "{refused:?}");
+    }
+}
+
+/// REQ-295 (REQ-NAV-010), DEC-2477: on a terminal that reports releases,
+/// Index held is Back and Index pressed is Index: a repeat goes Back once,
+/// a quick release is Index, a release after the hold time is Back; on a
+/// terminal that reports no releases, `i` is Index at once.
+#[test]
+fn a_held_index_is_back_and_a_pressed_index_is_index() {
+    use super::Shown;
+    use crossterm::event::KeyEventKind;
+    use neoteletext_core::config::Config;
+    use neoteletext_core::types::{Instant, PageAddress};
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let session = neoteletext_app::session::Session::new(Config::default(), 8);
+    let config = Config::default();
+    let shown = Shown { page: None, extras: None, config: &config, now: Instant(0) };
+    let mut source = Recorded::default();
+    let mut state = view_state(&session);
+    state.initial = page(0x150);
+    state.releases_reported = true;
+    let mut press = |state: &mut super::ViewState, character, kind| {
+        let key = KeyEvent::new_with_kind(KeyCode::Char(character), KeyModifiers::NONE, kind);
+        let _ = state.key(key, &mut source, &session, &shown, 0);
+    };
+    for digit in ['3', '0', '0'] {
+        press(&mut state, digit, KeyEventKind::Press);
+    }
+    assert_eq!(state.viewer.requested().0, page(0x300));
+    press(&mut state, 'i', KeyEventKind::Press);
+    assert_eq!(state.viewer.requested().0, page(0x300), "a press waits");
+    press(&mut state, 'i', KeyEventKind::Repeat);
+    assert_eq!(state.viewer.requested().0, page(0x100), "held: Back");
+    press(&mut state, 'i', KeyEventKind::Repeat);
+    press(&mut state, 'i', KeyEventKind::Release);
+    assert_eq!(state.viewer.requested().0, page(0x100), "Back once a hold");
+    press(&mut state, 'i', KeyEventKind::Press);
+    press(&mut state, 'i', KeyEventKind::Release);
+    assert_eq!(state.viewer.requested().0, page(0x150), "pressed: Index");
+    // Held past the hold time with no repeat.
+    let started = StdInstant::now();
+    assert_eq!(state.index_hold(KeyEventKind::Press, started), None);
+    assert_eq!(
+        state.index_hold(KeyEventKind::Release, started + super::keys::HOLD_FOR_BACK),
+        Some(neoteletext_core::viewer::Key::Back)
+    );
+    // A terminal that reports no releases: Index at once.
+    let mut plain = view_state(&session);
+    plain.initial = page(0x150);
+    for digit in ['3', '0', '0'] {
+        press(&mut plain, digit, KeyEventKind::Press);
+    }
+    press(&mut plain, 'i', KeyEventKind::Press);
+    assert_eq!(plain.viewer.requested().0, page(0x150));
+}

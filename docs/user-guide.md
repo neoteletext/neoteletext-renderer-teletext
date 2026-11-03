@@ -149,17 +149,19 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 |---|---|
 | `0` to `9` | Enter a page number. |
 | `r` `g` `y` `c`, or F1 to F4 | Follow the red, green, yellow and cyan links. They work only while row 24 is shown in full (REQ-SEC-024). |
-| `i` | Index link. |
+| `i` | Index link. Held, where the terminal reports key releases (the Kitty keyboard protocol): back through the history (DEC-2477). |
 | `h` or Home | Initial page. |
 | Up or `+`, Down or `-` | Next and previous page. |
 | Right and Left | Next and previous sub-page. |
 | `s`, then four digits | Show that sub-page, keyed as on a television: 0001 to 3979, the third digit 0 to 7 and the first 0 to 3 (REQ-NUM-017). A digit that cannot belong is ignored, and any other key leaves the entry. |
-| Alt+Left or Backspace, Alt+Right | Back and forward through the history. |
+| Alt+Left or Backspace, Alt+Right | Back and forward through the history. `--back-key KEY` and `--forward-key KEY` add a key of your own for each, as a remote control's configurable keys: one printable character the viewer does not already use. |
 | `?` | Reveal concealed text. |
 | `H` | Hold the page, so that new receptions do not update it. |
 | `m` | Mix: cell backgrounds become transparent, as when text is superimposed on the picture. |
 | `z` | Zoom: top half, bottom half, off. |
 | `q`, Esc or Ctrl+C | Quit. |
+
+Where the terminal reports key releases, `i` acts when it is let go: let go at once it is Index; held until the keyboard repeats it, or for half a second, it goes back, once a hold. On a terminal that reports no releases a hold cannot be told from a press, so `i` is Index at once and Back is Backspace, Alt+Left or the `--back-key`.
 
 A link to another service asks for confirmation: the status area shows `LEAVE?`, and row 24 the service's name and its origin, as in `Same key: Weather at weather.example` (the scheme is shown when it is not `https`), and pressing the same key again goes there; any other key stays. Once an origin is confirmed it is not asked about again for as long as the viewer runs, in any service (REQ-288, DEC-2454).
 

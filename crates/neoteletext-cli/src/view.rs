@@ -13,6 +13,7 @@ use crossterm::event::{
     self, EnableBracketedPaste, EnableFocusChange, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::{cursor, execute, queue, terminal};
+pub use keys::RemoteKeys;
 use neoteletext_app::extras::PageExtras;
 use neoteletext_app::input::Opening;
 use neoteletext_app::session::{Session, TraceLine};
@@ -74,6 +75,13 @@ struct ViewState {
     walk_trace: Vec<neoteletext_core::acq::Event>,
     // The trace could not be written, as standard error is the terminal.
     trace_withheld: bool,
+    // The keys the user gave for Back and Forward (DEC-2477).
+    remote_keys: RemoteKeys,
+    // The terminal reports key releases (the Kitty keyboard protocol), so
+    // a held Index can be told from a pressed one (DEC-2477).
+    releases_reported: bool,
+    // Index is down: since when, and whether its hold already went Back.
+    index_held: Option<(StdInstant, bool)>,
     // The report of the last grid built. The page and store stay borrowed
     // until the key is handled, so it is recorded at the start of the next
     // pass, when nothing borrows the decoder.
@@ -125,6 +133,9 @@ impl ViewState {
             walk_trace: Vec::new(),
             trace_withheld: false,
             unrecorded: None,
+            remote_keys: RemoteKeys::default(),
+            releases_reported: false,
+            index_held: None,
             pending_step: None,
             unrecorded_designation: None,
         }
@@ -188,8 +199,15 @@ pub struct Look {
     pub text_row_pixels: Option<usize>,
 }
 
-/// Runs the viewer until the user quits.
-pub fn run(session: &mut Session, source: &mut dyn Source, opening: Opening, look: Look) -> std::io::Result<()> {
+/// Runs the viewer until the user quits; `remote_keys` are the keys given
+/// for Back and Forward.
+pub fn run(
+    session: &mut Session,
+    source: &mut dyn Source,
+    opening: Opening,
+    look: Look,
+    remote_keys: RemoteKeys,
+) -> std::io::Result<()> {
     terminal::enable_raw_mode()?;
     // Releases and repeats where the terminal has the Kitty keyboard
     // protocol, a paste as one event, and the focus (`docs/user-guide.md`, "The viewer").
@@ -204,6 +222,8 @@ pub fn run(session: &mut Session, source: &mut dyn Source, opening: Opening, loo
 
     let start = StdInstant::now();
     let mut state = ViewState::new(session, start, opening);
+    state.remote_keys = remote_keys;
+    state.releases_reported = enhanced;
     session.keep(neoteletext_input::is_input_packet);
     // The viewer waits for the terminal and the source together: a key,
     // and a page the source has for it, are taken at once; the tick is

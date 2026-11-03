@@ -22,10 +22,11 @@ pub fn view(
     options: &Options,
     raster_args: &RasterArgs,
     graphics: GraphicsChoice,
-    legacy_mosaics: bool,
-    colours8: bool,
+    (legacy_mosaics, colours8): (bool, bool),
+    (back_key, forward_key): (Option<char>, Option<char>),
 ) -> Result<(), Failure> {
     use neoteletext_core::consts::PAGE_WIDTH;
+    let remote_keys = crate::view::RemoteKeys::new(back_key, forward_key).map_err(|error| (exit::USAGE, error))?;
     let opening = input::opening(&options.input).map_err(|error| (exit::USAGE, error.to_string()))?;
     let (mut session, mut source) = input::open_live(options)?;
     let (display, reason) = terminal::detect(display(graphics), std::io::stdout().is_terminal());
@@ -41,7 +42,7 @@ pub fn view(
         mosaics: mosaic_style(legacy_mosaics),
         text_row_pixels: area.and_then(terminal::TextArea::text_row_pixels),
     };
-    let ran = crate::view::run(&mut session, source.as_mut(), opening, look)
+    let ran = crate::view::run(&mut session, source.as_mut(), opening, look, remote_keys)
         .map_err(|error| (exit::INPUT, error.to_string()));
     // REQ-RND-029: why characters were drawn, as `show` says it, once the
     // terminal is the user's again.
@@ -57,8 +58,8 @@ pub fn view(
     _options: &Options,
     _raster_args: &RasterArgs,
     _graphics: GraphicsChoice,
-    _legacy_mosaics: bool,
-    _colours8: bool,
+    _text: (bool, bool),
+    _remote_keys: (Option<char>, Option<char>),
 ) -> Result<(), Failure> {
     Err(neoteletext_app::not_in_build("the interactive viewer", "view"))
 }

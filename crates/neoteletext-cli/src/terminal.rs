@@ -124,6 +124,7 @@ pub struct TextArea {
     pub rows: usize,
 }
 
+#[cfg(feature = "view")]
 impl TextArea {
     /// The height of a text row in pixels, when the rows divide the
     /// height exactly: a terminal whose reported height holds padding
