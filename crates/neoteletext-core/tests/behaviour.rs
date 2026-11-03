@@ -311,3 +311,35 @@ fn overwrites_take_the_designated_sets_whatever_esc_and_the_national_option_do()
     assert!(matches!(written(2), (CharSet::G0(g0), b'B') if g0.set == G0Set::Greek && g0.national.is_none()));
     assert_eq!(written(3), (CharSet::G2(G2Set::Greek), b'C'));
 }
+
+/// REQ-28 and REQ-149: the core has no clock, no randomness and no state
+/// outside its arguments, so the same packets at the same times through two
+/// decoders give the same statistics and the same stored page, and building
+/// a page's grid twice gives the same grid.
+#[test]
+fn the_same_input_gives_the_same_result() {
+    let mut packets = vec![header(0x00, 0)];
+    packets.extend(body());
+    packets.push(header(0x01, 0));
+    let run = || {
+        let mut slots = vec![StoredPage::EMPTY; 4];
+        let mut decoder = Decoder::new(&mut slots, Config::default());
+        for (index, packet) in packets.iter().enumerate() {
+            decoder.push(packet, &PacketMeta::default(), Instant(index as u64 * 64), &mut |_| {});
+        }
+        let address = PageAddress::from_mpp(0x200).unwrap();
+        let page = *decoder.store().get(address, SubCode::ANY).unwrap();
+        (*decoder.statistics(), page, decoder.magazine_data(address.magazine))
+    };
+    let (statistics, page, magazine) = run();
+    let (statistics_again, page_again, _) = run();
+    assert_eq!(statistics, statistics_again);
+    assert_eq!(page, page_again);
+    let build = || {
+        let mut grid = Grid::EMPTY;
+        build_grid(&mut grid, Some(&page), &magazine, &Config::default(), &DisplayOptions::default());
+        level15::apply(&mut grid, &page.enhancements, page.enhancements_present, &Config::default(), ALL_ROWS);
+        grid
+    };
+    assert_eq!(build(), build());
+}
