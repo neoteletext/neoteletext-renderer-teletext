@@ -9,7 +9,7 @@
 //! can run it in a confined process.
 //!
 //! The path from bytes to page:
-//! 1. [`decode`](crate::decode): the picture is decoded within fixed bounds
+//! 1. `decode`: the picture is decoded within fixed bounds
 //!    on its size and memory, turned upright from its orientation tag, and
 //!    any transparency is laid over the background colour.
 //! 2. `fit`: the picture is cropped, scaled or placed whole on the page's
