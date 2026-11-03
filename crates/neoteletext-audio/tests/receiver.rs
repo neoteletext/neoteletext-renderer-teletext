@@ -884,6 +884,39 @@ mod opus {
         assert_eq!(assembled(&sink, &sound), want, "whole once block 3 is here");
     }
 
+    // Verifies REQ-AUD-005 and REQ-AUD-013 for Opus (TODO-1146 item 3): a
+    // block in a refused record is not taken for one at the sink. The
+    // decoding in order stops at the refused block and goes on, exactly as
+    // one decoder's output, once its good record comes.
+    #[test]
+    fn an_opus_block_in_a_refused_record_reaches_the_sink_from_its_good_record() {
+        let data = packets(6, 13);
+        let samples = 6 * 960;
+        let sound = Sound::opus(5, 1, PACKET, &data, samples).unwrap();
+        let packet_bytes = usize::from(PACKET);
+        let packet = |index: usize| &data[index * packet_bytes..(index + 1) * packet_bytes];
+        let mut start = play(0, 1, &sound, None);
+        start.flags = PROGRESSIVE;
+        let mut arena = vec![0; ARENA];
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        let mut sink = Recorder::new();
+        let mut records = vec![sound.object_record().unwrap(), start.record()];
+        for index in [0, 1, 3, 4, 5] {
+            records.extend(sound.packet_records(u16::try_from(index).unwrap(), packet(index)).unwrap());
+        }
+        // Block 2 followed by two stray bytes.
+        let mut bad = packet(2).to_vec();
+        bad.extend_from_slice(&[0, 0]);
+        records.push(data_record(&sound, 2, &bad));
+        let good = sound.packet_records(2, packet(2)).unwrap();
+        records.extend(good.iter().cloned());
+        records.extend(good);
+        push(&mut receiver, &neoteletext_audio::encode::packets(0, 0, &records).0, &mut sink);
+        let expected: Vec<Option<&[u8]>> = data.chunks(packet_bytes).map(Some).collect();
+        assert_eq!(assembled(&sink, &sound), decoded(&expected));
+        assert!(receiver.store().entry(sound.handle).unwrap().complete());
+    }
+
     /// REQ-47: a live sound's lost packet is concealed by the decoder that follows it.
     #[test]
     fn a_lost_live_opus_packet_is_concealed_by_the_decoder() {
