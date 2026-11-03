@@ -62,6 +62,10 @@ pub struct Common {
     /// saa5246a profile's is E.
     #[arg(long, value_name = "LETTER", value_parser = parse_rom_variant)]
     pub variant: Option<RomVariant>,
+    /// In a screen dump, leave out a row that repeats the double-height row
+    /// above it, as the BBC Microcomputer's dumps hold it (REQ-INP-017).
+    #[arg(long)]
+    pub dump_repeated_rows: bool,
     /// Print diagnostics, and with -vv the state machine trace (REQ-FSM-010).
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,

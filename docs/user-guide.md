@@ -191,6 +191,7 @@ Every command accepts these options. Each one changes a setting that a decision 
 | `--level 1\|1.5\|2.5\|3.5` | The presentation level, overriding the profile's (REQ-CLI-007, decision E.40). | The profile's level |
 | `--no-rounding` | Turns character rounding off (REQ-RND-012). | Rounding on |
 | `--single-start-box` | Accepts a single Start Box code (decision E.17). | Two required |
+| `--dump-repeated-rows` | In a raw screen dump, leaves out a row that repeats, byte for byte, the double-height row above it, as the BBC Microcomputer's mode 7 dumps hold it; teletext ignores the row under a double-height row (REQ-INP-017). | Off |
 | `--variant LETTER` | The SAA5246A's national option ROM variant, E, H, T, J, K, L, I or S: C12 to C14 choose among its sets alone, a combination it lacks gives its default language, and X/28 and M/29 are not read (REQ-PRF-003). | E under `saa5246a`; none otherwise |
 | `--pages N` | Pages and sub-pages kept in memory. | 4096 |
 | `-v`, `-vv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds the state machine trace (REQ-FSM-010). | Off |

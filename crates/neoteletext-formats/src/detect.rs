@@ -94,6 +94,9 @@ pub struct AutoConfig {
     pub transport: TsConfig,
     /// The source number written into packet metadata.
     pub source: Option<u8>,
+    /// Leave out a screen dump's row that repeats the double-height row
+    /// above it, as the BBC Microcomputer's dumps hold it (REQ-181).
+    pub dump_repeated_rows: bool,
 }
 
 #[cfg(test)]

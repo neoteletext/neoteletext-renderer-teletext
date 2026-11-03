@@ -126,7 +126,7 @@ impl AnyReader {
         }
         #[cfg(feature = "dump")]
         if format == Format::ScreenDump {
-            return Self::Dump(DumpReader::new());
+            return Self::Dump(DumpReader::with_repeated_rows(config.dump_repeated_rows));
         }
         Self::NotCompiled(NotCompiledReader::new(format))
     }

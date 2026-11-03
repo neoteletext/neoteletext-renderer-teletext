@@ -51,6 +51,9 @@ pub struct Options {
     /// The SAA5246A national option ROM variant, overriding the profile's
     /// (REQ-PRF-003).
     pub rom_variant: Option<RomVariant>,
+    /// Leave out a screen dump's row that repeats the double-height row
+    /// above it (REQ-181).
+    pub dump_repeated_rows: bool,
     /// Diagnostics: 1 prints them, 2 adds the state machine trace
     /// (REQ-FSM-010).
     pub verbose: u8,
@@ -132,6 +135,7 @@ pub fn reader(options: &Options, encode_pages: bool) -> Box<AutoReader> {
         encode_pages,
         transport: TsConfig { pid: options.pid, program: options.program, ..TsConfig::default() },
         source: None,
+        dump_repeated_rows: options.dump_repeated_rows,
     }))
 }
 
@@ -241,6 +245,7 @@ mod tests {
             no_rounding: false,
             single_start_box: false,
             rom_variant: None,
+            dump_repeated_rows: false,
             verbose: 0,
             no_sandbox: false,
             allow_local: Vec::new(),
