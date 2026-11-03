@@ -7,7 +7,6 @@
 
 mod common;
 use common::{folder, neottx};
-use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
@@ -108,11 +107,14 @@ fn page_files_convert_to_t42_in_transmission_order() {
 
 /// Sub-pages of page 100 in the channel test: more than one part of a page's
 /// list holds (`neoteletext_web::subpages::ROWS_PER_PART`, 64).
+#[cfg(feature = "live")]
 const CHANNEL_SUB_PAGES: u16 = 70;
 
 /// Page 100 of [`CHANNEL_SUB_PAGES`] sub-pages, 0001 up, each saying its
 /// sub-code, and page 200 alone.
+#[cfg(feature = "live")]
 fn channel_input() -> String {
+    use std::fmt::Write as _;
     let mut pages = String::new();
     for subcode in 1..=CHANNEL_SUB_PAGES {
         let _ = write!(
@@ -161,7 +163,9 @@ fn a_channel_is_written_as_a_folder_and_read_back() {
 }
 
 // Verifies DEC-2413 item 1: a file already in the folder is never written
-// over, and the conversion fails saying which.
+// over, and the conversion fails saying which. A channel's folder is the
+// `live` feature, as the other channel tests are.
+#[cfg(feature = "live")]
 #[test]
 fn a_channel_never_overwrites_a_file() {
     let folder = folder("convert-channel-existing");
