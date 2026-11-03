@@ -45,13 +45,14 @@ mod push;
 mod push_data;
 mod push_messages;
 mod request;
+mod resource;
 mod response;
 mod service;
 
 pub use config::{Buffers, Config, Storage};
 pub use events::{
-    BoundChange, Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, Sink, Source,
-    Subscription,
+    BoundChange, Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, ResourceRole, Sink,
+    Source, Subscription,
 };
 
 /// The bytes of one T42 packet (REQ-INP-002).
@@ -135,6 +136,10 @@ enum Purpose {
     /// Registers a device-bound session (REQ-WEB-017).
     #[cfg_attr(not(feature = "dbsc"), allow(dead_code, reason = "made only with the feature `dbsc`"))]
     Register,
+    /// One resource the port asked for outside any channel (REQ-2476,
+    /// REQ-123): no cookie goes with it or is kept from it, and nothing of
+    /// a channel or a bound session is touched by its answer.
+    Resource(ResourceRole),
     /// Refreshes the device-bound session in `slot`; `retried` after the
     /// server's 403 and a fresh challenge.
     #[cfg_attr(not(feature = "dbsc"), allow(dead_code, reason = "made only with the feature `dbsc`"))]
@@ -302,6 +307,8 @@ pub struct UserAgent<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES
     wall_clock: Option<(Instant, u64)>,
     descriptor: Option<Descriptor>,
     pending_descriptor: Option<(Url, bool, bool)>,
+    /// A resource the port asked for, waiting for the fetch connection.
+    pending_resource: Option<(Url, ResourceRole)>,
     /// The open channel's folder (REQ-WEB-018), when a channel is open.
     channel: Option<Url>,
     /// The page file extension to try first in the channel: the one that
@@ -419,6 +426,7 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
             wall_clock: None,
             descriptor: None,
             pending_descriptor: None,
+            pending_resource: None,
             channel: None,
             t42_first: false,
             sub_page_t42_first: true,

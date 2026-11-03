@@ -18,7 +18,7 @@ use std::rc::Rc;
 use std::string::{String, ToString};
 use std::vec::Vec;
 
-use common::{Counter, Replay, Reply, header_value, response};
+use common::{Counter, Replay, Reply, assert_profile_headers, header_value, response};
 use neoteletext_core::types::{Instant, PageAddress};
 use neoteletext_web::agent::{BoundChange, Config, Input, Output, Storage, UserAgent};
 use neoteletext_web::dbsc::{COORDINATE_BYTES, DeviceKeys, KeyHandle, PublicKey, SIGNATURE_BYTES};
@@ -265,7 +265,16 @@ fn a_lapsed_cookie_is_refreshed_with_the_servers_challenge_before_the_request() 
     assert_eq!(&signature[..4], &1_u32.to_be_bytes(), "the session's own key");
     assert_eq!(header_value(&requests[5], "Cookie").as_deref(), Some("auth=two"));
     assert_eq!(harness.changes(), [change("s1", BoundChange::Refreshed)]);
+    // REQ-503: the registration, the refreshes and the requests they let
+    // through carry REQ-503's table of headers and a bound session's own,
+    // and nothing else.
+    assert_profile_headers(&harness.pump.transport, &BOUND_SESSION_HEADERS);
 }
+
+/// The request headers a bound session adds to REQ-503's table (REQ-503
+/// version 3, REQ-WEB-017): the session's identifier, the signed proof, and
+/// the proof's place in an `Authorization` header that a server may ask for.
+const BOUND_SESSION_HEADERS: [&str; 3] = ["sec-secure-session-id", "secure-session-response", "authorization"];
 
 #[test]
 fn a_refused_refresh_ends_the_session_and_deletes_its_key_and_the_request_still_goes() {

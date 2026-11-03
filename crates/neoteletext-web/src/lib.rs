@@ -20,7 +20,8 @@
 //! - content: [`channel`], [`contents`], [`font_library`] (a font
 //!   library's `fonts.txt` and a font's checksum), [`subpages`] (a page's list
 //!   of sub-pages, and with `std` a page written as a channel's files),
-//!   [`descriptor`], and `small_page` (feature `alloc`): what a web browser
+//!   [`descriptor`], [`discovery`] (the pointers a web page gives to its
+//!   channel), and `small_page` (feature `alloc`): what a web browser
 //!   is shown of a channel;
 //! - the machines: [`agent`] (the [`agent::UserAgent`]) and [`zxnet`]
 //!   (the [`zxnet::ZxnetFeed`]);
@@ -93,6 +94,7 @@ pub mod ws;
 pub mod channel;
 pub mod contents;
 pub mod descriptor;
+pub mod discovery;
 pub mod font_library;
 pub mod map;
 pub mod records;

@@ -13,7 +13,11 @@ pub fn fetch(
     allow_local: &[IpAddr],
     proxy: Option<&str>,
     walk: bool,
+    font: bool,
 ) -> Result<(), Failure> {
+    if font {
+        return neoteletext_app::fetch::run_font(address, no_sandbox, allow_local, proxy);
+    }
     neoteletext_app::fetch::run(address, no_sandbox, allow_local, proxy, walk)
 }
 
@@ -25,6 +29,7 @@ pub fn fetch(
     _allow_local: &[IpAddr],
     _proxy: Option<&str>,
     _walk: bool,
+    _font: bool,
 ) -> Result<(), Failure> {
     Err(neoteletext_app::not_in_build("the fetcher process of live mode", "live"))
 }

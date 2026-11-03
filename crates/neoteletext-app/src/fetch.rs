@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use std::time::Instant as StdInstant;
 
 mod decoder_link;
+mod font;
 mod transport;
 mod wakes;
 mod web;
@@ -37,6 +38,44 @@ pub fn run(
     proxy: Option<&str>,
     walk: bool,
 ) -> Result<(), (u8, String)> {
+    run_as(address, no_sandbox, allow_local, proxy, if walk { Role::Walk } else { Role::Read })
+}
+
+/// What a fetcher process is started for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Role {
+    /// A live feed, web service or channel, read as the decoder asks.
+    Read,
+    /// A live feed's whole service, walked (REQ-186).
+    Walk,
+    /// One font file at an address the user named (REQ-123).
+    Font,
+}
+
+/// Runs the fetcher for the font at `address` (REQ-123): it sends the
+/// font's bytes, or why they could not be fetched, to the decoder process
+/// as one frame, and ends.
+///
+/// # Errors
+/// As [`run`]'s: a proxy of another form, or a sandbox that cannot be
+/// applied.
+pub fn run_font(
+    address: &str,
+    no_sandbox: bool,
+    allow_local: &[IpAddr],
+    proxy: Option<&str>,
+) -> Result<(), (u8, String)> {
+    run_as(address, no_sandbox, allow_local, proxy, Role::Font)
+}
+
+fn run_as(
+    address: &str,
+    no_sandbox: bool,
+    allow_local: &[IpAddr],
+    proxy: Option<&str>,
+    role: Role,
+) -> Result<(), (u8, String)> {
+    let walk = role == Role::Walk;
     let proxy = proxy.map(Proxy::parse).transpose().map_err(|error| (crate::exit::USAGE, error.to_string()))?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let (wake, receiver) = mpsc::channel();
@@ -51,7 +90,9 @@ pub fn run(
         no_sandbox,
     )
     .map_err(|error| (crate::exit::INPUT, error.to_string()))?;
-    if let Some(channel) = feed(address) {
+    if role == Role::Font {
+        font::run_font(address, &mut wakes, wake, allow_local, proxy);
+    } else if let Some(channel) = feed(address) {
         let channel = channel.map_err(|error| (crate::exit::USAGE, format!("unknown live feed: {error:?}")))?;
         zxnet::run_zxnet(&channel, &mut wakes, wake, allow_local, proxy, walk);
     } else {

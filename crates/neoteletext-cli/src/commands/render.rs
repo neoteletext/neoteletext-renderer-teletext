@@ -1,6 +1,6 @@
 //! `neottx render` (REQ-RND-007): one page, or all, as image files.
 
-use super::font::{parse_sha256, parse_table, read_table_file};
+use super::font::{parse_sha256, parse_table, read_font};
 use super::io_failure;
 use super::{ImageFormat, Selection, grid_of, page_file_name, parse_selection, sandbox_writable, scale_for, selected};
 use crate::args::RasterArgs;
@@ -32,10 +32,14 @@ pub fn render(
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
     };
-    // The font file is read, within its bound, before the sandbox, and
-    // parsed after it with the input (REQ-SEC-017).
-    let font_file =
-        raster_args.font.as_deref().map(|path| read_table_file(path).map(|bytes| (path, bytes))).transpose()?;
+    // The font file is read, within its bound, or fetched by the fetcher
+    // process, before the sandbox, and parsed after it with the input
+    // (REQ-SEC-017, REQ-123).
+    let font_file = raster_args
+        .font
+        .as_deref()
+        .map(|path| read_font(path, expected.as_ref(), options).map(|bytes| (path, bytes)))
+        .transpose()?;
     let mut session =
         input::load_sandboxed(options, selection.page(), || sandbox_writable(Some(&directory), options.no_sandbox))?;
     let frame = Frame::still(session.decoder().config(), raster_args.reveal);

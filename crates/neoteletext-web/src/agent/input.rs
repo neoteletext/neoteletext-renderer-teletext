@@ -50,6 +50,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Input::WallClock(unix) => self.wall_clock = Some((now, unix)),
             Input::Send(message) => self.send_input(message, sink),
             Input::MeasureRoundTrip(on) => self.measure_round_trip(on),
+            Input::FetchResource { role, address } => self.request_resource(role, address, sink),
         }
         self.dispatch(now, sink);
         if !more {

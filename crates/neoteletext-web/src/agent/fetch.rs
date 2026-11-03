@@ -104,15 +104,25 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 }
                 continue;
             }
+            let kept = self.body_kept();
             let Some(body) = &mut self.fetch.body else { break };
             match body.feed(input) {
                 Ok(step) => {
-                    let end = self.fetch.body_len.saturating_add(step.data.len());
+                    let room = kept.map_or(step.data.len(), |kept| kept.saturating_sub(self.fetch.body_len));
+                    let data = step.data.get(..room.min(step.data.len())).unwrap_or(&[]);
+                    let end = self.fetch.body_len.saturating_add(data.len());
                     if let Some(target) = self.buffers.body.get_mut(self.fetch.body_len..end) {
-                        copy_prefix(target, step.data);
+                        copy_prefix(target, data);
                         self.fetch.body_len = end;
                     } else {
                         self.abandon_fetch(Failure::Http(HttpError::BodyTooLarge), sink);
+                        return;
+                    }
+                    // REQ-2476: discovery reads no further than its prefix,
+                    // and the connection, left mid-body, is closed.
+                    if kept.is_some_and(|kept| self.fetch.body_len >= kept) && !step.done {
+                        self.close_fetch_after = true;
+                        self.complete(now, sink);
                         return;
                     }
                     input = input.get(step.consumed..).unwrap_or(&[]);
@@ -136,6 +146,15 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 self.close_fetch_after = true;
             }
             self.complete(now, sink);
+        }
+    }
+
+    /// How much of the current exchange's body is kept, when it is read
+    /// only in part: discovery's prefix, no more than the buffer holds.
+    fn body_kept(&self) -> Option<usize> {
+        match self.fetch.exchange.map(|exchange| exchange.purpose) {
+            Some(Purpose::Resource(role)) => role.body_kept().map(|kept| kept.min(self.buffers.body.len())),
+            _ => None,
         }
     }
 
@@ -174,8 +193,15 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Purpose::Contents => crate::contents::MAX_BYTES,
             Purpose::SubPages { .. } => crate::subpages::MAX_BYTES,
             Purpose::Register | Purpose::Refresh { .. } => BOUND_INSTRUCTIONS_LIMIT,
-        }
-        .min(self.buffers.body.len());
+            // Discovery reads a prefix of a body of any length and stops
+            // (REQ-2476); its copy into the buffer is bounded instead.
+            Purpose::Resource(role) => role.body_limit(),
+        };
+        let limit = if matches!(exchange.purpose, Purpose::Resource(role) if role.body_kept().is_some()) {
+            limit
+        } else {
+            limit.min(self.buffers.body.len())
+        };
         let decoder = match BodyDecoder::new(head.framing, limit) {
             Ok(decoder) => decoder,
             Err(error) => {
@@ -192,15 +218,20 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         // response from inside it, or from its upgrade to `https`, sets or
         // clears any: a redirect elsewhere touches none (decision E.114
         // item 2, finding F-42).
-        let inside =
-            channel.as_ref().is_none_or(|folder| crate::channel::redirect_keeps_channel(folder, &exchange.url));
+        // A resource fetched outside any channel keeps no cookie, whatever
+        // it sets (REQ-2476, REQ-123).
+        let resource = matches!(exchange.purpose, Purpose::Resource(_));
+        let inside = !resource
+            && channel.as_ref().is_none_or(|folder| crate::channel::redirect_keeps_channel(folder, &exchange.url));
         let scope = channel.as_ref().map(Url::path);
         if inside {
             let store = cookie_store(jar, port_cookies);
             // The head parsed above, so this reading of it cannot fail.
             let _ = store_response_cookies(store, head_bytes, host, path, scope, secure, seconds, calendar, sink);
         }
-        self.bound_head(now, &exchange, &head, sink);
+        if !resource {
+            self.bound_head(now, &exchange, &head, sink);
+        }
         self.fetch.response = Some(head);
         self.fetch.body = Some(decoder);
         true
@@ -231,6 +262,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Purpose::Page { page, subcode, .. } => event(sink, Event::FetchFailed { page, subcode, failure }),
             Purpose::SubPages { page, part } => event(sink, Event::SubPagesFailed { page, part, failure }),
             Purpose::Register | Purpose::Refresh { .. } => self.bound_failed(purpose, sink),
+            Purpose::Resource(role) => event(sink, Event::ResourceFailed { role, failure }),
         }
     }
 

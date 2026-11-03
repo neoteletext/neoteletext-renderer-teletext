@@ -166,6 +166,9 @@ pub mod header {
     pub const LAST_MODIFIED: &[u8] = b"Last-Modified";
     /// `Cache-Control` (RFC 9111 section 5.2).
     pub const CACHE_CONTROL: &[u8] = b"Cache-Control";
+    /// `Link` (RFC 8288 section 3), read for discovery's pointers alone
+    /// (REQ-2476).
+    pub const LINK: &[u8] = b"Link";
     /// `Retry-After` (RFC 9110 section 10.2.3).
     pub const RETRY_AFTER: &[u8] = b"Retry-After";
     /// `Upgrade` (RFC 9110 section 7.8).
@@ -187,6 +190,11 @@ pub mod header {
 pub const ACCEPT_PAGES: &[u8] = b"text/x-teletext-tti, application/x-teletext-t42, application/json";
 /// The only content coding asked for and accepted (REQ-SEC-011).
 pub const IDENTITY: &[u8] = b"identity";
+/// What discovery asks for (REQ-2476): a web page, whose pointers are read.
+pub const ACCEPT_DISCOVERY: &[u8] = media::HTML;
+/// What a font fetched from an address is asked for as (REQ-123,
+/// DEC-2377): the type hosts give `.bdf` files, or a plain octet stream.
+pub const ACCEPT_FONT: &[u8] = b"application/x-font-bdf, application/octet-stream";
 /// The only transfer coding accepted (RFC 9112 section 7.1).
 pub const CHUNKED: &[u8] = b"chunked";
 /// The `Connection` option that ends a persistent connection (RFC 9112
@@ -220,6 +228,9 @@ pub mod media {
     /// What a host answers a missing file with, often with status 200
     /// (REQ-WEB-027).
     pub const HTML: &[u8] = b"text/html";
+    /// A channel's folder, as a pointer of discovery names it
+    /// (DEC-2475): no file is served with it.
+    pub const CHANNEL: &[u8] = b"application/vnd.neoteletext+json";
 }
 
 /// Cache-Control directives honoured (RFC 9111 section 5.2.2).
