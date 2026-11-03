@@ -79,6 +79,41 @@ Teletext pixels are about 1.2 times taller than wide on a 4:3 television (REQ-RN
 
 It does not drive displays, generate video, keep display timing, buffer frames or contain code for any particular chip (REQ-ARCH-010). Buffering strategy, direct memory access and scan-out are yours.
 
+## Security settings and their defaults
+
+Every security setting defaults to the safer choice (REQ-SEC-020); a port that changes one takes on the risk named here. The test `the_default_configuration_is_the_safer_choice` in `crates/neoteletext-web/tests/agent_replay.rs` names each default of the web agent's `Config`.
+
+| Setting | Default | The risk of changing it |
+|---|---|---|
+| `Config::allowed_local` (`neottx --allow-local`) | Empty: no local-network address may be contacted (REQ-SEC-006). | Each address allowed can be reached by any web service the receiver opens, so a hostile page can make the receiver probe or use a router, printer or other device at that address. Allow one test server's address, never a range. |
+| `Config::persist_cookies` | Off: cookies live for the run only (REQ-SEC-013). | Saved cookies identify the user to every service across runs, and are secrets on the device: a port that saves them must store them as secrets and offer a wipe. |
+| `Config::redirects_within_channel` | On: a redirect that leaves the channel is reported as `Event::RedirectToOtherChannel`, not followed (REQ-WEB-021). | Turned off, a channel can send the receiver to another site's content without the viewer confirming it; `neottx` turns it off only for a service opened by its descriptor, whose origin is the channel. |
+| `Config::proxied` (`neottx --proxy`) | Off: connections are direct. | The proxy sees every host the receiver contacts, and the local-network check can then judge only the host's name, not the address the proxy resolves it to. Set it only for a proxy the user chose. |
+| `Config::tls_available` | On: HTTPS addresses are used. | A port without TLS cannot open HTTPS services at all (they are reported unreachable); it does not fall back to plain HTTP. Turn it off only when the port has no TLS. |
+| `--no-sandbox` (`neottx`) | Off: `neottx` sandboxes itself and refuses to run when it cannot (REQ-SEC-017). | A fault in a parser of untrusted input can then reach every file and the network the user can. For debugging only. |
+| The security indicator | Always on; there is no setting (REQ-SEC-005). | None: a page cannot hide it, and no option turns it off. |
+
 ## Isolation on microcontrollers
 
-Where the chip has a memory protection unit, run the network stack and the decoder in separate regions (REQ-SEC-021, Phase 2 guidance).
+REQ-SEC-021 (Phase 2 guidance). The library cannot enforce any of this: it has no hardware code and does not know the chip (REQ-ARCH-010). It is what a port does around it. Untested on hardware: no port in this repository does it yet.
+
+**Why.** The network stack is the part that reads what an attacker on the network sends first, and the decoder reads what a hostile page sends. On a chip without an operating system both run with the rights of everything else, so a fault in either can rewrite the other's memory, the keys of a TLS session or the frame buffer. A memory protection unit lets the port give each its own regions, so that a fault stops at its own boundary.
+
+**What each kind of chip can separate.**
+- **Arm Cortex-M with a memory protection unit** (the Armv7-M and Armv8-M profiles: Cortex-M3, M4, M7, M23, M33; the Cortex-M0+ has it as an option, the Cortex-M0 never): eight or sixteen regions, each with a base, a size, read, write and execute permissions for privileged and unprivileged code. The usual split runs the decoder unprivileged with its own regions, and the network stack and the port privileged, or the other way round, switching regions on each change of task.
+- **RISC-V with physical memory protection** (PMP, in the privileged specification): up to sixteen or sixty-four entries giving read, write and execute rights to machine-mode software's less privileged modes. With user mode, the decoder runs in user mode inside its entries and calls the port only through traps; without user mode, PMP protects only against machine mode's own mistakes when entries are locked, which is much weaker.
+- **Xtensa (ESP32, ESP32-S3)**: the vendor's memory protection (the ESP32-S3's permission control, the ESP32's region protection), which the vendor's SDK configures; consult its documentation.
+
+**The regions the decoder needs.**
+1. Its code and read-only data, including the compiled font: read and execute, never write.
+2. Its state, all of it in memory the port provides (REQ-GEN-003): the page store (`[StoredPage; N]`), the enhancement store if Levels 2.5 or 3.5 are compiled in, the `Grid`, the viewer and its history. Read and write, never execute.
+3. Its stack: read and write, never execute, with a guard region below it, since a fixed stack can overflow into its neighbour.
+4. The buffer it shares with the network stack (below), and the row buffer it renders into for the display: read and write.
+
+Nothing else: no peripheral, no other task's memory, no network buffer beyond the shared one.
+
+**What passes between them, and how.** Only a stream of bytes, in one direction, through one shared buffer: the network stack writes the bytes of a response or a pushed message (TTI, T42 or the channel's records), and the decoder reads them, just as `neottx`'s fetcher process writes frames into a pipe that its decoder reads (REQ-SEC-018). Use a single-producer, single-consumer ring buffer of a fixed size in its own region, writable by the network stack and readable by the decoder, with the read and write positions as the only shared variables. Requests the other way (the next page wanted, an input message) go through a second, small buffer of the same kind. Treat every byte read from the buffer as untrusted, as the decoder already does: the length of a frame is bounded before it is used. Never share a pointer, a callback or a structure with fields that the other side interprets.
+
+**What a fault does.** A memory protection fault in the decoder's task means the decoder met input it could not handle, or has a fault: stop that task, clear its regions (the page store and the grid), drop the bytes in the shared buffer, and start it again with a fresh store, showing the receiver's own message that the page could not be shown. Never resume the faulted task, and never let the fault handler run code from the decoder's regions. A fault in the network stack's task is handled by restarting the network. Count faults, and stop restarting after a few in a short time, so that a hostile service cannot keep the device busy.
+
+**What this does not protect.** The display: the decoder writes the row buffer, so a hostile page can draw whatever a page may draw, which the status area's rules (REQ-SEC-005) already govern. Timing: the decoder's work for each packet is bounded (REQ-SEC-012), but the port still needs a watchdog on its task.
