@@ -4,8 +4,9 @@
 use super::{ComposeContext, SecurityIndicator, Viewer, ViewerState};
 use crate::acq::EnhancementReport;
 use crate::acq::StoredPage;
-use crate::compose::compose_level;
+use crate::compose::{compose_level, compose_level_traced};
 use crate::level1::{DisplayOptions, Grid, build_grid};
+use crate::trace::TraceSink;
 
 impl Viewer {
     /// Builds the grid the viewer shows (REQ-ARCH-006): Level 1, then the
@@ -18,6 +19,30 @@ impl Viewer {
     /// decoder counts each build once however often the page is redrawn.
     #[must_use]
     pub fn compose(&self, grid: &mut Grid, page: Option<&StoredPage>, context: &ComposeContext<'_>) -> Composed {
+        self.compose_with(grid, page, context, None)
+    }
+
+    /// [`Viewer::compose`], writing the transitions of the presentation
+    /// level's walk to `trace` (REQ-FSM-010), as `compose_level_traced`
+    /// does for the other commands.
+    #[must_use]
+    pub fn compose_traced(
+        &self,
+        grid: &mut Grid,
+        page: Option<&StoredPage>,
+        context: &ComposeContext<'_>,
+        trace: &mut TraceSink<'_>,
+    ) -> Composed {
+        self.compose_with(grid, page, context, Some(trace))
+    }
+
+    fn compose_with(
+        &self,
+        grid: &mut Grid,
+        page: Option<&StoredPage>,
+        context: &ComposeContext<'_>,
+        trace: Option<&mut TraceSink<'_>>,
+    ) -> Composed {
         let ComposeContext { magazine, config, rolling_header, store, row24, lookup } = *context;
         // REQ-NAV-006: while held, new receptions do not reach the screen.
         if self.state == ViewerState::Holding {
@@ -35,7 +60,10 @@ impl Viewer {
             boxed: false,
         };
         build_grid(grid, page, magazine, config, &options);
-        Composed::Built(page.and_then(|page| compose_level(grid, page, magazine, &lookup, config, &options)))
+        Composed::Built(page.and_then(|page| match trace {
+            Some(trace) => compose_level_traced(grid, page, magazine, &lookup, config, &options, trace),
+            None => compose_level(grid, page, magazine, &lookup, config, &options),
+        }))
     }
 }
 

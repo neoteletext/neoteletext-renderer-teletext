@@ -380,3 +380,37 @@ fn the_text_output_zooms_as_the_picture_does() {
     assert!(!lines(Zoom::Top).contains(&"row 24".to_owned()), "row 24 is off the screen");
     assert_eq!(super::zoomed_text(&text, Zoom::Off), text);
 }
+
+/// REQ-142 (REQ-FSM-010), TODO-1111: with `-vv` the viewer writes the
+/// machines' transitions to standard error when it is not the terminal,
+/// keeps none from turn to turn, and when it is the terminal drops them
+/// and says so at the end.
+#[test]
+fn the_viewer_writes_the_trace_where_it_does_not_spoil_the_page() {
+    use neoteletext_core::config::Config;
+    use neoteletext_core::packet::{PacketMeta, encode};
+    use neoteletext_core::types::{ControlBits, Magazine, PageNumber, SubCode};
+    let header =
+        encode::header(Magazine::new(1).unwrap(), PageNumber(0), SubCode::new(0), ControlBits(0), &[0x20; 32]).unwrap();
+    let traced = Config { trace: true, ..Config::default() };
+    let mut session = neoteletext_app::session::Session::new(traced, 8);
+    let mut state = view_state(&session);
+    session.push(&header, &PacketMeta::default());
+    let mut written = Vec::new();
+    state.write_trace(&mut session, &mut written, false);
+    let text = String::from_utf8(written).unwrap();
+    assert!(text.lines().any(|line| line.starts_with("neottx: Trace(")), "{text}");
+    assert!(session.trace.is_empty(), "nothing is kept");
+    session.push(&header, &PacketMeta::default());
+    let mut written = Vec::new();
+    state.write_trace(&mut session, &mut written, true);
+    assert_eq!((written.len(), session.trace.len()), (0, 0));
+    assert!(state.into_messages().iter().any(|message| message.contains("2>trace.txt")));
+    // Without -vv nothing is kept or written.
+    let mut session = neoteletext_app::session::Session::new(Config::default(), 8);
+    let mut state = view_state(&session);
+    session.push(&header, &PacketMeta::default());
+    let mut written = Vec::new();
+    state.write_trace(&mut session, &mut written, false);
+    assert_eq!(written, b"");
+}

@@ -4,8 +4,9 @@
 use super::{Shown, ViewState};
 use neoteletext_app::extras;
 use neoteletext_app::session::Session;
-use neoteletext_core::acq::StoredPage;
+use neoteletext_core::acq::{Event, StoredPage};
 use neoteletext_core::fsm::PageState;
+use neoteletext_core::trace::TraceSink;
 use neoteletext_core::types::{PageAddress, SubCode};
 use neoteletext_core::viewer::{ComposeContext, Composed, ViewerEvent, ViewerState};
 
@@ -54,7 +55,22 @@ impl ViewState {
             row24,
             lookup,
         };
-        if let Composed::Built(report) = self.viewer.compose(&mut self.grid, shown.page, &context) {
+        // REQ-FSM-010: with `-vv` the walk of the presentation level is
+        // traced, once for each reception of the page shown rather than on
+        // every redraw.
+        let reception = shown.page.map(|page| (page.key, page.last_received));
+        let traced = shown.config.trace && reception.is_some() && reception != self.traced;
+        let mut entries = Vec::new();
+        let composed = if traced {
+            self.traced = reception;
+            let mut keep = |entry| entries.push(Event::Trace(entry));
+            let mut sink = TraceSink { time: shown.now, entries: &mut keep };
+            self.viewer.compose_traced(&mut self.grid, shown.page, &context, &mut sink)
+        } else {
+            self.viewer.compose(&mut self.grid, shown.page, &context)
+        };
+        self.walk_trace.extend(entries);
+        if let Composed::Built(report) = composed {
             self.unrecorded = report;
         }
         if self.prompt.is_none()

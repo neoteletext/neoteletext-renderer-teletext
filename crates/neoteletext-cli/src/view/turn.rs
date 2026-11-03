@@ -17,6 +17,7 @@ use neoteletext_core::level1::Grid;
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 use neoteletext_core::viewer::{Action, Viewer, ViewerEvent};
 use neoteletext_input::event::Stamp;
+use std::io::IsTerminal;
 use std::sync::mpsc;
 
 impl ViewState {
@@ -38,6 +39,9 @@ impl ViewState {
             if self.live {
                 self.live = source.poll(session, now);
             }
+            let stderr = std::io::stderr();
+            let to_terminal = stderr.is_terminal();
+            self.write_trace(session, &mut stderr.lock(), to_terminal);
             for notice in source.notices() {
                 self.take_notice(notice, source);
             }

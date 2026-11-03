@@ -41,6 +41,10 @@ mod turn;
 mod typing;
 
 /// What the viewer keeps from one turn of its loop to the next.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a separate fact of the viewer's session, set and read apart"
+)]
 struct ViewState {
     start: StdInstant,
     initial: PageAddress,
@@ -59,6 +63,12 @@ struct ViewState {
     prompt: Option<[u8; COLUMNS]>,
     confirmed_services: HashSet<u8>,
     typing: Typing,
+    // The reception of the page whose walk was last traced (REQ-FSM-010).
+    traced: Option<(neoteletext_core::fsm::PageKey, Instant)>,
+    // The walk's trace entries of this turn, written with the decoder's.
+    walk_trace: Vec<neoteletext_core::acq::Event>,
+    // The trace could not be written, as standard error is the terminal.
+    trace_withheld: bool,
     // The report of the last grid built. The page and store stay borrowed
     // until the key is handled, so it is recorded at the start of the next
     // pass, when nothing borrows the decoder.
@@ -99,13 +109,43 @@ impl ViewState {
             prompt: None,
             confirmed_services: HashSet::new(),
             typing,
+            traced: None,
+            walk_trace: Vec::new(),
+            trace_withheld: false,
             unrecorded: None,
         }
     }
 
     /// The messages the source gave, for after the terminal is restored.
-    fn into_messages(self) -> Vec<String> {
+    fn into_messages(mut self) -> Vec<String> {
+        if self.trace_withheld {
+            self.messages.push(
+                "the trace of -vv was not written while the viewer held the terminal; \
+                 redirect standard error, as in `neottx view -vv INPUT 2>trace.txt`"
+                    .to_owned(),
+            );
+        }
         self.messages
+    }
+
+    /// Writes the trace kept this turn, the decoder's and the walk's, as
+    /// the other commands print it with `-vv` (REQ-FSM-010): to `out`,
+    /// standard error, when it is not the terminal the viewer draws on,
+    /// where its lines would spoil the page; otherwise it is dropped, and
+    /// the viewer says so when it ends. Nothing is kept from turn to turn.
+    fn write_trace(&mut self, session: &mut Session, out: &mut dyn Write, out_is_terminal: bool) {
+        session.trace.append(&mut self.walk_trace);
+        if session.trace.is_empty() {
+            return;
+        }
+        if out_is_terminal {
+            self.trace_withheld = true;
+            session.trace.clear();
+            return;
+        }
+        for event in session.trace.drain(..) {
+            let _ = writeln!(out, "neottx: {event:?}");
+        }
     }
 }
 
