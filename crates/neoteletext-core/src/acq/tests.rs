@@ -1231,3 +1231,37 @@ fn corrections_failures_and_damage_are_reported() {
         events.iter().any(|event| matches!(event, Event::Damaged { damage: Damage { hamming84_failures: 1, .. }, .. }))
     );
 }
+
+/// REQ-21 (REQ-ACQ-021), EN 300 706 Annex B.6, Table B.1: every row of the
+/// table through the replacement of an enhancement page's packets. Only a
+/// full page's complete transmission or first fragment with C4 erases the
+/// old version; a partial page (C13) or a continued fragment (C12)
+/// replaces only the packets it carries, also when C4 is set with them.
+#[test]
+fn every_row_of_table_b1_replaces_what_it_says() {
+    use crate::consts::{C8_UPDATE, C12, C13};
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let mut memory = EnhancementMemory::new(8, 100);
+    let mut decoder = Decoder::with_enhancement_store(&mut slots, memory.store(), Config::default());
+    let mut events = Vec::new();
+    // The MOT, page 1FE, sub-page S1 = 0; S2 is bits 4 to 6 of the sub-code.
+    let s2 = |n: u16| n << 4;
+    let mut transmit = |control: u16, update: u16, rows: &[u8]| {
+        let mut packets = std::vec![header(1, 0xFE, s2(update), control)];
+        packets.extend(rows.iter().map(|&row| encode::row(mag(1), row, &object_bytes(row))));
+        packets.push(header(1, 0x00, 0, 0));
+        feed(&mut decoder, &packets, &mut events);
+        let table = decoder.enhancement_lookup().magazine_organization_table(mag(1)).unwrap();
+        (1..=8u8).filter(|&row| table.row(row).is_some()).collect::<Vec<u8>>()
+    };
+    let erase = C4_ERASE | C8_UPDATE;
+    assert_eq!(transmit(erase, 1, &[1, 2]), [1, 2], "C4 C8: full page, changes, erase old");
+    assert_eq!(transmit(0, 1, &[3]), [1, 2, 3], "no flags: no changes since last");
+    assert_eq!(transmit(C12, 1, &[4]), [1, 2, 3, 4], "C12: further fragment, no changes");
+    assert_eq!(transmit(C8_UPDATE | C12, 1, &[5]), [1, 2, 3, 4, 5], "C8 C12: further fragment, changes");
+    assert_eq!(transmit(C8_UPDATE | C13, 2, &[6]), [1, 2, 3, 4, 5, 6], "C8 C13: partial page");
+    assert_eq!(transmit(C8_UPDATE | C12 | C13, 2, &[7]), [1, 2, 3, 4, 5, 6, 7], "C8 C12 C13: partial fragment");
+    assert_eq!(transmit(erase | C13, 3, &[8]), [1, 2, 3, 4, 5, 6, 7, 8], "C4 with C13 erases nothing");
+    assert_eq!(transmit(erase | C12, 3, &[1]), [1, 2, 3, 4, 5, 6, 7, 8], "C4 with C12 erases nothing");
+    assert_eq!(transmit(erase, 4, &[2]), [2], "C4 C8 alone erases");
+}
