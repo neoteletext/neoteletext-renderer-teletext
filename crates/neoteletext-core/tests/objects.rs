@@ -14,8 +14,8 @@ use common::{
 use neoteletext_core::colour::colour_index;
 use neoteletext_core::config::{Config, PresentationLevel};
 use neoteletext_core::consts::{
-    LINK_FUNCTION_GPOP, LINK_FUNCTION_POP, OBJECT_INVOCATIONS_PER_TYPE, OBJECTS_OPEN_AT_ONCE, PAGE_FUNCTION_DRCS,
-    PAGE_FUNCTION_POP,
+    LINK_FUNCTION_GPOP, LINK_FUNCTION_POP, MODE_DRCS_CHARACTER, MODE_FONT_STYLE, OBJECT_INVOCATIONS_PER_TYPE,
+    OBJECTS_OPEN_AT_ONCE, PAGE_FUNCTION_DRCS, PAGE_FUNCTION_POP,
 };
 use neoteletext_core::enhance::MAX_WALK_STEPS;
 use neoteletext_core::objects::{self, PageLink};
@@ -181,6 +181,32 @@ mod attributes {
         assert_eq!((grid.cells[3][0].foreground, grid.cells[4][0].foreground), (PINK, PINK), "persists to row 4");
         assert_eq!(grid.cells[3][10].foreground, PINK, "the second invocation starts again from white");
         assert_eq!(grid.cells[4][1].foreground, GREEN, "the page under the object is not affected");
+    }
+
+    /// REQ-338, REQ-144 step 4: an Adaptive object's range runs to the rightmost
+    /// cell any of its triplets addresses, even one that writes nothing: a
+    /// character below 2/0, a DRCS character or a Font Style triplet, neither
+    /// of which is drawn (decisions E.95 and E.96).
+    /// The object's red, set at column 0, reaches that cell and stops there.
+    #[test]
+    fn an_adaptive_range_reaches_a_cell_addressed_by_a_triplet_that_writes_nothing() {
+        let red = colour_index(0, 1);
+        let silent = [
+            g0(6, 0x05),
+            TripletFunction::UnsupportedColumn { column: 6, mode: MODE_DRCS_CHARACTER, data: 0 },
+            TripletFunction::UnsupportedColumn { column: 6, mode: MODE_FONT_STYLE, data: 0 },
+        ];
+        for (index, triplet) in silent.into_iter().enumerate() {
+            let object = local_object(ObjectKind::Adaptive, 1, &[foreground(0, red), triplet]);
+            let local = [set_position(4, 0), invoke(ObjectSource::Local, ObjectKind::Adaptive, local_number(1, 0))];
+            for level in [L25, L35] {
+                let grid =
+                    build(&page_with_objects(&[(4, b"abcdefghij")], &local, std::slice::from_ref(&object)), level).0;
+                let reds: Vec<bool> = (0..9).map(|column| grid.cells[4][column].foreground == red).collect();
+                let expected = [true, true, true, true, true, true, true, false, false];
+                assert_eq!(reds, expected, "triplet {index} at {level:?}");
+            }
+        }
     }
 }
 
