@@ -50,8 +50,10 @@ const PULSE_TABLE_LEN: usize = (2 * PULSE_SPAN_BITS * PULSE_TABLE_PER_BIT + 1) a
 /// limit value is used.
 const SINGULARITY_GUARD: f32 = 1e-4;
 /// The nominal line period, nanoseconds: 444 bit periods (clause 5.3).
-// Both values are below 2^24, so f32 holds them exactly.
-#[allow(clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "444 bit periods and the bit rate are both below 2^24, so f32 holds them exactly"
+)]
 const LINE_PERIOD_NS: f32 = BITS_PER_LINE as f32 * NS_PER_SECOND / BIT_RATE_HZ as f32;
 
 /// The bytes of one teletext line in transmission order: two run-in bytes,
@@ -128,7 +130,7 @@ impl SignalParams {
         Self {
             sample_rate_hz,
             start_ns: 0.0,
-            #[allow(clippy::cast_precision_loss)]
+            #[allow(clippy::cast_precision_loss, reason = "BT.601 black is 16, which f32 holds exactly")]
             black_level: BT601_BLACK_8BIT as f32,
             black_drift: 0.0,
             data_amplitude: NOMINAL_AMPLITUDE_8BIT,
@@ -302,11 +304,9 @@ pub fn quantise_u16le(values: &[f32], scale: f32, out: &mut [u8]) {
 
 #[cfg(test)]
 #[allow(
-    clippy::unwrap_used,
     clippy::indexing_slicing,
-    clippy::panic,
-    clippy::arithmetic_side_effects,
-    clippy::cast_precision_loss
+    clippy::cast_precision_loss,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size; counts and rates made floating point for measurements, all below 2^24 or within the measurement's tolerance"
 )]
 mod tests {
     use super::*;

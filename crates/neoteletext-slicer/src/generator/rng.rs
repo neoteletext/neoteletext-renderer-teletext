@@ -48,8 +48,10 @@ impl Rng {
     /// A uniform value in (0, 1]: never 0, so its logarithm is finite.
     pub fn uniform(&mut self) -> f32 {
         let bits = self.next_u64() >> (u64::BITS - UNIFORM_BITS);
-        // 24 bits fit an f32 exactly.
-        #[allow(clippy::cast_precision_loss)]
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "the value is at most 2^24, and every integer up to 2^24 is exact in an f32"
+        )]
         let value = (bits as f32 + 1.0) / (1u32 << UNIFORM_BITS) as f32;
         value
     }
