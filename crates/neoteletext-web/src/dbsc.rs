@@ -16,12 +16,14 @@
 
 mod headers;
 mod instructions;
+mod persist;
 mod proof;
 mod session;
 mod structured;
 
 pub use headers::{Challenge, Registration, read_challenge, read_registration};
 pub use instructions::{Answer, Instructions, InstructionsError, ScopeRule, read_instructions};
+pub use persist::{ImportError, MAX_EXPORT_BYTES};
 pub use proof::{ProofError, write_proof};
 pub use session::{Session, Sessions};
 

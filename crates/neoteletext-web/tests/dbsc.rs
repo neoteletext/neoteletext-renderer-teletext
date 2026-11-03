@@ -177,7 +177,11 @@ const INSTRUCTIONS: &[u8] = br#"{"session_identifier":"s1","refresh_url":"/dbsc/
 
 /// Opens the service, whose descriptor asks for a session, and registers.
 fn registered() -> Harness {
-    let mut harness = Harness::new();
+    registered_in(Harness::new())
+}
+
+/// As [`registered`], in `harness`.
+fn registered_in(mut harness: Harness) -> Harness {
     let descriptor = br#"{"name":"News","initial_page":"100","page_template":"/p/{mpp}"}"#;
     harness.reply(response(
         "200 OK",
@@ -381,4 +385,64 @@ fn registrations_are_bounded_for_each_origin_in_each_hour() {
     harness.reply(response("400 Bad Request", &[], b""));
     harness.fetch(0x1FF);
     assert_eq!(harness.keys.borrow().made, u32::from(MAX_REGISTRATIONS_PER_HOUR) + 1, "a new hour");
+}
+
+/// The calendar time both runs of a port share, in seconds since 1970.
+const WALL_CLOCK: u64 = 1_793_000_000;
+
+// REQ-WEB-017 (TODO-1207, decision E.110 item 4): a port keeps its bound
+// sessions across runs: exported by one agent, imported by a new one with no
+// cookies and no new key, a session is refreshed when its request needs it,
+// proving possession with the same key the first run registered.
+#[test]
+fn a_session_kept_across_runs_refreshes_with_its_own_key() {
+    let mut first = Harness::new();
+    first.input(Input::WallClock(WALL_CLOCK));
+    let first = registered_in(first);
+    let mut saved = std::vec![0_u8; neoteletext_web::dbsc::MAX_EXPORT_BYTES];
+    let mut writer = neoteletext_web::bytes::Writer::new(&mut saved);
+    assert_eq!(first.agent.export_bound_sessions(first.now, &mut writer), Some(1));
+    let length = writer.len();
+    saved.truncate(length);
+
+    let mut second = Harness::new();
+    second.input(Input::WallClock(WALL_CLOCK));
+    assert_eq!(second.agent.import_bound_sessions(second.now, &saved), Ok(1));
+    // The descriptor's own request is in the session's scope and lacks its
+    // cookie, so the refresh goes first.
+    let descriptor = br#"{"name":"News","initial_page":"100","page_template":"/p/{mpp}"}"#;
+    second.reply(response("403 Forbidden", &[r#"Secure-Session-Challenge: "c9";id="s1""#], b""));
+    second.reply(response("200 OK", &["Set-Cookie: auth=three; Max-Age=60; Secure; Path=/"], b""));
+    second.reply(response("200 OK", &["Content-Type: application/json"], descriptor));
+    second.input(Input::OpenService("https://news.example/d.json"));
+    second.reply(response("200 OK", &["Content-Type: text/x-teletext-tti"], TTI));
+    second.fetch(0x100);
+    let requests = second.requests();
+    let lines: Vec<String> = requests.iter().map(|request| request_line(request)).collect();
+    assert_eq!(
+        lines,
+        ["POST /dbsc/refresh HTTP/1.1", "POST /dbsc/refresh HTTP/1.1", "GET /d.json HTTP/1.1", "GET /p/100 HTTP/1.1"]
+    );
+    let (_, payload, signature) = proof(&requests[1]);
+    assert_eq!(payload, r#"{"jti":"c9"}"#);
+    assert_eq!(&signature[..4], &1_u32.to_be_bytes(), "the key the first run registered");
+    assert_eq!(second.keys.borrow().made, 0, "no new key was made");
+    assert_eq!(header_value(&requests[3], "Cookie").as_deref(), Some("auth=three"));
+}
+
+// REQ-WEB-017: without a wall clock a session's times mean nothing in another
+// run, so nothing is exported or imported.
+#[test]
+fn sessions_are_kept_across_runs_only_with_a_wall_clock() {
+    let first = registered();
+    let mut saved = [0_u8; 64];
+    assert_eq!(
+        first.agent.export_bound_sessions(first.now, &mut neoteletext_web::bytes::Writer::new(&mut saved)),
+        None
+    );
+    let mut second = Harness::new();
+    assert_eq!(
+        second.agent.import_bound_sessions(second.now, b"neoteletext-sessions 1\n"),
+        Err(neoteletext_web::dbsc::ImportError::NoWallClock)
+    );
 }

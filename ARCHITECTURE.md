@@ -495,7 +495,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `url/`: the strict address parser's lexical pass, host grammar and path grammar.
 - `proxy/`: the HTTP `CONNECT` and SOCKS5 handshakes, and the blocking tunnel over `std::io` (feature `std`).
 - `cookie/`: the cookie store's `Set-Cookie` algorithm, the `Cookie` header, the date algorithm and the persistence format.
-- `dbsc/`: Device Bound Session Credentials: structured fields, the two headers, the session instructions, the proof and the session store.
+- `dbsc/`: Device Bound Session Credentials: structured fields, the two headers, the session instructions, the proof, the session store and its saved form, which a port keeps beside its cookies across runs (`Sessions::export` and `import`, the agent's `export_bound_sessions` and `import_bound_sessions`).
 - `descriptor/`: the descriptor's member grammar, its page address template and its links to other sites.
 - `subpages/`: a channel's pages laid out as files (feature `std`).
 - `records/`: one file a record type, each with its encoder, its reader and, for the index, LINKS and SUBPAGES records, the progress of a sending.
