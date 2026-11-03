@@ -375,6 +375,8 @@ Layer 3 asks the sink where a voice has got to, measured in samples.
 
 This is the shape of tellyboy's voice API: `tb_audio_voice_rom`, `tb_audio_stream_open`, `tb_audio_voice_fade`, `tb_audio_voice_set_gain`, `tb_audio_voice_position`. The microcontroller sink is therefore a direct mapping. Its detailed interface is left for implementation.
 
+A sink that decodes IMA ADPCM itself, as tellyboy's driver does, says so (`VoiceSink::decodes_ima`) and is then given an IMA ADPCM sound's blocks undecoded, their headers checked, never its samples: a stored block with its first sample (`ima_samples`), a live one in order (`ima_stream`), each with flags saying which edge to fade because the neighbouring block has not arrived. A live block is given whole, so before a block given as silence the sink fades out the end of what it holds (DEC-2449).
+
 ### 10.2 Gain and fades
 
 Gain is a whole percentage, as tellyboy's `gain_percent`, so every platform computes the same level.

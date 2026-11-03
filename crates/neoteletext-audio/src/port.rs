@@ -42,6 +42,23 @@ pub struct Start {
     pub after_current: bool,
 }
 
+/// One IMA ADPCM block given undecoded to a sink that decodes IMA ADPCM
+/// itself, such as tellyboy's driver (REQ-AUD-018, DEC-2449). Its header
+/// has been checked; its codes are as received.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ImaBlock<'a> {
+    /// The block: the WAVE IMA ADPCM header, then two codes a byte.
+    pub bytes: &'a [u8],
+    /// The samples of it the sound keeps: the final block's last code may
+    /// be padding.
+    pub samples: u32,
+    /// Fade the first 5 ms in: the block before it has not arrived
+    /// (REQ-AUD-013).
+    pub fade_in: bool,
+    /// Fade the last 5 ms out: the block after it has not arrived.
+    pub fade_out: bool,
+}
+
 /// What a port supplies to play sound.
 pub trait VoiceSink {
     /// How many channels the sink plays, at most [`crate::CHANNELS`]. The
@@ -85,4 +102,23 @@ pub trait VoiceSink {
     /// because it had not arrived when it was due. It is for diagnostics; a
     /// sink plays nothing differently for it, and may ignore it.
     fn concealed(&mut self, _sound: SoundId, _block: u16, _samples: u32) {}
+
+    /// Whether the sink decodes IMA ADPCM itself (REQ-AUD-018, DEC-2449).
+    /// When it does, an IMA ADPCM sound's blocks come to
+    /// [`VoiceSink::ima_samples`] and [`VoiceSink::ima_stream`] undecoded,
+    /// and never as samples. The provided answer is no.
+    fn decodes_ima(&self) -> bool {
+        false
+    }
+
+    /// A stored IMA ADPCM sound's block, starting at sample `first`, for a
+    /// sink that decodes it itself, fading either edge as the block says.
+    fn ima_samples(&mut self, _sound: SoundId, _first: u32, _block: ImaBlock<'_>) {}
+
+    /// A live IMA ADPCM sound's next block, in order, for a sink that
+    /// decodes it itself. Nothing of it is held back: before a block given
+    /// as silence, which comes through [`VoiceSink::stream_samples`] after
+    /// a [`VoiceSink::concealed`] report, the sink fades out the last 5 ms
+    /// it holds (REQ-AUD-013).
+    fn ima_stream(&mut self, _sound: SoundId, _block: ImaBlock<'_>) {}
 }

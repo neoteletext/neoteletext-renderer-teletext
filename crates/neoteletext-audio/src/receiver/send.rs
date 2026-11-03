@@ -8,6 +8,8 @@ use super::{bump, fade};
 use crate::Codec;
 #[cfg(any(feature = "pcm16", feature = "ima"))]
 use crate::MAX_BLOCK_SAMPLES;
+#[cfg(feature = "ima")]
+use crate::port::ImaBlock;
 use crate::port::{SoundFormat, SoundId, VoiceSink};
 use crate::store::Entry;
 #[cfg(any(feature = "pcm16", feature = "ima"))]
@@ -104,6 +106,11 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// first 5 ms faded in after a block that has not, and its last faded out
     /// before one (REQ-AUD-013).
     fn send_block(&mut self, entry: &Entry, index: u16, sink: &mut dyn VoiceSink) {
+        #[cfg(feature = "ima")]
+        if entry.codec == Codec::ImaAdpcm && sink.decodes_ima() {
+            self.pass_ima_block(entry, index, sink);
+            return;
+        }
         let Some(block) = self.store.block(entry.sound, index) else { return };
         let mut pcm = [0_i16; MAX_BLOCK_SAMPLES];
         let Some(count) = decode(entry.codec, block, &mut pcm) else {
@@ -128,6 +135,29 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         sink.samples(entry.sound, first, pcm);
     }
 
+    /// Gives a stored IMA ADPCM block, its header checked, to a sink that
+    /// decodes it itself, with the fades its neighbours call for (REQ-AUD-018,
+    /// REQ-AUD-013).
+    #[cfg(feature = "ima")]
+    fn pass_ima_block(&mut self, entry: &Entry, index: u16, sink: &mut dyn VoiceSink) {
+        let Some(block) = self.store.block(entry.sound, index) else { return };
+        let Ok(count) = crate::ima::check_block(block) else {
+            bump(&mut self.statistics.decode_failures);
+            return;
+        };
+        let samples = entry.block_samples(index).min(u32::try_from(count).unwrap_or(u32::MAX));
+        let missing =
+            |at: Option<u16>| at.is_some_and(|at| at < entry.blocks && self.store.block(entry.sound, at).is_none());
+        let block = ImaBlock {
+            bytes: block,
+            samples,
+            fade_in: missing(index.checked_sub(1)),
+            fade_out: missing(index.checked_add(1)),
+        };
+        let first = u32::from(index).saturating_mul(entry.samples_per_block());
+        sink.ima_samples(entry.sound, first, block);
+    }
+
     /// Sends a live sound's blocks in order from its cursor. The last 5 ms of
     /// each block are held back until the next block's fate is known, so
     /// that they can be faded out before a block given as silence; the block
@@ -144,6 +174,24 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         for _ in 0..entry.blocks {
             if crate::serial_newer(next, newest) {
                 break;
+            }
+            #[cfg(feature = "ima")]
+            if entry.codec == Codec::ImaAdpcm && sink.decodes_ima() {
+                let block = self.store.live_block(sound, next);
+                if let Some((bytes, count)) =
+                    block.and_then(|bytes| Some((bytes, crate::ima::check_block(bytes).ok()?)))
+                {
+                    // Nothing is held back: the sink fades its own end
+                    // before a silence (VoiceSink::ima_stream).
+                    let samples = u32::try_from(count).unwrap_or(u32::MAX);
+                    sink.ima_stream(
+                        sound,
+                        ImaBlock { bytes, samples, fade_in: edge == LiveEdge::Gap, fade_out: false },
+                    );
+                    edge = LiveEdge::Joined;
+                    next = next.wrapping_add(1);
+                    continue;
+                }
             }
             let mut pcm = [0_i16; MAX_BLOCK_SAMPLES];
             let decoded = self.store.live_block(sound, next).and_then(|block| decode(entry.codec, block, &mut pcm));

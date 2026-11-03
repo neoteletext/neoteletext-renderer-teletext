@@ -1093,3 +1093,114 @@ fn a_receiver_publishes_its_limits_against_its_levels_minimum() {
     assert!(!Receiver::<8, 2>::new(&mut short).limits().meets(&LEVEL_A_MINIMUM));
     assert_eq!(LEVEL_B_MINIMUM, ReceiverLimits { store_bytes: 4 * 1024 * 1024, objects: 256, records_in_flight: 8 });
 }
+
+/// REQ-AUD-018 (TODO-1146 item 5, DEC-2449): a sink that decodes IMA ADPCM
+/// itself is given the blocks undecoded, with their fades, and no samples.
+mod ima_to_the_sink {
+    use super::*;
+    use neoteletext_audio::port::ImaBlock;
+
+    /// What an IMA-decoding sink was given: (first sample or none for a
+    /// live block, the block, its samples, fade in, fade out).
+    type Given = (Option<u32>, Vec<u8>, u32, bool, bool);
+
+    #[derive(Default)]
+    struct DecodingSink {
+        given: Vec<Given>,
+        samples_calls: usize,
+        silences: usize,
+    }
+
+    impl VoiceSink for DecodingSink {
+        fn define(&mut self, _: SoundId, _: SoundFormat) {}
+        fn samples(&mut self, _: SoundId, _: u32, _: &[i16]) {
+            self.samples_calls += 1;
+        }
+        fn forget(&mut self, _: SoundId) {}
+        fn stream(&mut self, _: SoundId, _: u32) {}
+        fn stream_samples(&mut self, _: SoundId, pcm: &[i16]) {
+            assert!(pcm.iter().all(|&sample| sample == 0), "only silence comes as samples");
+            self.silences += 1;
+        }
+        fn start(&mut self, _: u8, _: Start) {}
+        fn stop(&mut self, _: u8, _: u16) {}
+        fn gain(&mut self, _: u8, _: u8, _: u16) {}
+        fn decodes_ima(&self) -> bool {
+            true
+        }
+        fn ima_samples(&mut self, _: SoundId, first: u32, block: ImaBlock<'_>) {
+            self.given.push((Some(first), block.bytes.to_vec(), block.samples, block.fade_in, block.fade_out));
+        }
+        fn ima_stream(&mut self, _: SoundId, block: ImaBlock<'_>) {
+            self.given.push((None, block.bytes.to_vec(), block.samples, block.fade_in, block.fade_out));
+        }
+    }
+
+    #[test]
+    fn a_stored_ima_sound_reaches_a_decoding_sink_as_its_blocks() {
+        let pcm = tone(2_000);
+        let sound = Sound::new(2, 1, Codec::ImaAdpcm, 8_000, 256, &pcm).unwrap();
+        let block = 256;
+        let per_block = 505;
+        let blocks: Vec<&[u8]> = sound.data.chunks(block).collect();
+        assert_eq!(blocks.len(), 4);
+        let mut arena = vec![0_u8; ARENA];
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        let mut sink = DecodingSink::default();
+        receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+        let mut command = play(0, 1, &sound, None);
+        command.flags = FLAG_PROGRESSIVE;
+        receiver.push_record(&command.record(), &mut sink);
+        let records = sound.data_records();
+        // Blocks 0, then 2: block 1 is missing between them, and block 3
+        // after, so each fades towards what is missing.
+        receiver.push_record(&data_record(&sound, 0, blocks[0]), &mut sink);
+        receiver.push_record(&data_record(&sound, 2, blocks[2]), &mut sink);
+        assert_eq!(
+            sink.given,
+            [
+                (Some(0), blocks[0].to_vec(), per_block, false, true),
+                (Some(2 * per_block), blocks[2].to_vec(), per_block, true, true),
+            ]
+        );
+        sink.given.clear();
+        for record in &records {
+            receiver.push_record(record, &mut sink);
+        }
+        assert!(
+            sink.given.iter().any(|given| given == &(Some(per_block), blocks[1].to_vec(), per_block, false, false))
+        );
+        let last = (Some(3 * per_block), blocks[3].to_vec(), 2_000 - 3 * per_block, false, false);
+        assert!(sink.given.contains(&last), "the final block keeps the sound's samples: {:?}", sink.given.len());
+        assert_eq!(sink.samples_calls, 0, "no samples for a sink that decodes IMA ADPCM");
+        // The blocks decode to what the receiver would have sent.
+        let mut out = [0_i16; 1_100];
+        assert_eq!(decode_block(blocks[1], &mut out).unwrap(), usize::try_from(per_block).unwrap());
+    }
+
+    #[test]
+    fn a_live_ima_sound_reaches_a_decoding_sink_in_order_and_fades_in_after_a_silence() {
+        let sound = Sound::live(7, 1, Codec::ImaAdpcm, 8_000, IMA_BLOCK_SMALL).unwrap();
+        let per_block = usize::try_from(sound.samples_per_block()).unwrap();
+        let pcm = tone(per_block * 12);
+        let mut arena = vec![0_u8; ARENA];
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        let mut sink = DecodingSink::default();
+        receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+        receiver.push_record(&play(0, 1, &sound, None).record(), &mut sink);
+        // Block 2 is lost for good.
+        for (index, block) in (0_u16..).zip(pcm.chunks(per_block)) {
+            if index != 2 {
+                for record in sound.live_records(index, block) {
+                    receiver.push_record(&record, &mut sink);
+                }
+            }
+        }
+        let blocks: Vec<(Option<u32>, bool)> = sink.given.iter().map(|given| (given.0, given.3)).collect();
+        assert!(sink.given.len() >= 3 && blocks.iter().all(|&(first, _)| first.is_none()));
+        assert_eq!(blocks.iter().filter(|&&(_, faded_in)| faded_in).count(), 1, "block 3 fades in after the silence");
+        assert!(sink.given[2].3, "the third block given is block 3, after the silence");
+        assert_eq!(sink.silences, 1, "block 2 as silence");
+        assert_eq!(sink.samples_calls, 0);
+    }
+}
