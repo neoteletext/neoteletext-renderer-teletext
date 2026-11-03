@@ -255,13 +255,17 @@ full_steps() {
     # REQ-TST-022: the files of the corpus that can be fetched are, once, and
     # the tests that read only those run. The other corpus tests stay ignored:
     # no machine holds their recordings (TODO-2081).
-    step "the corpus tests whose recordings can be fetched (REQ-TST-012, REQ-TST-022, REQ-L25-010)"
+    step "the corpus tests whose recordings can be fetched, and the CLDR letter check (REQ-TST-012, REQ-TST-022, REQ-L25-010, REQ-82)"
     local corpus="${NEOTELETEXT_CORPUS:-$PWD/target/corpus}"
     NEOTELETEXT_CORPUS="$corpus" cargo xtask corpus
     NEOTELETEXT_CORPUS="$corpus" cargo test --quiet -p neoteletext-formats --test corpus -- \
         --ignored --exact national_option_order_matches_broadcast_languages
     NEOTELETEXT_CORPUS="$corpus" cargo test --quiet -p neoteletext-cli --test level25_corpus -- \
         --ignored --exact polish_letter_from_x26
+    # REQ-82, DEC-2411, DEC-2443: every letter Unicode CLDR gives each
+    # language is written by the page writer, or its refusal is listed.
+    NEOTELETEXT_CORPUS="$corpus" cargo test --quiet -p neoteletext-formats --features std,tti,write-text \
+        --test cldr -- --ignored --exact every_cldr_letter_is_written_or_its_refusal_listed
 
     step "release tests, including the exhaustive error-code tests"
     cargo test --workspace --all-features --release --quiet
