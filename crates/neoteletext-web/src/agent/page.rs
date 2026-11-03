@@ -120,7 +120,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                     if head.media.is_page() {
                         Ok(head.media)
                     } else {
-                        Err(Failure::MediaType)
+                        Err(Failure::MediaType(head.media))
                     }
                 }
                 PageFile::Channel { t42, .. } | PageFile::SubPage { t42, .. } => {
@@ -177,7 +177,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             event(sink, Event::SubPagesFailed { page, part, failure: Failure::Status(status) });
         } else if !matches!(head.media, MediaType::TextPlain | MediaType::OctetStream) {
             // REQ-1903: a part of a list is text, as `contents.txt` is.
-            event(sink, Event::SubPagesFailed { page, part, failure: Failure::MediaType });
+            event(sink, Event::SubPagesFailed { page, part, failure: Failure::MediaType(head.media) });
         } else {
             self.set_catalogued(page, true);
             self.update_cache(now, key, head, false);

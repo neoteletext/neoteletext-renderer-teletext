@@ -192,8 +192,10 @@ pub enum Failure {
     /// An address given as a channel's breaks a rule of a channel's
     /// address, named here (REQ-WEB-023, REQ-1693).
     ChannelAddress(crate::map::MapError),
-    /// A media type outside the profile (REQ-WEB-014).
-    MediaType,
+    /// A media type outside the profile (REQ-WEB-014), or one the file
+    /// asked for may not have (REQ-WEB-027): the type the response gave,
+    /// named so that a diagnostic says which.
+    MediaType(MediaType),
     /// A blocked local-network address (REQ-SEC-006).
     Blocked,
     /// A downgrade from HTTPS to plain HTTP (REQ-SEC-007).

@@ -358,7 +358,7 @@ fn not_found_and_failures_leave_pages_alone() {
     harness.advance(SECOND);
     assert!(has_event(
         &harness.fetch(0x103),
-        "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(3) }, subcode: None, failure: MediaType"
+        "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(3) }, subcode: None, failure: MediaType(Html)"
     ));
 }
 
@@ -646,7 +646,7 @@ fn descriptor_rejections() {
     let mut harness = Harness::new(Config::default(), replay);
     assert!(has_event(&harness.open("http://tt.example/a.json"), "DescriptorRejected(Placeholder)"));
     harness.advance(SECOND);
-    assert!(has_event(&harness.open("http://tt.example/b.json"), "DescriptorFailed(MediaType)"));
+    assert!(has_event(&harness.open("http://tt.example/b.json"), "DescriptorFailed(MediaType(Html))"));
     harness.advance(SECOND);
     assert!(has_event(&harness.open("https://secure.example/c.json"), "DescriptorRejected(Downgrade(PageTemplate))"));
     assert!(has_event(&harness.open("ftp://x.example/"), "DescriptorFailed(Address(Scheme))"));
@@ -1361,7 +1361,7 @@ fn a_channels_entry_file_opens_whatever_type_a_host_gives_it() {
     let mut harness = site_harness(Config::default());
     harness.replay().reply("site.example:80", ok("text/html; charset=utf-8", settings));
     let records = harness.open_channel("http://site.example/news/");
-    assert!(has_event(&records, "DescriptorFailed(MediaType)"), "{records:?}");
+    assert!(has_event(&records, "DescriptorFailed(MediaType(Html))"), "{records:?}");
     // A generic type gives no pass to what is not the channel's settings.
     let mut harness = site_harness(Config::default());
     harness.replay().reply("site.example:80", ok("application/octet-stream", b"<html></html>"));
@@ -1423,7 +1423,7 @@ fn a_broken_settings_file_is_not_replaced_by_the_defaults() {
     let cases: [(Reply, &str); 3] = [
         (Reply::Bytes(response("500 Oops", &["Content-Type: text/plain"], b"")), "DescriptorFailed(Status(500))"),
         (json_response(br#"{"page_template":"/{mpp}.t42"}"#), "DescriptorRejected(NotForChannels(PageTemplate))"),
-        (ok("text/html", br#"{"name":"Test"}"#), "DescriptorFailed(MediaType)"),
+        (ok("text/html", br#"{"name":"Test"}"#), "DescriptorFailed(MediaType(Html))"),
     ];
     for (reply, expected) in cases {
         let mut harness = site_harness(Config::default());
@@ -1473,7 +1473,7 @@ fn page_files_must_be_what_their_names_say() {
     assert!(
         has_event(
             &records,
-            "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(16) }, subcode: None, failure: MediaType }"
+            "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(16) }, subcode: None, failure: MediaType(Html) }"
         ),
         "{records:?}"
     );
@@ -1566,7 +1566,7 @@ fn contents_are_fetched_on_request() {
     assert!(has_event(&harness.take(), "ContentsMissing"));
     harness.replay().reply("site.example:80", ok("text/html", b"p\t100\tIndex\n"));
     harness.input(Input::FetchContents);
-    assert!(has_event(&harness.take(), "ContentsFailed(MediaType)"));
+    assert!(has_event(&harness.take(), "ContentsFailed(MediaType(Html))"));
 }
 
 /// Whether a file is a part of a page's list.
@@ -1815,7 +1815,7 @@ fn a_part_of_a_list_must_be_text() {
     harness.advance(neoteletext_web::consts::DEFAULT_FETCH_INTERVAL_US);
     assert!(has_event(
         &harness.take(),
-        "SubPagesFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(0) }, part: PartNumber(0), failure: MediaType }"
+        "SubPagesFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(0) }, part: PartNumber(0), failure: MediaType(Html) }"
     ));
     harness.replay().reply("site.example:80", tti_response(&[]));
     harness.input(Input::FetchPage { page, subcode: Some(SubCode::new(1)) });
