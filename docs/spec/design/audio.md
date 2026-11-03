@@ -256,7 +256,7 @@ Following §6.7.1.1, a live sound fades out when its service has sent no packet 
 
 ### 6.2 Network and file
 
-- **WebSocket:** a binary message is whole 42-byte packets, the broadcast carriage's (REQ-WEB-005, decision E.92); a message of any other length is refused whole. Text messages are pages, not sound.
+- **WebSocket:** a binary message is whole 42-byte packets, the broadcast carriage's (REQ-WEB-005, decision E.92); a message of any other length is refused whole. Nothing but binary messages of packets is sent to a receiver: no text message carries a page or anything else (DEC-1459), and what is not page content, sound included, travels as records in packet 4/31 on data channel 12.
 - **File (`.ttau`):** records concatenated. A truncated final record is discarded. A record whose length breaks a bound ends the file, because nothing after it can be framed safely.
 - **Source:** the host associates each connection or file with one service. A record never names its own service, and the CRC is not authentication.
 
