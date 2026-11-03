@@ -392,10 +392,14 @@ fn send_list_part(page: u16, part: PartNumber, bytes: &[u8]) -> std::io::Result<
         return send(&Frame::Notice(Notice::SubPagesMissing(page, part.number())));
     };
     let mut subcodes = Vec::new();
+    let mut validators = Vec::new();
     let mut ignored = 0usize;
     for row in list.entries {
         match row {
-            Ok(entry) => subcodes.push(entry.subcode.value()),
+            Ok(entry) => {
+                subcodes.push(entry.subcode.value());
+                validators.push(entry.validator.as_str().to_owned());
+            }
             Err(_) => ignored = ignored.saturating_add(1),
         }
     }
@@ -411,6 +415,7 @@ fn send_list_part(page: u16, part: PartNumber, bytes: &[u8]) -> std::io::Result<
         total: list.total,
         version: list.version.as_str().to_owned(),
         subcodes,
+        validators,
     })))
 }
 

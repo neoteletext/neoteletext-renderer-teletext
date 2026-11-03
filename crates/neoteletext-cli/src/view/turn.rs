@@ -106,7 +106,13 @@ impl ViewState {
         match self.action {
             Action::Request(address, subcode) => {
                 session.decoder_mut().set_requested(Some(address));
-                source.request(address, subcode);
+                // REQ-523: a sub-page held may be current by its page's
+                // list, which the source knows.
+                if !subcode.is_any() && session.page(address, subcode).is_some() {
+                    source.request_held(address, subcode);
+                } else {
+                    source.request(address, subcode);
+                }
                 self.prompt = None;
             }
             Action::FollowService(target) => {

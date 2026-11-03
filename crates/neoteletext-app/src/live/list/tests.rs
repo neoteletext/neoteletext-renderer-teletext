@@ -28,7 +28,8 @@ fn part(number: u8) -> ListPart {
     let all = subcodes();
     let first = usize::from(number) * MAX_LIST_ROWS;
     let rows = all[first..(first + MAX_LIST_ROWS).min(all.len())].to_vec();
-    ListPart { page: PAGE, part: number, total: TOTAL, version: "v".into(), subcodes: rows }
+    let validators = rows.iter().map(|subcode| format!("v{subcode:04X}")).collect();
+    ListPart { page: PAGE, part: number, total: TOTAL, version: "v".into(), subcodes: rows, validators }
 }
 
 /// Steps once, answering every part asked for at once, and returns the
@@ -114,8 +115,32 @@ fn few_parts_are_held() {
     for number in 0..10 {
         let mut part = large(number);
         part.subcodes = (0..MAX_LIST_ROWS).map(|row| u16::try_from(usize::from(number) * 100 + row).unwrap()).collect();
+        part.validators = part.subcodes.iter().map(u16::to_string).collect();
         list.take(&part);
     }
     assert_eq!(list.parts.len(), MAX_HELD_PARTS);
     assert!(list.parts.contains_key(&9));
+}
+
+// Verifies REQ-523: a sub-page that arrived while the list named it is
+// current while its row keeps the validator it arrived under, and not once
+// a part of the list gives the row another; one the list does not name, or
+// one that has not arrived, is not known to be current.
+#[test]
+fn a_held_sub_page_is_current_while_its_rows_validator_stands() {
+    let mut list = PageList::new(PAGE);
+    list.take(&part(0));
+    let second = at(1).value();
+    assert!(!list.is_current(second), "not arrived");
+    list.arrived(second);
+    assert!(list.is_current(second));
+    let mut changed = part(0);
+    changed.validators[1] = "changed".into();
+    list.take(&changed);
+    assert!(!list.is_current(second), "its file changed");
+    list.arrived(second);
+    assert!(list.is_current(second), "arrived again under the new validator");
+    let unlisted = at(LAST).value();
+    list.arrived(unlisted);
+    assert!(!list.is_current(unlisted), "part 2 is not held");
 }

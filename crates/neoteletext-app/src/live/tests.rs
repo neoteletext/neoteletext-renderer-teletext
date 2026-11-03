@@ -261,6 +261,7 @@ fn a_sub_page_step_asks_for_the_list_and_takes_its_rows() {
             total: 3,
             version: "v".into(),
             subcodes: vec![1, 2, 3],
+            validators: vec!["a".into(), "b".into(), "c".into()],
         }))
     };
     sender.send(part(0x200)).unwrap();
@@ -345,4 +346,43 @@ fn followed_services_are_numbered_and_reopened_by_number() {
     );
     while live.follow(0, page, SubCode::ANY).is_some() {}
     assert_eq!(live.session_services, pipe::MAX_SESSION_SERVICES);
+}
+
+// Verifies REQ-523: a sub-page that arrived while its page's list named it
+// is not asked for again while the list's row keeps the validator it came
+// under, and is once a part of the list gives the row another; a request
+// that is not for a held sub-page always goes.
+#[test]
+fn a_held_sub_page_whose_validator_stands_is_not_asked_for_again() {
+    let (sender, frames) = mpsc::channel();
+    let kept = Kept::default();
+    let mut live = routed(frames, Box::new(kept.clone()));
+    let mut session = Session::new(neoteletext_core::config::Config::default(), 8);
+    let page = PageAddress::from_mpp(0x302).unwrap();
+    let second = SubCode::new(2);
+    let part = |validator: &str| {
+        Frame::Notice(Notice::SubPages(pipe::ListPart {
+            page: 0x302,
+            part: 0,
+            total: 2,
+            version: validator.into(),
+            subcodes: vec![1, 2],
+            validators: vec!["first".into(), validator.into()],
+        }))
+    };
+    live.request(page, second);
+    sender.send(part("old")).unwrap();
+    let bytes = b"PN,30202\r\nSC,0002\r\nOL,1,Second\r\n".to_vec();
+    sender.send(Frame::Tti(PageData { secure: true, origin: Origin::Page, bytes })).unwrap();
+    live.poll(&mut session, Instant(0));
+    assert!(session.page(page, second).is_some());
+    assert_eq!(kept.requests(), 1);
+    live.request_held(page, second);
+    assert_eq!(kept.requests(), 1, "current by the list: not asked for");
+    live.request(page, second);
+    assert_eq!(kept.requests(), 2, "a plain request always goes");
+    sender.send(part("new")).unwrap();
+    live.poll(&mut session, Instant(0));
+    live.request_held(page, second);
+    assert_eq!(kept.requests(), 3, "its file changed: asked for");
 }

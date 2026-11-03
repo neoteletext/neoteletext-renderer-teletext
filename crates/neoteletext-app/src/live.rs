@@ -154,14 +154,15 @@ impl Live {
 
     /// Decodes page bytes into the session, keeping each page's extension
     /// data; with no `format`, the bytes say which it is (REQ-INP-005).
-    /// Returns the first page the bytes held, and every page they held.
+    /// Returns the first page the bytes held, and every page they held,
+    /// `0xMPP`, with its sub-code.
     fn feed_page(
         &mut self,
         session: &mut Session,
         format: Option<Format>,
         page: &PageData,
         now: Instant,
-    ) -> (Option<PageAddress>, Vec<u16>) {
+    ) -> (Option<PageAddress>, Vec<(u16, Option<SubCode>)>) {
         let mut reader = Box::new(AutoReader::new(AutoConfig { format, encode_pages: true, ..AutoConfig::default() }));
         let mut packets: Vec<(Packet, PacketMeta)> = Vec::new();
         let mut held = Vec::new();
@@ -207,7 +208,7 @@ impl Live {
                     *state = taken.is_some();
                 }
                 if let Some(page) = taken {
-                    held.push(page.mpp());
+                    held.push((page.mpp(), header.subcode));
                 }
             }
             let magazine_wide = address.number >= PACKET_MAGAZINE_ENHANCEMENT;
@@ -261,8 +262,18 @@ impl Live {
         self.offline_since = None;
         let (first, held) = self.feed_page(session, format, page, now);
         if page.origin != Origin::Push {
-            for mpp in held {
+            for &(mpp, _) in &held {
                 self.plain.insert(mpp, !page.secure);
+            }
+        }
+        // REQ-523: a sub-page fetched while its page's list names it is
+        // current for as long as its row keeps the validator it has now.
+        if page.origin == Origin::Page
+            && let Some(list) = self.list.as_mut()
+        {
+            let page = list.page;
+            for subcode in held.iter().filter(|(mpp, _)| *mpp == page).filter_map(|(_, subcode)| *subcode) {
+                list.arrived(subcode.value());
             }
         }
         if let Some(address) = first
@@ -401,6 +412,20 @@ impl Source for Live {
         self.requested = Some((page, subcode));
         self.last_retry = self.last_poll;
         self.send(&Frame::Request(page.mpp(), wire_subcode(subcode)));
+    }
+
+    fn request_held(&mut self, page: PageAddress, subcode: SubCode) {
+        let current = !subcode.is_any()
+            && self.list.as_ref().is_some_and(|list| list.page == page.mpp() && list.is_current(subcode.value()));
+        if !current {
+            self.request(page, subcode);
+            return;
+        }
+        // REQ-523: the copy held is current by the list, so its file is not
+        // asked for; the page is still the one kept fresh from now on.
+        self.asked.insert(page.mpp());
+        self.requested = Some((page, subcode));
+        self.last_retry = self.last_poll;
     }
 
     fn prefetch(&mut self, page: PageAddress) {

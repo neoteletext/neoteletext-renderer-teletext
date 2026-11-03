@@ -242,6 +242,10 @@ pub struct ListPart {
     pub version: String,
     /// The rows' sub-codes, in order.
     pub subcodes: Vec<u16>,
+    /// The rows' validators, in the same order, one for each sub-code: each
+    /// changes when its sub-page's file changes (REQ-523), at most
+    /// [`MAX_LIST_VERSION`] bytes.
+    pub validators: Vec<String>,
 }
 
 #[cfg(test)]

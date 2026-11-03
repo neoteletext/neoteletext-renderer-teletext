@@ -182,7 +182,7 @@ The status area in row 0's first seven columns shows the page number, and (DEC-2
 
 A place or count of three digits gives up the `P` (`100/123`), and one of four digits gives up the page number (`P/8190`), whose header still shows it.
 
-A page may have up to 3,199 sub-pages (area NUM). Right and Left step through those stored, and the sub-page key followed by four digits asks for one by its number (DEC-2363). On a channel whose page keeps its sub-pages in a folder (`NNN/SSSS.t42`, with its list of sub-pages in parts), Right and Left step through every sub-page the list names, in ascending order and wrapping at either end, whether or not the viewer holds it: each is fetched as it is reached, and the parts of the list only as stepping needs them (REQ-328).
+A page may have up to 3,199 sub-pages (area NUM). Right and Left step through those stored, and the sub-page key followed by four digits asks for one by its number (DEC-2363). On a channel whose page keeps its sub-pages in a folder (`NNN/SSSS.t42`, with its list of sub-pages in parts), Right and Left step through every sub-page the list names, in ascending order and wrapping at either end, whether or not the viewer holds it: each is fetched as it is reached, and the parts of the list only as stepping needs them (REQ-328). A sub-page the viewer already holds is shown without asking for it again while the list says its file has not changed since it came (REQ-523).
 
 ## Checking a channel
 

@@ -51,6 +51,7 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
             total: 66,
             version: "4be81f7a09c2d635".into(),
             subcodes: vec![0x65, 0x66],
+            validators: vec!["4be81f7a09c2d635".into(), "x_-9".into()],
         })),
         Frame::Notice(Notice::Index(IndexPart {
             generation: 7,
@@ -97,6 +98,14 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
         &[b'u', 0, 0, 0, 3, 0, 7, 0],
         // A request for a part with a byte left over.
         &[b'x', 0, 0, 0, 4, 1, 0, 0, 9],
+        // A row of a part of a list without its validator, with an empty
+        // one, and with one of 17 bytes (REQ-523).
+        &[b'p', 0, 0, 0, 13, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0x65],
+        &[b'p', 0, 0, 0, 17, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0x65, 0, 0, 0, 0],
+        &[
+            b'p', 0, 0, 0, 34, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0x65, 0, 0, 0, 17, b'a', b'a', b'a', b'a', b'a',
+            b'a', b'a', b'a', b'a', b'a', b'a', b'a', b'a', b'a', b'a', b'a', b'a',
+        ],
         // A service reopened with a byte short and a byte over (REQ-295).
         &[b'<', 0, 0, 0, 4, 1, 1, 0, 0xFF],
         &[b'<', 0, 0, 0, 6, 1, 1, 0, 0xFF, 0xFF, 0],
@@ -156,6 +165,7 @@ fn every_frame_written_has_a_listed_kind() {
             total: 1,
             version: String::new(),
             subcodes: vec![],
+            validators: vec![],
         })),
         Frame::Notice(Notice::Index(IndexPart { generation: 0, pages: vec![] })),
         Frame::Notice(Notice::IndexComplete(0)),

@@ -38,6 +38,12 @@ pub trait Source {
     /// Asks for a page, for sources that fetch on demand.
     fn request(&mut self, _page: PageAddress, _subcode: SubCode) {}
 
+    /// Asks for a page, or a sub-page, the store already holds: a source
+    /// that knows the copy held is current asks for nothing (REQ-523).
+    fn request_held(&mut self, page: PageAddress, subcode: SubCode) {
+        self.request(page, subcode);
+    }
+
     /// Asks for a page the shown page depends on, without making it the
     /// page kept fresh.
     fn prefetch(&mut self, _page: PageAddress) {}

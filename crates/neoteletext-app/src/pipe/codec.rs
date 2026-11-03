@@ -292,14 +292,19 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
             | Notice::Links(_)),
         ) => write_record_notice(out, notice),
         Frame::Notice(Notice::SubPages(list)) => {
-            if list.subcodes.len() > MAX_LIST_ROWS || list.version.len() > MAX_LIST_VERSION {
-                return Err(io::Error::other("a part of a list too long"));
+            if list.subcodes.len() > MAX_LIST_ROWS
+                || list.version.len() > MAX_LIST_VERSION
+                || list.validators.len() != list.subcodes.len()
+                || list.validators.iter().any(|validator| !is_validator(validator))
+            {
+                return Err(io::Error::other("a part of a list too long, or its rows unlike its validators"));
             }
             let mut buffer = [list.page.to_be_bytes().as_slice(), &[list.part], &list.total.to_be_bytes()].concat();
             put_string(&mut buffer, &list.version);
             buffer.extend_from_slice(&u16::try_from(list.subcodes.len()).unwrap_or(0).to_be_bytes());
-            for subcode in &list.subcodes {
+            for (subcode, validator) in list.subcodes.iter().zip(&list.validators) {
                 buffer.extend_from_slice(&subcode.to_be_bytes());
+                put_string(&mut buffer, validator);
             }
             put(out, SUB_PAGES, &buffer)
         }
@@ -356,9 +361,24 @@ fn list_part(cursor: &mut Cursor<'_>) -> io::Result<ListPart> {
     if count > MAX_LIST_ROWS || version.len() > MAX_LIST_VERSION {
         return Err(invalid());
     }
-    let subcodes = (0..count).map(|_| cursor.u16()).collect::<io::Result<Vec<_>>>()?;
+    let mut subcodes = Vec::with_capacity(count);
+    let mut validators = Vec::with_capacity(count);
+    for _ in 0..count {
+        subcodes.push(cursor.u16()?);
+        let validator = cursor.string()?;
+        if !is_validator(&validator) {
+            return Err(invalid());
+        }
+        validators.push(validator);
+    }
     cursor.end()?;
-    Ok(ListPart { page, part, total, version, subcodes })
+    Ok(ListPart { page, part, total, version, subcodes, validators })
+}
+
+/// A row's validator as the list's reader took it (REQ-523): 1 to
+/// [`MAX_LIST_VERSION`] bytes.
+fn is_validator(validator: &str) -> bool {
+    (1..=MAX_LIST_VERSION).contains(&validator.len())
 }
 
 /// Reads one frame; `None` at the end of the stream.

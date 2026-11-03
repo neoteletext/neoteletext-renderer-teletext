@@ -21,6 +21,14 @@ pub(super) struct PageList {
     shape: Option<(u16, String)>,
     /// The parts held: each one's rows' sub-codes, ascending.
     parts: BTreeMap<u8, Vec<u16>>,
+    /// The parts' rows' validators, as `parts` holds their sub-codes
+    /// (REQ-523).
+    validators: BTreeMap<u8, Vec<String>>,
+    /// The sub-pages that arrived while the list held their rows, each with
+    /// the row's validator then: the copy held is current while the list's
+    /// row keeps that validator (REQ-523). At most one for each sub-page of
+    /// the page, 8,190.
+    arrived: BTreeMap<u16, String>,
     /// Parts asked for and not yet answered.
     asked: BTreeSet<u8>,
     /// The page has no list, or a part of it could not be had: stepping
@@ -41,7 +49,15 @@ enum Place {
 impl PageList {
     /// Nothing known of `page`'s list yet.
     pub(super) fn new(page: u16) -> Self {
-        Self { page, shape: None, parts: BTreeMap::new(), asked: BTreeSet::new(), unusable: false }
+        Self {
+            page,
+            shape: None,
+            parts: BTreeMap::new(),
+            validators: BTreeMap::new(),
+            arrived: BTreeMap::new(),
+            asked: BTreeSet::new(),
+            unusable: false,
+        }
     }
 
     /// How many parts the list has.
@@ -58,24 +74,56 @@ impl PageList {
         let shape = (part.total, part.version.clone());
         if self.shape.as_ref() != Some(&shape) {
             self.parts.clear();
+            self.validators.clear();
             self.shape = Some(shape);
         }
         let ascending = part.subcodes.windows(2).all(|pair| pair.first() < pair.last());
         let first_place = usize::from(part.part).saturating_mul(MAX_LIST_ROWS);
         let fits = first_place.saturating_add(part.subcodes.len()) <= usize::from(part.total);
         let in_list = self.part_count().is_some_and(|count| usize::from(part.part) < count);
-        if !ascending || !fits || !in_list || part.subcodes.is_empty() {
+        let validated = part.validators.len() == part.subcodes.len();
+        if !ascending || !fits || !in_list || !validated || part.subcodes.is_empty() {
             self.unusable = true;
             return;
         }
         self.parts.insert(part.part, part.subcodes.clone());
+        self.validators.insert(part.part, part.validators.clone());
         while self.parts.len() > MAX_HELD_PARTS {
             // The part farthest from the one that came goes first.
             let farthest = self.parts.keys().copied().max_by_key(|held| held.abs_diff(part.part));
             if let Some(farthest) = farthest {
                 self.parts.remove(&farthest);
+                self.validators.remove(&farthest);
             }
         }
+    }
+
+    /// The validator of `subcode`'s row, when a part held names it.
+    fn validator(&self, subcode: u16) -> Option<&str> {
+        self.parts.iter().find_map(|(part, rows)| {
+            let row = rows.binary_search(&subcode).ok()?;
+            self.validators.get(part)?.get(row).map(String::as_str)
+        })
+    }
+
+    /// Sub-page `subcode` of the page arrived: it is current for as long as
+    /// its row keeps the validator it has now (REQ-523). One the list holds
+    /// no row for is not known to be current.
+    pub(super) fn arrived(&mut self, subcode: u16) {
+        match self.validator(subcode).map(str::to_owned) {
+            Some(validator) => {
+                self.arrived.insert(subcode, validator);
+            }
+            None => {
+                self.arrived.remove(&subcode);
+            }
+        }
+    }
+
+    /// Whether the copy of `subcode` that arrived is current: the list's
+    /// row for it has the validator it arrived under (REQ-523).
+    pub(super) fn is_current(&self, subcode: u16) -> bool {
+        self.arrived.get(&subcode).is_some_and(|validator| self.validator(subcode) == Some(validator.as_str()))
     }
 
     /// A part is missing or failed: with no part the page has no list, and
