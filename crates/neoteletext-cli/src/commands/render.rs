@@ -1,6 +1,6 @@
 //! `neottx render` (REQ-RND-007): one page, or all, as image files.
 
-use super::font::read_table;
+use super::font::{parse_sha256, read_table};
 use super::io_failure;
 use super::{ImageFormat, Selection, grid_of, page_file_name, parse_selection, sandbox_writable, scale_for, selected};
 use crate::args::RasterArgs;
@@ -25,7 +25,8 @@ pub fn render(
     let mut session = input::load_for(options, selection.page())?;
     let frame = Frame::still(session.decoder().config(), raster_args.reveal);
     let scale = scale_for(raster_args, None, (0, 0));
-    let table = raster_args.font.as_deref().map(read_table).transpose()?;
+    let expected = raster_args.font_sha256.as_deref().map(parse_sha256).transpose()?;
+    let table = raster_args.font.as_deref().map(|path| read_table(path, expected.as_ref())).transpose()?;
     let loaded =
         table.as_deref().map(LoadedFont::new).transpose().map_err(|error| (exit::INPUT, format!("{error:?}")))?;
     let glyphs = GlyphSet::noto_teletext().with_fonts(loaded, [None; FONT_SET_COUNT]);

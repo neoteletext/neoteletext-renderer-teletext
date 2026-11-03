@@ -17,7 +17,8 @@
 //! - addresses and origins: [`url`];
 //! - protocols: [`http`], [`ws`], [`cookie`], and `dbsc` (feature
 //!   `dbsc`): Device Bound Session Credentials (REQ-WEB-017);
-//! - content: [`channel`], [`contents`], [`subpages`] (a page's list
+//! - content: [`channel`], [`contents`], [`font_library`] (a font
+//!   library's `fonts.txt` and a font's checksum), [`subpages`] (a page's list
 //!   of sub-pages, and with `std` a page written as a channel's files),
 //!   [`descriptor`], and `small_page` (feature `alloc`): what a web browser
 //!   is shown of a channel;
@@ -75,6 +76,7 @@ pub mod ws;
 pub mod channel;
 pub mod contents;
 pub mod descriptor;
+pub mod font_library;
 pub mod map;
 pub mod records;
 #[cfg(feature = "alloc")]

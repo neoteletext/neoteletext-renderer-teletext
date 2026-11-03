@@ -9,7 +9,9 @@ use neoteletext_app::bounded_file::read_bounded;
 use neoteletext_app::{Failure, exit};
 use neoteletext_core::consts::{FONT_MAX_CHARACTERS, FONT_MAX_FILE_BYTES};
 use neoteletext_core::glyphs::LoadedFont;
-use neoteletext_core::glyphs::conformance::{FONT_SETS, Failure as RuleFailure, SET_POSITIONS, conformance};
+use neoteletext_core::glyphs::conformance::{
+    FONT_SETS, Failure as RuleFailure, SET_POSITIONS, conformance, font_set_index,
+};
 use neoteletext_core::types::FontGlyph;
 use neoteletext_formats::bdf::FontErrorKind;
 use neoteletext_formats::bdf::convert::{ConvertError, convert, read_map};
@@ -17,6 +19,8 @@ use neoteletext_formats::bdf::read;
 use neoteletext_formats::bdf::source::{SourceGlyph, read_source};
 use neoteletext_formats::consts::{FONT_MAP_MAX_FILE_BYTES, SOURCE_FONT_MAX_CHARACTERS, SOURCE_FONT_MAX_FILE_BYTES};
 use neoteletext_formats::write::{FontText, write_font};
+use neoteletext_web::font_library::{self, Entry, INDEX_FILE};
+use neoteletext_web::sha256::{self, Digest};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -59,12 +63,26 @@ pub fn convert_font(input: &Path, output: &Path, map: Option<&Path>, no_sandbox:
     Ok(())
 }
 
+/// A SHA-256 as `--font-sha256` gives it: 64 hexadecimal digits.
+pub(super) fn parse_sha256(text: &str) -> Result<Digest, Failure> {
+    sha256::parse_hex(text.as_bytes())
+        .ok_or_else(|| (exit::USAGE, format!("--font-sha256 {text:?}: not 64 hexadecimal digits")))
+}
+
 /// Reads a loaded font for drawing pages (`--font`, REQ-FNT-008): its glyph
-/// table, checked by the reader of REQ-FNT-002 and for shape. Called before
-/// the sandbox closes the file system.
-pub(super) fn read_table(path: &Path) -> Result<Vec<FontGlyph>, Failure> {
+/// table, checked by the reader of REQ-FNT-002 and for shape. When the user
+/// names the font with a SHA-256, a file with any other is refused before
+/// it is parsed (REQ-FNT-003). Called before the sandbox closes the file
+/// system.
+pub(super) fn read_table(path: &Path, expected: Option<&Digest>) -> Result<Vec<FontGlyph>, Failure> {
     let bytes = read_bounded(path, FONT_MAX_FILE_BYTES)?;
     let name = path.display();
+    if let Some(expected) = expected {
+        font_library::check_font(&bytes, expected).map_err(|actual| {
+            let actual = String::from_utf8_lossy(&sha256::to_hex(&actual)).into_owned();
+            (exit::INPUT, format!("{name}: SHA-256 {actual} is not the one named (REQ-FNT-003)"))
+        })?;
+    }
     let mut glyphs = vec![FontGlyph::EMPTY; FONT_MAX_CHARACTERS];
     let font = read(&bytes, &mut glyphs)
         .map_err(|error| (exit::INPUT, format!("{name}:{}: {:?} (REQ-FNT-002)", error.line, error.kind)))?;
@@ -135,4 +153,48 @@ fn conversion_fault(error: ConvertError) -> String {
         ConvertError::Repeated { encoding } => format!("character {encoding}: its code point is already in the font"),
         ConvertError::TooMany => format!("more than {FONT_MAX_CHARACTERS} characters"),
     }
+}
+
+/// `neottx font library LIBRARY` (REQ-FNT-004): the fonts of a library's
+/// index by title, one line each, `title<TAB>font<TAB>SHA-256<TAB>sets`,
+/// the sets as its `c` line states them; then the malformed lines on
+/// standard error, each with its number and fault, and their count. Only
+/// the index is read: listing a library fetches no font.
+pub fn font_library(library: &Path, no_sandbox: bool) -> Result<(), Failure> {
+    let index = if library.is_dir() { library.join(INDEX_FILE) } else { library.to_path_buf() };
+    let bytes = read_bounded(&index, font_library::MAX_BYTES)?;
+    sandbox_closed(no_sandbox)?;
+    let name = index.display();
+    // REQ-FNT-011: the set names libraries give are the core's.
+    let entries = font_library::read(&bytes, |set| font_set_index(set).is_some())
+        .map_err(|error| (exit::INPUT, format!("{name}: {error:?} (REQ-FNT-004)")))?;
+    let mut fonts = Vec::new();
+    let mut stated = std::collections::BTreeMap::new();
+    let mut malformed = 0usize;
+    for entry in entries {
+        match entry {
+            Ok(Entry::Font(font)) => fonts.push(font),
+            Ok(Entry::Conformance(conformance)) => {
+                let sets: Vec<String> = conformance
+                    .sets()
+                    .map(|(set, saa5050)| format!("{set}{}", if saa5050 { "*" } else { "" }))
+                    .collect();
+                stated.insert(conformance.location.as_str(), sets.join(" "));
+            }
+            Err(fault) if fault.fault.is_malformed() => {
+                malformed = malformed.saturating_add(1);
+                eprintln!("{name}:{}: {:?} (REQ-FNT-004)", fault.line, fault.fault);
+            }
+            Err(_) => {}
+        }
+    }
+    let mut out = std::io::stdout().lock();
+    for font in &fonts {
+        let at = font.location.as_str();
+        let hash = String::from_utf8_lossy(&sha256::to_hex(&font.sha256)).into_owned();
+        let sets = stated.get(at).map_or("", String::as_str);
+        writeln!(out, "{}\t{at}\t{hash}\t{sets}", font.title).map_err(|error| io_failure(Path::new("-"), error))?;
+    }
+    eprintln!("{name}: {} font(s), {malformed} malformed line(s)", fonts.len());
+    Ok(())
 }

@@ -42,7 +42,7 @@ pub use check::check;
 pub use contents::contents;
 pub use convert::convert;
 pub use fetch::fetch;
-pub use font::{convert_font, font_sets};
+pub use font::{convert_font, font_library, font_sets};
 pub use html::html;
 #[cfg(feature = "keyboard")]
 pub use keyboard::{KeyboardOptions, keyboard};

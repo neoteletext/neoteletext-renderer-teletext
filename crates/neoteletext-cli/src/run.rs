@@ -47,6 +47,9 @@ pub fn run() -> ExitCode {
         Command::Font { action: FontCommand::Sets { font, library_line, no_sandbox } } => {
             commands::font_sets(&font, library_line.as_deref(), no_sandbox)
         }
+        Command::Font { action: FontCommand::Library { library, no_sandbox } } => {
+            commands::font_library(&library, no_sandbox)
+        }
         Command::Contents { common } => commands::contents(&common.options()),
         Command::Html { common, address, public } => commands::html(&common.options(), &address, &public),
         Command::WriteText { set, language, level, page, input, output, no_sandbox } => {
