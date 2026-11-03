@@ -302,3 +302,60 @@ fn s_is_the_sub_page_key() {
     assert_eq!(key(KeyCode::Char('s')), Some(Key::SubPage));
     assert_eq!(key(KeyCode::Char('7')), Some(Key::Digit(7)));
 }
+
+/// A packet 8/30 format 1 naming `mpp` as the initial page: it shares
+/// X/27/0's page reference (Figure 12), with an absolute magazine.
+fn service_packet(mpp: u16) -> neoteletext_core::packet::Packet {
+    use neoteletext_core::consts::{PACKET_SERVICE, SERVICE_MAGAZINE};
+    use neoteletext_core::packet::encode;
+    use neoteletext_core::types::{Magazine, PageAddress, SubCode};
+    let target = PageAddress::from_mpp(mpp).unwrap();
+    let here = Magazine::new(SERVICE_MAGAZINE).unwrap();
+    // Link 0's magazine is written relative to the packet's, which 8/30
+    // reads as absolute: give the bits the target's magazine has.
+    let relative = Magazine::from_bits(target.magazine.bits() ^ here.bits());
+    let links = [Some((relative, target.page, SubCode::ANY)), None, None, None, None, None];
+    let mut packet = encode::links(Magazine::from_bits(0), &links, true, 0);
+    packet.bytes[..2].copy_from_slice(&encode::address(here, PACKET_SERVICE).bytes[..2]);
+    packet
+}
+
+fn view_state(session: &neoteletext_app::session::Session) -> super::ViewState {
+    let opening = neoteletext_app::input::Opening { page: None, parameters: String::new() };
+    super::ViewState::new(session, StdInstant::now(), opening)
+}
+
+/// REQ-458 (REQ-SVC-004), DEC-2410: an 8/30 that arrives on a live source
+/// after the view started moves an untouched viewer to its initial page
+/// and makes it the Index and Home keys' target; a viewer the user has
+/// moved stays, with only the target changed; a channel's own initial
+/// page stands over 8/30.
+#[test]
+fn a_late_8_30_gives_the_initial_page() {
+    use neoteletext_core::packet::PacketMeta;
+    use neoteletext_core::types::{PageAddress, SubCode};
+    use neoteletext_core::viewer::{Viewer, ViewerEvent};
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut state = view_state(&session);
+    assert_eq!((state.initial, state.viewer.requested().0), (page(0x100), page(0x100)));
+    session.push(&service_packet(0x200), &PacketMeta::default());
+    state.follow_service_initial(&session);
+    assert_eq!((state.initial, state.viewer.requested()), (page(0x200), (page(0x200), SubCode::ANY)));
+    // The user has moved: only the target changes.
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut state = view_state(&session);
+    state.viewer = Viewer::new(page(0x300));
+    let _ = state.viewer.event(ViewerEvent::Started);
+    session.push(&service_packet(0x200), &PacketMeta::default());
+    state.follow_service_initial(&session);
+    assert_eq!((state.initial, state.viewer.requested().0), (page(0x200), page(0x300)));
+    // A channel's descriptor named its initial page: 8/30 does not move it.
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut state = view_state(&session);
+    let mut recorded = Recorded::default();
+    state.take_notice(neoteletext_app::pipe::Notice::InitialPage(0x150), &mut recorded);
+    session.push(&service_packet(0x200), &PacketMeta::default());
+    state.follow_service_initial(&session);
+    assert_eq!((state.initial, state.viewer.requested().0), (page(0x150), page(0x150)));
+}

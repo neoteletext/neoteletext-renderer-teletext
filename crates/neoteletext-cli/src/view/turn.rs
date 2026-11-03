@@ -41,6 +41,7 @@ impl ViewState {
             for notice in source.notices() {
                 self.take_notice(notice, source);
             }
+            self.follow_service_initial(session);
             let config: Config = *session.decoder().config();
             self.act(session, source);
             let (requested, subcode) = self.viewer.requested();

@@ -46,6 +46,9 @@ struct ViewState {
     // The address opened named a page, which the channel's initial page,
     // when it comes, does not replace (REQ-1693 item 1).
     named: bool,
+    // The channel's descriptor gave the initial page, which then stands
+    // over packet 8/30's (DEC-2410).
+    initial_from_channel: bool,
     viewer: Viewer,
     messages: Vec<String>,
     live: bool,
@@ -85,6 +88,7 @@ impl ViewState {
             start,
             initial,
             named: opening.page.is_some(),
+            initial_from_channel: false,
             viewer,
             messages: Vec::new(),
             live: true,
