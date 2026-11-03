@@ -432,3 +432,18 @@ fn tatar_holds_shcha_at_2_7_and_3_e() {
     let tatar = CharSet::G0(G0 { set: G0Set::Tatar, national: None });
     assert_eq!((to_unicode(CharRef::new(tatar, 0x27)).base, to_unicode(CharRef::new(tatar, 0x3E)).base), ('Щ', 'щ'));
 }
+
+/// DEC-2370 (TODO-1165): Greek Ό, the one capital with tonos the
+/// standard's Greek set lacks, is reached on a Greek page as Ο with the
+/// acute placed by X/26, and drawn from the font's precomposed glyph.
+#[cfg(feature = "render")]
+#[test]
+fn greek_omicron_with_tonos_is_omicron_with_the_acute() {
+    const ACUTE: u8 = 2;
+    let greek = CharSet::G0(G0 { set: G0Set::Greek, national: None });
+    let character = CharRef { diacritic: ACUTE, ..CharRef::new(greek, code_of(greek, 'Ο')) };
+    let unicode = to_unicode(character);
+    assert_eq!(compose(unicode.base, unicode.combining.unwrap()), Some('Ό'));
+    let glyphs = crate::glyphs::GlyphSet::noto_teletext();
+    assert_eq!(Some(&glyphs.glyph(character)), glyphs.lookup('Ό'));
+}

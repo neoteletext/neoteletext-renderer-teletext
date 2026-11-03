@@ -49,7 +49,7 @@ A glyph is never edited by hand in a BDF file or in `noto.rs`: a change to glyph
 ## Checksums
 
 <!-- checksums: written by convert.py -->
-- `noto-teletext.bdf`: `9d3405596e8fcbf37bf977d7a489b49589209d8e5ce85c92ccc1f56e96c5c9fc`
+- `noto-teletext.bdf`: `cfbd975333d14d8f65099e66e760a514314fe13c667672575ee47d67636288db`
 - `noto-teletext-arabic.bdf`: `17cfa3817914c2a05ffadc1dd55f834356397ac5e9864fc82a0d6337b9c45629`
 - `noto-teletext-composed.bdf`: `e500e27361addb68119d02834192206216a3fd672c6926d082947d9f6092fe87`
 - `noto-teletext-japanese.bdf`: `a6bcc0a95f0746cbba59a82cbc871fa6c2727611716e279fe589f2b5a7eea398`
