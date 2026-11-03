@@ -54,6 +54,13 @@ impl GeometryChoice {
     }
 }
 
+/// The slicer's settings for a decoder configuration: the exact framing
+/// code alternative of REQ-PRF-004 is the decoder's `framing_tolerance`,
+/// whichever profile it came from.
+fn slicer_config(config: &neoteletext_core::config::Config) -> neoteletext_slicer::Config {
+    neoteletext_slicer::Config { framing_tolerance: config.framing_tolerance, ..neoteletext_slicer::Config::default() }
+}
+
 /// Slices the input, a raw capture of the geometry `preset` names with the
 /// parts `choice` gives replaced, and writes the packets found to `output`
 /// as T42. A geometry the reader cannot use is refused with the usage
@@ -67,8 +74,7 @@ pub fn slice(options: &Options, output: &Path, preset: &str, choice: &GeometryCh
         "tbc-vbi" => Preset::TbcVbi,
         other => return Err((exit::USAGE, format!("unknown preset {other:?} (bt8x8, cx88, saa7131, tbc, tbc-vbi)"))),
     };
-    let mut config = neoteletext_slicer::Config::default();
-    config.framing_tolerance = input::config(options)?.framing_tolerance;
+    let config = slicer_config(&input::config(options)?);
     let mut raw = RawReader::new(choice.applied_to(RawGeometry::preset(preset)), config)
         .map_err(|error| (exit::USAGE, format!("{error:?}")))?;
     let mut input = input::open(options)?;
@@ -102,4 +108,72 @@ pub fn slice(options: &Options, output: &Path, preset: &str, choice: &GeometryCh
         eprintln!("neottx: input byte {}: a partial line of {} bytes", cut.offset, cut.bytes);
     }
     Ok(raw.slicer().counters())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "a test")]
+mod tests {
+    use super::slicer_config;
+    use neoteletext_core::config::Config;
+    use neoteletext_slicer::generator::line_bytes;
+    use neoteletext_slicer::generator::{Generator, SignalParams, quantise_u8};
+    use neoteletext_slicer::{Line, Preset, RawGeometry, Rejection, SampleFormat, Slicer};
+
+    /// The geometry the lines are made in.
+    fn geometry() -> RawGeometry {
+        RawGeometry::preset(Preset::Bt8x8)
+    }
+
+    /// The place in the field of the line the test carries teletext on.
+    const POSITION: u16 = 10;
+
+    /// A sampled line of one packet, with framing code bit 3 wrong when asked.
+    #[allow(clippy::cast_precision_loss, reason = "a sample rate well within f32's exact range")]
+    fn line_samples(framing_wrong: bool) -> Vec<u8> {
+        let mut packet = [0u8; neoteletext_core::consts::PACKET_BYTES];
+        packet[..2].copy_from_slice(&[0x02, 0x15]);
+        let mut bytes = line_bytes(&neoteletext_core::packet::Packet { bytes: packet });
+        if framing_wrong {
+            bytes[2] ^= 0x08;
+        }
+        let geometry = geometry();
+        let mut values = vec![0.0_f32; geometry.samples_per_line];
+        // The bt8x8 capture starts about 7 microseconds after the
+        // synchronising edge, as the slicer's own tests of it say.
+        let params = SignalParams { start_ns: 7_000.0, ..SignalParams::nominal(geometry.sample_rate_hz as f32) };
+        Generator::new(1).line(&params, &bytes, &mut values);
+        let mut samples = vec![0u8; geometry.samples_per_line];
+        quantise_u8(&values, &mut samples);
+        samples
+    }
+
+    // Verifies REQ-370: the exact framing code takes effect from each
+    // profile: with the decoder's framing tolerance off, a framing code with
+    // one wrong bit is refused even on a line carrying teletext, and with it
+    // on (every profile's default) it is accepted there (DEC-1092).
+    #[test]
+    fn the_exact_framing_code_from_each_profile() {
+        let exact = line_samples(false);
+        let wrong = line_samples(true);
+        let at = |samples| Line {
+            second_field: Some(false),
+            position_in_field: Some(POSITION),
+            ..Line::new(samples, SampleFormat::U8, geometry().sample_rate_hz)
+        };
+        for name in ["en300706", "saa5050", "saa5246a"] {
+            for tolerance in [true, false] {
+                let config = Config { framing_tolerance: tolerance, ..Config::profile(name).expect("a profile") };
+                let mut slicer = Slicer::new(slicer_config(&config));
+                for _ in 0..neoteletext_slicer::consts::EXPECTED_LINE_EXACT_PACKETS {
+                    assert!(slicer.slice(&at(&exact)).is_ok(), "{name}: the exact packet");
+                }
+                let outcome = slicer.slice(&at(&wrong));
+                if tolerance {
+                    assert!(outcome.is_ok(), "{name}: {outcome:?}");
+                } else {
+                    assert_eq!(outcome, Err(Rejection::NoFramingCode), "{name}");
+                }
+            }
+        }
+    }
 }
