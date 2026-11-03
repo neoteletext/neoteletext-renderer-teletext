@@ -1,6 +1,6 @@
 # Noto-derived fonts
 
-**Status:** these files are Noto Teletext, neoteletext's one font (DEC-1761, REQ-FNT-001), and the only glyph data in the repository. `cargo xtask glyphs` merges them into `crates/neoteletext-core/src/glyphs/noto.rs`, which is compiled into the core. A font file holds at most 1,024 characters (REQ-FNT-002), so the font is spread over five files, one font together; they agree wherever two hold the same character, and the generator refuses them if they do not. Each file can also be loaded at run time like any other font (REQ-FNT-005 to REQ-FNT-008).
+**Status:** these files are Noto Teletext, neoteletext's one font (DEC-1761, REQ-FNT-001), and the only compiled glyph data; the one other font in the repository is the X11 misc-fixed 6x10 font in `third_party/misc-fixed/` (REQ-2223), loaded at run time only. `cargo xtask glyphs` merges them into `crates/neoteletext-core/src/glyphs/noto.rs`, which is compiled into the core. A font file holds at most 1,024 characters (REQ-FNT-002), so the font is spread over five files, one font together; they agree wherever two hold the same character, and the generator refuses them if they do not. Each file can also be loaded at run time like any other font (REQ-FNT-005 to REQ-FNT-008).
 
 ## What is here
 
@@ -24,7 +24,7 @@ cargo build --profile iterate -p neoteletext-cli
 uv run third_party/noto/convert.py --neottx target/iterate/neottx
 ```
 
-The converter writes every font of `settings.txt`, then `fonts.txt`, then the checksums below. Then `cargo xtask glyphs` compiles the files into the core. `cargo xtask check-noto`, run by every gate, fails if a committed font differs from its checksum here or if a font and its line do not match, and a test of `xtask` fails if the compiled table is not these files.
+The converter writes every font of `settings.txt`, then `fonts.txt`, then the checksums below. Then `cargo xtask glyphs` compiles the files into the core. `cargo xtask check-noto`, run by every gate, fails if a committed font differs from its checksum here, if a font and its line do not match, or if the folder holds a file it does not account for, and a test of `xtask` fails if the compiled table is not these files.
 
 ## Checksums
 

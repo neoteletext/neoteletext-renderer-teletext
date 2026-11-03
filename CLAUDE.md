@@ -38,9 +38,10 @@ That is the one document of how we work, for every NeoTeletext repository, with 
 
 - **No copyrighted source material in this repository.** Do not copy standards PDFs or datasheets here. Link to them or cite them by clause.
 - **No GPL code.** vbit2 and QTeletextMaker may be run as external programs, or used as test oracles at test time. Their code and test files must never be copied into this repository.
-- **One font: Noto Teletext** (DEC-1761, REQ-FNT-001).
+- **One compiled font: Noto Teletext** (DEC-1761, REQ-FNT-001).
   - `third_party/noto/*.bdf` hold it; `cargo xtask glyphs` compiles them into `crates/neoteletext-core/src/glyphs/noto.rs`. Its licence (SIL OFL 1.1) and provenance are in `third_party/noto/`, with the converter that makes it.
-  - It is the only glyph data in the repository. Mosaics and G3 characters are drawn by rule.
+  - It is the only compiled glyph data. Mosaics and G3 characters are drawn by rule.
+  - The one other font in the repository is the public-domain X11 misc-fixed 6x10 font in `third_party/misc-fixed/` (REQ-2223, DEC-2224): the original and its 12 × 20 conversion, made by `cargo xtask misc-fixed` and checked by `cargo xtask check-misc-fixed`. It is loaded at run time only: never compile it in, make it a default, or put it in the browser without the owner's word.
   - Never add any other font, or any glyphs from character-generator ROMs, to the repository. Other fonts are 12 × 10 or 12 × 20 BDF files loaded at run time (area FNT); the owner's font collection lives in a separate repository.
   - Keep glyphs as replaceable data, never hard-coded.
 - **The test corpus is downloaded at test time and pinned by checksum** (REQ-TST-022). Local corpus files, including Dan Farrimond's recovered T42 captures in `~/devel/jellytext/dan/`, are read from `$NEOTELETEXT_CORPUS`. Never commit sample streams or captures.

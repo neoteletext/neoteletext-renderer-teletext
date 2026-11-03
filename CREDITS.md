@@ -17,6 +17,15 @@ contributes, with its licence and how neoteletext uses it.
 - *Effect on neoteletext's licence:* none. The OFL binds the font, which stays under it; a binary
   that holds the font must carry its licence and copyright lines.
 
+**X11 misc-fixed 6x10** — the X11 misc-fixed authors, with the Unicode (ISO 10646-1) extensions by
+Markus Kuhn and contributors, <https://www.cl.cam.ac.uk/~mgk25/ucs-fonts.html>
+- *What it provides:* a terminal font covering all of code page 437 (the IBM PC's character set),
+  with Latin, Greek, Cyrillic and Hebrew, loaded at run time (REQ-2223). `third_party/misc-fixed/`
+  holds the original `6x10.bdf` and its conversion to the 12 by 20 cell, each pixel made two by two.
+  It is not compiled in.
+- *Licence:* public domain ("Public domain terminal emulator font.  Share and enjoy.").
+- *Effect on neoteletext's licence:* none.
+
 ## Ported
 
 **libopus 1.5.2** — Xiph.Org Foundation, Skype Limited, Octasic, Jean-Marc Valin, Timothy B.
@@ -73,5 +82,5 @@ These programs are run as separate programs or test oracles, in containers with 
 
 ## Fonts loaded at run time
 
-Fonts other than Noto Teletext are not part of neoteletext: the user loads them from font libraries
+Fonts other than Noto Teletext and the misc-fixed font above are not part of neoteletext: the user loads them from font libraries
 at run time (area FNT), and each keeps its own licence and record of where it came from.

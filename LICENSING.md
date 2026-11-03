@@ -43,5 +43,5 @@ Measured on 20 October 2026 from `cargo metadata --all-features`.
 
 - **Crates:** about 110, all under the licences of section 2: MIT or Apache-2.0 for most; `ring` (Apache-2.0 and ISC), `rustls` and `rustls-webpki` (ISC among their choices), `subtle` (BSD-3-Clause), `unicode-ident` (adds Unicode-3.0), `webpki-roots` (CDLA-Permissive-2.0). The library crates that run on a microcontroller have no dependencies at all (REQ-GEN-017).
 - **Ported code:** `neoteletext-opus` is ported from libopus 1.5.2 (BSD-3-Clause; its notice kept beside the source as `LICENSE-libopus` and in each ported file), so the crate is licensed `MIT AND BSD-3-Clause`; CREDITS.md names it (decision E.123).
-- **Fonts:** Noto Teletext, the one font, converted from Noto and compiled into `neoteletext-core` (SIL OFL 1.1, `third_party/noto/`, DEC-1761). Its notice is compiled in with it as `GlyphSet::provenance`.
+- **Fonts:** Noto Teletext, the one font, converted from Noto and compiled into `neoteletext-core` (SIL OFL 1.1, `third_party/noto/`, DEC-1761). Its notice is compiled in with it as `GlyphSet::provenance`. The X11 misc-fixed 6x10 font, public domain, is kept in `third_party/misc-fixed/` for loading at run time and is not compiled in (REQ-2223).
 - **System libraries:** the C library of each platform. The engine itself plays no sound; `neoteletext-audio-mix` only mixes.

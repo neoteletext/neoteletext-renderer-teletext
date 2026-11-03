@@ -48,4 +48,4 @@ The project is licensed under the MIT licence; see [LICENSE](LICENSE). Bundled t
 
 ## Licensing of data
 
-No standards documents, GPL code or broadcast recordings are kept in this repository. The one font is Noto Teletext (`third_party/noto/`, DEC-1761), whose provenance, licence and checksums are recorded in `third_party/noto/PROVENANCE.md`; no other glyphs are kept here. Other fonts are 12 × 10 BDF files loaded when the user names them (area FNT); a channel or a page cannot name one (decision E.111).
+No standards documents, GPL code or broadcast recordings are kept in this repository. The one font is Noto Teletext (`third_party/noto/`, DEC-1761), whose provenance, licence and checksums are recorded in `third_party/noto/PROVENANCE.md`. The one other font kept here is the public-domain X11 misc-fixed 6x10 font (`third_party/misc-fixed/`, REQ-2223), at 12 × 20 for loading at run time; it is not compiled in. Other fonts are 12 × 10 BDF files loaded when the user names them (area FNT); a channel or a page cannot name one (decision E.111).

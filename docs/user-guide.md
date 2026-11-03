@@ -243,7 +243,7 @@ Pages are drawn in Noto Teletext, the one compiled font (REQ-FNT-001, DEC-1761):
 
 Pages are drawn in Noto Teletext unless another font is named. `neottx render --font FILE` draws a page's text in a loaded font: a BDF file of 12 × 10 or 12 × 20 cells, encoded in Unicode, with at most 1,024 characters (REQ-FNT-002); anything else is refused with the line at fault. A character the font lacks is drawn in Noto Teletext. Row 0 is always drawn in Noto Teletext, so that a loaded font cannot change what the status area says. A channel or a page cannot name a font (decision E.111): `channel.ttx` refuses a `font` member, and the page checker reports a TTI `TF` line as a withdrawn command.
 
-A font library is a folder with a `fonts.txt` index listing fonts by title, each with its SHA-256 (`f`, the file name or address, the title and the checksum, separated by tabs). `third_party/noto/` is such a library. The windowed browser that chooses fonts from libraries is maintained in the separate neoteletext-browser repository.
+A font library is a folder with a `fonts.txt` index listing fonts by title, each with its SHA-256 (`f`, the file name or address, the title and the checksum, separated by tabs). `third_party/noto/` is such a library, and so is `third_party/misc-fixed/`, which holds the X11 misc-fixed 6x10 font at 12 × 20: load `third_party/misc-fixed/misc-fixed-6x10-12x20.bdf` with `neottx render --font` to draw a page in it, code page 437's box-drawing and block characters included. The windowed browser that chooses fonts from libraries is maintained in the separate neoteletext-browser repository.
 
 ### Character sets and conformance
 
