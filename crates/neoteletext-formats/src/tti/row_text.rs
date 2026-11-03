@@ -25,7 +25,9 @@ pub struct DecodedText {
 /// written as the byte plus 0x80, or as ESC followed by the code plus 0x40.
 /// With `row_text`, a raw 0x10 is Double Height, as the MRG format
 /// specifies, and 0x90 is still code 0x10; packed enhancement lines take no
-/// such alias.
+/// such alias. `capacity` is how many codes the line may hold, at most
+/// a packed line's; a larger value is taken as that, and codes past it
+/// set the overflow flag.
 #[must_use]
 pub fn decode_text(text: &[u8], row_text: bool, capacity: usize) -> DecodedText {
     let mut result = DecodedText { codes: [0; PACKED_LINE], count: 0, overflow: false, bad_escape: false };

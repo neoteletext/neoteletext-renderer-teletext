@@ -2,7 +2,7 @@
 //! reported for the default build so that `docs/spec/design/porting.md`
 //! can publish it, and bounded so that growth is seen.
 #![cfg(all(feature = "level15", feature = "render", feature = "viewer"))]
-#![allow(missing_docs, clippy::print_stdout, reason = "a test that reports")]
+#![allow(clippy::print_stdout, reason = "the test prints the measured sizes of the state types for the report")]
 
 use core::mem::size_of;
 use neoteletext_core::acq::{Decoder, EnhancementPacket, EnhancementSubPage, StoredPage};

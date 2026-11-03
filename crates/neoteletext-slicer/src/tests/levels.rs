@@ -1,17 +1,10 @@
 //! Tests of REQ-SLC-003 and REQ-SLC-005: black level and amplitude.
 #![allow(
     clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
     clippy::panic,
-    clippy::arithmetic_side_effects,
-    clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_wrap,
-    clippy::float_cmp,
-    clippy::too_many_lines,
-    clippy::similar_names
+    clippy::similar_names,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `panic!` on outcomes it rules out; counts and rates made floating point for measurements, all below 2^24 or within the measurement's tolerance; `slicer` and `sliced` stand side by side, the slicer and what it sliced"
 )]
 
 use super::*;

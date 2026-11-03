@@ -1,6 +1,9 @@
 //! Tests of the magazine acquisition and page lifecycle machines
 //! (REQ-FSM-003, REQ-FSM-004).
-#![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

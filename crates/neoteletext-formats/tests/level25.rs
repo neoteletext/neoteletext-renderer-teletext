@@ -5,7 +5,13 @@
 //! (REQ-INP-024, REQ-ACQ-016 to REQ-ACQ-020). The stream is also read back
 //! from its TTI form, which must give the same packets (REQ-INP-023).
 #![cfg(feature = "std")]
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size, arithmetic on small values it chose, where an overflow would also fail it and `panic!` on outcomes it rules out"
+)]
 
 use neoteletext_core::acq::{Decoder, EnhancementPacket, EnhancementStore, EnhancementSubPage, StoredPage};
 use neoteletext_core::config::{Config, PresentationLevel};

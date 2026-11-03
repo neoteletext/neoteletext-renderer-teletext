@@ -50,7 +50,6 @@ pub fn background_index(cell: &Cell, grid: &Grid) -> u8 {
 /// shows; outside the boxes of a boxed page everything is picture; mix
 /// makes backgrounds picture (REQ-L1-020). Row colours never colour row 0,
 /// columns 0 to 7 (decision E.45).
-#[allow(clippy::too_many_arguments)] // The pixel's colour, role, cell and position.
 fn plane(index: u8, background: bool, cell: &Cell, grid: &Grid, row: usize, column: usize) -> u8 {
     if (grid.boxed_mode && !cell.boxed) || (background && grid.mix) {
         return COLOUR_TRANSPARENT;
@@ -147,6 +146,9 @@ pub fn fill_palette<T: Copy>(out: &mut [T; PALETTE_SIZE], base: &[T; COLOURS + 1
 }
 
 /// The base colour (0 to 7, or 8 for transparent) of a palette index.
+/// `index` is 0 to [`PALETTE_SIZE`] − 1: 0 to 7 are the colours, then come
+/// the flash pairs from `PALETTE_FLASH_BASE` and the conceal pairs from
+/// `PALETTE_CONCEAL_BASE`; any other index gives transparent.
 #[must_use]
 pub fn palette_colour(index: usize, flash_visible: bool, reveal: bool) -> u8 {
     let flash_base = usize::from(PALETTE_FLASH_BASE);

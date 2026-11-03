@@ -101,9 +101,11 @@ const fn hamming84_decode_slow(byte: u8) -> (u8, Status) {
     }
 }
 
-// Runs only during compilation: an out-of-range index or overflow here stops
-// the build, so it cannot become a run-time panic (REQ-GEN-006).
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "runs only during compilation: an out-of-range index or overflow here stops the build, so it cannot become a run-time panic (REQ-GEN-006)"
+)]
 const fn build_hamming84_table() -> [(u8, Status); 256] {
     let mut table = [(0, Status::Uncorrectable); 256];
     let mut index = 0;

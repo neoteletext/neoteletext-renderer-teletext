@@ -1,7 +1,13 @@
 //! Tests of acquisition and the page store (area ACQ): the magazine
 //! machines driven by packets, serial and parallel mode, the parity merge,
 //! eviction, enhancement pages, magazine data and the rolling header.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size, `panic!` on outcomes it rules out and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 extern crate std;
 // The module is compiled for tests only (see the parent file); the

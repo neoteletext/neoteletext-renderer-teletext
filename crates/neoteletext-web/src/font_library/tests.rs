@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::string_slice, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::string_slice,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size, slicing strings it wrote itself and `panic!` on outcomes it rules out"
+)]
 //! The tests of a font library's index, `fonts.txt` (REQ-124), and of a
 //! font's checksum (REQ-123).
 

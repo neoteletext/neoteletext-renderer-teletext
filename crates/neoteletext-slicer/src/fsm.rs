@@ -90,9 +90,11 @@ pub enum SlicerAction {
 /// The transition function of the line slicer machine (REQ-FSM-002). One
 /// arm per row of the table, then one "no change" arm per state for the
 /// events the table does not list in it.
-// Arms with equal bodies are kept apart so each matches one table row
-// (REQ-FSM-001 traceability).
-#[allow(clippy::match_same_arms, clippy::too_many_lines)]
+#[allow(
+    clippy::match_same_arms,
+    clippy::too_many_lines,
+    reason = "arms with equal bodies are kept apart so each matches one row of the transition table (REQ-FSM-001 traceability), and one arm per row makes the function as long as the table"
+)]
 #[must_use]
 pub const fn slicer_transition(state: SlicerState, event: SlicerEvent) -> (SlicerState, SlicerAction) {
     use SlicerAction as A;

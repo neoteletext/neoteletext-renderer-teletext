@@ -1,7 +1,12 @@
 //! `neottx probe` (DEC-1759 lesson 20) against a small channel of this test:
 //! what it reports, and that a fault gives a non-zero exit status.
 #![cfg(feature = "live")]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, `expect` naming what it expected and indexing into data it built to a known size"
+)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};

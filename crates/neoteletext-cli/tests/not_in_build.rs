@@ -1,7 +1,6 @@
 //! A build that leaves an area out (decision E.61) refuses it plainly, with
 //! the usage exit status (REQ-CLI-005), rather than failing some other way.
 //! Each test runs only in a build without its feature.
-#![allow(missing_docs)]
 
 use std::process::Command;
 

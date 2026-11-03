@@ -1,4 +1,8 @@
-#![allow(clippy::indexing_slicing, clippy::unwrap_used)]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `unwrap` on results it expects to be good"
+)]
 
 // Tests of REQ-INT-005 and REQ-INT-006.
 use super::*;

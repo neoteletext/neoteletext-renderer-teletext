@@ -1,4 +1,7 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 use super::*;
 use neoteletext_core::limits::is_sub_code;
 use neoteletext_formats::item::{Item, Reader};

@@ -162,11 +162,8 @@ impl<'a> Packet<'a> {
 
 #[cfg(test)]
 #[allow(
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
     clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "tests may panic"
+    reason = "a test reports a failure by panicking, so it uses `expect` naming what it expected"
 )]
 mod tests {
     use super::{MAX_PACKET, Mode, Packet, PacketError};

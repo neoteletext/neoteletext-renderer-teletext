@@ -37,9 +37,10 @@ pub struct ColourMap {
 
 impl ColourMap {
     /// The defaults of Table 30.
-    // Evaluated at compile time over two arrays of the same constant
-    // length: an index out of range would fail the build, not panic.
-    #[allow(clippy::indexing_slicing)]
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "evaluated at compile time over two arrays of the same constant length: an index out of range would fail the build, not panic"
+    )]
     pub const DEFAULT: Self = {
         let mut entries = [Rgb12(0); COLOUR_MAP_ENTRIES];
         let mut index = 0;

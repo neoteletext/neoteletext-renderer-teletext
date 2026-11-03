@@ -1,4 +1,8 @@
-#![allow(clippy::indexing_slicing, clippy::unwrap_used, reason = "a test")]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `unwrap` on results it expects to be good"
+)]
 
 use super::*;
 use crate::sha256;

@@ -125,13 +125,16 @@ struct Route {
 impl<'a> Decoder<'a> {
     /// A decoder storing pages in `pages` (REQ-GEN-003), with no store for
     /// enhancement pages: object pages and the Magazine Organization Table
-    /// are not kept.
+    /// are not kept. `pages` may have any length, which is the number of
+    /// pages kept; when every slot is in use the least recently received
+    /// page gives way (REQ-ACQ-005), and an empty slice keeps no page.
     pub fn new(pages: &'a mut [StoredPage], config: Config) -> Self {
         Self::with_enhancement_store(pages, EnhancementStore::new(&mut [], &mut []), config)
     }
 
     /// A decoder storing pages in `pages` and enhancement pages in
-    /// `enhancement` (REQ-GEN-003, REQ-ACQ-019).
+    /// `enhancement` (REQ-GEN-003, REQ-ACQ-019). `pages` may have any
+    /// length, as for [`Decoder::new`].
     pub fn with_enhancement_store(
         pages: &'a mut [StoredPage],
         enhancement: EnhancementStore<'a>,

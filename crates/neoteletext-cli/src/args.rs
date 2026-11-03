@@ -17,8 +17,7 @@ pub struct Cli {
 }
 
 /// Options every command accepts (REQ-CLI-002).
-// Each flag is a separate command-line switch.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "each flag is a separate command-line switch")]
 #[derive(Args, Debug, Clone)]
 pub struct Common {
     /// Input: a file, `-` for standard input, `zxnet:<name>` for a live feed,

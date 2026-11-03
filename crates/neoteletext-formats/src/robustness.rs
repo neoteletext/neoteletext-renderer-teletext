@@ -2,7 +2,12 @@
 //! panics or overflows (tests build with overflow checks), and the items
 //! do not depend on how the input is split. Each reader compiled into the
 //! build is tested (decision E.61).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 use proptest::prelude::*;
 use std::boxed::Box;

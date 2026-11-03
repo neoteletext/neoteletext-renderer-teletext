@@ -4,7 +4,7 @@
 //! It writes indexed-colour images (PNG colour type 3) with the 144-entry
 //! teletext palette, or the 32 entries of a Colour Map (REQ-RND-030), and a
 //! `tRNS` chunk for transparency. Image data is
-//! compressed with fixed-Huffman deflate (RFC 1951 section 3.2.6) using two
+//! compressed with fixed-Huffman deflate (RFC 1951 section 3.2.5) using two
 //! kinds of match that suit teletext: a run of the previous byte, and the
 //! same bytes one row above. Memory use is fixed: two rows of scratch and
 //! one output chunk buffer.
@@ -43,9 +43,11 @@ pub enum PngError<E> {
     BadSize,
 }
 
-// Generated during compilation: a bad index stops the build rather than
-// panicking at run time.
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a constant function run only during compilation, where an index out of range or an overflow stops the build instead of panicking at run time"
+)]
 const fn crc_table() -> [u32; 256] {
     let mut table = [0u32; 256];
     let mut n = 0;

@@ -3,7 +3,13 @@
 //! through the decoder, and built into grids by the Level 1 pass and the
 //! enhancement processor, as a receiver would.
 // Each test file uses its own subset of these builders.
-#![allow(dead_code, clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    dead_code,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it; each test file uses only some of these shared helpers"
+)]
 
 pub mod reorder;
 

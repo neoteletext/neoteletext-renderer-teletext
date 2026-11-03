@@ -9,7 +9,10 @@
 //! guard does not live for the program's whole life, or through unsafe
 //! code, which the core forbids. It is a local value of the caller, as any
 //! port's would be (DEC-2440).
-#![allow(clippy::unwrap_used, missing_docs, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 use neoteletext_core::acq::{Decoder, EnhancementPacket, EnhancementStore, EnhancementSubPage, StoredPage};
 use neoteletext_core::config::Config;

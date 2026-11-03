@@ -56,7 +56,9 @@ fn listed(pages: &[StoredPage], address: PageAddress) -> impl Iterator<Item = Su
 }
 
 impl<'a> PageStore<'a> {
-    /// A store using the given slots; they are reset to empty.
+    /// A store using the given slots; they are reset to empty. `pages` may
+    /// have any length, which is the store's capacity in pages; an empty
+    /// slice gives a store that keeps nothing.
     pub fn new(pages: &'a mut [StoredPage]) -> Self {
         for page in pages.iter_mut() {
             *page = StoredPage::EMPTY;
@@ -123,7 +125,8 @@ impl<'a> PageStore<'a> {
         self.find(PageKey { address, subcode }).and_then(|index| self.pages.get(index))
     }
 
-    /// The page in a slot.
+    /// The page in a slot: `index` is below the number of slots the store
+    /// was made with; any other gives `None`.
     #[must_use]
     pub fn slot(&self, index: usize) -> Option<&StoredPage> {
         #[cfg(test)]

@@ -78,12 +78,11 @@ pub const PERCENT: f32 = 100.0;
 /// The nominal "1" level above black in 8-bit studio coding: 66 percent of
 /// black-to-white (EN 300 706 clause 5.2) with BT.601 black at 16 and white
 /// at 235, about 144.5 codes.
-// The product is 14,454, which f32 holds exactly.
-#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss, reason = "the product is 14,454, which f32 holds exactly")]
 pub const NOMINAL_AMPLITUDE_8BIT: f32 =
     ((BT601_WHITE_8BIT - BT601_BLACK_8BIT) * ONE_LEVEL_PERCENT_OF_WHITE) as f32 / PERCENT;
 /// The same for 16-bit samples: the 8-bit coding scaled by 256.
-#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss, reason = "`SAMPLE_16_PER_8` is 256, which f32 holds exactly")]
 pub const NOMINAL_AMPLITUDE_16BIT: f32 = NOMINAL_AMPLITUDE_8BIT * SAMPLE_16_PER_8 as f32;
 
 // ---------------------------------------------------------------------------

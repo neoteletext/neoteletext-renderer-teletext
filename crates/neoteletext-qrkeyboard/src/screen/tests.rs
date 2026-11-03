@@ -1,7 +1,11 @@
 //! The screen's handling of the phone's frames, with no relay: the frames
 //! a relay would deliver are handed to it, and what it would send is lost.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `expect` naming what it expected"
+)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;

@@ -72,7 +72,6 @@ pub fn scale_indices(
 /// [`ScaleError::ZeroFactor`] for a factor of zero, and
 /// [`ScaleError::BufferTooSmall`] when `input` or `out` is shorter than its
 /// image.
-#[allow(clippy::too_many_arguments)] // Geometry of input and output; grouping them adds nothing.
 pub fn scale_rgb_smoothed(
     input: &[u8],
     width: usize,
@@ -116,7 +115,11 @@ pub fn scale_rgb_smoothed(
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `unwrap` on results it expects to be good"
+)]
 mod tests {
     use super::*;
 

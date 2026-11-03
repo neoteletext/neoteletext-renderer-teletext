@@ -1,5 +1,8 @@
 //! Tests of navigation: links, page stepping, entry and history (area NAV).
-#![allow(clippy::unwrap_used, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

@@ -151,7 +151,10 @@ pub(crate) fn nth_chunk_mut<T>(slice: &mut [T], size: usize, index: usize) -> Op
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, reason = "tests may panic")]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size"
+)]
 mod tests {
     use super::{
         chunks, chunks_mut, chunks_up_to, chunks_up_to_mut, copy, discard_front, for_each_strided, move_up, nth_chunk,

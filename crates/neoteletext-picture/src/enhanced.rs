@@ -614,7 +614,6 @@ fn fit_within_page(picture: &Picture, palette: &Palette) -> Result<(Palette, Enc
 
 /// The three reductions of the picture to `count` colours, each as its set
 /// of twelve-bit colours.
-#[allow(clippy::cast_sign_loss, reason = "sixel primaries are 0 to 255")]
 fn starting_palettes(picture: &Picture, count: u32) -> Vec<Vec<Rgb>> {
     let byte = |value: i64| u8::try_from(value).unwrap_or(u8::MAX);
     let pixels: Vec<Px> = picture.pixels.iter().map(|&[r, g, b]| Px { r: byte(r), g: byte(g), b: byte(b) }).collect();

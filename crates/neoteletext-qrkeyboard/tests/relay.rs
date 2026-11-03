@@ -3,7 +3,11 @@
 //! `QRKEYBOARD_RELAY=http://127.0.0.1:8791` names one, such as the relay's
 //! own `npm run dev -- --port 8791 --ip 127.0.0.1`. These tests are ignored,
 //! and asked for without a relay they fail.
-#![allow(clippy::unwrap_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `panic!` on outcomes it rules out"
+)]
 
 use std::sync::mpsc;
 use std::thread;

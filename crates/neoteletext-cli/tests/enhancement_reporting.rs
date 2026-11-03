@@ -2,7 +2,6 @@
 //! walk trace of `-vv` (REQ-FSM-010, REQ-CLI-002), on the
 //! authored Level 2.5 and 3.5 stream (REQ-INP-025), which carries faults on
 //! purpose.
-#![allow(missing_docs)]
 
 use std::io::Write;
 use std::process::{Command, Stdio};

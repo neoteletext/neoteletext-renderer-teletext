@@ -164,7 +164,10 @@ pub const fn key(page: &PageFile) -> (PageAddress, SubCode) {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing, reason = "a test")]
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 mod tests {
     use super::*;
 

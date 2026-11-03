@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, `panic!` on outcomes it rules out, and indexes the Colour Map entries it checks"
+)]
 use super::*;
 use neoteletext_app::exit;
 

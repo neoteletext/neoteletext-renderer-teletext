@@ -1,5 +1,8 @@
 //! The program `neottx-picture` (REQ-2337).
-#![allow(clippy::unwrap_used, reason = "tests")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 use std::path::PathBuf;
 use std::process::Command;

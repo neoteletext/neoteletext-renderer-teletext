@@ -17,8 +17,7 @@ use crate::consts::{
 };
 
 /// The state record of the row attribute machine (REQ-FSM-006).
-// The fields are exactly the record REQ-FSM-006 lists.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "the fields are exactly the record REQ-FSM-006 lists")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RowState {
     foreground: u8,

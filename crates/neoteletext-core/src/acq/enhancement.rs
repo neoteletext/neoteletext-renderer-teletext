@@ -93,13 +93,15 @@ impl EnhancementSubPage {
 }
 
 /// The index of a packet within a sub-page: packets X/1 to X/25 are 0 to
-/// 24, and X/26 with designation code d is 25 + d.
+/// 24, and X/26 with designation code d is 25 + d. `packet` is 1 to
+/// [`PACKET_ROW_25`]; any other gives `None`.
 #[must_use]
 pub const fn row_index(packet: u8) -> Option<usize> {
     if packet >= 1 && packet <= PACKET_ROW_25 { Some((packet as usize).saturating_sub(1)) } else { None }
 }
 
-/// The index of packet X/26 with designation code `designation`.
+/// The index of packet X/26 with designation code `designation`, 0 to
+/// [`DESIGNATION_CODES`] − 1; any other gives `None`.
 #[must_use]
 pub const fn enhancement_index(designation: u8) -> Option<usize> {
     if (designation as usize) < DESIGNATION_CODES {
@@ -191,14 +193,18 @@ impl<'s> EnhancementPage<'s> {
         self.packets.get(usize::from(slot)).map(|packet| &packet.bytes)
     }
 
-    /// The stored data bytes of packet X/`packet` (1 to 25), as received.
+    /// The stored data bytes of packet X/`packet` (1 to [`PACKET_ROW_25`]),
+    /// as received; another packet number, or a packet not received, gives
+    /// `None`.
     #[must_use]
     pub fn row(&self, packet: u8) -> Option<&'s [u8; DATA_BYTES]> {
         self.packet(row_index(packet))
     }
 
-    /// The stored data bytes of X/26 with designation code `designation`,
-    /// byte 6 being the Hamming-coded designation code.
+    /// The stored data bytes of X/26 with designation code `designation`
+    /// (0 to [`DESIGNATION_CODES`] − 1), byte 6 being the Hamming-coded
+    /// designation code; another code, or a packet not received, gives
+    /// `None`.
     #[must_use]
     pub fn enhancement(&self, designation: u8) -> Option<&'s [u8; DATA_BYTES]> {
         self.packet(enhancement_index(designation))
@@ -548,7 +554,8 @@ pub struct EnhancementLookup<'s> {
 impl<'s> EnhancementLookup<'s> {
     /// The stored packets of an enhancement sub-page, named by its
     /// magazine, page number and S1 (decision E.52: invocations name the
-    /// sub-page by S1 directly).
+    /// sub-page by S1 directly). `s1` is 0 to 15, the four bits of S1; any
+    /// other value names no stored sub-page and gives `None`.
     #[must_use]
     pub fn sub_page(&self, magazine: Magazine, page: PageNumber, s1: u8) -> Option<EnhancementPage<'s>> {
         lookup(self.sub_pages, self.packets, EnhancementKey { address: PageAddress { magazine, page }, s1 })

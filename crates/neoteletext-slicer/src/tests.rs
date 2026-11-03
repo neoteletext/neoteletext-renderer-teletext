@@ -3,18 +3,11 @@
 //! Tests marked `#[ignore]` print measurements for the report; run them
 //! with `cargo test -p neoteletext-slicer --release -- --ignored --nocapture`.
 #![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
-    clippy::cast_possible_wrap,
-    clippy::float_cmp,
-    clippy::too_many_lines,
-    clippy::similar_names
+    reason = "a test reports a failure by panicking, so it uses arithmetic on small values it chose, where an overflow would also fail it; casts of counts and positions the test keeps in range; counts and rates made floating point for measurements, all below 2^24 or within the measurement's tolerance; casts of measured values that are never negative"
 )]
 
 use std::vec;

@@ -268,7 +268,11 @@ const _: () = {
 };
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::cast_precision_loss)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_precision_loss,
+    reason = "a test reports a failure by panicking, so it uses arithmetic on small values it chose, where an overflow would also fail it; counts and rates made floating point for measurements, all below 2^24 or within the measurement's tolerance"
+)]
 mod tests {
     use std::vec::Vec;
 

@@ -1,6 +1,10 @@
 //! Tests of the bundled glyph set: order, size, the diacritics drawn over their bases, loaded
 //! fonts and replaced G3 glyphs.
-#![allow(clippy::indexing_slicing, clippy::unwrap_used)]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `unwrap` on results it expects to be good"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

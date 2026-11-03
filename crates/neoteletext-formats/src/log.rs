@@ -117,7 +117,10 @@ pub fn check(text: &[u8]) -> Result<&str, LogRefused> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "a test")]
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 mod tests {
     use super::*;
 

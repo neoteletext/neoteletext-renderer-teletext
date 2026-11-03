@@ -2,7 +2,6 @@
 //! REQ-1728 for a page a static channel opts in): a static channel's folder
 //! gets an `index.html` and an `NNN/index.html` for each page, which hold
 //! nothing of the page by default, and which change nothing a reader does.
-#![allow(missing_docs)]
 
 mod common;
 

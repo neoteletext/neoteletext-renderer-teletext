@@ -4,7 +4,10 @@
 //! live feeds opens addresses: any other says so and connects to nothing, so
 //! `first_request` would wait for ever.
 #![cfg(feature = "live")]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::expect_used,
+    reason = "a test reports a failure by panicking, so it uses `expect` naming what it expected"
+)]
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;

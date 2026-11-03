@@ -74,8 +74,7 @@ pub const MAX_WALK_STEPS: u32 = WALK_RUNS * MAX_RUN_STEPS;
 
 /// The attributes a cell is drawn with (REQ-L25-006), each attribute type
 /// of decision E.47 a field.
-// Each flag is one attribute type of Annex A.7.1 and decision E.47.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "each flag is one attribute type of Annex A.7.1 and decision E.47")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Attrs {
     foreground: ColourIndex,

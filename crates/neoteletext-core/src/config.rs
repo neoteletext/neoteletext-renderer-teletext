@@ -191,9 +191,10 @@ impl RomVariant {
 
 /// The decoder configuration: a plain struct with a `Default`
 /// implementation and named profile constructors (REQ-GEN-011).
-// Each flag is a separate Part E decision that REQ-ARCH-008 requires to be
-// its own setting.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a separate Part E decision that REQ-ARCH-008 requires to be its own setting"
+)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Config {
     /// The presentation level (REQ-PRF-006, decision E.40). It replaces the
