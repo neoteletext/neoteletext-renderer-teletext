@@ -52,7 +52,7 @@ fn g3(code: u8) -> Glyph {
     Glyph::Char(CharRef::new(CharSet::G3, code))
 }
 
-fn options(mode: CellMode, unit: u8, reveal: bool) -> RenderOptions {
+fn options_with(mode: CellMode, unit: u8, reveal: bool) -> RenderOptions {
     RenderOptions {
         mode,
         rounding: true,
@@ -63,7 +63,7 @@ fn options(mode: CellMode, unit: u8, reveal: bool) -> RenderOptions {
 }
 
 fn large(unit: u8) -> RenderOptions {
-    options(CellMode::Saa5050, unit, false)
+    options_with(CellMode::Saa5050, unit, false)
 }
 
 fn line_of(grid: &Grid, cell: &Cell, row: usize, column: usize, line: usize, options: RenderOptions) -> CellLine {
@@ -312,7 +312,7 @@ fn invert_flash_and_conceal_combinations() {
             attributes,
             ..Cell::BLANK
         };
-        let raster = line_of(&grid, &cell, 4, 4, 8, options(CellMode::Saa5050, unit, reveal));
+        let raster = line_of(&grid, &cell, 4, 4, 8, options_with(CellMode::Saa5050, unit, reveal));
         assert_eq!((raster.foreground, raster.background), expected, "{invert} {flash:?} {conceal} {reveal} {unit}");
         assert_ne!(raster.mask, 0);
     }
@@ -402,7 +402,7 @@ fn resolved_indices_are_colour_map_indices() {
 /// REQ-RND-017: whole screen, row by row and line by line agree, and a
 /// buffer one pixel short of a row is refused.
 #[test]
-fn rows_render_identically_in_any_order() {
+fn rows_render_identically_in_any_order_in_the_resolved_mode() {
     let mut grid = Grid::EMPTY;
     grid.screen_colour = 3;
     grid.cells[4][0].glyph = text(b'A');
@@ -460,7 +460,7 @@ fn double_width_and_double_size() {
     let grid = Grid::EMPTY;
     let glyphs = [text(b'W'), Glyph::Mosaic { pattern: 0x2D, separated: true }, g3(0x22)];
     for mode in [CellMode::Saa5050, CellMode::Saa5246a] {
-        let options = options(mode, 0, false);
+        let options = options_with(mode, 0, false);
         let height = options.row_height();
         for glyph in glyphs {
             for (size, vertical) in [(Size::Normal, 0), (Size::DoubleTop, 1), (Size::DoubleBottom, 2)] {
@@ -493,7 +493,7 @@ fn underline_on_the_last_line() {
     let underlined = CellAttributes::DEFAULT.with_underline(true);
     let g2 = CharSet::G2(crate::charset::G2Set::Latin);
     for mode in [CellMode::Saa5050, CellMode::Saa5246a] {
-        let options = options(mode, 0, false);
+        let options = options_with(mode, 0, false);
         let last = options.row_height() - 1;
         for glyph in [text(b'g'), text(b' '), Glyph::Char(CharRef::new(g2, 0x23))] {
             let cell = Cell { glyph, attributes: underlined, ..Cell::BLANK };
@@ -536,7 +536,7 @@ fn the_underline_option_turns_underline_off_and_leaves_separated_mosaics() {
     let underlined = CellAttributes::DEFAULT.with_underline(true);
     let g2 = CharSet::G2(crate::charset::G2Set::Latin);
     for mode in [CellMode::Saa5050, CellMode::Saa5246a] {
-        let on = options(mode, 0, false);
+        let on = options_with(mode, 0, false);
         let off = on.with_underline(false);
         assert!(on.underline && !off.underline);
         let last = on.row_height() - 1;
@@ -582,7 +582,7 @@ fn every_g3_position_draws() {
         let data = glyphs.g3(code);
         for mode in [CellMode::Saa5050, CellMode::Saa5246a] {
             for rounding in [false, true] {
-                let options = RenderOptions { rounding, ..options(mode, 0, false) };
+                let options = RenderOptions { rounding, ..options_with(mode, 0, false) };
                 let cell = Cell { glyph: g3(code), ..Cell::BLANK };
                 for line in 0..options.row_height() {
                     let expected = match mode {
@@ -753,10 +753,10 @@ fn change_tracking_in_the_resolved_mode() {
     assert_eq!(tracker.changed_rows(&grid, large(11)), 0, "same unit, nothing");
     tracker.changed_rows(&grid, large(0));
     // Reveal: the rows with concealed cells.
-    let revealed = options(CellMode::Saa5050, 0, true);
+    let revealed = options_with(CellMode::Saa5050, 0, true);
     assert_eq!(tracker.changed_rows(&grid, revealed), 1 << 14 | 1 << 16);
     // A flashing concealed cell flashes once revealed.
-    assert_eq!(tracker.changed_rows(&grid, options(CellMode::Saa5050, 9, true)) & 1 << 14, 1 << 14);
+    assert_eq!(tracker.changed_rows(&grid, options_with(CellMode::Saa5050, 9, true)) & 1 << 14, 1 << 14);
     tracker.changed_rows(&grid, large(0));
     // A changed cell changes only its row.
     grid.cells[20][5].glyph = text(b'D');

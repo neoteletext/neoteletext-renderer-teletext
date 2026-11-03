@@ -84,7 +84,7 @@ fn value(group: u8, national: u8) -> u8 {
     (group << DESIGNATION_GROUP_SHIFT) | national
 }
 
-fn latin(national: NationalOption) -> G0 {
+fn latin_g0(national: NationalOption) -> G0 {
     G0 { set: G0Set::Latin, national: Some(national) }
 }
 
@@ -158,7 +158,7 @@ fn table_34_modified_designation() {
 #[test]
 fn defined_designation_needs_no_fallback() {
     let (found, fallback) = designation_with_fallback(value(0b0011, 0b111));
-    assert_eq!(found, Designation { g0: latin(NationalOption::Rumanian), g2: G2Set::Latin });
+    assert_eq!(found, Designation { g0: latin_g0(NationalOption::Rumanian), g2: G2Set::Latin });
     assert!(!fallback);
 }
 
@@ -168,18 +168,18 @@ fn defined_designation_needs_no_fallback() {
 fn reserved_designation_retries_group_0000() {
     // Group 0011 defines only indexes 101 and 111.
     let (found, fallback) = designation_with_fallback(value(0b0011, 0b110));
-    assert_eq!(found, Designation { g0: latin(NationalOption::CzechSlovak), g2: G2Set::Latin });
+    assert_eq!(found, Designation { g0: latin_g0(NationalOption::CzechSlovak), g2: G2Set::Latin });
     assert!(fallback);
     // Group 1110 is wholly reserved.
     let (found, fallback) = designation_with_fallback(value(0b1110, 0b001));
-    assert_eq!(found.g0, latin(NationalOption::German));
+    assert_eq!(found.g0, latin_g0(NationalOption::German));
     assert!(fallback);
 }
 
 /// REQ-CHR-003 step 2: when group 0000 is reserved too, English.
 #[test]
 fn doubly_reserved_designation_is_english() {
-    let english = Designation { g0: latin(NationalOption::English), g2: G2Set::Latin };
+    let english = Designation { g0: latin_g0(NationalOption::English), g2: G2Set::Latin };
     for reserved in [value(0b1101, 0b111), value(0b1111, 0b111), value(0b0000, 0b111)] {
         assert_eq!(designation(reserved), None);
         assert_eq!(designation_with_fallback(reserved), (english, true), "value {reserved:#09b}");
@@ -208,10 +208,10 @@ fn mosaic_codes_to_unicode() {
 fn national_positions_are_where_the_options_differ() {
     let mut count = 0;
     for code in SPACE..=CODE_MASK_7BIT {
-        let first = to_unicode(CharRef::new(CharSet::G0(latin(NationalOption::ALL[0])), code)).base;
+        let first = to_unicode(CharRef::new(CharSet::G0(latin_g0(NationalOption::ALL[0])), code)).base;
         let varies = NationalOption::ALL
             .iter()
-            .any(|&option| to_unicode(CharRef::new(CharSet::G0(latin(option)), code)).base != first);
+            .any(|&option| to_unicode(CharRef::new(CharSet::G0(latin_g0(option)), code)).base != first);
         assert_eq!(is_national_position(code), varies, "code {code:#04x}");
         assert_eq!(is_national_position(code | !CODE_MASK_7BIT), varies, "code {code:#04x} with bit 8 set");
         count += usize::from(varies);

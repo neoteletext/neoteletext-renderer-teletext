@@ -16,7 +16,7 @@ use std::vec::Vec;
 
 const ALL_CODES: core::ops::RangeInclusive<u8> = 0x20..=0x7F;
 
-const fn latin(national: Option<NationalOption>) -> CharSet {
+const fn latin_set(national: Option<NationalOption>) -> CharSet {
     CharSet::G0(G0 { set: G0Set::Latin, national })
 }
 
@@ -56,7 +56,7 @@ fn every_national_option_matches_table_36() {
     for (option, expected) in TABLE_36 {
         let actual: std::string::String = NATIONAL_POSITIONS
             .iter()
-            .map(|&code| base_unicode(latin(Some(option)), code))
+            .map(|&code| base_unicode(latin_set(Some(option)), code))
             .collect();
         assert_eq!(actual, expected, "{option:?}");
     }
@@ -65,13 +65,13 @@ fn every_national_option_matches_table_36() {
 /// REQ-71: the four glyphs the standard draws too small to identify, and the Turkish lira sign.
 #[test]
 fn project_decided_national_glyphs() {
-    let english = latin(Some(NationalOption::English));
-    let polish = latin(Some(NationalOption::Polish));
+    let english = latin_set(Some(NationalOption::English));
+    let polish = latin_set(Some(NationalOption::Polish));
     assert_eq!(base_unicode(polish, 0x5B), '\u{01B5}');
     assert_eq!(base_unicode(polish, 0x7D), '\u{0142}');
     assert_eq!(base_unicode(english, 0x60), '\u{2014}');
     assert_eq!(base_unicode(english, 0x7C), '\u{2016}');
-    assert_eq!(base_unicode(latin(Some(NationalOption::Turkish)), 0x23), '\u{20BA}');
+    assert_eq!(base_unicode(latin_set(Some(NationalOption::Turkish)), 0x23), '\u{20BA}');
 }
 
 /// REQ-71: a national option changes only its 13 positions of Table 35.
@@ -80,8 +80,8 @@ fn national_option_leaves_other_positions_alone() {
     for option in NationalOption::ALL {
         for code in ALL_CODES.filter(|code| !NATIONAL_POSITIONS.contains(code)) {
             assert_eq!(
-                base_unicode(latin(Some(option)), code),
-                base_unicode(latin(None), code),
+                base_unicode(latin_set(Some(option)), code),
+                base_unicode(latin_set(None), code),
                 "{option:?} {code:#04x}"
             );
         }
@@ -92,11 +92,11 @@ fn national_option_leaves_other_positions_alone() {
 #[test]
 fn latin_g0_base_forms() {
     let base: std::string::String =
-        NATIONAL_POSITIONS.iter().map(|&code| base_unicode(latin(None), code)).collect();
+        NATIONAL_POSITIONS.iter().map(|&code| base_unicode(latin_set(None), code)).collect();
     assert_eq!(base, "#¤@[\\]^_`{|}~");
-    assert_eq!(row(latin(None), 0x40), "@ABCDEFGHIJKLMNO");
-    assert_eq!(row(latin(None), 0x70), "pqrstuvwxyz{|}~■");
-    assert_eq!(base_unicode(latin(None), 0x20), ' ');
+    assert_eq!(row(latin_set(None), 0x40), "@ABCDEFGHIJKLMNO");
+    assert_eq!(row(latin_set(None), 0x70), "pqrstuvwxyz{|}~■");
+    assert_eq!(base_unicode(latin_set(None), 0x20), ' ');
 }
 
 // --- Tables 32 and 33 -------------------------------------------------------
@@ -281,8 +281,8 @@ fn national_bits_mask_is_the_index_mask() {
 // --- Code tables --------------------------------------------------------
 
 fn every_set() -> Vec<CharSet> {
-    let mut sets = std::vec![latin(None)];
-    sets.extend(NationalOption::ALL.iter().map(|&option| latin(Some(option))));
+    let mut sets = std::vec![latin_set(None)];
+    sets.extend(NationalOption::ALL.iter().map(|&option| latin_set(Some(option))));
     sets.extend(
         [
             G0Set::Cyrillic1,
@@ -554,7 +554,7 @@ fn every_latin_g0_letter_with_every_mark() {
     }
     let mut count = 0;
     for code in (0x41..=0x5A).chain(0x61..=0x7A) {
-        let base = base_unicode(latin(None), code);
+        let base = base_unicode(latin_set(None), code);
         for mark in 1..=15 {
             count += usize::from(compose(base, diacritic_combining(mark).unwrap()).is_some());
         }

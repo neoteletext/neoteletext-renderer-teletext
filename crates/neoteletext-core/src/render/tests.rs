@@ -25,7 +25,7 @@ use crate::consts::{COLOUR_BLUE_BIT, COLOUR_RED_BIT, PAGE_WIDTH};
 use std::vec;
 use std::vec::Vec;
 
-fn options() -> RenderOptions {
+fn default_options() -> RenderOptions {
     RenderOptions {
         mode: CellMode::Saa5050,
         rounding: true,
@@ -92,16 +92,16 @@ fn rows_render_identically_in_any_order() {
     let glyphs = GlyphSet::noto_teletext();
     let mut whole = vec![0u8; PAGE_WIDTH * 500];
     let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut whole, stride: PAGE_WIDTH };
-    render_screen(&grid, ALL_ROWS, &glyphs, options(), &mut buffer).unwrap();
+    render_screen(&grid, ALL_ROWS, &glyphs, default_options(), &mut buffer).unwrap();
     for row in (0..ROWS).rev() {
         let mut single = vec![0u8; PAGE_WIDTH * 20];
         let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut single, stride: PAGE_WIDTH };
-        render_row(&grid, row, Field::Both, &glyphs, options(), &mut buffer).unwrap();
+        render_row(&grid, row, Field::Both, &glyphs, default_options(), &mut buffer).unwrap();
         assert_eq!(&whole[row * 20 * PAGE_WIDTH..(row + 1) * 20 * PAGE_WIDTH], &single[..]);
     }
     for y in 0..500 {
         let mut line = vec![0u8; PAGE_WIDTH];
-        render_line(&grid, y, Zoom::Off, &glyphs, options(), IndexFormat::Bits8, &mut line).unwrap();
+        render_line(&grid, y, Zoom::Off, &glyphs, default_options(), IndexFormat::Bits8, &mut line).unwrap();
         assert_eq!(&whole[y * PAGE_WIDTH..(y + 1) * PAGE_WIDTH], &line[..]);
     }
 }
@@ -110,14 +110,14 @@ fn rows_render_identically_in_any_order() {
 fn change_tracking_reports_only_changed_rows() {
     let mut tracker = ChangeTracker::new();
     let mut grid = Grid::EMPTY;
-    assert_eq!(tracker.changed_rows(&grid, options()), ALL_ROWS);
-    assert_eq!(tracker.changed_rows(&grid, options()), 0);
+    assert_eq!(tracker.changed_rows(&grid, default_options()), ALL_ROWS);
+    assert_eq!(tracker.changed_rows(&grid, default_options()), 0);
     grid.cells[5][0].foreground = 3;
-    assert_eq!(tracker.changed_rows(&grid, options()), 1 << 5);
+    assert_eq!(tracker.changed_rows(&grid, default_options()), 1 << 5);
     grid.cells[7][0].flash = true;
     grid.cells[7][0].conceal = true;
-    tracker.changed_rows(&grid, options());
-    let revealed = RenderOptions { reveal: true, ..options() };
+    tracker.changed_rows(&grid, default_options());
+    let revealed = RenderOptions { reveal: true, ..default_options() };
     assert_eq!(tracker.changed_rows(&grid, revealed), 1 << 7, "reveal redraws flashing concealed rows only");
 }
 
@@ -213,11 +213,11 @@ fn change_tracking_starts_and_restarts_with_every_row() {
     assert_eq!(ChangeTracker::default(), ChangeTracker::new());
     let grid = Grid::EMPTY;
     let mut tracker = ChangeTracker::default();
-    assert_eq!(tracker.changed_rows(&grid, options()), ALL_ROWS);
-    assert_eq!(tracker.changed_rows(&grid, options()), 0);
+    assert_eq!(tracker.changed_rows(&grid, default_options()), ALL_ROWS);
+    assert_eq!(tracker.changed_rows(&grid, default_options()), 0);
     tracker.invalidate();
-    assert_eq!(tracker.changed_rows(&grid, options()), ALL_ROWS);
-    assert_eq!(tracker.changed_rows(&grid, options()), 0);
+    assert_eq!(tracker.changed_rows(&grid, default_options()), ALL_ROWS);
+    assert_eq!(tracker.changed_rows(&grid, default_options()), 0);
 }
 
 /// REQ-RND-017, REQ-L1-020: one field draws the even or the odd lines of
@@ -237,7 +237,7 @@ fn fields_zoom_and_bounds_of_the_row_renderer() {
     let row = |field| {
         let mut out = vec![0u8; PAGE_WIDTH * lines];
         let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut out, stride: PAGE_WIDTH };
-        render_row(&grid, 5, field, &glyphs, options(), &mut buffer).unwrap();
+        render_row(&grid, 5, field, &glyphs, default_options(), &mut buffer).unwrap();
         out
     };
     let both = row(Field::Both);
@@ -249,7 +249,7 @@ fn fields_zoom_and_bounds_of_the_row_renderer() {
     }
     let line = |y, zoom| {
         let mut out = vec![0u8; PAGE_WIDTH];
-        render_line(&grid, y, zoom, &glyphs, options(), IndexFormat::Bits8, &mut out).map(|()| out)
+        render_line(&grid, y, zoom, &glyphs, default_options(), IndexFormat::Bits8, &mut out).map(|()| out)
     };
     for y in [0, 7, 39, 105] {
         assert_eq!(line(2 * y, Zoom::Top), line(y, Zoom::Off), "top, line {y}");
@@ -261,12 +261,18 @@ fn fields_zoom_and_bounds_of_the_row_renderer() {
     assert_eq!(line(ROWS * lines, Zoom::Off), Err(RenderError::OutOfRange));
     let mut out = vec![0u8; PAGE_WIDTH * lines];
     let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut out, stride: PAGE_WIDTH };
-    assert_eq!(render_row(&grid, ROWS, Field::Both, &glyphs, options(), &mut buffer), Err(RenderError::OutOfRange));
+    assert_eq!(
+        render_row(&grid, ROWS, Field::Both, &glyphs, default_options(), &mut buffer),
+        Err(RenderError::OutOfRange)
+    );
     // Room for rows 0 and 1 only: drawing row 2 is refused.
     let mut small = vec![0u8; PAGE_WIDTH * lines * 2];
     let mut framebuffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut small, stride: PAGE_WIDTH };
-    assert_eq!(render_screen(&grid, 0b11, &glyphs, options(), &mut framebuffer), Ok(()));
-    assert_eq!(render_screen(&grid, 0b111, &glyphs, options(), &mut framebuffer), Err(RenderError::BufferTooSmall));
+    assert_eq!(render_screen(&grid, 0b11, &glyphs, default_options(), &mut framebuffer), Ok(()));
+    assert_eq!(
+        render_screen(&grid, 0b111, &glyphs, default_options(), &mut framebuffer),
+        Err(RenderError::BufferTooSmall)
+    );
 }
 
 // The tests draw with the shipped glyph set.
@@ -299,7 +305,7 @@ fn a_flashing_concealed_cell_changes_range_with_reveal() {
 /// The index of the first pixel of `column` in the first line of `row`,
 /// drawn in the resolved mode.
 fn resolved_index(grid: &Grid, row: usize, column: usize) -> u8 {
-    let options = RenderOptions { colour: ColourMode::Resolved(FlashPhase::STEADY), ..options() };
+    let options = RenderOptions { colour: ColourMode::Resolved(FlashPhase::STEADY), ..default_options() };
     let mut pixels = vec![0u8; PAGE_WIDTH * options.row_height()];
     let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut pixels, stride: PAGE_WIDTH };
     render_row(grid, row, Field::Both, &GlyphSet::noto_teletext(), options, &mut buffer).unwrap();
