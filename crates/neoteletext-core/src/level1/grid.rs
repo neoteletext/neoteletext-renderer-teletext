@@ -4,8 +4,8 @@ use super::Cell;
 use crate::charset::{self, Designation, G0};
 use crate::colour::{ColourIndex, ColourMap};
 use crate::consts::{
-    CLOCK_BYTES, COLOUR_BLACK, COLOURS, COLUMNS, FASTEXT_COLOURS, FASTEXT_KEYS, HEADER_DISPLAY_BYTES, ROWS, SPACE,
-    STATUS_COLUMNS,
+    CLOCK_BYTES, COLOUR_BLACK, COLOURS, COLUMNS, FASTEXT_COLOURS, FASTEXT_KEYS, HEADER_DISPLAY_BYTES, RECEIVER_COLUMNS,
+    ROWS, SPACE, STATUS_COLUMNS,
 };
 use crate::types::Rgb12;
 
@@ -112,6 +112,15 @@ impl Grid {
         let entry = |index: u8| self.colour_map.entries.get(usize::from(index)).copied();
         let expected = self.receiver_colours.get(usize::from(colour)).copied();
         expected.is_some() && entry(cell.foreground) == expected && entry(cell.background) != expected
+    }
+
+    /// True for a cell the receiver draws: the status area, row 0 columns 0
+    /// to 7 (REQ-SEC-005), and a row 24 drawn from links (REQ-NAV-011).
+    /// Every renderer draws these cells in the receiver's fixed colours,
+    /// never through the page's Colour Map (DEC-2464).
+    #[must_use]
+    pub const fn is_receiver_cell(&self, row: usize, column: usize) -> bool {
+        (row == 0 && column < RECEIVER_COLUMNS) || (self.receiver_row_24 && row == ROWS - 1)
     }
 
     /// An empty grid.

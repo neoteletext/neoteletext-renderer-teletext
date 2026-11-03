@@ -359,6 +359,17 @@ impl<const HISTORY: usize> Viewer<HISTORY> {
         self.run(ViewerInput::ChooseSubPage(subcode))
     }
 
+    /// Selects `address` in place of the page just selected, as one visit
+    /// of the history: where a typed page number leads at once to another
+    /// page of this service, by the page's number link or the service's
+    /// alias (REQ-WEB-020, decision E.64 item 4). The machine stays where
+    /// the first selection put it, searching.
+    pub fn redirect(&mut self, address: PageAddress, subcode: SubCode) -> Action {
+        let action = self.select(address, subcode, false);
+        self.history.replace_current(HistoryEntry { service: self.service, address, subcode });
+        action
+    }
+
     /// Handles a decoder event (REQ-FSM-005).
     pub fn event(&mut self, event: ViewerEvent) -> Action {
         self.run(ViewerInput::Event(event))

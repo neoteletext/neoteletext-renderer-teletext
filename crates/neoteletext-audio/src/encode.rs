@@ -79,14 +79,19 @@ impl Sound {
         }
         let data = match codec {
             Codec::Pcm16 => pcm.iter().flat_map(|sample| sample.to_le_bytes()).collect(),
-            Codec::ImaAdpcm => ima_blocks(pcm, usize::try_from(per_block).map_err(|_| EncodeError::Length)?),
+            Codec::ImaAdpcm => {
+                let per_block = usize::try_from(per_block).map_err(|_| EncodeError::Length)?;
+                let mut out = Vec::new();
+                ima_blocks(&mut State { predictor: 0, index: 0 }, pcm, per_block, &mut out);
+                out
+            }
             Codec::Opus => return Err(EncodeError::Encoder),
         };
         Ok(Self { handle, generation, id: u32::from(handle), codec, rate_hz, block_bytes, samples, data, label: None })
     }
 
     /// A live sound (REQ-AUD-014): announced with no samples, its blocks
-    /// written as they come by [`Sound::live_records`].
+    /// written as they come by a [`LiveEncoder`].
     ///
     /// # Errors
     /// A rate or block size the profile does not allow.
@@ -182,23 +187,6 @@ impl Sound {
         self.codec.samples_per_block(self.block_bytes)
     }
 
-    /// The DATA records of a live sound's next whole blocks, numbered from
-    /// block `first` (counting modulo 2¹⁶), one block a record so each is
-    /// sent as soon as it exists. A final part block is padded with silence.
-    /// An Opus sound's packets go by [`Sound::packet_records`]: none here.
-    #[must_use]
-    pub fn live_records(&self, first: u16, pcm: &[i16]) -> Vec<Vec<u8>> {
-        let per_block = usize::try_from(self.samples_per_block()).unwrap_or(1).max(1);
-        let mut padded = pcm.to_vec();
-        padded.resize(pcm.len().div_ceil(per_block).saturating_mul(per_block), 0);
-        let data = match self.codec {
-            Codec::Pcm16 => padded.iter().flat_map(|sample| sample.to_le_bytes()).collect(),
-            Codec::ImaAdpcm => ima_blocks(&padded, per_block),
-            Codec::Opus => return Vec::new(),
-        };
-        self.records_of(&data, first, 1)
-    }
-
     /// Blocks in the whole sound.
     #[must_use]
     pub fn blocks(&self) -> u16 {
@@ -257,12 +245,107 @@ impl Sound {
     }
 }
 
-/// IMA ADPCM blocks of `per_block` samples: each block's header holds its
-/// first sample and the step index the encoder had reached, so it decodes
-/// on its own.
-fn ima_blocks(pcm: &[i16], per_block: usize) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut state = State { predictor: 0, index: 0 };
+/// The encoder of a live sound's blocks (REQ-AUD-014), which carries what
+/// one call learns into the next: the IMA ADPCM step index the last block
+/// reached, the samples of a block not yet whole, and the next block's
+/// number. A live sound encoded in many calls is so byte for byte the sound
+/// encoded in one. Each call starting afresh, from the smallest step, cost
+/// the start of every batch several samples of adaptation (the server
+/// measured 2 to 7 decibels of signal-to-noise ratio lost at each restart),
+/// and a batch that ended part way through a block put silence into the
+/// middle of the sound.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LiveEncoder {
+    /// The live sound, for its handle, generation, codec and block size.
+    sound: Sound,
+    /// Samples in each whole block, at least one.
+    per_block: usize,
+    /// The number of the next block written, counting modulo 2¹⁶.
+    next: u16,
+    /// The IMA ADPCM encoder's state where the last block ended.
+    state: State,
+    /// Samples of the next block, fewer than [`LiveEncoder::per_block`].
+    pending: Vec<i16>,
+}
+
+impl LiveEncoder {
+    /// An encoder for `sound`, made by [`Sound::live`], whose next block is
+    /// numbered `first`.
+    ///
+    /// # Errors
+    /// An Opus sound, whose packets come from a publisher's encoder and go
+    /// by [`Sound::packet_records`] (decision E.124).
+    pub fn new(sound: &Sound, first: u16) -> Result<Self, EncodeError> {
+        if sound.codec == Codec::Opus {
+            return Err(EncodeError::Encoder);
+        }
+        Ok(Self {
+            sound: sound.clone(),
+            per_block: usize::try_from(sound.samples_per_block()).unwrap_or(1).max(1),
+            next: first,
+            state: State { predictor: 0, index: 0 },
+            pending: Vec::new(),
+        })
+    }
+
+    /// The live sound this encoder writes.
+    #[must_use]
+    pub fn sound(&self) -> &Sound {
+        &self.sound
+    }
+
+    /// The number the next block written will carry.
+    #[must_use]
+    pub fn next_block(&self) -> u16 {
+        self.next
+    }
+
+    /// The DATA records of every block `pcm` completes, one block a record
+    /// so each is sent as soon as it exists. Samples left over, too few for
+    /// a block, wait for the next call or for [`LiveEncoder::finish`].
+    pub fn records(&mut self, pcm: &[i16]) -> Vec<Vec<u8>> {
+        self.pending.extend_from_slice(pcm);
+        let whole = self.pending.len().saturating_sub(self.pending.len().checked_rem(self.per_block).unwrap_or(0));
+        let records = self.encode(whole);
+        self.pending.drain(..whole);
+        records
+    }
+
+    /// The DATA record of the samples still waiting, their block padded with
+    /// silence, at the end of the sound; none if no sample waits.
+    pub fn finish(&mut self) -> Vec<Vec<u8>> {
+        if self.pending.is_empty() {
+            return Vec::new();
+        }
+        self.pending.resize(self.per_block, 0);
+        let records = self.encode(self.per_block);
+        self.pending.clear();
+        records
+    }
+
+    /// The records of the first `count` waiting samples, a whole number of
+    /// blocks, numbered on from the last.
+    fn encode(&mut self, count: usize) -> Vec<Vec<u8>> {
+        let samples = self.pending.get(..count).unwrap_or(&[]);
+        let mut data = Vec::new();
+        match self.sound.codec {
+            Codec::Pcm16 => data.extend(samples.iter().flat_map(|sample| sample.to_le_bytes())),
+            Codec::ImaAdpcm => ima_blocks(&mut self.state, samples, self.per_block, &mut data),
+            Codec::Opus => {}
+        }
+        let records = self.sound.records_of(&data, self.next, 1);
+        let blocks = u16::try_from(records.len()).unwrap_or(u16::MAX);
+        self.next = self.next.wrapping_add(blocks);
+        records
+    }
+}
+
+/// IMA ADPCM blocks of `per_block` samples, appended to `out`, starting from
+/// `state` and leaving it where the last block ended: each block's header
+/// holds its first sample and the step index the encoder had reached, so it
+/// decodes on its own (the block layout of Microsoft's "DVI ADPCM Wave Type",
+/// cited in [`crate::ima`]).
+fn ima_blocks(state: &mut State, pcm: &[i16], per_block: usize, out: &mut Vec<u8>) {
     for block in pcm.chunks(per_block) {
         let Some((&first, rest)) = block.split_first() else { continue };
         state.predictor = first;
@@ -271,15 +354,14 @@ fn ima_blocks(pcm: &[i16], per_block: usize) -> Vec<u8> {
         out.push(0);
         // Two codes a byte, low nibble first; an odd count is padded.
         for pair in rest.chunks(2) {
-            let low = encode_code(&mut state, pair.first().copied().unwrap_or(0));
+            let low = encode_code(state, pair.first().copied().unwrap_or(0));
             let high = match pair.get(1) {
-                Some(&sample) => encode_code(&mut state, sample),
+                Some(&sample) => encode_code(state, sample),
                 None => 0,
             };
             out.push(low | (high << 4));
         }
     }
-    out
 }
 
 /// A command, written as a CONTROL record (REQ-AUD-006).

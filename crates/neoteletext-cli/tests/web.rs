@@ -143,19 +143,109 @@ fn local_addresses_are_blocked_unless_named() {
     assert!(errors.contains("Blocked"), "REQ-SEC-006: {errors}");
 }
 
+// Verifies REQ-502 (REQ-WEB-013): each fault the test server injects ends
+// neottx cleanly, as an input that could not be read (REQ-CLI-005), with the
+// diagnostic that names the fault.
 #[test]
 fn faults_do_not_crash_the_receiver() {
     let server = server();
-    for fault in ["drop", "big", "media", "loop", "ambiguous"] {
-        // A descriptor address that misbehaves: neottx must fail cleanly,
-        // and as an input that could not be read (REQ-CLI-005).
+    let expected = [
+        ("drop", "DescriptorFailed(Http(Truncated))"),
+        ("big", "DescriptorFailed(Http(BodyTooLarge))"),
+        ("media", "DescriptorFailed(MediaType(Html))"),
+        ("loop", "DescriptorFailed(BadRedirect)"),
+        ("ambiguous", "DescriptorFailed(Http(AmbiguousFraming))"),
+    ];
+    for (fault, diagnostic) in expected {
         let url = format!("http://127.0.0.1:{}/fault/{fault}", server.port);
         let output = Command::new(env!("CARGO_BIN_EXE_neottx"))
             .args(["text", &url, "100", "--allow-local", "127.0.0.1", "--duration", "5"])
             .output()
             .expect("run neottx");
-        assert_eq!(output.status.code(), Some(3), "fault {fault}: {}", String::from_utf8_lossy(&output.stderr));
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(3), "fault {fault}: {errors}");
+        assert!(errors.contains(diagnostic), "fault {fault}: {errors}");
     }
+}
+
+// Verifies REQ-502 (REQ-WEB-013): a server slow to answer, here by two
+// seconds the test gives it, is waited for within the response limit.
+#[test]
+fn a_slow_server_is_waited_for() {
+    let server = server();
+    let url = format!("http://127.0.0.1:{}/fault/slow?seconds=2", server.port);
+    let (ok, text, errors) = neottx(&["text", &url, "100", "--allow-local", "127.0.0.1", "--duration", "15"]);
+    assert!(ok, "neottx failed: {errors}");
+    assert!(text.contains("NEOTELETEXT TEST SERVICE"), "{text}");
+}
+
+/// A GET of `path` from the test server with `Accept: accept`: the whole
+/// answer.
+fn get_accepting(port: u16, path: &str, accept: &str) -> Vec<u8> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("the test server");
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: {accept}\r\nConnection: close\r\n\r\n").unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).unwrap();
+    answer
+}
+
+// Verifies REQ-502 (REQ-WEB-013): the session cookie the test server sets
+// comes back on neottx's next requests.
+#[test]
+fn the_session_cookie_comes_back() {
+    let server = server();
+    let count = || {
+        let answer = get_accepting(server.port, "/sessions", "text/plain");
+        let text = String::from_utf8_lossy(&answer).into_owned();
+        text.rsplit("\r\n\r\n").next().unwrap_or_default().trim().parse::<u32>().expect("a count")
+    };
+    let before = count();
+    let url = format!("http://127.0.0.1:{}/service.json", server.port);
+    let (ok, _, errors) = neottx(&["text", &url, "100", "--allow-local", "127.0.0.1", "--duration", "15"]);
+    assert!(ok, "neottx failed: {errors}");
+    assert!(count() > before, "no request brought the session cookie back");
+}
+
+// Verifies REQ-501 (REQ-WEB-012) and REQ-2476: the test server shows a
+// publisher how to point from the web to a channel: a web page with a `Link`
+// header field and a `<link>` element in its head, read by the engine's
+// discovery reader as the channel's folder, and a `303 See Other` to the
+// channel for a receiver that asks for teletext, both varying by `Accept`.
+#[test]
+fn the_test_server_points_from_the_web_to_its_channel() {
+    use neoteletext_web::discovery::{self, Found, PointerMedia};
+    use neoteletext_web::url::Url;
+    let server = server();
+    let answer = get_accepting(server.port, "/web/", "text/html");
+    let split = answer.windows(4).position(|window| window == b"\r\n\r\n").expect("a head") + 4;
+    let (head, body) = answer.split_at(split);
+    let head_text = String::from_utf8_lossy(head);
+    assert!(head_text.starts_with("HTTP/1.1 200 "), "{head_text}");
+    assert!(head_text.contains("Vary: Accept"), "{head_text}");
+    // The pointers are relative, so they are resolved against a public
+    // name standing for the site: a literal local address is refused, as
+    // discovery refuses it.
+    let page = Url::parse("http://site.example/web/").unwrap();
+    let mut found = Vec::new();
+    let mut take = |pointer: discovery::Pointer<'_>| {
+        let target = discovery::resolve(&pointer, &page).expect("a pointer that checks");
+        found.push((target.as_str().to_owned(), pointer.media, pointer.found));
+    };
+    discovery::read_headers(head, &mut take);
+    discovery::read_elements(body, &mut take);
+    let channel = "http://site.example/regional/".to_owned();
+    assert_eq!(
+        found,
+        [
+            (channel.clone(), PointerMedia::Channel, Found::Header),
+            (channel, PointerMedia::Channel, Found::Element { after_base: false }),
+        ]
+    );
+    let answer = get_accepting(server.port, "/web/", "application/vnd.neoteletext+json");
+    let text = String::from_utf8_lossy(&answer);
+    assert!(text.starts_with("HTTP/1.1 303 "), "{text}");
+    assert!(text.contains("Location: /regional/") && text.contains("Vary: Accept"), "{text}");
 }
 
 #[cfg(feature = "view")]

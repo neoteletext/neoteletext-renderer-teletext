@@ -60,7 +60,12 @@ impl Screen {
             .channel
             .as_ref()
             .and_then(|_| self.keepalive.checked_add(Duration::from_millis(KEEPALIVE_INTERVAL_MS)));
-        let reconnect = if self.socket.is_none() { Some(self.reconnect_at.unwrap_or_else(Instant::now)) } else { None };
+        // An opening under way wakes the wait itself when it ends.
+        let reconnect = if self.socket.is_none() && self.opening.is_none() {
+            Some(self.reconnect_at.unwrap_or_else(Instant::now))
+        } else {
+            None
+        };
         let release = self.held.iter().filter_map(|(_, since)| since.checked_add(MAX_HOLD)).min();
         [keepalive, reconnect, release].into_iter().flatten().min()
     }
@@ -69,15 +74,8 @@ impl Screen {
     /// sent.
     fn turn(&mut self, events: &mut Vec<Event>) {
         self.release_stale(events);
-        if self.socket.is_none() {
-            if self.reconnect_at.is_some_and(|at| Instant::now() < at) {
-                return;
-            }
-            if self.connect().is_err() {
-                self.reconnect_delay = self.reconnect_delay.saturating_mul(2).min(RECONNECT_MAX);
-                self.reconnect_at = Some(later(self.reconnect_delay));
-                return;
-            }
+        if self.socket.is_none() && !self.reconnected() {
+            return;
         }
         if self.channel.is_some() && self.keepalive.elapsed() >= Duration::from_millis(KEEPALIVE_INTERVAL_MS) {
             self.keepalive = Instant::now();
@@ -103,6 +101,33 @@ impl Screen {
                     }
                     return;
                 }
+            }
+        }
+    }
+
+    /// Moves a reconnection on without waiting (REQ-INT-009): starts one
+    /// when it is due, and takes the socket of one that has ended. Whether
+    /// the screen has its socket again.
+    fn reconnected(&mut self) -> bool {
+        let Some(opening) = &self.opening else {
+            if self.reconnect_at.is_none_or(|at| Instant::now() >= at) {
+                self.start_opening();
+            }
+            return false;
+        };
+        match opening.try_recv() {
+            Ok(Ok(socket)) => {
+                self.opening = None;
+                self.socket = Some(socket);
+                self.reconnect_at = None;
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => false,
+            Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                self.opening = None;
+                self.reconnect_delay = self.reconnect_delay.saturating_mul(2).min(RECONNECT_MAX);
+                self.reconnect_at = Some(later(self.reconnect_delay));
+                false
             }
         }
     }

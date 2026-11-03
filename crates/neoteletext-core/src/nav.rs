@@ -375,6 +375,17 @@ impl<const N: usize> History<N> {
         self.position = self.entries.len();
     }
 
+    /// Puts `entry` in place of the entry being shown, keeping the forward
+    /// history: a selection that leads at once to another page, as a typed
+    /// number's link does (REQ-WEB-020), is one visit. With no entry it is
+    /// visited.
+    pub fn replace_current(&mut self, entry: HistoryEntry) {
+        match self.position.checked_sub(1).and_then(|index| self.entries.as_mut_slice().get_mut(index)) {
+            Some(current) => *current = entry,
+            None => self.visit(entry),
+        }
+    }
+
     /// The entry being shown.
     #[must_use]
     pub fn current(&self) -> Option<HistoryEntry> {

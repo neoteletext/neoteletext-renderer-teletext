@@ -32,7 +32,7 @@ const NEW_LINE: u8 = b'-';
 /// A repeat introducer: `!` count, then the sixel to repeat.
 const REPEAT: u8 = b'!';
 /// Rows of pixels in one band: a sixel is six pixels high.
-const BAND_ROWS: usize = 6;
+pub const BAND_ROWS: usize = 6;
 /// A sixel's character is 0x3F plus its six bits, top pixel least
 /// significant (section 14.3.1).
 const SIXEL_BASE: u8 = 0x3F;

@@ -6,6 +6,7 @@
 use super::io_failure;
 use super::sandbox_closed;
 use neoteletext_app::bounded_file::read_bounded;
+use neoteletext_app::input::Options;
 use neoteletext_app::{Failure, exit};
 use neoteletext_core::consts::{FONT_MAX_CHARACTERS, FONT_MAX_FILE_BYTES};
 use neoteletext_core::glyphs::LoadedFont;
@@ -74,6 +75,45 @@ pub(super) fn parse_sha256(text: &str) -> Result<Digest, Failure> {
 /// `parse_table` reads it after.
 pub(super) fn read_table_file(path: &Path) -> Result<Vec<u8>, Failure> {
     read_bounded(path, FONT_MAX_FILE_BYTES)
+}
+
+/// The bytes of the font `--font` names (REQ-123): a file, read within its
+/// bound, or an `http` or `https` address, fetched by the confined fetcher
+/// process under the network rules of a channel's files, which only a font
+/// named with its SHA-256 may be (DEC-2481). Runs before the sandbox, which
+/// then forbids starting the fetcher; `parse_table` reads the bytes after.
+pub(super) fn read_font(font: &Path, expected: Option<&Digest>, options: &Options) -> Result<Vec<u8>, Failure> {
+    let Some(address) = font.to_str().filter(|text| is_web_address(text)) else {
+        return read_table_file(font);
+    };
+    if expected.is_none() {
+        return Err((exit::USAGE, format!("--font {address}: a font fetched from an address needs --font-sha256")));
+    }
+    fetch_font(address, options)
+}
+
+/// Whether `--font` names an address rather than a file.
+fn is_web_address(text: &str) -> bool {
+    WEB_SCHEMES.iter().any(|scheme| text.get(..scheme.len()).is_some_and(|start| start.eq_ignore_ascii_case(scheme)))
+}
+
+/// The schemes a font may be fetched with (REQ-123).
+const WEB_SCHEMES: [&str; 2] = ["http://", "https://"];
+
+#[cfg(feature = "live")]
+fn fetch_font(address: &str, options: &Options) -> Result<Vec<u8>, Failure> {
+    let (bytes, secure) =
+        neoteletext_app::live::fetch_font(address, options.no_sandbox, &options.allow_local, options.proxy.as_deref())?;
+    // REQ-SEC-005, REQ-SEC-008: a font that came over plain HTTP is said to.
+    if !secure {
+        eprintln!("neottx: {address}: the font came over plain HTTP, unencrypted");
+    }
+    Ok(bytes)
+}
+
+#[cfg(not(feature = "live"))]
+fn fetch_font(_address: &str, _options: &Options) -> Result<Vec<u8>, Failure> {
+    Err(neoteletext_app::not_in_build("a font fetched from an address", "live"))
 }
 
 /// The glyph table of a font file `read_table_file` read, checked by the

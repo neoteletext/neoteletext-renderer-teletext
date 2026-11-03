@@ -91,6 +91,32 @@ LN,Y,https://other.example/200.tti,Elsewhere\r\nLN,C,web:https://example.org/,We
     });
 }
 
+/// REQ-437 (REQ-SEC-024): a hostile page cannot disguise a link to another
+/// service as one of its own. Its label imitates a prompt of this service,
+/// even starting with spaces to push a mark aside, and still the link
+/// resolves to the other service, the receiver's row draws the mark of
+/// leaving at the label's first column, in the key's colour, and the
+/// label's own leading spaces come after it. The viewer then asks before
+/// following it (`other_service_links_need_confirmation`), and packet
+/// X/27/0 never carries it (`link_lines_reach_a_decoder_as_x27`).
+#[test]
+fn a_link_to_another_service_cannot_pass_as_this_services() {
+    read(b"PN,10000\r\nLN,R,weather:100,100 Home\r\nLN,G,news:101,  101\r\nLN,Y,102,102 Next\r\n", |file| {
+        let links = receiver_links(file, &SERVICES, false).unwrap();
+        let address = |mpp| PageAddress::from_mpp(mpp).unwrap();
+        let [red, green, yellow, ..] = links.keys;
+        assert_eq!(red, Some(Destination::Page { address: address(0x100), subcode: None, service: Some(1) }));
+        assert_eq!(green, Some(Destination::Page { address: address(0x101), subcode: None, service: Some(0) }));
+        assert!(red.unwrap().leaves_service() && green.unwrap().leaves_service());
+        assert_eq!(yellow, Some(page(address(0x102))), "the one local link");
+        assert_eq!(links.row.marks.as_slice(), [1, 11], "a mark before each label that leaves, none for yellow");
+        let codes = links.row.codes;
+        assert_eq!(&codes[..10], &[[ALPHA_RED].as_slice(), b">100 Home"].concat()[..]);
+        assert_eq!(&codes[10..17], &[[ALPHA_BLACK | COLOUR_GREEN_BIT].as_slice(), b">  101"].concat()[..]);
+        assert_eq!(&codes[20..29], &[[ALPHA_YELLOW].as_slice(), b"102 Next"].concat()[..]);
+    });
+}
+
 /// Appendix E.2 rule 2: a service the descriptor does not name makes
 /// the link null, and its prompt blank.
 #[test]

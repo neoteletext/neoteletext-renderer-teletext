@@ -7,7 +7,7 @@ use crate::commands::{io_failure, page_number, sandbox_closed};
 use neoteletext_app::bounded_file::read_bounded;
 use neoteletext_app::{Failure, exit};
 use neoteletext_audio::Codec;
-use neoteletext_audio::encode::{Command, Sound, packets};
+use neoteletext_audio::encode::{Command, LiveEncoder, Sound, packets};
 use neoteletext_audio::ogg::{OggError, OggOpus, read_ogg_opus};
 use std::fs::File;
 use std::io::Write;
@@ -69,7 +69,7 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
                     Codec::Pcm16 | Codec::Opus => neoteletext_audio::MAX_PCM_BLOCK,
                 };
                 let sound = Sound::live(options.handle, 1, codec, wave.rate_hz(), block).map_err(rate_refused)?;
-                let blocks = wave_live_blocks(&sound, wave.samples(), options.repeat);
+                let blocks = wave_live_blocks(&sound, wave.samples(), options.repeat).map_err(refused)?;
                 (sound, blocks)
             }
         };
@@ -201,16 +201,23 @@ fn write_repeats(out: &mut File, output: &Path, records: &[Vec<u8>], repeat: u8)
 }
 
 /// A live WAVE sound's blocks: `repeat` runs of `samples` in a row, cut
-/// into blocks, each with its records and the samples captured when it is
-/// whole.
-fn wave_live_blocks(sound: &Sound, samples: &[i16], repeat: u8) -> Vec<LiveBlock> {
+/// into blocks by one live encoder, so the IMA ADPCM step index runs on from
+/// block to block as it would in one call, each with its records and the
+/// samples captured when it is whole; the last, part block is padded with
+/// silence.
+fn wave_live_blocks(sound: &Sound, samples: &[i16], repeat: u8) -> Result<Vec<LiveBlock>, String> {
     let per_block = usize::try_from(sound.samples_per_block()).unwrap_or(usize::MAX).max(1);
     let all: Vec<i16> =
         samples.iter().copied().cycle().take(samples.len().saturating_mul(usize::from(repeat))).collect();
-    (0_u16..)
-        .zip(all.chunks(per_block))
-        .map(|(index, block)| LiveBlock { records: sound.live_records(index, block), samples: per_block })
-        .collect()
+    let mut encoder = LiveEncoder::new(sound, 0).map_err(|error| format!("{error:?}"))?;
+    Ok(all
+        .chunks(per_block)
+        .map(|block| {
+            let mut records = encoder.records(block);
+            records.extend(encoder.finish());
+            LiveBlock { records, samples: per_block }
+        })
+        .collect())
 }
 
 /// A live Opus sound's blocks: `repeat` runs of the encoder's packets in a

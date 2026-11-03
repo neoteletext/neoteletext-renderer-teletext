@@ -59,12 +59,12 @@ fn connections_go_through_the_proxy() {
         host.extend(rest);
         host
     };
-    let (socket, peer, early) = through(ProxyKind::Http, port).reach("news.example", 443).unwrap();
+    let (socket, peer, early) = through(ProxyKind::Http, port).opener.reach("news.example", 443).unwrap();
     assert_eq!(peer, IpAddr::from([127, 0, 0, 1]), "the peer is the proxy");
     assert_eq!(first_four(socket, early), b"HOST");
     assert!(proxy.join().unwrap().starts_with(b"CONNECT news.example:443 HTTP/1.1\r\n"));
     let (port, proxy) = played_proxy(ProxyKind::Socks5, vec![5, 0, 0, 1, 10, 0, 0, 1, 0, 80]);
-    let (socket, _, early) = through(ProxyKind::Socks5, port).reach("news.example", 80).unwrap();
+    let (socket, _, early) = through(ProxyKind::Socks5, port).opener.reach("news.example", 80).unwrap();
     assert!(early.is_empty(), "a SOCKS5 answer is read to its length");
     assert_eq!(first_four(socket, early), b"HOST");
     assert_eq!(&proxy.join().unwrap()[3..8], &[5, 1, 0, 3, 12], "the name for the proxy to resolve");
@@ -76,7 +76,7 @@ fn connections_go_through_the_proxy() {
 fn the_tunnels_first_bytes_reach_the_connection() {
     use neoteletext_web::proxy::ProxyKind;
     let (port, proxy) = played_proxy(ProxyKind::Http, b"HTTP/1.1 200 Connection established\r\n\r\n".to_vec());
-    let transport = through(ProxyKind::Http, port);
+    let transport = through(ProxyKind::Http, port).opener;
     let (mut connection, _) = transport.open("news.example", 80, Security::Plain).unwrap();
     proxy.join().unwrap();
     let mut seen = Vec::new();
@@ -98,7 +98,7 @@ fn the_tunnels_first_bytes_reach_the_connection() {
 fn a_refusing_proxy_fails_the_connection() {
     use neoteletext_web::proxy::ProxyKind;
     let (port, proxy) = played_proxy(ProxyKind::Http, b"HTTP/1.1 403 Forbidden\r\n\r\n".to_vec());
-    let error = through(ProxyKind::Http, port).reach("news.example", 443).unwrap_err();
+    let error = through(ProxyKind::Http, port).opener.reach("news.example", 443).unwrap_err();
     assert!(error.contains("the proxy refused the connection to news.example"), "{error}");
     proxy.join().unwrap();
     assert!(Proxy::parse("ftp://p.example:21").is_err());
@@ -111,12 +111,64 @@ fn tls_resumes_and_sends_no_early_data() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let (wake, _) = mpsc::channel();
     let transport = StdTransport::new(&[], wake, None);
-    assert!(!transport.tls.enable_early_data, "no 0-RTT: an input message could be replayed");
-    let shared = Arc::clone(&transport.tls);
-    assert!(Arc::ptr_eq(&shared, &transport.tls), "one configuration, so one store of sessions");
+    assert!(!transport.opener.tls.enable_early_data, "no 0-RTT: an input message could be replayed");
+    let shared = Arc::clone(&transport.opener.tls);
+    assert!(Arc::ptr_eq(&shared, &transport.opener.tls), "one configuration, so one store of sessions");
     assert!(
-        format!("{:?}", transport.tls.resumption).contains("MemoryCache"),
+        format!("{:?}", transport.opener.tls.resumption).contains("MemoryCache"),
         "sessions kept in memory to resume: {:?}",
-        transport.tls.resumption
+        transport.opener.tls.resumption
     );
+}
+
+/// How long the test of a silent server allows `connect` to return; the
+/// opening it starts would wait for TLS's answer for the connection's limit
+/// of ten seconds.
+const AT_ONCE: Duration = Duration::from_secs(2);
+
+// REQ-490: connecting does not block the loop. A server that accepts the
+// connection and never answers TLS's handshake leaves the connection
+// connecting, and `connect` returns at once; before, it waited for the
+// handshake's limit. Closing it abandons the opening.
+#[test]
+fn connecting_returns_at_once_while_the_server_is_silent() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (accepted, silent) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        accepted.send(()).unwrap();
+        // Held, unanswered, until the test ends.
+        std::thread::sleep(Duration::from_secs(30));
+        drop(stream);
+    });
+    let (wake, _woken) = mpsc::channel();
+    let mut transport = StdTransport::new(&[IpAddr::from([127, 0, 0, 1])], wake, None);
+    let started = std::time::Instant::now();
+    transport.connect(ConnectionId::Fetch, "127.0.0.1", port, Security::Tls).unwrap();
+    let took = started.elapsed();
+    assert!(took < AT_ONCE, "connect blocked for {took:?}");
+    silent.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(transport.state(ConnectionId::Fetch), LinkState::Connecting);
+    transport.close(ConnectionId::Fetch);
+    assert_eq!(transport.state(ConnectionId::Fetch), LinkState::Closed);
+}
+
+// REQ-490: a connection opened on its thread is taken up as open, and its
+// peer is the address reached.
+#[test]
+fn a_connection_opened_on_its_thread_is_taken_up() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        std::thread::sleep(Duration::from_secs(5));
+        drop(stream);
+    });
+    let (wake, woken) = mpsc::channel();
+    let mut transport = StdTransport::new(&[IpAddr::from([127, 0, 0, 1])], wake, None);
+    transport.connect(ConnectionId::Push, "127.0.0.1", port, Security::Plain).unwrap();
+    assert!(matches!(woken.recv_timeout(Duration::from_secs(10)), Ok(Wake::Network)), "the opening woke nobody");
+    assert_eq!(transport.state(ConnectionId::Push), LinkState::Open(web_address(IpAddr::from([127, 0, 0, 1]))));
 }

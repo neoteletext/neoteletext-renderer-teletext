@@ -280,3 +280,23 @@ fn a_ring_is_four_times_the_target() {
     // A rate of zero is taken as one, as `stream` takes it.
     assert_eq!(Mixer::stream_ring(0), 1);
 }
+
+// Verifies REQ-AUD-013 (DEC-2470): the mixer reports where a voice is in its
+// stored sound, for a port's `VoiceSink::position`, and nothing for a voice
+// that is silent or playing a live sound.
+#[test]
+fn a_voice_reports_where_it_is_in_its_stored_sound() {
+    let mut mixer = Mixer::new(RATE);
+    constant(&mut mixer, (1, 1), 1_000, 4000);
+    assert_eq!(mixer.position(0), None, "nothing plays");
+    mixer.start(0, start((1, 1), 100));
+    assert_eq!(mixer.position(0), Some(0));
+    render(&mut mixer, 250);
+    // At the sound's own rate a voice moves one sample an output sample.
+    assert_eq!(mixer.position(0), Some(250));
+    mixer.stream((2, 1), RATE);
+    mixer.start(1, start((2, 1), 100));
+    assert_eq!(mixer.position(1), None, "a live sound's place is in its ring");
+    mixer.stop(0, 5);
+    assert_eq!(mixer.position(0), None, "a stopping voice");
+}

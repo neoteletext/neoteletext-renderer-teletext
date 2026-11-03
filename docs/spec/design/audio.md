@@ -336,7 +336,7 @@ Because IMA ADPCM blocks are independent (§3.1), this one rule serves both code
 
 Audetel concealed losses by interpolating speech parameters (Suddle §7.5.4). A waveform codec can't do that, so silence with fades is the waveform equivalent.
 
-The receiver reports `concealed`, with each silenced block. It cannot see the sink play, so it follows a play by its own clock from the moment it starts it, and reports each block not at the sink when the play reaches it (decision E.131). The fades fall on the samples either side of the gap: a block next to a missing one is sent with that edge faded, and sent again whole once the missing block arrives. An Opus sound's blocks are decoded in order, so its samples end where its blocks stop arriving, and that end is faded the same way.
+The receiver reports `concealed`, with each silenced block. It follows a play by where the sink says its voice is (`VoiceSink::position`, in samples of the sound), and by its own clock from the last place it knew where the sink cannot say, starting from the moment it starts the play, and reports each block not at the sink when the play reaches it (decision E.131, DEC-2470). So a sink's output latency, or a port that ticks late, does not report a block that arrives before the voice meets it. The fades fall on the samples either side of the gap: a block next to a missing one is sent with that edge faded, and sent again whole once the missing block arrives. An Opus sound's blocks are decoded in order, so its samples end where its blocks stop arriving, and that end is faded the same way. When the blocks come again after the voice has passed that faded end into silence, the samples it meets are faded in from where the sink says it is (DEC-2470).
 
 ### 8.3 Live
 
@@ -349,6 +349,8 @@ A receiver MUST absorb at least ±1 % of sender clock error. That figure is a de
 The receiver keeps the newest 32 blocks of a live sound and joins at the newest when a play can start. It gives the sink the blocks in order; a block still missing once three newer ones are held is silence. Over a T42 file or the network, live IMA ADPCM fits where a broadcast line does not (§6.3): NeoTeletext reads 320 packets a second, and 8 kHz IMA ADPCM in 256-byte blocks needs about 127.
 
 A live sound fades out after its **stall time** without new blocks. That is EN 300 708 §6.7.1.1's mute, with the time this profile defines: 2 seconds.
+
+A sender writes a live sound's blocks with one `encode::LiveEncoder` for the life of the sound, handing it samples as they come in batches of any length. The encoder keeps the IMA ADPCM step index where the last block ended, holds samples too few for a block until the next batch, and numbers the blocks on, so the blocks are byte for byte those of the whole sound encoded at once; `finish` pads the last part block with silence. An encoder made afresh for each batch would start every batch from the smallest step, losing 2 to 7 dB of signal-to-noise ratio at each restart as the server measured, and would pad every part block with silence in the middle of the sound (DEC-2467).
 
 ---
 
@@ -371,7 +373,7 @@ Layer 3 issues these operations and nothing else:
 - *gain* (channel, gain, fade);
 - *duck* (channel, attenuation).
 
-Layer 3 asks the sink where a voice has got to, measured in samples.
+Layer 3 asks the sink where a voice has got to, measured in samples (`VoiceSink::position`, provided as unknown; the desktop mixer answers it with `Mixer::position`, DEC-2470).
 
 This is the shape of tellyboy's voice API: `tb_audio_voice_rom`, `tb_audio_stream_open`, `tb_audio_voice_fade`, `tb_audio_voice_set_gain`, `tb_audio_voice_position`. The microcontroller sink is therefore a direct mapping. Its detailed interface is left for implementation.
 
@@ -440,7 +442,7 @@ These are tellyboy's constraints as built (`<tellyboy/audio.h>`; `components/AUD
 
 A receiver publishes its actual figures: `Receiver::limits` returns the store's bytes, the objects and the records in flight it was built with, and `ReceiverLimits::meets` checks them against `LEVEL_A_MINIMUM` or `LEVEL_B_MINIMUM` in `neoteletext-audio` (REQ-AUD-017). KB and MB here are binary multiples: 16,384 and 4,194,304 bytes (DEC-2372).
 
-**Flash, measured.** `cargo xtask size` links the receiver alone in both shapes, every entry point a port calls rooted, over the core with no optional area: `audio-mcu` (broadcast carriage, PCM16 and IMA ADPCM, at Level A's minimums) and `audio-desktop` (broadcast carriage and Opus, at Level B's). On 4 November 2026: 43,142 and 112,122 bytes on the Cortex-M0 (`thumbv6m-none-eabi`), 45,634 and 121,568 on RV32IMC, no static RAM, and no panic path in either (REQ-GEN-019). The arena is the port's and is not counted.
+**Flash, measured.** `cargo xtask size` links the receiver alone in both shapes, every entry point a port calls rooted, over the core with no optional area: `audio-mcu` (broadcast carriage, PCM16 and IMA ADPCM, at Level A's minimums) and `audio-desktop` (broadcast carriage and Opus, at Level B's). On 4 November 2026: 43,142 and 112,122 bytes on the Cortex-M0 (`thumbv6m-none-eabi`), 45,634 and 121,568 on RV32IMC, no static RAM, and no panic path in either (REQ-GEN-019). Following the voice's position (DEC-2470) raised the Cortex-M0 figures to 43,550 and 112,574 bytes, still with no static RAM and no panic path; RV32IMC was not measured again. The arena is the port's and is not counted.
 
 The Level A numbers are proposals. They must be checked against the RAM the teletext renderer leaves on its smallest microcontroller target (open decision 5). The SAMD21's 32 KB, the floor of tellyboy's own budget, is too small to hold the renderer, the store and the stream rings at once.
 

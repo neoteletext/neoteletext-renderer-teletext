@@ -41,10 +41,11 @@ const LIVE_LIST_COMPLETE: u8 = b'z';
 // Every letter but H is taken or retired (KINDS, RETIRED_KINDS).
 const LIVE_LIST_REFUSED: u8 = b'!';
 const LINKS: u8 = b'H';
+const FONT: u8 = b'#';
 
 /// Every kind a frame may have. A kind written by [`write`] and missing here
 /// fails `every_frame_written_has_a_listed_kind`, so none is added unlisted.
-pub(super) const KINDS: [u8; 32] = [
+pub(super) const KINDS: [u8; 33] = [
     PACKET,
     TTI,
     T42,
@@ -77,6 +78,7 @@ pub(super) const KINDS: [u8; 32] = [
     LIVE_LIST_COMPLETE,
     LIVE_LIST_REFUSED,
     LINKS,
+    FONT,
 ];
 
 /// Kinds once used and never to be used again, so that an old peer's frame
@@ -229,6 +231,12 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
         Frame::Notice(Notice::Region(region)) => put(out, REGION, region.as_slice()),
         Frame::Notice(Notice::Current(mpp)) => put(out, CURRENT, &mpp.to_be_bytes()),
         Frame::Notice(Notice::Offline(mpp)) => put(out, OFFLINE, &mpp.to_be_bytes()),
+        Frame::Font(bytes) => {
+            if bytes.len() > neoteletext_core::consts::FONT_MAX_FILE_BYTES {
+                return Err(io::Error::other("a font file too long"));
+            }
+            put(out, FONT, bytes)
+        }
         Frame::Request(mpp, sub) => put(out, REQUEST, &[mpp.to_be_bytes(), sub.to_be_bytes()].concat()),
         Frame::Input(record) => {
             if record.len() > MAX_INPUT_MESSAGE {
@@ -409,6 +417,7 @@ pub fn read(input: &mut dyn Read) -> io::Result<Option<Frame>> {
             Frame::Request(u16::from_be_bytes([a, b]), u16::from_be_bytes([c, d]))
         }
         KEY if payload.len() <= MAX_INPUT_MESSAGE => Frame::Input(payload),
+        FONT if payload.len() <= neoteletext_core::consts::FONT_MAX_FILE_BYTES => Frame::Font(payload),
         INPUT if payload.len() == 1 => Frame::Notice(Notice::Input(payload.first() != Some(&0))),
         FOLLOW => {
             let mpp = cursor.u16()?;

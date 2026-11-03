@@ -35,7 +35,14 @@ const SECURE_SCHEME: &str = "https://";
 /// alone is longer than the row's room.
 #[must_use]
 pub fn leave_prompt(name: &str, origin: &str) -> [u8; COLUMNS] {
-    let room = COLUMNS.saturating_sub(1).saturating_sub(LEAVE_INSTRUCTION.len());
+    prompt_with(LEAVE_INSTRUCTION, name, origin)
+}
+
+/// [`leave_prompt`] with another instruction before the name and origin,
+/// as a typed number's question has (`Enter: `).
+#[must_use]
+pub fn prompt_with(instruction: &str, name: &str, origin: &str) -> [u8; COLUMNS] {
+    let room = COLUMNS.saturating_sub(1).saturating_sub(instruction.len());
     let origin = origin.strip_prefix(SECURE_SCHEME).unwrap_or(origin);
     // Characters outside printable ASCII are drawn as spaces, one each.
     let printable = |text: &str| -> String {
@@ -52,7 +59,7 @@ pub fn leave_prompt(name: &str, origin: &str) -> [u8; COLUMNS] {
         let name = name.get(..name.len().min(for_name)).unwrap_or_default().trim_end();
         if name.is_empty() { origin } else { format!("{name}{LEAVE_JOIN}{origin}") }
     };
-    message_row(&format!("{LEAVE_INSTRUCTION}{text}"))
+    message_row(&format!("{instruction}{text}"))
 }
 
 #[cfg(test)]

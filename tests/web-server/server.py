@@ -2,8 +2,12 @@
 """A local web teletext test server (REQ-WEB-013, REQ-WEB-012).
 
 Test code, not part of the library. Serves a service descriptor, TTI pages
-with ETag validators, a versioned session cookie, WebSocket push, and fault
-injection. Standard library only.
+with ETag validators, a versioned session cookie (and, at /sessions, how many
+requests brought it back), WebSocket push, an ordinary web page at /web/ that
+points to the regional channel by a Link header field, a <link> element and,
+for a receiver asking for teletext, a 303 that varies by Accept (REQ-501),
+and fault injection (/fault/slow?seconds=N waits N seconds, 40 by default).
+Standard library only.
 
 Usage: server.py PORT
 """
@@ -140,6 +144,21 @@ T42_DESCRIPTOR = """{"name": "T42 service", "initial_page": "100", "page_templat
 UNDECLARED_DESCRIPTOR = """{{"name": "T", "initial_page": "100", "page_template": "/undeclared/{kind}/{{mpp}}"}}"""
 
 
+# An ordinary web page that points to the regional channel, as REQ-501's
+# guidance tells a publisher to: a `Link` header field and a `<link>` element
+# in the first 8,192 bytes, both with the channel's media type (REQ-2476).
+WEB_PAGE = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Test site</title>
+<link rel="alternate" type="application/vnd.neoteletext+json" href="/regional/">
+</head><body><p>This site has a teletext channel.</p></body></html>
+"""
+CHANNEL_POINTER = '</regional/>; rel="alternate"; type="application/vnd.neoteletext+json"'
+# What a teletext receiver says it wants, for content negotiation.
+TELETEXT_TYPES = ("application/vnd.neoteletext+json", "text/x-teletext-tti", "application/x-teletext-t42")
+# How long /fault/slow waits when the request does not say (seconds).
+SLOW_DEFAULT_SECONDS = 40
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -188,9 +207,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self.send(200, t42_page(PAGES[name]), UNDECLARED_TYPES[kind], cookies)
 
     def do_GET(self):
-        path = self.path.split("?")[0]
+        path, _, query = self.path.partition("?")
         cookies = []
         session = self.session()
+        if session is not None:
+            with self.server.lock:
+                self.server.sessions_returned += 1
+        if path == "/sessions":
+            # How many requests have brought the session cookie back
+            # (REQ-502: a test sees that the cookie returns).
+            return self.send(200, str(self.server.sessions_returned), "text/plain")
+        if path == "/web/":
+            return self.web_page()
         if session is None:
             session = SESSION_VERSION + "." + base64.urlsafe_b64encode(os.urandom(9)).decode()
             cookies.append(("Set-Cookie", "session=" + session + "; Path=/; HttpOnly; SameSite=Lax"))
@@ -221,7 +249,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, DESCRIPTOR.format(port=port).replace("/push", "/push-invalid"), "application/json", cookies)
         if path == "/push-invalid":
             return self.push_websocket(invalid=True)
-        return self.fault(path)
+        return self.fault(path, query)
+
+    def web_page(self):
+        """A web page that points to the channel (REQ-501's guidance): a
+        receiver that asks for teletext is sent to the channel by 303, and
+        the answer varies by Accept, so a cache keeps the two apart."""
+        accept = self.headers.get("Accept", "")
+        if any(kind in accept for kind in TELETEXT_TYPES):
+            self.send_response(303)
+            self.send_header("Location", "/regional/")
+            self.send_header("Vary", "Accept")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
+        return self.send(200, WEB_PAGE, "text/html; charset=utf-8", [("Link", CHANNEL_POINTER), ("Vary", "Accept")])
 
     def push_websocket(self, invalid=False):
         key = self.headers.get("Sec-WebSocket-Key", "")
@@ -249,11 +291,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.close_connection = True
         return None
 
-    def fault(self, path):
+    def fault(self, path, query=""):
         """Fault injection (REQ-WEB-013)."""
         if path == "/fault/slow":
-            time.sleep(40)
-            return self.send(200, PAGES["200"])
+            # ?seconds=N lets a test wait less than the default.
+            seconds = SLOW_DEFAULT_SECONDS
+            for pair in query.split("&"):
+                name, _, value = pair.partition("=")
+                if name == "seconds" and value.isdigit():
+                    seconds = int(value)
+            time.sleep(seconds)
+            return self.send(200, DESCRIPTOR.format(port=self.server.server_address[1]), "application/json")
         if path == "/fault/drop":
             self.close_connection = True
             self.wfile.write(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
@@ -277,6 +325,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.lock = threading.Lock()
+        self.sessions_returned = 0
 
 
 def main():

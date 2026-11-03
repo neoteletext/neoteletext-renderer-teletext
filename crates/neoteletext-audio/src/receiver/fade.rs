@@ -36,6 +36,23 @@ pub(super) fn fade_out(samples: &mut [i16]) {
     ramp(samples, true);
 }
 
+/// Ramps up from silence the samples of a sound that fall in the `length`
+/// samples from sample `from`, when `samples` hold the sound from sample
+/// `at`: the fade in at a voice's position, which may fall anywhere in a
+/// block, or across two writes (DEC-2470). Sample `from + n` is scaled by
+/// (n + 1) / (length + 1), as [`fade_in`] scales sample `n`.
+#[cfg(feature = "opus")]
+pub(super) fn fade_in_from(samples: &mut [i16], at: u32, from: u32, length: usize) {
+    let length = u32::try_from(length).unwrap_or(u32::MAX);
+    let step = GAIN_ONE.checked_div(length.saturating_add(1)).unwrap_or(0);
+    for (position, sample) in (at..).zip(samples.iter_mut()) {
+        let Some(offset) = position.checked_sub(from).filter(|&offset| offset < length) else { continue };
+        let gain = i32::try_from(offset.saturating_add(1).saturating_mul(step)).unwrap_or(0);
+        let scaled = i32::from(*sample).saturating_mul(gain) >> GAIN_BITS;
+        *sample = i16::try_from(scaled).unwrap_or(0);
+    }
+}
+
 fn ramp(samples: &mut [i16], down: bool) {
     let length = u32::try_from(samples.len()).unwrap_or(u32::MAX);
     let step = GAIN_ONE.checked_div(length.saturating_add(1)).unwrap_or(0);
@@ -80,5 +97,19 @@ mod tests {
         let mut negative = [i16::MIN; 3];
         fade_out(&mut negative);
         assert!(negative.iter().all(|&sample| sample < 0 && sample > i16::MIN));
+    }
+
+    // REQ-AUD-013, DEC-2470: a fade in at a voice's position matches the
+    // block fade, wherever the position falls, and spans two writes.
+    #[cfg(feature = "opus")]
+    #[test]
+    fn a_fade_in_from_a_position_ramps_only_the_samples_after_it() {
+        let mut first = [10_000_i16; 6];
+        let mut second = [10_000_i16; 6];
+        // The sound's samples 100 to 105, then 106 to 111; the voice at 103.
+        fade_in_from(&mut first, 100, 103, 4);
+        fade_in_from(&mut second, 106, 103, 4);
+        assert_eq!(first, [10_000, 10_000, 10_000, 1999, 3999, 5999]);
+        assert_eq!(second, [7999, 10_000, 10_000, 10_000, 10_000, 10_000]);
     }
 }

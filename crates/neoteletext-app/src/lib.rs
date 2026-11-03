@@ -35,6 +35,7 @@ pub mod input;
 pub mod interact;
 #[cfg(feature = "live")]
 pub mod live;
+pub mod packet_trace;
 pub mod pipe;
 pub mod present;
 pub mod sandbox;

@@ -124,6 +124,18 @@ pub struct TextArea {
     pub rows: usize,
 }
 
+#[cfg(feature = "view")]
+impl TextArea {
+    /// The height of a text row in pixels, when the rows divide the
+    /// height exactly: a terminal whose reported height holds padding
+    /// besides its rows gives no row height to place an image by.
+    #[must_use]
+    pub fn text_row_pixels(self) -> Option<usize> {
+        let row = self.height.checked_div(self.rows)?;
+        (row > 0 && row.checked_mul(self.rows) == Some(self.height)).then_some(row)
+    }
+}
+
 /// The text area, if the terminal reports its size in pixels.
 #[cfg(feature = "view")]
 #[must_use]

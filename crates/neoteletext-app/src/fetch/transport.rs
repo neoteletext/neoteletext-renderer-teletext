@@ -13,14 +13,30 @@ use neoteletext_web::port::{ConnectionId, LinkState, RandomSource, Received, Sec
 use neoteletext_web::proxy::Proxy;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
-/// A blocking-connect transport over std sockets and rustls, checking every
-/// resolved address against the policy before connecting (decision 27),
-/// whose connections each wake the loop when bytes arrive.
+/// A transport over std sockets and rustls, checking every resolved
+/// address against the policy before connecting (decision 27), whose
+/// connections each wake the loop when bytes arrive. A connection is opened
+/// on a thread of its own, so that `connect` returns at once and the loop
+/// goes on while a name resolves, a proxy answers and TLS shakes hands
+/// (REQ-490, DEC-2490).
 pub struct StdTransport {
     streams: [Option<Connection>; 3],
     states: [LinkState; 3],
+    /// Each connection's opening while it is under way: the thread hands
+    /// back the connection and its peer, or why it failed.
+    openings: [Option<Receiver<Opened>>; 3],
+    opener: Opener,
+}
+
+/// What an opening thread hands back.
+type Opened = Result<(Connection, IpAddr), String>;
+
+/// What opening a connection needs, owned, so that a thread of its own can
+/// do it.
+#[derive(Clone)]
+struct Opener {
     tls: Arc<rustls::ClientConfig>,
     allowed_local: Vec<IpAddr>,
     wake: Sender<Wake>,
@@ -45,13 +61,39 @@ impl StdTransport {
         Self {
             streams: [None, None, None],
             states: [LinkState::Closed; 3],
-            tls: Arc::new(tls),
-            allowed_local: allowed_local.to_vec(),
-            wake,
-            proxy,
+            openings: [None, None, None],
+            opener: Opener { tls: Arc::new(tls), allowed_local: allowed_local.to_vec(), wake, proxy },
         }
     }
 
+    /// Takes up the opening of `connection` if it has ended: the connection
+    /// is open, or has failed and the user is told why.
+    fn settle(&mut self, connection: ConnectionId) {
+        let index = slot(connection);
+        let Some(opening) = self.openings.get(index).and_then(Option::as_ref) else { return };
+        let opened = match opening.try_recv() {
+            Ok(opened) => opened,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("the connection's opening ended without a result".to_string()),
+        };
+        if let Some(opening) = self.openings.get_mut(index) {
+            *opening = None;
+        }
+        let (state, stream) = match opened {
+            Ok((stream, peer)) => (LinkState::Open(web_address(peer)), Some(stream)),
+            Err(message) => {
+                let _ = send(&Frame::Notice(Notice::Message(message)));
+                (LinkState::Failed, None)
+            }
+        };
+        if let (Some(slot_state), Some(slot_stream)) = (self.states.get_mut(index), self.streams.get_mut(index)) {
+            *slot_state = state;
+            *slot_stream = stream;
+        }
+    }
+}
+
+impl Opener {
     /// A socket that reaches `host` and `port`: directly, to an address the
     /// local-network rule allows, or through the proxy, whose address the
     /// user chose, after its handshake (REQ-WEB-032). With it, the host's
@@ -116,24 +158,35 @@ impl Transport for StdTransport {
         port: u16,
         security: Security,
     ) -> Result<(), Self::Error> {
+        // REQ-490: the name's resolution, the connection, the proxy's and
+        // TLS's handshakes run on a thread of their own, each within its
+        // limit, and the loop hears the result as the connection's state,
+        // woken when it comes.
+        self.close(connection);
         let index = slot(connection);
-        let (state, stream) = match self.open(host, port, security) {
-            Ok((stream, peer)) => (LinkState::Open(web_address(peer)), Some(stream)),
-            Err(message) => {
-                let _ = send(&Frame::Notice(Notice::Message(message)));
-                (LinkState::Failed, None)
+        let (handed, opening) = mpsc::channel();
+        let opener = self.opener.clone();
+        let host = host.to_owned();
+        std::thread::spawn(move || {
+            let result = opener.open(&host, port, security);
+            match handed.send(result) {
+                Ok(()) => {
+                    let _ = opener.wake.send(Wake::Network);
+                }
+                // Closed while it was opening: the connection is ended.
+                Err(mpsc::SendError(Ok((connection, _)))) => connection.shutdown(),
+                Err(mpsc::SendError(Err(_))) => {}
             }
-        };
-        if let (Some(slot_state), Some(slot_stream)) = (self.states.get_mut(index), self.streams.get_mut(index)) {
-            *slot_state = state;
-            if stream.is_some() {
-                *slot_stream = stream;
-            }
+        });
+        if let (Some(state), Some(slot_opening)) = (self.states.get_mut(index), self.openings.get_mut(index)) {
+            *state = LinkState::Connecting;
+            *slot_opening = Some(opening);
         }
         Ok(())
     }
 
     fn state(&mut self, connection: ConnectionId) -> LinkState {
+        self.settle(connection);
         self.states.get(slot(connection)).copied().unwrap_or(LinkState::Closed)
     }
 
@@ -143,8 +196,11 @@ impl Transport for StdTransport {
             .get_mut(slot(connection))
             .and_then(Option::as_mut)
             .ok_or(embedded_io::ErrorKind::NotConnected)?;
-        // Written whole, blocking, within the write limit: a request or a
-        // input message is small, and the socket drains it at once.
+        // Written whole, blocking, within the write limit: a request or an
+        // input message is small, and the kernel takes it at once unless
+        // the peer has stopped reading for long enough to fill the socket's
+        // buffer (DEC-2490 item 2; the writer thread that would make this
+        // non-blocking too is owed in TODO-2058).
         open.write_all(bytes).map_err(|_| embedded_io::ErrorKind::Other)
     }
 
@@ -163,6 +219,11 @@ impl Transport for StdTransport {
 
     fn close(&mut self, connection: ConnectionId) {
         let index = slot(connection);
+        // An opening under way is abandoned: its thread ends the connection
+        // it opens, since nothing takes it.
+        if let Some(opening) = self.openings.get_mut(index) {
+            *opening = None;
+        }
         if let Some(open) = self.streams.get_mut(index).and_then(Option::take) {
             open.shutdown();
         }

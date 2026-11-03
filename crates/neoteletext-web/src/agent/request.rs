@@ -66,6 +66,8 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             } else if let Some((url, via_link, channel)) = self.pending_descriptor.take() {
                 let site = if via_link { Site::CrossServiceNavigation } else { Site::SameService };
                 (Purpose::Descriptor { via_link, channel }, url, Method::Get, site)
+            } else if let Some((url, role)) = self.pending_resource.take() {
+                (Purpose::Resource(role), url, Method::Get, Site::SameService)
             } else if let Some(url) = self.front_door.take() {
                 (Purpose::FrontDoor, url, Method::Get, Site::SameService)
             } else if let Some((page, subcode, file)) = self.second_try.take() {
@@ -85,8 +87,9 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 return;
             };
             // REQ-WEB-017: a request that would go without a bound
-            // session's cookie waits for the session's refresh.
-            if self.bound_defer(now, purpose, &url, method, site) {
+            // session's cookie waits for the session's refresh. A resource
+            // carries no cookie at all, so waits for none (REQ-2476).
+            if !matches!(purpose, Purpose::Resource(_)) && self.bound_defer(now, purpose, &url, method, site) {
                 continue;
             }
             self.next_fetch_at = Instant(now.0.saturating_add(self.config.fetch_interval_us));
@@ -227,8 +230,12 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     /// Sends the current exchange's request, connecting first if needed.
     pub(super) fn start_exchange(&mut self, now: Instant, sink: &mut Sink<'_>) {
         let Some(exchange) = self.fetch.exchange else { return };
-        let reusable =
-            self.fetch.link == Link::Open && self.fetch.target.is_some_and(|target| target.matches(&exchange.url));
+        // A resource fetched outside any channel opens a connection of its
+        // own, which ends with it (REQ-2476): nothing it reads shares a
+        // connection with a channel's requests.
+        let reusable = self.fetch.link == Link::Open
+            && !matches!(exchange.purpose, Purpose::Resource(_))
+            && self.fetch.target.is_some_and(|target| target.matches(&exchange.url));
         if reusable {
             self.send_request(now, sink);
             return;
@@ -256,7 +263,11 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         http::write_request_line(&mut writer, exchange.method, exchange.url.target())?;
         http::write_host(&mut writer, &exchange.url)?;
         http::write_header(&mut writer, header::USER_AGENT, self.named_as.as_bytes())?;
-        http::write_header(&mut writer, header::ACCEPT, ACCEPT_PAGES)?;
+        let accept = match exchange.purpose {
+            Purpose::Resource(role) => role.accept(),
+            _ => ACCEPT_PAGES,
+        };
+        http::write_header(&mut writer, header::ACCEPT, accept)?;
         http::write_header(&mut writer, header::ACCEPT_ENCODING, IDENTITY)?;
         // A channel's page or sub-page is a TTI or a T42 file, and validators
         // are a file's own (RFC 9110 section 8.8): the other file's never go
@@ -291,6 +302,13 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             writer.put(header::CONTENT_LENGTH)?;
             writer.put(b": 0")?;
             writer.put(CRLF)?;
+        }
+        // A resource fetched outside any channel carries no cookie and no
+        // bound session's header: a page discovery reads, or a font, must
+        // learn nothing of the viewer's channels (REQ-2476, REQ-123).
+        if matches!(exchange.purpose, Purpose::Resource(_)) {
+            writer.put(CRLF)?;
+            return Ok(writer.len());
         }
         #[cfg(feature = "dbsc")]
         bound::write_headers(&mut self.bound, self.device_keys.as_deref_mut(), exchange, &mut writer)?;

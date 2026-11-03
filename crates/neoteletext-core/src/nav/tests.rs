@@ -191,3 +191,19 @@ fn the_diagnostic_setting_lets_navigation_reach_hexadecimal_pages() {
         assert_eq!(viewer.key(Key::NextPage, &context), Action::Request(page(expected), SubCode::ANY), "{setting}");
     }
 }
+
+/// REQ-295 (REQ-NAV-010), REQ-509 (REQ-WEB-020): a selection replaced at
+/// once, as a typed number's link replaces it, is one entry, and the
+/// forward history stays.
+#[test]
+fn a_replaced_selection_is_one_entry() {
+    let entry = |mpp| HistoryEntry { service: 0, address: PageAddress::from_mpp(mpp).unwrap(), subcode: SubCode::ANY };
+    let mut history = History::<4>::new();
+    history.replace_current(entry(0x100));
+    assert_eq!(history.current(), Some(entry(0x100)), "an empty history is visited");
+    history.visit(entry(0x300));
+    history.replace_current(entry(0x350));
+    assert_eq!(history.current(), Some(entry(0x350)));
+    assert_eq!(history.back(), Some(entry(0x100)), "300 is gone");
+    assert_eq!(history.peek_forward(), Some(entry(0x350)));
+}

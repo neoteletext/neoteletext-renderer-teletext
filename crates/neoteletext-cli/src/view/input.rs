@@ -1,7 +1,7 @@
 //! The terminal's events in a turn: a paste and the focus, and each key,
 //! whether the channel's or the viewer's.
 
-use super::keys::{leaves_typing, map_key};
+use super::keys::{HOLD_FOR_BACK, is_index, leaves_typing, map_key};
 use super::typing::input_of;
 use super::{Shown, ViewState};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -13,6 +13,7 @@ use neoteletext_core::nav::PageLinks;
 use neoteletext_core::types::SubCode;
 use neoteletext_core::viewer::{Action, Key, KeyContext, ViewerState};
 use std::ops::ControlFlow;
+use std::time::Instant as StdInstant;
 
 impl ViewState {
     /// A paste, while keys go to the channel, and the terminal's focus.
@@ -67,6 +68,27 @@ impl ViewState {
             }
             return ControlFlow::Continue(());
         }
+        // DEC-2480: a typed number's link to another service waits for
+        // Enter; any other key lets it go, and is a key as usual.
+        if let Some(target) = self.pending_link.take()
+            && key.kind != KeyEventKind::Release
+        {
+            if key.code == KeyCode::Enter {
+                self.last_drawn = None;
+                self.action = Action::FollowService(target);
+                return ControlFlow::Continue(());
+            }
+            self.prompt = None;
+        }
+        // REQ-NAV-010, DEC-2477: where the terminal reports releases,
+        // Index acts when it is let go: held, it is Back.
+        if self.releases_reported && is_index(key) {
+            if let Some(key) = self.index_hold(key.kind, StdInstant::now()) {
+                self.last_drawn = None;
+                self.machine_key(key, source, session, shown);
+            }
+            return ControlFlow::Continue(());
+        }
         // The viewer's own keys act once, as pressed.
         if key.kind == KeyEventKind::Release {
             return ControlFlow::Continue(());
@@ -94,10 +116,41 @@ impl ViewState {
         self.last_drawn = None;
     }
 
+    /// The Index key on a terminal that reports releases (DEC-2477): a
+    /// press waits; a repeat, the terminal's sign of a held key, is Back,
+    /// once a hold; a release is Index, or Back when the key was held
+    /// [`HOLD_FOR_BACK`] or longer without a repeat. A release after Back
+    /// does nothing more.
+    pub(super) fn index_hold(&mut self, kind: KeyEventKind, now: StdInstant) -> Option<Key> {
+        match kind {
+            KeyEventKind::Press => {
+                self.index_held = Some((now, false));
+                None
+            }
+            KeyEventKind::Repeat => match self.index_held {
+                Some((_, true)) => None,
+                Some((since, false)) => {
+                    self.index_held = Some((since, true));
+                    Some(Key::Back)
+                }
+                // A repeat with no press seen: the key is held all the same.
+                None => {
+                    self.index_held = Some((now, true));
+                    Some(Key::Back)
+                }
+            },
+            KeyEventKind::Release => match self.index_held.take()? {
+                (_, true) => None,
+                (since, false) if now.saturating_duration_since(since) >= HOLD_FOR_BACK => Some(Key::Back),
+                _ => Some(Key::Index),
+            },
+        }
+    }
+
     /// A terminal key for the viewer: a sub-page step goes by the page's
     /// list where the source keeps one, and every other key to the machine.
     fn viewer_key(&mut self, key: KeyEvent, source: &mut dyn Source, session: &Session, shown: &Shown<'_>) {
-        let Some(key) = map_key(key) else { return };
+        let Some(key) = self.remote_keys.key(key).or_else(|| map_key(key)) else { return };
         if matches!(key, Key::NextSubPage | Key::PreviousSubPage) {
             self.pending_step = None;
             self.step_subpage(key == Key::NextSubPage, source, session, shown);
@@ -173,6 +226,12 @@ impl ViewState {
         self.action = self.viewer.key(key, &key_context);
         if !matches!(self.action, Action::ConfirmService(_)) {
             self.prompt = None;
+        }
+        // A digit that completes a page number selects it: the page's own
+        // number link for it, else the service's alias, leads elsewhere
+        // (REQ-509).
+        if let (Key::Digit(_), Action::Request(address, _)) = (key, self.action) {
+            self.typed_number(address, source, shown.extras);
         }
     }
 }

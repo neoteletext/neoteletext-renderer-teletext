@@ -15,13 +15,13 @@ mod common;
 use std::string::{String, ToString};
 use std::vec::Vec;
 
-use common::{Counter, Replay, Reply, header_value, response};
+use common::{Counter, Replay, Reply, assert_profile_headers, header_value, response};
 #[cfg(feature = "push")]
 use common::{client_frames, server_frame};
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 #[cfg(feature = "push")]
 use neoteletext_web::agent::InputMessage;
-use neoteletext_web::agent::{Config, Input, Output, Source, Storage, Subscription, UserAgent};
+use neoteletext_web::agent::{Config, Input, Output, ResourceRole, Source, Storage, Subscription, UserAgent};
 use neoteletext_web::bytes::Writer;
 #[cfg(feature = "std")]
 use neoteletext_web::channel::ChannelFile;
@@ -222,47 +222,6 @@ fn tti_response(headers: &[&str]) -> Reply {
     Reply::Bytes(response("200 OK", &all, TTI))
 }
 
-/// REQ-WEB-014: every request carries only the permitted headers, never
-/// `Referer`, always `Accept-Encoding: identity`.
-fn assert_profile_headers(replay: &Replay) {
-    // REQ-503's table of request headers, exactly: no request sends
-    // Content-Type, and the agent offers no WebSocket extension.
-    const PERMITTED: [&str; 13] = [
-        "host",
-        "user-agent",
-        "accept",
-        "accept-encoding",
-        "cookie",
-        "if-none-match",
-        "if-modified-since",
-        "content-length",
-        "upgrade",
-        "connection",
-        "sec-websocket-key",
-        "sec-websocket-version",
-        "sec-websocket-protocol",
-    ];
-    assert_ne!(replay.requests.len(), 0);
-    for (_, request) in &replay.requests {
-        let text = String::from_utf8_lossy(request);
-        let head = text.split("\r\n\r\n").next().unwrap();
-        let mut lines = head.split("\r\n");
-        let request_line = lines.next().unwrap();
-        assert!(request_line.starts_with("GET ") || request_line.starts_with("POST "), "{request_line}");
-        assert!(request_line.ends_with(" HTTP/1.1"));
-        let mut names = Vec::new();
-        for line in lines {
-            let name = line.split(':').next().unwrap().to_ascii_lowercase();
-            assert!(PERMITTED.contains(&name.as_str()), "header {name} is outside the profile");
-            names.push(name);
-        }
-        assert!(names.contains(&"host".to_string()) && names.contains(&"user-agent".to_string()));
-        if !names.contains(&"upgrade".to_string()) {
-            assert_eq!(header_value(request, "Accept-Encoding").as_deref(), Some("identity"));
-        }
-    }
-}
-
 /// The configuration of a port that follows redirects out of the service,
 /// as `neottx` does for a service opened by its descriptor: the default
 /// keeps them inside (REQ-SEC-020).
@@ -313,7 +272,7 @@ fn descriptor_page_and_conditional_request() {
     assert_eq!(header_value(last, "Cookie").as_deref(), Some("session=v1-abc"));
     // One persistent connection served all three requests.
     assert_eq!(harness.replay().connects.len(), 1);
-    assert_profile_headers(harness.replay());
+    assert_profile_headers(harness.replay(), &[]);
 }
 
 /// REQ-497: a connection made without encryption is reported as an event.
@@ -731,7 +690,7 @@ fn websocket_push() {
     harness.input(Input::Subscribe(Subscription::Pages(&wanted)));
     let (_, last) = harness.replay().sent.last().unwrap().clone();
     assert_eq!(client_frames(&last).last(), Some(&(0x1, b"subscribe 100 1A0".to_vec())));
-    assert_profile_headers(harness.replay());
+    assert_profile_headers(harness.replay(), &[]);
 }
 
 /// DOC-1960, REQ-1688: a REDIRECT record on the push connection
@@ -2669,4 +2628,154 @@ fn the_default_configuration_is_the_safer_choice() {
     assert!(config.redirects_within_channel, "redirects stay inside the channel");
     assert!(!config.proxied, "no proxy");
     assert!(config.tls_available, "TLS is offered");
+}
+
+/// The events of a resource fetched, without the exchange's report.
+fn outcome(records: &[Rec]) -> Vec<&str> {
+    events(records).into_iter().filter(|event| !event.starts_with("Exchanged")).collect()
+}
+
+/// A page with pointers for discovery: one in a `Link` field, one in a
+/// `<link>` element, one hidden in a comment, and one after the prefix.
+fn discovery_page(padding: usize) -> Vec<u8> {
+    let mut body = String::from(
+        "<!DOCTYPE html><html><head><!-- <link rel=alternate type=text/x-teletext-tti href=/hidden/> -->\
+         <link rel=\"alternate\" type=\"application/vnd.neoteletext+json\" href=\"/teletext/\">\
+         <link rel=alternate type=text/x-teletext-tti href=\"/a&amp;b/\">",
+    );
+    body.push_str(&" ".repeat(padding));
+    body.push_str("<link rel=alternate type=text/x-teletext-tti href=/far/></head><body></body></html>");
+    body.into_bytes()
+}
+
+fn discovery_answer(padding: usize) -> Reply {
+    Reply::Bytes(response(
+        "200 OK",
+        &[
+            "Content-Type: text/html; charset=utf-8",
+            "Set-Cookie: planted=1; Path=/",
+            "Link: <https://secure.example/tv/>; rel=\"alternate\"; type=\"application/vnd.neoteletext+json\"",
+        ],
+        &discovery_page(padding),
+    ))
+}
+
+// REQ-2476: discovery's request carries no cookie, keeps none of the
+// answer's, reads the pointers of the headers and then the elements in the
+// first 8,192 bytes, refuses a target with `&`, and closes its connection.
+#[cfg(feature = "cookies")]
+#[test]
+fn discovery_reads_pointers_and_touches_no_cookie() {
+    let mut harness = secure_service();
+    harness.replay().reply("secure.example:443", tti_response(&["Set-Cookie: id=1; Secure; Path=/"]));
+    harness.fetch(0x100);
+    harness.replay().reply("secure.example:443", discovery_answer(64 * 1024));
+    let connects = harness.replay().connects.len();
+    harness.input(Input::FetchResource { role: ResourceRole::Discovery, address: "https://secure.example/news/" });
+    let records = harness.take();
+    assert_eq!(
+        outcome(&records),
+        [
+            "Pointer { target: \"https://secure.example/tv/\", media: Channel, found: Header }",
+            "Pointer { target: \"https://secure.example/teletext/\", media: Channel, found: Element { after_base: false } }",
+            "DiscoveryDone { answered: \"https://secure.example/news/\", refused: 1 }",
+        ]
+    );
+    let request = harness.replay().requests_to("secure.example:443").pop().unwrap();
+    assert_eq!(header_value(&request, "Cookie"), None, "a cookie went with discovery");
+    assert_eq!(header_value(&request, "Accept").as_deref(), Some("text/html"));
+    assert_eq!(harness.replay().connects.len(), connects + 1, "discovery opened a connection of its own");
+    // The next page request opens another, and sends the channel's cookie
+    // alone: discovery's `Set-Cookie` was never kept.
+    harness.advance(SECOND);
+    harness.replay().reply("secure.example:443", tti_response(&[]));
+    harness.fetch(0x101);
+    assert_eq!(harness.replay().connects.len(), connects + 2, "discovery's connection was used again");
+    let last = harness.replay().requests_to("secure.example:443").pop().unwrap();
+    assert_eq!(header_value(&last, "Cookie").as_deref(), Some("id=1"));
+    assert_profile_headers(harness.replay(), &[]);
+}
+
+// REQ-2476: a body of any length is read only to its prefix, without being
+// refused for its size.
+#[test]
+fn discovery_reads_a_long_page_only_to_its_prefix() {
+    let mut harness = secure_service();
+    harness.replay().reply("secure.example:443", discovery_answer(4 * 1024 * 1024));
+    harness.input(Input::FetchResource { role: ResourceRole::Discovery, address: "https://secure.example/" });
+    let found = outcome(&harness.take()).into_iter().filter(|event| event.starts_with("Pointer")).count();
+    assert_eq!(found, 2, "the pointer past the prefix was read");
+}
+
+// REQ-2476: a redirect to the local network or from https to http ends
+// discovery; any status but 200 and any type but HTML find nothing.
+#[test]
+fn discovery_refuses_what_it_may_not_read() {
+    let mut replay = Replay::new(&[("secure.example", PUBLIC), ("evil.example", PRIVATE)]);
+    replay.reply("secure.example:443", Reply::Bytes(response("302 Found", &["Location: http://secure.example/"], b"")));
+    replay.reply("secure.example:443", Reply::Bytes(response("302 Found", &["Location: https://evil.example/"], b"")));
+    replay.reply("secure.example:443", Reply::Bytes(response("404 Not Found", &["Content-Type: text/html"], b"")));
+    replay.reply("secure.example:443", tti_response(&[]));
+    let mut harness = Harness::new(Config::default(), replay);
+    let expected = [
+        "ResourceFailed { role: Discovery, failure: Downgrade }",
+        "ResourceFailed { role: Discovery, failure: Blocked }",
+        "ResourceFailed { role: Discovery, failure: Status(404) }",
+        "ResourceFailed { role: Discovery, failure: MediaType(Tti) }",
+    ];
+    for expected in expected {
+        harness.input(Input::FetchResource { role: ResourceRole::Discovery, address: "https://secure.example/" });
+        let records = harness.take();
+        assert!(outcome(&records).contains(&expected), "{expected}: {records:?}");
+    }
+}
+
+/// A font file's bytes, as a host would serve them; their shape is the
+/// drawing process's to check.
+const FONT: &[u8] = b"STARTFONT 2.1\nENDFONT\n";
+
+// REQ-123: a font named by its address is fetched without a cookie and
+// handed to the port with its final address, only as a font's media type
+// and within the core's bound.
+#[test]
+fn a_font_is_fetched_by_its_address() {
+    let mut harness = secure_service();
+    harness
+        .replay()
+        .reply("secure.example:443", Reply::Bytes(response("200 OK", &["Content-Type: application/x-font-bdf"], FONT)));
+    harness.input(Input::FetchResource { role: ResourceRole::Font, address: "https://secure.example/fonts/a.bdf" });
+    let records = harness.take();
+    let expected = format!("Font {{ address: \"https://secure.example/fonts/a.bdf\", bytes: {FONT:?} }}");
+    assert_eq!(outcome(&records), [expected.as_str()]);
+    let request = harness.replay().requests_to("secure.example:443").pop().unwrap();
+    assert_eq!(header_value(&request, "Cookie"), None);
+    assert_eq!(header_value(&request, "Accept").as_deref(), Some("application/x-font-bdf, application/octet-stream"));
+
+    harness.replay().reply("secure.example:443", Reply::Bytes(response("200 OK", &["Content-Type: text/html"], FONT)));
+    harness.input(Input::FetchResource { role: ResourceRole::Font, address: "https://secure.example/fonts/a.bdf" });
+    assert_eq!(outcome(&harness.take()), ["ResourceFailed { role: Font, failure: MediaType(Html) }"]);
+
+    let large = std::vec![b'x'; neoteletext_core::consts::FONT_MAX_FILE_BYTES + 1];
+    harness.replay().reply(
+        "secure.example:443",
+        Reply::Bytes(response("200 OK", &["Content-Type: application/octet-stream"], &large)),
+    );
+    harness.input(Input::FetchResource { role: ResourceRole::Font, address: "https://secure.example/fonts/a.bdf" });
+    assert_eq!(outcome(&harness.take()), ["ResourceFailed { role: Font, failure: Http(BodyTooLarge) }"]);
+
+    harness.input(Input::FetchResource { role: ResourceRole::Font, address: "https://192.168.1.10/a.bdf" });
+    assert!(outcome(&harness.take()).contains(&"ResourceFailed { role: Font, failure: Blocked }"));
+}
+
+// REQ-123: the Accept header a font is asked for with names the media
+// types a font is taken as, which are defined once in the media constants.
+#[test]
+fn a_fonts_accept_header_names_the_font_media_types() {
+    use neoteletext_web::consts::{ACCEPT_FONT, media};
+    let accept = std::str::from_utf8(ACCEPT_FONT).unwrap();
+    let names: Vec<&str> = accept.split(", ").collect();
+    assert_eq!(
+        names,
+        [std::str::from_utf8(media::FONT_BDF).unwrap(), std::str::from_utf8(media::OCTET_STREAM).unwrap()]
+    );
 }

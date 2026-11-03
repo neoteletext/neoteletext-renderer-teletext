@@ -39,7 +39,10 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     pub(super) fn send_blocks(&mut self, entry: &Entry, first: u16, count: u16, sink: &mut dyn VoiceSink) {
         match entry.codec {
             #[cfg(feature = "opus")]
-            Codec::Opus => self.opus.send_stored(&self.store, entry, &mut self.statistics, sink),
+            Codec::Opus => {
+                let voice = self.voice_position(entry.sound, sink);
+                self.opus.send_stored(&self.store, entry, voice, &mut self.statistics, sink);
+            }
             #[cfg(any(feature = "pcm16", feature = "ima"))]
             Codec::Pcm16 | Codec::ImaAdpcm => self.send_independent(entry, first, count, sink),
             // A codec the build leaves out: `Codec::from_code` ignores its

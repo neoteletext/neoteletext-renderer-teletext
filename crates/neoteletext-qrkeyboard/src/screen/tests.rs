@@ -37,6 +37,7 @@ impl Screen {
             socket_address: net::parse("ws://127.0.0.1:1/s").unwrap(),
             secret: Secret::Key(KEY),
             socket: None,
+            opening: None,
             pairing: None,
             channel: None,
             authenticated: false,
@@ -187,4 +188,18 @@ fn an_end_without_the_key_is_never_connected() {
         assert_eq!(receive(&mut screen, &down), []);
     }
     assert!(!screen.connected());
+}
+
+// REQ-199 (REQ-INT-009): finishing leaves no reconnection behind it: the
+// opening under way is abandoned, so the socket it hands back later is
+// dropped, and closed, rather than taken up by a finished screen.
+#[test]
+fn finishing_abandons_an_opening_under_way() {
+    let mut screen = Screen::offline();
+    let (handed, opening) = mpsc::channel();
+    screen.opening = Some(opening);
+    // The offline relay cannot be told; the session ends here anyway.
+    let _ = screen.finish();
+    assert!(screen.opening.is_none());
+    assert!(handed.send(Err(Error::Address)).is_err(), "the opening's socket would still be taken");
 }

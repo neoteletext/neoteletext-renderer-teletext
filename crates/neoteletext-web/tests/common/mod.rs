@@ -362,3 +362,49 @@ pub fn response(status: &str, headers: &[&str], body: &[u8]) -> Vec<u8> {
     bytes.extend_from_slice(body);
     bytes
 }
+
+/// REQ-WEB-014, REQ-503: every request carries only the permitted headers,
+/// never `Referer`, always `Accept-Encoding: identity`; `extra` names the
+/// headers a kind of request adds to REQ-503's table, such as a bound
+/// session's (REQ-WEB-017).
+pub fn assert_profile_headers(replay: &Replay, extra: &[&str]) {
+    // REQ-503's table of request headers, exactly: no request sends
+    // Content-Type, and the agent offers no WebSocket extension.
+    const PERMITTED: [&str; 13] = [
+        "host",
+        "user-agent",
+        "accept",
+        "accept-encoding",
+        "cookie",
+        "if-none-match",
+        "if-modified-since",
+        "content-length",
+        "upgrade",
+        "connection",
+        "sec-websocket-key",
+        "sec-websocket-version",
+        "sec-websocket-protocol",
+    ];
+    assert_ne!(replay.requests.len(), 0);
+    for (_, request) in &replay.requests {
+        let text = String::from_utf8_lossy(request);
+        let head = text.split("\r\n\r\n").next().unwrap();
+        let mut lines = head.split("\r\n");
+        let request_line = lines.next().unwrap();
+        assert!(request_line.starts_with("GET ") || request_line.starts_with("POST "), "{request_line}");
+        assert!(request_line.ends_with(" HTTP/1.1"));
+        let mut names = Vec::new();
+        for line in lines {
+            let name = line.split(':').next().unwrap().to_ascii_lowercase();
+            assert!(
+                PERMITTED.contains(&name.as_str()) || extra.contains(&name.as_str()),
+                "header {name} is outside the profile"
+            );
+            names.push(name);
+        }
+        assert!(names.contains(&"host".to_string()) && names.contains(&"user-agent".to_string()));
+        if !names.contains(&"upgrade".to_string()) {
+            assert_eq!(header_value(request, "Accept-Encoding").as_deref(), Some("identity"));
+        }
+    }
+}

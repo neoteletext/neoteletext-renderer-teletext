@@ -95,6 +95,19 @@ pub enum Input<'a> {
     /// dropped, with [`Event::InputDropped`]: what it sends never changes
     /// what is fetched.
     Send(InputMessage<'a>),
+    /// Fetch one resource outside any channel, in the role given
+    /// (REQ-2476, REQ-123): one `GET` with no cookie and no `Referer`,
+    /// whose `Set-Cookie` fields are ignored, redirected at most
+    /// [`crate::consts::MAX_REDIRECTS`] times to any origin, each address
+    /// checked for the local network and a fall from `https` to `http`,
+    /// and the connection closed when it ends. Answered by the role's
+    /// events and [`Event::ResourceFailed`].
+    FetchResource {
+        /// What the resource is for.
+        role: ResourceRole,
+        /// Its `http` or `https` address.
+        address: &'a str,
+    },
     /// Measure the push connection's round trip, by a WebSocket ping at
     /// most once in [`crate::consts::ROUND_TRIP_EVERY_US`], answered by
     /// [`Event::RoundTrip`] (REQ-RCH-016): on while keys go to the channel,
@@ -497,6 +510,45 @@ pub enum Event<'a> {
     CookieRejected(CookieRejected),
     /// Not every matching cookie fitted in a request.
     CookiesTruncated,
+    /// A pointer found by discovery ([`ResourceRole::Discovery`],
+    /// REQ-2476), checked and resolved against the final address by
+    /// [`crate::discovery::resolve`]; the `Link` header fields' pointers come
+    /// first, then the `<link>` elements', each in the order written.
+    Pointer {
+        /// The target.
+        target: &'a str,
+        /// What it says it leads to.
+        media: crate::discovery::PointerMedia,
+        /// Where it was found.
+        found: crate::discovery::Found,
+    },
+    /// Discovery has read the page at `answered`, the final address after
+    /// redirects, and reported every pointer it accepted; `refused`
+    /// pointers failed [`crate::discovery::resolve`]'s checks.
+    DiscoveryDone {
+        /// The final address.
+        answered: &'a str,
+        /// How many pointers were refused.
+        refused: usize,
+    },
+    /// A font file ([`ResourceRole::Font`], REQ-123), unchecked: the port
+    /// checks its SHA-256 with [`crate::font_library::check_font`] and
+    /// gives it to the process that draws, which reads it strictly.
+    Font {
+        /// The final address after redirects.
+        address: &'a str,
+        /// The file's bytes, at most the core's
+        /// [`FONT_MAX_FILE_BYTES`](neoteletext_core::consts::FONT_MAX_FILE_BYTES).
+        bytes: &'a [u8],
+    },
+    /// A resource could not be fetched, or its answer was not one its role
+    /// takes.
+    ResourceFailed {
+        /// The role it was fetched in.
+        role: ResourceRole,
+        /// Why.
+        failure: Failure,
+    },
     /// A device-bound session changed (REQ-WEB-017, feature `dbsc`).
     BoundSession {
         /// The session's identifier, empty when a registration failed
@@ -505,6 +557,22 @@ pub enum Event<'a> {
         /// What happened.
         change: BoundChange,
     },
+}
+
+/// What a resource fetched outside any channel is for ([`Input::FetchResource`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResourceRole {
+    /// The page at an address the viewer typed, read for the pointers to
+    /// its channel (REQ-2476): asked for with `Accept: text/html`; only an
+    /// answer of 200 with `text/html` is read, and of its body only the
+    /// first [`crate::discovery::DISCOVERY_BODY_BYTES`], after which the
+    /// connection is closed.
+    Discovery,
+    /// A font file the user named by its address (REQ-123): accepted only
+    /// with status 200 and the media type `application/x-font-bdf` or
+    /// `application/octet-stream`, and at most the core's
+    /// [`FONT_MAX_FILE_BYTES`](neoteletext_core::consts::FONT_MAX_FILE_BYTES).
+    Font,
 }
 
 /// What happened to a device-bound session (REQ-WEB-017).
