@@ -15,8 +15,8 @@ use crate::item::{Diagnostic, DiagnosticKind, Item};
 use crate::page::{IssueKind, LinkKey, PageFile, PageFunction, Warning};
 use crate::testing::{diagnostics, pages, same_in_any_chunks};
 use neoteletext_core::consts::{
-    ALPHA_BLACK, ALPHA_RED, C11_SERIAL, COLOUR_GREEN, DOUBLE_HEIGHT, MODE_G0_NO_DIACRITIC, MODE_SET_ACTIVE_POSITION,
-    MODE_TERMINATION, ROW_ADDRESS_LAST,
+    ALPHA_BLACK, ALPHA_RED, C11_SERIAL, COLOUR_GREEN, DOUBLE_HEIGHT, ESC, MODE_G0_NO_DIACRITIC,
+    MODE_SET_ACTIVE_POSITION, MODE_TERMINATION, ROW_ADDRESS_LAST,
 };
 use neoteletext_core::ecc::check_parity;
 use neoteletext_core::packet::{Decoded, PageFormat, PagePacket, Triplet, decode};
@@ -433,4 +433,13 @@ pub(super) fn packets_of(page: &PageFile) -> Vec<neoteletext_core::packet::Packe
     let mut packets = Vec::new();
     encode_page(page, &mut |packet| packets.push(packet));
     packets
+}
+
+/// REQ-177 and DEC-2362: code 0x10 written in its plus-0x80 form, 0x90, is
+/// code 0x10 (Mosaic Black), as is ESC with 0x50; only the raw byte 0x10 of
+/// a row is the Double Height alias of the MRG format.
+#[test]
+fn the_plus_0x80_form_of_code_0x10_is_not_the_double_height_alias() {
+    let decoded = decode_text(&[0x90, 0x10, ESC, 0x50], true, 4);
+    assert_eq!(decoded.codes[..decoded.count], [0x10, DOUBLE_HEIGHT, 0x10]);
 }

@@ -24,7 +24,8 @@ pub struct DecodedText {
 /// Decodes the text of an `OL` line (REQ-INP-013). Control codes may be
 /// written as the byte plus 0x80, or as ESC followed by the code plus 0x40.
 /// With `row_text`, a raw 0x10 is Double Height, as the MRG format
-/// specifies; packed enhancement lines take no such alias.
+/// specifies, and 0x90 is still code 0x10; packed enhancement lines take no
+/// such alias.
 #[must_use]
 pub fn decode_text(text: &[u8], row_text: bool, capacity: usize) -> DecodedText {
     let mut result = DecodedText { codes: [0; PACKED_LINE], count: 0, overflow: false, bad_escape: false };
@@ -39,8 +40,9 @@ pub fn decode_text(text: &[u8], row_text: bool, capacity: usize) -> DecodedText 
                 break;
             }
         } else {
-            let code = byte & CODE_MASK_7BIT;
-            if row_text && code == TTI_DOUBLE_HEIGHT_ALIAS { DOUBLE_HEIGHT } else { code }
+            // The alias is the raw byte alone: 0x90 is code 0x10 written
+            // plus 0x80, so it is tested before the top bit goes (DEC-2362).
+            if row_text && byte == TTI_DOUBLE_HEIGHT_ALIAS { DOUBLE_HEIGHT } else { byte & CODE_MASK_7BIT }
         };
         if result.count >= capacity {
             result.overflow = true;
