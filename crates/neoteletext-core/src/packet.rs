@@ -42,7 +42,7 @@ use service_data::decode_service;
 use triplets::{triplet_values, triplets};
 
 pub use compositional_links::CompositionalLink;
-pub use editorial_links::{Link, Links};
+pub use editorial_links::{Link, Links, decode_links_from_data};
 pub use function::TripletFunction;
 pub use header::Header;
 pub use inventory::{InventoryFunction, PageCode, mip_position, page_code, sub_page_count};

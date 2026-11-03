@@ -627,3 +627,41 @@ fn a_page_function_in_x_28_4_is_honoured() {
         assert_eq!(decoder.store().subpage_count(address(0x150)), 0);
     });
 }
+
+/// REQ-305, REQ-316 (REQ-NUM-007, REQ-NUM-018), DEC-2344: every editorial link, of X/27/0 and
+/// of X/27/1 to X/27/3 alike, gives an ordinary target, sub-code 3F7F as
+/// any sub-page, page FF as no page and XFF:3F7F as no link, through one
+/// rule; a relative magazine bit complements the packet's magazine.
+#[test]
+fn every_kind_of_editorial_link_has_the_same_meanings() {
+    let magazine = Magazine::new(1).unwrap();
+    let other = Magazine::new(3).unwrap();
+    let links = [
+        Some((magazine, PageNumber(0x23), SubCode::new(0x0004))),
+        Some((magazine, PageNumber(0x45), SubCode::ANY)),
+        Some((magazine, PageNumber(0xFF), SubCode::new(0x0001))),
+        None,
+        Some((other, PageNumber(0x67), SubCode::new(0x3F7E))),
+        Some((magazine, PageNumber(0xFF), SubCode::ANY)),
+    ];
+    let expected =
+        [Some((0x123, 0x0004)), Some((0x145, SubCode::ANY.value())), None, None, Some((0x367, 0x3F7E)), None];
+    for designation in 0..=3u8 {
+        let mut packet = encode::links(magazine, &links, true, 0);
+        packet.bytes[neoteletext_core::consts::DATA_START] = hamming84_encode(designation);
+        with_decoder(8, |decoder| {
+            let mut stream = vec![header(0x100, 0), packet];
+            stream.extend(filling());
+            feed(decoder, &stream);
+            let page = decoder.store().get(address(0x100), SubCode::ANY).unwrap();
+            let decoded = page.editorial_links(designation).expect("received");
+            let targets = decoded.links.map(|link| {
+                neoteletext_core::nav::link_target(link).map(|target| (target.address.mpp(), target.subcode.value()))
+            });
+            assert_eq!(targets, expected, "X/27/{designation}");
+            for absent in (0..=3u8).filter(|&other| other != designation) {
+                assert_eq!(page.editorial_links(absent), None, "X/27/{absent} was not sent");
+            }
+        });
+    }
+}

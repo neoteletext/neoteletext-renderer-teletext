@@ -6,6 +6,7 @@ use crate::limits::{
     DECIMAL_DIGIT_MAX, KEYABLE_PAGES, MPP_MAGAZINE_SHIFT, PAGE_DIGIT_MAX, PAGE_TENS_SHIFT, S2_MASK, S4_MASK,
     SUBCODE_DIGITS, decimal_sub_code,
 };
+use crate::packet::Link;
 use crate::types::{FixedVec, PageAddress, PageNumber, SubCode};
 
 /// A link target: a page, a sub-code (3F7F for any), and the service it
@@ -40,14 +41,7 @@ impl PageLinks {
     #[must_use]
     pub fn from_page(page: &StoredPage) -> Self {
         let Some(links) = page.links else { return Self::default() };
-        // REQ-NUM-018: page number FF names no page; the null address
-        // XFF:3F7F is already no link (REQ-PKT-005).
-        let target = |index: usize| {
-            links.links.get(index).copied().flatten().filter(|link| link.page.0 != LINK_NULL_PAGE).and_then(|link| {
-                let mpp = (u16::from(link.magazine.number()) << 8) | u16::from(link.page.0);
-                PageAddress::from_mpp(mpp).map(|address| LinkTarget { address, subcode: link.subcode, service: None })
-            })
-        };
+        let target = |index: usize| link_target(links.links.get(index).copied().flatten());
         Self { keys: [target(0), target(1), target(2), target(3)], index: target(X27_INDEX_LINK) }
     }
 
@@ -56,6 +50,19 @@ impl PageLinks {
     pub fn no_coloured_links(&self) -> bool {
         self.keys.iter().all(Option::is_none)
     }
+}
+
+/// What an editorial link of X/27/0 to X/27/3 names (clause 9.6.1;
+/// REQ-NUM-007, REQ-NUM-018, DEC-2344), the one rule for every kind: the
+/// null address XFF:3F7F is no link at all, so its key is disabled (the
+/// decoder gives `None`, REQ-PKT-005); page number FF names no page; a
+/// sub-code of 3F7F names the page with no particular sub-page
+/// (`SubCode::ANY`).
+#[must_use]
+pub fn link_target(link: Option<Link>) -> Option<LinkTarget> {
+    let link = link.filter(|link| link.page.0 != LINK_NULL_PAGE)?;
+    let mpp = (u16::from(link.magazine.number()) << MPP_MAGAZINE_SHIFT) | u16::from(link.page.0);
+    PageAddress::from_mpp(mpp).map(|address| LinkTarget { address, subcode: link.subcode, service: None })
 }
 
 /// The page after `address` in numerical order; 899 wraps to 100

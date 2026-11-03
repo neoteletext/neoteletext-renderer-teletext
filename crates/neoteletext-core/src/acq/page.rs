@@ -8,7 +8,7 @@ use crate::consts::{
 };
 use crate::ecc::has_odd_parity;
 use crate::fsm::{PageKey, PageState};
-use crate::packet::{CompositionalLink, Links, PageEnhancement, PageFormat, Triplet};
+use crate::packet::{CompositionalLink, Links, PageEnhancement, PageFormat, Triplet, decode_links_from_data};
 use crate::types::{ControlBits, Instant, Magazine, PageAddress, PageNumber, SubCode};
 
 /// How a stored page's sub-code is read, as the Magazine Inventory Page
@@ -133,6 +133,17 @@ impl StoredPage {
         is_text(self.page_data.and_then(|data| data.format))
             && is_text(self.page_data_level35.and_then(|data| data.format))
             && is_text(self.download_function)
+    }
+
+    /// The editorial links of packet X/27/`designation`, 0 to 3, when it
+    /// was received (clause 9.6.1; DEC-2344): X/27/0 as decoded, X/27/1 to
+    /// X/27/3 from their stored bytes with the same decoder.
+    #[must_use]
+    pub fn editorial_links(&self, designation: u8) -> Option<Links> {
+        let Some(index) = designation.checked_sub(1) else { return self.links };
+        let present = self.links_raw_present.checked_shr(u32::from(index)).is_some_and(|bits| bits & 1 == 1);
+        let bytes = self.links_raw.get(usize::from(index)).filter(|_| present)?;
+        Some(decode_links_from_data(bytes, self.key.address.magazine))
     }
 
     /// True when the page is stored and is a display page by its page
