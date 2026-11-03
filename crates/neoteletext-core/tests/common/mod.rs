@@ -452,6 +452,15 @@ pub fn build_35(packets: &[Packet]) -> Box<Grid> {
     build(packets, PresentationLevel::Level35).0
 }
 
+/// Builds page 100 at Level 2.5 and at Level 3.5, asserts that the two give
+/// the same cells, and returns them: a test of a Level 2.5 rule that holds at
+/// both levels runs at both (REQ-TST-015).
+pub fn build_both(packets: &[Packet]) -> Box<Grid> {
+    let grid = build_25(packets);
+    assert_same_cells(&grid, &build_35(packets), "Level 3.5 against Level 2.5");
+    grid
+}
+
 /// The character a cell shows, as Unicode: a space for no glyph and `#`
 /// for a mosaic.
 pub fn char_of(cell: &Cell) -> char {

@@ -12,9 +12,9 @@
 mod common;
 
 use common::{
-    DISPLAY, Mot, ObjectDef, Receiver, build, build_25, build_35, char_of, define, display_page, end, g0, invoke, link,
-    local_data, local_number, mot_packets, null_link, object_link, object_page, object_page_data, object_page_packets,
-    origin, page_grid, public_number, set_position, text, text_at, x26, x27, x28,
+    DISPLAY, Mot, ObjectDef, Receiver, build, build_25, build_35, build_both, char_of, define, display_page, end, g0,
+    invoke, link, local_data, local_number, mot_packets, null_link, object_link, object_page, object_page_data,
+    object_page_packets, origin, page_grid, public_number, set_position, text, text_at, x26, x27, x28,
 };
 use neoteletext_core::colour::colour_index;
 use neoteletext_core::config::{Config, PresentationLevel};
@@ -182,7 +182,7 @@ mod attributes {
         ];
         let mut object = local_object(ObjectKind::Passive, 1, &body);
         object.insert(1, foreground(0, colour_index(0, 1)));
-        let grid = build_25(&page_with_objects(&[(4, &[ALPHA_GREEN, b'x'])], &local, &[object]));
+        let grid = build_both(&page_with_objects(&[(4, &[ALPHA_GREEN, b'x'])], &local, &[object]));
         assert_eq!((grid.cells[3][0].foreground, grid.cells[4][0].foreground), (PINK, PINK), "persists to row 4");
         assert_eq!(grid.cells[3][10].foreground, PINK, "the second invocation starts again from white");
         assert_eq!(grid.cells[4][1].foreground, GREEN, "the page under the object is not affected");
@@ -338,7 +338,7 @@ fn side_panel_data_is_read_past() {
         panels.insert(1, x28(0, &PresentationFields { side_panels: Some(fields), ..plain }));
         let mut removed = page_with_objects(&[(2, b"MAIN PAGE")], &on_the_page, core::slice::from_ref(&object));
         removed.insert(1, x28(0, &plain));
-        assert_eq!(build_25(&panels), build_25(&removed), "{fields:?} at Level 2.5");
+        assert_eq!(build_both(&panels), build_both(&removed), "{fields:?} at Level 2.5");
         assert_eq!(build_35(&panels), build_35(&removed), "{fields:?} at Level 3.5");
     }
 }
@@ -405,7 +405,7 @@ fn display_priority_of_overlapping_objects() {
         invoke(ObjectSource::Local, ObjectKind::Active, local_number(1, 0)),
         g0(5, b'l'),
     ];
-    let grid = build_25(&page_with_objects(&[(4, b"123456")], &local, &objects));
+    let grid = build_both(&page_with_objects(&[(4, b"123456")], &local, &objects));
     assert_eq!(&text(&grid, 4)[..6], "pddd5l", "Passive, then Adaptive over local data and Active");
 }
 
@@ -422,7 +422,7 @@ fn restricted_triplets_in_adaptive_and_passive_objects() {
         [(ObjectKind::Active, 9, 10), (ObjectKind::Adaptive, 0, 0), (ObjectKind::Passive, 0, 0)]
     {
         let local = [set_position(2, 0), invoke(ObjectSource::Local, kind, local_number(1, 0))];
-        let grid = build_25(&page_with_objects(&[], &local, &[local_object(kind, 1, &colours)]));
+        let grid = build_both(&page_with_objects(&[], &local, &[local_object(kind, 1, &colours)]));
         assert_eq!((grid.screen_colour, grid.row_colours[7]), (screen, row_5), "{kind:?}");
         let written_row = if kind == ObjectKind::Active { 7 } else { 2 };
         assert_eq!(char_of(&grid.cells[written_row][1]), 'r', "{kind:?}: the row move is ignored too");
@@ -444,6 +444,7 @@ fn unusable_local_definitions_are_skipped() {
     ];
     for (index, (number, object, shown)) in cases.into_iter().enumerate() {
         let local = [set_position(2, 0), invoke(ObjectSource::Local, ObjectKind::Passive, number)];
+        // Usage 01 is for Level 2.5 only, so this case differs at Level 3.5.
         let grid = build_25(&page_with_objects(&[], &local, &[object]));
         assert_eq!(char_of(&grid.cells[2][0]) == 'o', shown, "case {index}");
     }
@@ -477,7 +478,7 @@ fn public_object_pointers() {
         let local = [set_position(2, 0), invoke(ObjectSource::Public, ObjectKind::Passive, number)];
         let mut packets = page_with_objects(&[], &local, &[]);
         packets.extend(pages);
-        let grid = build_25(&packets);
+        let grid = build_both(&packets);
         char_of(&grid.cells[2][0])
     };
     let keep = |_: &mut common::ObjectPageData| {};
@@ -507,7 +508,7 @@ fn object_bodies_cross_packets_and_reach_x26() {
     let mut packets = page_with_objects(&[], &local, &[]);
     packets.extend(object_page(POP, 0, &[long]));
     assert!(packets.iter().any(|packet| neoteletext_core::packet::decode_address(packet).unwrap().number == 26));
-    let grid = build_25(&packets);
+    let grid = build_both(&packets);
     assert_eq!(&text(&grid, 2)[..3], "END");
 }
 
@@ -695,12 +696,12 @@ fn default_objects() {
         packets.extend(gpop.clone());
         packets.extend(pop.clone());
         packets.extend(display_page(0, &[(1, b"LEVEL1")], others));
-        build_25(&packets)
+        build_both(&packets)
     };
     let grid = run(vec![]);
     // Clause 13.8: origin row 0, column 0; the receiver's columns are kept
     // (REQ-L25-050); POP 1 is invoked after GPOP 1 and wins (Annex A.7.1).
-    let plain = build_25(&display_page(0, &[], vec![]));
+    let plain = build_both(&display_page(0, &[], vec![]));
     assert_eq!(grid.cells[0][3], plain.cells[0][3], "column 3 belongs to the receiver");
     assert_eq!((char_of(&grid.cells[0][9]), char_of(&grid.cells[0][10])), ('g', 'p'));
     assert_eq!(char_of(&grid.cells[3][5]), 'h', "GPOP 2, an Active object");
@@ -725,7 +726,7 @@ fn sub_pages_beyond_the_count_are_used() {
         &[],
         local_data(&[set_position(2, 0), invoke(ObjectSource::Public, ObjectKind::Passive, public_number(3, 0))]),
     ));
-    assert_eq!(char_of(&build_25(&packets).cells[2][0]), 's');
+    assert_eq!(char_of(&build_both(&packets).cells[2][0]), 's');
 }
 
 /// REQ-OBJ-041: the Magazine Organization Table and the pages whose
@@ -830,9 +831,9 @@ fn page_of_a_passive_object() -> Vec<Packet> {
 fn an_object_page_before_its_link_is_kept() {
     let (page, objects) = (page_invoking_a_public_object(), page_of_a_passive_object());
     let standard = [page.clone(), objects.clone()].concat();
-    assert_eq!(char_of(&build_25(&standard).cells[2][0]), 'a', "the order every other test uses");
+    assert_eq!(char_of(&build_both(&standard).cells[2][0]), 'a', "the order every other test uses");
     let early = [objects, page].concat();
-    assert_eq!(char_of(&build_25(&early).cells[2][0]), 'a');
+    assert_eq!(char_of(&build_both(&early).cells[2][0]), 'a');
 }
 
 /// REQ-140: the Magazine Organization Table may come after the object page
@@ -852,9 +853,9 @@ fn a_table_after_the_object_page_it_links_is_kept() {
     let table = mot_packets(&mot);
     let page = display_page(0, &[(2, b"HELLO")], vec![]);
     let standard = [table.clone(), page.clone(), objects.clone()].concat();
-    assert_eq!(text(&build_25(&standard), 2).trim_end(), "HELdO");
+    assert_eq!(text(&build_both(&standard), 2).trim_end(), "HELdO");
     let early = [objects, table, page].concat();
-    assert_eq!(text(&build_25(&early), 2).trim_end(), "HELdO");
+    assert_eq!(text(&build_both(&early), 2).trim_end(), "HELdO");
 }
 
 /// REQ-140: packet X/28 may come after the rows of its page, and the packets
@@ -865,7 +866,7 @@ fn a_page_function_after_the_packets_it_describes_loses_none_of_them() {
     let function = encode::page_enhancement(common::mag(1), 0, format, &PresentationFields::default());
     let objects = [page_of_a_passive_object(), vec![function]].concat();
     let page = page_invoking_a_public_object();
-    assert_eq!(char_of(&build_25(&[objects, page].concat()).cells[2][0]), 'a');
+    assert_eq!(char_of(&build_both(&[objects, page].concat()).cells[2][0]), 'a');
 }
 
 /// REQ-140 and REQ-ACQ-019: copies kept in case a link names them give way
@@ -878,7 +879,7 @@ fn pages_no_link_names_do_not_displace_a_named_object_page() {
         packets.extend([common::header(mpp, 0, 0), common::row(1, b"A PAGE NO LINK NAMES")]);
     }
     packets.extend(page);
-    assert_eq!(char_of(&build_25(&packets).cells[2][0]), 'a');
+    assert_eq!(char_of(&build_both(&packets).cells[2][0]), 'a');
 }
 
 /// REQ-140, REQ-ACQ-016: a page kept in case a link names it is no enhancement

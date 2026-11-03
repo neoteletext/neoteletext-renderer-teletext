@@ -12,8 +12,8 @@
 mod common;
 
 use common::{
-    background, build, build_25, char_of, colours, display_page, end, foreground, g0, local_data, row_0, set_position,
-    x26, x28,
+    background, build, build_both, char_of, colours, display_page, end, foreground, g0, local_data, row_0,
+    set_position, x26, x28,
 };
 use neoteletext_core::colour::colour_index;
 use neoteletext_core::config::PresentationLevel;
@@ -48,7 +48,7 @@ fn g1_mosaics_follow_the_non_spacing_separated_attribute() {
         TripletFunction::G1Character { column: 6, code: 0x7F },
     ];
     let row = [MOSAIC_RED, SEPARATED_MOSAICS, 0x7F, b' ', b' ', b' ', b' ', 0x7F];
-    let grid = build_25(&page(&[(3, &row)], &local));
+    let grid = build_both(&page(&[(3, &row)], &local));
     let cells = &grid.cells[3];
     assert_eq!(cells[2].glyph, Glyph::Mosaic { pattern: 0x3F, separated: true }, "Level 1 1/A");
     assert_eq!(cells[3].glyph, Glyph::Mosaic { pattern: 0x3F, separated: false }, "1/A ignored (note 12)");
@@ -65,10 +65,10 @@ fn contention_examples_of_annex_c2() {
     let yellow = colour_index(0, 3);
     let red = colour_index(0, 1);
     // Example 1: Foreground Blue at n − 1 takes effect before alpha red.
-    let grid = build_25(&page(&[(1, row)], &[set_position(1, 0), foreground(4, blue)]));
+    let grid = build_both(&page(&[(1, row)], &[set_position(1, 0), foreground(4, blue)]));
     assert_eq!(grid.cells[1][5].foreground, red, "rule 1: red");
     // Example 2: both take effect at n; Foreground Blue is placed later.
-    let grid = build_25(&page(&[(1, row)], &[set_position(1, 0), foreground(5, blue)]));
+    let grid = build_both(&page(&[(1, row)], &[set_position(1, 0), foreground(5, blue)]));
     assert_eq!(grid.cells[1][5].foreground, blue, "rule 2: blue");
     // Example 3: X/26/0 blue and X/26/1 yellow at n: the later wins.
     let packets = display_page(
@@ -79,11 +79,11 @@ fn contention_examples_of_annex_c2() {
             x26(1, &[set_position(1, 0), foreground(5, yellow), end()]),
         ],
     );
-    assert_eq!(build_25(&packets).cells[1][5].foreground, yellow, "rule 3: yellow");
+    assert_eq!(build_both(&packets).cells[1][5].foreground, yellow, "rule 3: yellow");
     // Decision E.47: a set-at Level 1 attribute and an X/26 attribute at the
     // same cell: the X/26 attribute wins.
     let row: &[u8] = &[ALPHA_RED, NEW_BACKGROUND, b'A'];
-    let grid = build_25(&page(&[(1, row)], &[set_position(1, 0), background(1, blue)]));
+    let grid = build_both(&page(&[(1, row)], &[set_position(1, 0), background(1, blue)]));
     assert_eq!((grid.cells[1][1].background, grid.cells[1][2].background), (blue, blue));
 }
 
@@ -97,7 +97,7 @@ fn colour_triplets_set_colour_map_indices() {
         background(3, 27),
         TripletFunction::ForegroundColour { column: 8, colour: ColourData { index: 5, high: 0b01 } },
     ];
-    let grid = build_25(&page(&[(4, &[MOSAIC_RED, b' ', b' ', 0x7F, b'A'])], &local));
+    let grid = build_both(&page(&[(4, &[MOSAIC_RED, b' ', b' ', 0x7F, b'A'])], &local));
     let cells = &grid.cells[4];
     assert_eq!((cells[1].foreground, cells[2].foreground, cells[39].foreground), (1, 20, 20));
     assert_eq!((cells[2].background, cells[3].background, cells[39].background), (0, 27, 27));
@@ -120,7 +120,7 @@ fn remapping_and_black_background_substitution() {
                 x28(0, &colours(0, 20, substitution, value as u8)),
                 x26(0, &[set_position(5, 0), background(10, 0), end()]),
             ];
-            let grid = build_25(&display_page(0, &[(5, row)], others));
+            let grid = build_both(&display_page(0, &[(5, row)], others));
             let cells = &grid.cells[5];
             let black = if substitution { 20 } else { colour_index(background_clut, 0) };
             let label = format!("re-mapping {value}, substitution {substitution}");
@@ -148,23 +148,23 @@ fn display_attributes_against_level_1() {
     // Conceal: a colour code ends only Level 1 conceal; a 0 bit ends both.
     let local = [set_position(1, 0), display(2, on(|a| a.conceal = true)), display(12, off)];
     let row: &[u8] = &[b' ', b' ', b'A', ALPHA_RED, b'B', b' ', b' ', b' ', b' ', b' ', CONCEAL, b'C', b'D'];
-    let grid = build_25(&page(&[(1, row)], &local));
+    let grid = build_both(&page(&[(1, row)], &local));
     let concealed: Vec<bool> = grid.cells[1][..13].iter().map(|cell| cell.conceal).collect();
     let mut expected = vec![false, false, true, true, true, true, true, true, true, true, true, true, false];
     assert_eq!(concealed, expected, "non-spacing conceal survives 0/1");
     let row: &[u8] = &[CONCEAL, b'A', ALPHA_RED, b'B'];
-    let grid = build_25(&page(&[(1, row)], &[set_position(1, 0), display(1, off)]));
+    let grid = build_both(&page(&[(1, row)], &[set_position(1, 0), display(1, off)]));
     expected = vec![true, false, false, false];
     assert_eq!(grid.cells[1][..4].iter().map(|cell| cell.conceal).collect::<Vec<_>>(), expected, "a 0 bit ends 1/8");
     // Underline: on G0 text, not cancelled by 1/9; a 0 bit clears 1/A.
     let local = [set_position(1, 0), display(1, on(|a| a.underline = true)), display(6, off)];
     let row: &[u8] = &[b'A', b'B', CONTIGUOUS_MOSAICS, b'C', MOSAIC_RED, SEPARATED_MOSAICS, 0x7F];
-    let grid = build_25(&page(&[(1, row)], &local));
+    let grid = build_both(&page(&[(1, row)], &local));
     let cells = &grid.cells[1];
     assert!(!cells[0].attributes.underline() && cells[1].attributes.underline() && cells[3].attributes.underline());
     assert_eq!(cells[6].glyph, Glyph::Mosaic { pattern: 0x3F, separated: false }, "the 0 bit cleared 1/A");
     // Invert.
-    let grid = build_25(&page(&[(1, b"AB")], &[set_position(1, 0), display(1, on(|a| a.invert = true))]));
+    let grid = build_both(&page(&[(1, b"AB")], &[set_position(1, 0), display(1, on(|a| a.invert = true))]));
     assert!(!grid.cells[1][0].attributes.invert() && grid.cells[1][1].attributes.invert());
 }
 
@@ -176,11 +176,11 @@ fn boxing_and_windows() {
     let boxing = DisplayAttributes { boxing: true, ..DisplayAttributes::default() };
     let row: &[u8] = &[START_BOX, START_BOX, b'A', b'B'];
     let local = [set_position(2, 0), display(3, boxing)];
-    let grid = build_25(&page(&[(2, row)], &local));
+    let grid = build_both(&page(&[(2, row)], &local));
     let boxed: Vec<bool> = grid.cells[2][..5].iter().map(|cell| cell.boxed).collect();
     assert_eq!(boxed, [false, false, false, true, true], "window from the triplet only");
     let packets = display_page(C5_NEWSFLASH, &[(2, row)], local_data(&[]));
-    let grid = build_25(&packets);
+    let grid = build_both(&packets);
     let boxed: Vec<bool> = grid.cells[2][..4].iter().map(|cell| cell.boxed).collect();
     assert_eq!(boxed, [false, true, true, true], "Level 1 boxes on a newsflash page");
 }
@@ -212,7 +212,7 @@ fn sizes_follow_annex_c3() {
         (23, b" T"),
         (10, &[DOUBLE_WIDTH, b'A', b'B', b'C']),
     ];
-    let grid = build_25(&page(rows, &local));
+    let grid = build_both(&page(rows, &local));
     let width = |row: usize, column: usize| grid.cells[row][column].attributes.width();
     assert_eq!((width(3, 5), width(3, 6), width(3, 7)), (Width::LeftHalf, Width::RightHalf, Width::LeftHalf));
     assert_eq!((char_of(&grid.cells[3][6]), char_of(&grid.cells[3][7])), ('A', 'C'), "B is hidden");
@@ -233,7 +233,7 @@ fn row_below_spacing_double_height() {
     let local = [set_position(6, 0), g0(20, b'E'), foreground(21, 3), g0(22, b'F')];
     let rows: &[(u8, &[u8])] =
         &[(5, &[ALPHA_RED, DOUBLE_HEIGHT, b'B', ALPHA_YELLOW, b'G', NORMAL_SIZE]), (6, b"XYZXYZXYZ")];
-    let grid = build_25(&page(rows, &local));
+    let grid = build_both(&page(rows, &local));
     assert_eq!((grid.cells[6][2].size, char_of(&grid.cells[6][2])), (Size::DoubleBottom, 'B'));
     assert_eq!(char_of(&grid.cells[6][7]), ' ', "Level 1 content of the lower row is ignored");
     assert_eq!((char_of(&grid.cells[6][20]), grid.cells[6][20].foreground), ('E', 7), "start-of-row white");
@@ -281,7 +281,7 @@ mod additional_flash_functions {
             flash(30, 0b01, 0b110),
             TripletFunction::AdditionalFlash { column: 32, mode: 0b01, rate: 0, reserved: 0b10 },
         ];
-        let grid = build_25(&page(&[(1, &[b'A'; 40]), (2, &[FLASH, b'A', b'B', STEADY, b'C'])], &local));
+        let grid = build_both(&page(&[(1, &[b'A'; 40]), (2, &[FLASH, b'A', b'B', STEADY, b'C'])], &local));
         let cell = |column: usize| grid.cells[1][column];
         let state = |cell: Cell| (cell.flash, cell.attributes.flash_mode(), cell.attributes.flash_rate());
         assert!(!state(cell(0)).0);
