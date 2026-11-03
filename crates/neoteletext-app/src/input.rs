@@ -99,12 +99,16 @@ pub fn config(options: &Options) -> Result<Config, Failure> {
     if let Some(variant) = options.rom_variant {
         config.rom_variant = Some(variant);
     }
-    config.trace = options.verbose >= 2;
+    config.trace = options.verbose >= TRACE_VERBOSITY;
     // A thousand entries a page: the row attribute machine's cells only at
     // the highest verbosity.
     config.trace_cells = options.verbose >= 3;
     Ok(config)
 }
+
+/// The verbosity of `-vv`, from which the packet trace and the state
+/// machine trace are printed (REQ-CLI-002).
+pub const TRACE_VERBOSITY: u8 = 2;
 
 /// Opens the input: a file, or standard input for `-`.
 ///
@@ -236,6 +240,9 @@ pub fn load_from(options: &Options, input: &mut dyn Read) -> Result<Session, Fai
         Item::Packet { packet, meta } => {
             packets = packets.saturating_add(1);
             session.push(&packet, &meta);
+            // With -vv, each packet's line as it is read, not kept to the
+            // end of a long file (REQ-CLI-002).
+            session.print_trace();
         }
         Item::Detected(format) => {
             detected = Some(format);

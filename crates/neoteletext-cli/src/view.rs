@@ -15,7 +15,7 @@ use crossterm::event::{
 use crossterm::{cursor, execute, queue, terminal};
 use neoteletext_app::extras::PageExtras;
 use neoteletext_app::input::Opening;
-use neoteletext_app::session::Session;
+use neoteletext_app::session::{Session, TraceLine};
 use neoteletext_app::source::Source;
 use neoteletext_core::acq::{EnhancementReport, PageBuild, StoredPage};
 use neoteletext_core::config::Config;
@@ -148,10 +148,10 @@ impl ViewState {
     /// where its lines would spoil the page; otherwise it is dropped, and
     /// the viewer says so when it ends. Nothing is kept from turn to turn.
     fn write_trace(&mut self, session: &mut Session, out: &mut dyn Write, out_is_terminal: bool) {
-        session.trace.append(&mut self.walk_trace);
+        session.trace.extend(self.walk_trace.drain(..).map(TraceLine::Event));
         let now = Instant(self.start.elapsed().as_micros().try_into().unwrap_or(u64::MAX));
         let lost = self.viewer.take_trace(now, &mut |entry| {
-            session.trace.push(neoteletext_core::acq::Event::Trace(entry));
+            session.trace.push(TraceLine::Event(neoteletext_core::acq::Event::Trace(entry)));
         });
         if session.trace.is_empty() {
             return;
@@ -161,8 +161,8 @@ impl ViewState {
             session.trace.clear();
             return;
         }
-        for event in session.trace.drain(..) {
-            let _ = writeln!(out, "neottx: {event:?}");
+        for line in session.trace.drain(..) {
+            let _ = writeln!(out, "neottx: {line}");
         }
         if lost > 0 {
             let _ = writeln!(out, "neottx: {lost} viewer transitions came between two passes and were not kept");
