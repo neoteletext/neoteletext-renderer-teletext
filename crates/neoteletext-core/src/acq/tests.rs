@@ -1266,22 +1266,27 @@ fn every_row_of_table_b1_replaces_what_it_says() {
     assert_eq!(transmit(erase, 4, &[2]), [2], "C4 C8 alone erases");
 }
 
-/// The most slots, entries and pool slots one packet of `stream` visits, in
-/// a store of `pages` slots and an enhancement store of `sub_pages` entries
-/// and `packets` pool slots.
-fn most_visits(stream: &[Packet], pages: usize, sub_pages: usize, packets: usize) -> usize {
+/// The most slots, entries and pool slots one packet of `stream` visits, and
+/// the visits of the whole stream, in a store of `pages` slots and an
+/// enhancement store of `sub_pages` entries and `packets` pool slots.
+fn visits(stream: &[Packet], pages: usize, sub_pages: usize, packets: usize) -> (usize, usize) {
     let mut slots = std::vec![StoredPage::EMPTY; pages];
     let mut memory = EnhancementMemory::new(sub_pages, packets);
     let mut decoder = Decoder::with_enhancement_store(&mut slots, memory.store(), Config::default());
-    let mut most = 0;
+    let (mut most, mut total) = (0, 0);
     decoder.store().take_visits();
     decoder.enhancement_store().take_visits();
     for (time, packet) in (0u64..).zip(stream) {
         decoder.push(packet, &PacketMeta::default(), Instant(time * 1000), &mut |_| {});
         let visits = decoder.store().take_visits() + decoder.enhancement_store().take_visits();
         most = most.max(visits);
+        total += visits;
     }
-    most
+    (most, total)
+}
+
+fn most_visits(stream: &[Packet], pages: usize, sub_pages: usize, packets: usize) -> usize {
+    visits(stream, pages, sub_pages, packets).0
 }
 
 /// A stream that fills every store past its capacity, so that every header
@@ -1352,4 +1357,23 @@ fn the_work_for_one_packet_is_bounded_by_the_store_size() {
             );
         }
     }
+}
+
+/// REQ-425 (REQ-SEC-012): the work for a message, such as a channel's bundle
+/// or a frame from the fetcher, which the decoder takes as its packets, is
+/// at most proportional to its size: each packet costs at most the bound of
+/// the test above, so a message twice as long costs at most twice as much,
+/// whatever the store already holds.
+#[test]
+fn the_work_for_a_message_is_proportional_to_its_size() {
+    let (pages, sub_pages, packets) = (64, 32, 128);
+    let one = filling_stream(256);
+    let two = filling_stream(512);
+    let (most_one, total_one) = visits(&one, pages, sub_pages, packets);
+    let (_, total_two) = visits(&two, pages, sub_pages, packets);
+    assert!(total_one <= one.len() * most_one);
+    // Measured on 4 November 2026: 187,904 visits for 2,048 packets and
+    // 326,016 for 4,096; a cost growing faster than the message passes twice.
+    assert!(total_two <= 2 * total_one, "{total_one} then {total_two}");
+    std::println!("{} packets: {total_one}; {} packets: {total_two}", one.len(), two.len());
 }

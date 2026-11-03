@@ -432,6 +432,10 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | Untrusted bytes into the audio receiver | Independent data lines, records from a network or a file | Bounded records and fragments, CRCs, no panicking constructs, fuzzing (REQ-AUD-021) |
 | L8, the port contract | Everything the platform supplies | Narrow traits; the library holds no ambient authority (REQ-SEC-016) |
 
+**Bounded work (REQ-SEC-012).** Whatever crosses these boundaries, the work it causes is bounded in one of two ways, and nothing grows faster:
+- **Per packet, a fixed bound.** `Decoder::push` makes at most four passes over the page store's slots, five over the enhancement store's directory and two over its pool, all fixed for a build by the caller's slices; the test `the_work_for_one_packet_is_bounded_by_the_store_size` (`crates/neoteletext-core/src/acq/tests.rs`) counts the visits on worst-case streams with each capacity grown alone and together. Building a grid is bounded by `MAX_WALK_STEPS` (`worst_case_page_is_bounded` in `crates/neoteletext-core/tests/objects.rs`).
+- **Per message, proportional to its size.** Every reader of L0 and L7 is one streaming pass with bounded state per byte and a bounded message (`MAX_FRAME` for the pipe between `neottx`'s processes, the record bounds of `neoteletext-web::records`, the head and body bounds of the HTTP and WebSocket readers), and the packets a message yields each cost the per-packet bound; `the_work_for_a_message_is_proportional_to_its_size` checks that a stream twice as long costs at most twice as much.
+
 ---
 
 ## 7. Crates
