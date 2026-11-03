@@ -15,7 +15,7 @@ mod common;
 use std::string::{String, ToString};
 use std::vec::Vec;
 
-use common::{Counter, Replay, Reply, header_value, response};
+use common::{Counter, Replay, Reply, assert_profile_headers, header_value, response};
 #[cfg(feature = "push")]
 use common::{client_frames, server_frame};
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
@@ -222,47 +222,6 @@ fn tti_response(headers: &[&str]) -> Reply {
     Reply::Bytes(response("200 OK", &all, TTI))
 }
 
-/// REQ-WEB-014: every request carries only the permitted headers, never
-/// `Referer`, always `Accept-Encoding: identity`.
-fn assert_profile_headers(replay: &Replay) {
-    // REQ-503's table of request headers, exactly: no request sends
-    // Content-Type, and the agent offers no WebSocket extension.
-    const PERMITTED: [&str; 13] = [
-        "host",
-        "user-agent",
-        "accept",
-        "accept-encoding",
-        "cookie",
-        "if-none-match",
-        "if-modified-since",
-        "content-length",
-        "upgrade",
-        "connection",
-        "sec-websocket-key",
-        "sec-websocket-version",
-        "sec-websocket-protocol",
-    ];
-    assert_ne!(replay.requests.len(), 0);
-    for (_, request) in &replay.requests {
-        let text = String::from_utf8_lossy(request);
-        let head = text.split("\r\n\r\n").next().unwrap();
-        let mut lines = head.split("\r\n");
-        let request_line = lines.next().unwrap();
-        assert!(request_line.starts_with("GET ") || request_line.starts_with("POST "), "{request_line}");
-        assert!(request_line.ends_with(" HTTP/1.1"));
-        let mut names = Vec::new();
-        for line in lines {
-            let name = line.split(':').next().unwrap().to_ascii_lowercase();
-            assert!(PERMITTED.contains(&name.as_str()), "header {name} is outside the profile");
-            names.push(name);
-        }
-        assert!(names.contains(&"host".to_string()) && names.contains(&"user-agent".to_string()));
-        if !names.contains(&"upgrade".to_string()) {
-            assert_eq!(header_value(request, "Accept-Encoding").as_deref(), Some("identity"));
-        }
-    }
-}
-
 /// The configuration of a port that follows redirects out of the service,
 /// as `neottx` does for a service opened by its descriptor: the default
 /// keeps them inside (REQ-SEC-020).
@@ -313,7 +272,7 @@ fn descriptor_page_and_conditional_request() {
     assert_eq!(header_value(last, "Cookie").as_deref(), Some("session=v1-abc"));
     // One persistent connection served all three requests.
     assert_eq!(harness.replay().connects.len(), 1);
-    assert_profile_headers(harness.replay());
+    assert_profile_headers(harness.replay(), &[]);
 }
 
 /// REQ-497: a connection made without encryption is reported as an event.
@@ -731,7 +690,7 @@ fn websocket_push() {
     harness.input(Input::Subscribe(Subscription::Pages(&wanted)));
     let (_, last) = harness.replay().sent.last().unwrap().clone();
     assert_eq!(client_frames(&last).last(), Some(&(0x1, b"subscribe 100 1A0".to_vec())));
-    assert_profile_headers(harness.replay());
+    assert_profile_headers(harness.replay(), &[]);
 }
 
 /// DOC-1960, REQ-1688: a REDIRECT record on the push connection
@@ -2734,7 +2693,7 @@ fn discovery_reads_pointers_and_touches_no_cookie() {
     assert_eq!(harness.replay().connects.len(), connects + 2, "discovery's connection was used again");
     let last = harness.replay().requests_to("secure.example:443").pop().unwrap();
     assert_eq!(header_value(&last, "Cookie").as_deref(), Some("id=1"));
-    assert_profile_headers(harness.replay());
+    assert_profile_headers(harness.replay(), &[]);
 }
 
 // REQ-2476: a body of any length is read only to its prefix, without being
