@@ -51,6 +51,9 @@ const APPLICATION_CRATES: &[(&str, &[&str])] = &[
             "neoteletext-web",
             "neoteletext-image",
             "neoteletext-transport",
+            // DEC-2445: a one-shot command selects its page on a live
+            // channel.
+            "neoteletext-input",
         ],
     ),
     (

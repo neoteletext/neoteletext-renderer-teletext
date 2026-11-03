@@ -70,7 +70,14 @@ impl ViewState {
             // A part of a list is taken by the source; a step waiting for
             // it is taken up in the same turn.
             | Notice::SubPages(_)
-            | Notice::SubPagesMissing(..) => {}
+            | Notice::SubPagesMissing(..)
+            // A live channel's records, which the source keeps.
+            | Notice::Index(_)
+            | Notice::IndexComplete(_)
+            | Notice::SubPageList(_)
+            | Notice::SubPageListComplete(..)
+            | Notice::SubPageListRefused(..)
+            | Notice::Links(_) => {}
             Notice::RedirectToOtherChannel(address) => self.messages.push(format!("redirected to {address}")),
             Notice::PageRedirect(mpp, sub, query) => self.typing.redirected(mpp, sub, query),
             Notice::Denied(status, place) => {

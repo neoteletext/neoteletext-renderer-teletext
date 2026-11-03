@@ -18,6 +18,8 @@ neoteletext-formats = { workspace = true, features = ["std", "transport", "slice
 neoteletext-slicer = { workspace = true, optional = true }
 # Under `live`: the whole user agent, with push and cookies.
 neoteletext-web = { workspace = true, optional = true, features = ["default", "std"] }
+# DEC-2445: a one-shot command selects its page on a live channel.
+neoteletext-input = { workspace = true, optional = true }
 embedded-io = { workspace = true, optional = true }
 neoteletext-transport = { workspace = true, optional = true }
 # Apache-2.0, ISC or MIT: TLS for live feeds and web services. Pinned
@@ -40,7 +42,7 @@ libc = "=0.2.190"
 default = ["live", "slice", "write-text"]
 # Live feeds and web services (area WEB, REQ-INP-022): the web module, TLS
 # and the fetcher process of REQ-SEC-018. Without it no TLS code is built.
-live = ["dep:neoteletext-web", "dep:embedded-io", "dep:neoteletext-transport", "dep:rustls"]
+live = ["dep:neoteletext-web", "dep:neoteletext-input", "dep:embedded-io", "dep:neoteletext-transport", "dep:rustls"]
 # Raw sampled video through the software data slicer (area SLC).
 slice = ["dep:neoteletext-slicer"]
 # Writing pages from text in neoteletext's own sets (REQ-CLI-010,

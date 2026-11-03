@@ -634,6 +634,7 @@ dependencies = [
  "neoteletext-core",
  "neoteletext-formats",
  "neoteletext-image",
+ "neoteletext-input",
  "neoteletext-slicer",
  "neoteletext-transport",
  "neoteletext-web",

@@ -109,11 +109,17 @@ fn live_source(_options: &Options) -> Result<Box<dyn Source>, Failure> {
 }
 
 /// Collects a live source for `--duration` seconds, or until `wanted` is
-/// stored and complete (REQ-CLI-002).
+/// stored and complete (REQ-CLI-002). On a live channel the page wanted, or
+/// none, is selected on its push connection (DEC-2445).
 pub(super) fn load_live(options: &Options, wanted: Option<PageAddress>) -> Result<Session, Failure> {
     let config = config(options)?;
     let mut session = Session::new(config, options.pages);
     let mut source = live_source(options)?;
+    #[cfg(feature = "live")]
+    let mut selecting = {
+        session.keep(neoteletext_input::is_input_packet);
+        super::select::Selecting::new(wanted)
+    };
     let start = std::time::Instant::now();
     let limit = std::time::Duration::from_secs(options.duration);
     if let Some(page) = wanted {
@@ -124,6 +130,8 @@ pub(super) fn load_live(options: &Options, wanted: Option<PageAddress>) -> Resul
         let now = neoteletext_core::types::Instant(u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX));
         let alive = source.poll(&mut session, now);
         for notice in source.notices() {
+            #[cfg(feature = "live")]
+            selecting.notice(&notice, source.as_mut());
             match notice {
                 crate::pipe::Notice::InitialPage(mpp) if !asked_initial => {
                     if let Some(page) = PageAddress::from_mpp(mpp) {
@@ -135,6 +143,8 @@ pub(super) fn load_live(options: &Options, wanted: Option<PageAddress>) -> Resul
                 _ => {}
             }
         }
+        #[cfg(feature = "live")]
+        selecting.turn(&mut session, source.as_mut());
         let done = wanted
             .and_then(|page| session.page(page, SubCode::ANY))
             .is_some_and(|page| page.state == PageState::Complete);
@@ -143,6 +153,7 @@ pub(super) fn load_live(options: &Options, wanted: Option<PageAddress>) -> Resul
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    session.channel_index = source.index();
     // Asked before `finish`, whose own headers count as packets.
     let nothing_arrived = session.packets_received() == 0;
     session.finish();

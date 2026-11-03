@@ -180,3 +180,79 @@ impl PageList {
 
 #[cfg(test)]
 mod tests;
+
+/// The sub-page after or before `current` in a page's whole list, as a live
+/// channel sends it (DOC-1959), wrapping at either end; `SubCode::ANY`, or a
+/// sub-code the list does not name, stands before the first.
+pub(super) fn step_in(list: &[u16], current: SubCode, forward: bool) -> Option<SubCode> {
+    let place = (!current.is_any()).then(|| list.binary_search(&current.value()).ok()).flatten();
+    let next = match (place, forward) {
+        (Some(place), true) => list.get(place.saturating_add(1)).or_else(|| list.first()),
+        (Some(place), false) => place.checked_sub(1).and_then(|before| list.get(before)).or_else(|| list.last()),
+        (None, true) => list.first(),
+        (None, false) => list.last(),
+    };
+    next.map(|&subcode| SubCode::new(subcode))
+}
+
+/// A live page's list of sub-pages (DOC-1959): the records of the version
+/// being sent, and the last whole list, which a partial one never replaces.
+#[derive(Clone, Debug, Default)]
+pub(super) struct LiveLists {
+    /// The page, version and sub-codes of the sending in progress.
+    gathering: Option<(u16, u16, Vec<u16>)>,
+    /// Each page's whole list, of the pages whose list came; at most
+    /// [`MAX_LIVE_PAGES`].
+    whole: BTreeMap<u16, Vec<u16>>,
+}
+
+/// The most pages whose live lists are kept: the page shown and the few
+/// before it, which a viewer goes back to.
+const MAX_LIVE_PAGES: usize = 8;
+
+impl LiveLists {
+    /// A record of a sending: one of another page or version begins anew.
+    pub(super) fn record(&mut self, list: &crate::pipe::LiveList) {
+        let same =
+            self.gathering.as_ref().is_some_and(|(page, version, _)| (*page, *version) == (list.page, list.version));
+        if !same {
+            self.gathering = Some((list.page, list.version, Vec::new()));
+        }
+        if let Some((_, _, subcodes)) = self.gathering.as_mut()
+            && subcodes.len().saturating_add(list.subcodes.len()) <= neoteletext_core::limits::MAX_SUBPAGES
+        {
+            subcodes.extend_from_slice(&list.subcodes);
+        }
+    }
+
+    /// The sending is whole: it replaces the page's list, if its rows
+    /// ascend (REQ-1890), as the agent checked them.
+    pub(super) fn complete(&mut self, page: u16, version: u16) {
+        let Some((gathered_page, gathered_version, subcodes)) = self.gathering.take() else { return };
+        if (gathered_page, gathered_version) != (page, version)
+            || !subcodes.windows(2).all(|pair| pair.first() < pair.last())
+        {
+            return;
+        }
+        self.whole.remove(&page);
+        if self.whole.len() >= MAX_LIVE_PAGES
+            && let Some(&oldest) = self.whole.keys().next()
+        {
+            self.whole.remove(&oldest);
+        }
+        self.whole.insert(page, subcodes);
+    }
+
+    /// The sending was refused: what came of it goes, and the list held
+    /// stays.
+    pub(super) fn refused(&mut self, page: u16, version: u16) {
+        if self.gathering.as_ref().is_some_and(|(held, held_version, _)| (*held, *held_version) == (page, version)) {
+            self.gathering = None;
+        }
+    }
+
+    /// A page's whole list, when one came.
+    pub(super) fn of(&self, page: u16) -> Option<&[u16]> {
+        self.whole.get(&page).map(Vec::as_slice)
+    }
+}

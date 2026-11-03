@@ -13,6 +13,15 @@ pub fn list(options: &Options) -> Result<(), Failure> {
     let mut session = input::load(options)?;
     sandbox_closed(options.no_sandbox)?;
     let mut out = std::io::stdout().lock();
+    // DOC-1955: a live channel's index says what the channel has, which is
+    // more than the pages its connection sent.
+    if !session.channel_index.is_empty() {
+        let _ = writeln!(out, "index of the channel:");
+        for entry in &session.channel_index {
+            let _ = writeln!(out, "{:03X}  sub-pages {:>4}  {}", entry.page, entry.subpages, entry.title);
+        }
+        let _ = writeln!(out);
+    }
     let pages = session.pages();
     let page_count = pages.len();
     let keys: Vec<PageKey> = pages.iter().map(|page| page.key).collect();

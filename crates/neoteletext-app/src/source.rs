@@ -63,6 +63,11 @@ pub trait Source {
         SubPageStep::NoList
     }
 
+    /// A live channel's index, page by page, when it sent one (DOC-1955).
+    fn index(&self) -> Vec<crate::pipe::IndexEntry> {
+        Vec::new()
+    }
+
     /// Follows a link to another service.
     fn follow(&mut self, _service: u8, _page: PageAddress, _subcode: SubCode) {}
 

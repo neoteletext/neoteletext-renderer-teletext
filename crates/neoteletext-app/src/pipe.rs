@@ -21,6 +21,10 @@ pub const MAX_LIST_ROWS: usize = 64;
 /// The longest version of a page's list: 64 bits of a digest in hexadecimal,
 /// the web module's `subpages::MAX_VALIDATOR`, asserted by the fetcher.
 pub const MAX_LIST_VERSION: usize = 16;
+/// The most pages an index record holds: it is one magazine's.
+pub const MAX_INDEX_PAGES: usize = neoteletext_core::limits::PAGE_NUMBERS_PER_MAGAZINE;
+/// The most sub-codes of one record of a live list: a page's every sub-page.
+pub const MAX_LIVE_LIST: usize = neoteletext_core::limits::MAX_SUBPAGES;
 
 /// Where page bytes came from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -130,6 +134,59 @@ pub enum Notice {
     /// read: the part number. Part 0 missing means the page keeps its
     /// sub-pages in its page file and has no list (DOC-2038).
     SubPagesMissing(u16, u8),
+    /// A record of a live channel's index (DOC-1955): pages shown at once,
+    /// added or replacing what was there.
+    Index(IndexPart),
+    /// Every record of the index sending of this generation has arrived:
+    /// the pages they listed are the whole index.
+    IndexComplete(u16),
+    /// A record of a live page's list of sub-pages (DOC-1959, REQ-1503):
+    /// a record of another version begins a new list.
+    SubPageList(LiveList),
+    /// Every record of page `0xMPP`'s list of this version has arrived: it
+    /// is the page's whole list, and replaces the list held.
+    SubPageListComplete(u16, u16),
+    /// A record broke page `0xMPP`'s sending of this version: what came of
+    /// it is discarded, and the page keeps the list it had.
+    SubPageListRefused(u16, u16),
+    /// A live sub-page's TTI Link Extension links from its LINKS records
+    /// (DOC-1958, REQ-1494), written as a TTI page file of its `PN` and `SC`
+    /// and its `LN`, `LK` and `LT` lines, for the same store as a page
+    /// file's; none replaces the links held for the sub-page.
+    Links(Vec<u8>),
+}
+
+/// One page of a live channel's index.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct IndexEntry {
+    /// The page, `0xMPP`.
+    pub page: u16,
+    /// Its number of sub-pages.
+    pub subpages: u16,
+    /// Its title.
+    pub title: String,
+}
+
+/// One record of a live channel's index, as the fetcher passes it on: one
+/// magazine's pages, at most [`MAX_INDEX_PAGES`].
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct IndexPart {
+    /// The sending's generation.
+    pub generation: u16,
+    /// The pages.
+    pub pages: Vec<IndexEntry>,
+}
+
+/// One record of a live page's list of sub-pages: at most
+/// [`MAX_LIVE_LIST`] sub-codes, in the list's ascending order.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LiveList {
+    /// The page, `0xMPP`.
+    pub page: u16,
+    /// The list's version.
+    pub version: u16,
+    /// The record's sub-codes.
+    pub subcodes: Vec<u16>,
 }
 
 /// A part of a page's list of sub-pages, as the fetcher passes it on.

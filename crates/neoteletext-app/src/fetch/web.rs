@@ -7,6 +7,7 @@ use super::wakes::{Wake, Wakes};
 use super::{clock, neottx};
 use crate::pipe::{self, Frame, Notice};
 use neoteletext_core::types::Instant;
+use neoteletext_formats::page::{AddressSpan, PageFile};
 use neoteletext_transport::{SOCKET_READ, web_address};
 use neoteletext_web::agent::{
     Config, Event, Failure, Input, InputMessage, Output, PageBytes, PushStop, Source as Came, Storage, UserAgent,
@@ -17,9 +18,10 @@ use neoteletext_web::descriptor::Descriptor;
 use neoteletext_web::http::MediaType;
 use neoteletext_web::port::{ConnectionId, Pump};
 use neoteletext_web::proxy::Proxy;
+use neoteletext_web::records::links::LinksRecord;
 use neoteletext_web::records::redirect::RedirectRecord;
 use neoteletext_web::subpages::{self, PartNumber};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::net::IpAddr;
 use std::sync::mpsc::Sender;
 use std::time::Instant as StdInstant;
@@ -66,13 +68,16 @@ pub(super) fn run_web(
     // decoder to know when keys may go (area INT).
     let push_state: Cell<Option<bool>> = Cell::new(None);
     let invalid = Cell::new(InvalidReport::default());
+    // A live sub-page's links while its LINKS sending is in progress.
+    let links = RefCell::new(None);
     let mut next_tick: Option<Instant> = Some(Instant(0));
     let sink = |output: Output<'_>, pump: &mut Pump<StdTransport>, next_tick: &mut Option<Instant>| {
         if let Some(net) = output.net() {
             pump.execute(net);
             return;
         }
-        if forward(output, next_tick, &service_ready, &push_state, &invalid, clock(start)).is_err() {
+        let noted = Noted { service_ready: &service_ready, push_state: &push_state, invalid: &invalid, links: &links };
+        if forward(output, next_tick, &noted, clock(start)).is_err() {
             broken.set(true);
         }
     };
@@ -186,17 +191,28 @@ fn stopped(stop: PushStop) -> String {
     }
 }
 
+/// What the loop notes from the agent's outputs between its turns.
+struct Noted<'a> {
+    /// A new service is ready.
+    service_ready: &'a Cell<bool>,
+    /// The push connection opened (true) or was lost (false).
+    push_state: &'a Cell<Option<bool>>,
+    /// The invalid packets' report.
+    invalid: &'a Cell<InvalidReport>,
+    /// A live sub-page's links while its sending is in progress.
+    links: &'a RefCell<Option<Box<PageFile>>>,
+}
+
 /// Acts on one of the agent's outputs that is not for the network: a timer
 /// moves the next tick, pages and notices go to the decoder, and a new
 /// service or a push connection's change is noted for the loop.
 fn forward(
     output: Output<'_>,
     next_tick: &mut Option<Instant>,
-    service_ready: &Cell<bool>,
-    push_state: &Cell<Option<bool>>,
-    invalid: &Cell<InvalidReport>,
+    noted: &Noted<'_>,
     now: Instant,
 ) -> std::io::Result<()> {
+    let Noted { service_ready, push_state, invalid, links } = *noted;
     match output {
         Output::Timer { at } => {
             *next_tick = Some(next_tick.map_or(at, |current| current.min(at)));
@@ -252,6 +268,15 @@ fn forward(
         }
         Output::Event(Event::PageCurrent { page, .. }) => send(&Frame::Notice(Notice::Current(page.mpp()))),
         Output::Event(Event::SubPages { page, part, bytes }) => send_list_part(page.mpp(), part, bytes),
+        Output::Event(
+            event @ (Event::Index(_)
+            | Event::IndexComplete { .. }
+            | Event::SubPageList(_)
+            | Event::SubPageListComplete { .. }
+            | Event::SubPageListRefused { .. }
+            | Event::Links(_)
+            | Event::LinksRefused { .. }),
+        ) => forward_record(event, links),
         Output::Event(Event::SubPagesMissing { page, part } | Event::SubPagesFailed { page, part, .. }) => {
             send(&Frame::Notice(Notice::SubPagesMissing(page.mpp(), part.number())))
         }
@@ -271,6 +296,83 @@ fn forward(
         ) => send(&Frame::Notice(Notice::Message(format!("{event:?}")))),
         _ => Ok(()),
     }
+}
+
+/// Passes a live channel's record on to the decoder: its index (DOC-1955),
+/// a page's list of sub-pages (DOC-1959), and a sub-page's links when their
+/// sending is whole (DOC-1958), a refused sending dropping every link held
+/// for the sub-page.
+fn forward_record(event: Event<'_>, links: &RefCell<Option<Box<PageFile>>>) -> std::io::Result<()> {
+    match event {
+        Event::Index(record) => send(&Frame::Notice(Notice::Index(pipe::IndexPart {
+            generation: record.generation,
+            pages: record
+                .pages()
+                .map(|page| pipe::IndexEntry { page: page.page, subpages: page.subpages, title: page.title.to_owned() })
+                .collect(),
+        }))),
+        Event::IndexComplete { generation } => send(&Frame::Notice(Notice::IndexComplete(generation))),
+        Event::SubPageList(list) => send(&Frame::Notice(Notice::SubPageList(pipe::LiveList {
+            page: list.page.mpp(),
+            version: list.version,
+            subcodes: list.entries().map(|entry| entry.subcode.value()).collect(),
+        }))),
+        Event::SubPageListComplete { page, version } => {
+            send(&Frame::Notice(Notice::SubPageListComplete(page.mpp(), version)))
+        }
+        Event::SubPageListRefused { page, version } => {
+            send(&Frame::Notice(Notice::SubPageListRefused(page.mpp(), version)))
+        }
+        Event::Links(record) => match take_links(&mut links.borrow_mut(), &record) {
+            Some(page) => send_links(&page),
+            None => Ok(()),
+        },
+        Event::LinksRefused { page, subcode } => {
+            links.borrow_mut().take();
+            let none = Box::new(PageFile { address: page, subcode, ..PageFile::default() });
+            send_links(&none)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Adds a LINKS record's links to the sub-page's sending: part 0 begins it,
+/// a later part adds to it, as the agent checked their order. The sub-page
+/// with every link of the sending, when this record ends it.
+fn take_links(held: &mut Option<Box<PageFile>>, record: &LinksRecord<'_>) -> Option<Box<PageFile>> {
+    if record.part == 0 {
+        *held = Some(Box::new(PageFile { address: record.page, subcode: record.subcode, ..PageFile::default() }));
+    }
+    let page = held.as_mut()?;
+    // The record's addresses are spans of its own bytes, moved to the page's.
+    let mut rebase = |span: AddressSpan| {
+        let address = record.address(span);
+        if address.is_empty() { Some(AddressSpan::NONE) } else { page.link_text.add(address) }
+    };
+    let mut fitted = true;
+    for mut line in record.key_links() {
+        line.url = rebase(line.url).unwrap_or(AddressSpan::NONE);
+        fitted &= page.links.push(line);
+    }
+    for mut link in record.number_links() {
+        link.destination.url = rebase(link.destination.url).unwrap_or(AddressSpan::NONE);
+        fitted &= page.number_links.push(link);
+    }
+    for mut link in record.text_links() {
+        link.destination.url = rebase(link.destination.url).unwrap_or(AddressSpan::NONE);
+        fitted &= page.text_links.push(link);
+    }
+    // The agent held the sending to a page file's bounds (DOC-1958).
+    page.links_valid = fitted && !page.links.is_empty();
+    (record.part.saturating_add(1) >= record.parts).then(|| held.take()).flatten()
+}
+
+/// Sends a sub-page's links to the decoder as the TTI lines a page file
+/// would give them.
+fn send_links(page: &PageFile) -> std::io::Result<()> {
+    let mut tti = Vec::new();
+    neoteletext_formats::write::write_tti(&[page], &mut tti)?;
+    send(&Frame::Notice(Notice::Links(tti)))
 }
 
 /// Reads a part of a page's list with the web module's bounded reader
@@ -375,8 +477,15 @@ fn hand_frame(agent: &mut Agent<'_>, now: Instant, frame: Frame, more: bool, out
         }
         Frame::SubPages(mpp, part) => {
             let page = neoteletext_core::types::PageAddress::from_mpp(mpp);
-            if let (Some(page), Some(part)) = (page, PartNumber::new(usize::from(part))) {
-                agent.handle(now, Input::FetchSubPages { page, part }, out);
+            match (page, PartNumber::new(usize::from(part))) {
+                // A live channel has no files: its lists come on its
+                // connection (DOC-1959), so the decoder steps by those or
+                // the store.
+                _ if agent.is_live() => {
+                    let _ = send(&Frame::Notice(Notice::SubPagesMissing(mpp, part)));
+                }
+                (Some(page), Some(part)) => agent.handle(now, Input::FetchSubPages { page, part }, out),
+                _ => {}
             }
         }
         Frame::Input(message) => {

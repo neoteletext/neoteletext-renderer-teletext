@@ -4,7 +4,9 @@ whose page 100 has COUNT sub-pages, each saying `SUB NNNN` in row 1: Right
 from the first reaches each in ascending order and wraps to the first, and
 Left from the first wraps to the last (REQ-328, REQ-1888). Test code.
 
-Usage: drive_subpages.py TTX PORT COUNT. Exit status 0 when every step passed.
+Usage: drive_subpages.py TTX PORT COUNT [leave]. With `leave`, the channel
+takes keys, and Ctrl+] gives them to the viewer first. Exit status 0 when
+every step passed.
 """
 
 import os
@@ -18,10 +20,13 @@ import time
 STEP_SECONDS = 5
 RIGHT = b"\x1b[C"
 LEFT = b"\x1b[D"
+# Ctrl+], which leaves a channel's keys to the viewer.
+LEAVE = b"\x1d"
 
 
 def main():
     neottx, port, count = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    leave = sys.argv[4:] == ["leave"]
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = "xterm-256color"
@@ -53,6 +58,8 @@ def main():
     failures = []
     if not wait_for("SUB 0001"):
         failures.append("the first sub-page")
+    if leave and not press(LEAVE, "Keys are the viewer's"):
+        failures.append("Ctrl+] leaves the channel's keys")
     for place in range(2, count + 1):
         if not press(RIGHT, f"SUB {place:04d}"):
             failures.append(f"Right to {place:04d}")

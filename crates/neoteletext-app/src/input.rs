@@ -14,6 +14,8 @@ use std::io::Read;
 use std::net::IpAddr;
 
 mod feed;
+#[cfg(feature = "live")]
+mod select;
 
 pub use feed::{Opening, is_live, link_address, open_live, opening};
 

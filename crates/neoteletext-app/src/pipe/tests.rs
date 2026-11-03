@@ -40,6 +40,15 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
             version: "4be81f7a09c2d635".into(),
             subcodes: vec![0x65, 0x66],
         })),
+        Frame::Notice(Notice::Index(IndexPart {
+            generation: 7,
+            pages: vec![IndexEntry { page: 0x100, subpages: 1, title: "Index".into() }],
+        })),
+        Frame::Notice(Notice::IndexComplete(7)),
+        Frame::Notice(Notice::SubPageList(LiveList { page: 0x302, version: 2, subcodes: vec![1, 2, 3] })),
+        Frame::Notice(Notice::SubPageListComplete(0x302, 2)),
+        Frame::Notice(Notice::SubPageListRefused(0x302, 3)),
+        Frame::Notice(Notice::Links(b"PN,30201\nSC,0001\nLN,R,100,Index\n".to_vec())),
     ];
     let mut buffer = Vec::new();
     for frame in &frames {
@@ -70,6 +79,8 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
         &[b'T', 0, 0, 0, 2, 1, 2],
         // A part of a list with more rows than a part holds, 65.
         &[b'p', 0, 0, 0, 11, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 65],
+        // An index generation with a byte left over.
+        &[b'u', 0, 0, 0, 3, 0, 7, 0],
         // A request for a part with a byte left over.
         &[b'x', 0, 0, 0, 4, 1, 0, 0, 9],
     ] {

@@ -55,8 +55,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     }
 
     /// Whether the open channel is live (REQ-WEB-018): its pages and its
-    /// contents come on its push connection, and none is fetched.
-    pub(super) const fn is_live(&self) -> bool {
+    /// contents come on its push connection, and none is fetched, so a port
+    /// asks for no file of it.
+    #[must_use]
+    pub const fn is_live(&self) -> bool {
         self.live
     }
 

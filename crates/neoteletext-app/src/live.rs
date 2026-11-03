@@ -65,6 +65,12 @@ pub struct Live {
     /// The list of sub-pages of the page asked for last, as far as stepping
     /// has needed it (REQ-1888).
     list: Option<list::PageList>,
+    /// A live channel's lists of sub-pages (DOC-1959).
+    channel_lists: list::LiveLists,
+    /// A live channel's index (DOC-1955): each page's sub-pages and title,
+    /// and the pages the sending in progress listed, with its generation.
+    index: std::collections::BTreeMap<u16, (u16, String)>,
+    index_sending: Option<(u16, std::collections::BTreeSet<u16>)>,
 }
 
 /// Bounds of a service's refresh interval, in seconds (concept decision 13).
@@ -98,6 +104,9 @@ impl Live {
             region_named,
             receiver_region: None,
             list: None,
+            channel_lists: list::LiveLists::default(),
+            index: std::collections::BTreeMap::new(),
+            index_sending: None,
         }
     }
 
@@ -164,6 +173,39 @@ impl Live {
         first
     }
 
+    /// A record of a live channel's index: its pages are shown at once;
+    /// one of another generation begins a new sending (DOC-1955).
+    fn take_index(&mut self, part: pipe::IndexPart) {
+        let listed = match &mut self.index_sending {
+            Some((generation, listed)) if *generation == part.generation => listed,
+            sending => &mut sending.insert((part.generation, std::collections::BTreeSet::new())).1,
+        };
+        for entry in part.pages {
+            listed.insert(entry.page);
+            self.index.insert(entry.page, (entry.subpages, entry.title));
+        }
+    }
+
+    /// A live sub-page's links, as a page file's `LN`, `LK` and `LT` lines
+    /// give them, replace those held for it; none removes them (DOC-1958).
+    fn take_links(&mut self, tti: &[u8]) {
+        let services = self.services.clone();
+        let extras = &mut self.extras;
+        let mut reader = neoteletext_formats::tti::TtiReader::new();
+        let mut take = |item: Item<'_>| {
+            if let Item::Page(file) = item {
+                let key = extras::key(file);
+                if file.uses_link_lines() || !file.number_links.is_empty() || !file.text_links.is_empty() {
+                    extras.insert(key, extras::from_page(file, &services));
+                } else {
+                    extras.remove(&key);
+                }
+            }
+        };
+        reader.feed(tti, &mut take);
+        reader.finish(&mut take);
+    }
+
     fn send(&mut self, frame: &Frame) {
         let _ = pipe::write(&mut self.requests, frame);
     }
@@ -215,6 +257,9 @@ impl Source for Live {
                     self.extras.clear();
                     self.last_bytes.clear();
                     self.list = None;
+                    self.channel_lists = list::LiveLists::default();
+                    self.index.clear();
+                    self.index_sending = None;
                     self.services = names;
                 }
                 Frame::Notice(Notice::Refresh(seconds)) => {
@@ -252,6 +297,17 @@ impl Source for Live {
                         self.notices.push(Notice::SubPagesMissing(page, part));
                     }
                 }
+                Frame::Notice(Notice::Index(part)) => self.take_index(part),
+                Frame::Notice(Notice::IndexComplete(generation)) => {
+                    if let Some((sending, listed)) = self.index_sending.take_if(|(sending, _)| *sending == generation) {
+                        self.index.retain(|page, _| listed.contains(page));
+                        self.index_sending = Some((sending, listed));
+                    }
+                }
+                Frame::Notice(Notice::SubPageList(list)) => self.channel_lists.record(&list),
+                Frame::Notice(Notice::SubPageListComplete(page, version)) => self.channel_lists.complete(page, version),
+                Frame::Notice(Notice::SubPageListRefused(page, version)) => self.channel_lists.refused(page, version),
+                Frame::Notice(Notice::Links(tti)) => self.take_links(&tti),
                 Frame::Notice(notice) => self.notices.push(notice),
                 // The fetcher never sends these to a decoder; ignore rather
                 // than trust.
@@ -318,6 +374,10 @@ impl Source for Live {
 
     fn subpage_step(&mut self, page: PageAddress, current: SubCode, forward: bool) -> SubPageStep {
         let mpp = page.mpp();
+        // A live page's list comes whole on its connection (DOC-1959).
+        if let Some(whole) = self.channel_lists.of(mpp) {
+            return list::step_in(whole, current, forward).map_or(SubPageStep::NoList, SubPageStep::To);
+        }
         if self.list.as_ref().is_none_or(|list| list.page != mpp) {
             self.list = Some(list::PageList::new(mpp));
         }
@@ -330,6 +390,13 @@ impl Source for Live {
             self.send(&Frame::SubPages(mpp, part));
         }
         step
+    }
+
+    fn index(&self) -> Vec<pipe::IndexEntry> {
+        self.index
+            .iter()
+            .map(|(&page, (subpages, title))| pipe::IndexEntry { page, subpages: *subpages, title: title.clone() })
+            .collect()
     }
 
     fn send_input(&mut self, message: &[u8]) {

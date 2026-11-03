@@ -1,7 +1,10 @@
 //! The wire form of the frames: the kind bytes, the strict payload reader,
 //! and writing and reading one frame (decision 26 of IMPLEMENTATION-LOG.md).
 
-use super::{Frame, ListPart, MAX_FRAME, MAX_INPUT_MESSAGE, MAX_LIST_ROWS, MAX_LIST_VERSION, Notice, Origin, PageData};
+use super::{
+    Frame, IndexEntry, IndexPart, ListPart, LiveList, MAX_FRAME, MAX_INDEX_PAGES, MAX_INPUT_MESSAGE, MAX_LIST_ROWS,
+    MAX_LIST_VERSION, MAX_LIVE_LIST, Notice, Origin, PageData,
+};
 use neoteletext_core::consts::NIBBLE_MASK;
 use std::io::{self, Read, Write};
 
@@ -37,6 +40,13 @@ const REGION: u8 = b'r';
 const SUB_PAGES: u8 = b'p';
 const SUB_PAGES_MISSING: u8 = b'm';
 const SUB_PAGES_REQUEST: u8 = b'x';
+const INDEX: u8 = b'c';
+const INDEX_COMPLETE: u8 = b'u';
+const LIVE_LIST: u8 = b't';
+const LIVE_LIST_COMPLETE: u8 = b'z';
+// Every letter but H is taken or retired.
+const LIVE_LIST_REFUSED: u8 = b'!';
+const LINKS: u8 = b'H';
 /// The most strings one frame may carry.
 const MAX_STRINGS: usize = 256;
 
@@ -187,6 +197,14 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
         Frame::Notice(Notice::SubPagesMissing(mpp, part)) => {
             put(out, SUB_PAGES_MISSING, &[mpp.to_be_bytes().as_slice(), &[*part]].concat())
         }
+        Frame::Notice(
+            notice @ (Notice::Index(_)
+            | Notice::IndexComplete(_)
+            | Notice::SubPageList(_)
+            | Notice::SubPageListComplete(..)
+            | Notice::SubPageListRefused(..)
+            | Notice::Links(_)),
+        ) => write_record_notice(out, notice),
         Frame::Notice(Notice::SubPages(list)) => {
             if list.subcodes.len() > MAX_LIST_ROWS || list.version.len() > MAX_LIST_VERSION {
                 return Err(io::Error::other("a part of a list too long"));
@@ -199,6 +217,48 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
             }
             put(out, SUB_PAGES, &buffer)
         }
+    }
+}
+
+/// Writes a notice of a live channel's records: its index, a page's list of
+/// sub-pages and a sub-page's links.
+fn write_record_notice(out: &mut dyn Write, notice: &Notice) -> io::Result<()> {
+    match notice {
+        Notice::Index(index) => {
+            if index.pages.len() > MAX_INDEX_PAGES {
+                return Err(io::Error::other("an index record too long"));
+            }
+            let mut buffer =
+                [index.generation.to_be_bytes(), u16::try_from(index.pages.len()).unwrap_or(0).to_be_bytes()].concat();
+            for entry in &index.pages {
+                buffer.extend_from_slice(&entry.page.to_be_bytes());
+                buffer.extend_from_slice(&entry.subpages.to_be_bytes());
+                put_string(&mut buffer, &entry.title);
+            }
+            put(out, INDEX, &buffer)
+        }
+        Notice::IndexComplete(generation) => put(out, INDEX_COMPLETE, &generation.to_be_bytes()),
+        Notice::SubPageList(list) => {
+            if list.subcodes.len() > MAX_LIVE_LIST {
+                return Err(io::Error::other("a live list too long"));
+            }
+            let mut buffer = [list.page, list.version, u16::try_from(list.subcodes.len()).unwrap_or(0)]
+                .iter()
+                .flat_map(|value| value.to_be_bytes())
+                .collect::<Vec<u8>>();
+            for subcode in &list.subcodes {
+                buffer.extend_from_slice(&subcode.to_be_bytes());
+            }
+            put(out, LIVE_LIST, &buffer)
+        }
+        Notice::SubPageListComplete(page, version) => {
+            put(out, LIVE_LIST_COMPLETE, &[page.to_be_bytes(), version.to_be_bytes()].concat())
+        }
+        Notice::SubPageListRefused(page, version) => {
+            put(out, LIVE_LIST_REFUSED, &[page.to_be_bytes(), version.to_be_bytes()].concat())
+        }
+        Notice::Links(tti) => put(out, LINKS, tti),
+        _ => Err(io::Error::other("not a notice of a channel's records")),
     }
 }
 
@@ -307,6 +367,42 @@ fn notice_frame(kind: u8, payload: &[u8]) -> io::Result<Frame> {
         }
         REFRESH => Frame::Notice(Notice::Refresh(u32::from_be_bytes(payload.try_into().map_err(|_| invalid())?))),
         SUB_PAGES => Frame::Notice(Notice::SubPages(list_part(&mut cursor)?)),
+        INDEX => {
+            let generation = cursor.u16()?;
+            let count = usize::from(cursor.u16()?);
+            if count > MAX_INDEX_PAGES {
+                return Err(invalid());
+            }
+            let pages = (0..count)
+                .map(|_| Ok(IndexEntry { page: cursor.u16()?, subpages: cursor.u16()?, title: cursor.string()? }))
+                .collect::<io::Result<Vec<_>>>()?;
+            cursor.end()?;
+            Frame::Notice(Notice::Index(IndexPart { generation, pages }))
+        }
+        INDEX_COMPLETE => {
+            let generation = cursor.u16()?;
+            cursor.end()?;
+            Frame::Notice(Notice::IndexComplete(generation))
+        }
+        LIVE_LIST => {
+            let (page, version, count) = (cursor.u16()?, cursor.u16()?, usize::from(cursor.u16()?));
+            if count > MAX_LIVE_LIST {
+                return Err(invalid());
+            }
+            let subcodes = (0..count).map(|_| cursor.u16()).collect::<io::Result<Vec<_>>>()?;
+            cursor.end()?;
+            Frame::Notice(Notice::SubPageList(LiveList { page, version, subcodes }))
+        }
+        LIVE_LIST_COMPLETE | LIVE_LIST_REFUSED => {
+            let (page, version) = (cursor.u16()?, cursor.u16()?);
+            cursor.end()?;
+            if kind == LIVE_LIST_COMPLETE {
+                Frame::Notice(Notice::SubPageListComplete(page, version))
+            } else {
+                Frame::Notice(Notice::SubPageListRefused(page, version))
+            }
+        }
+        LINKS => Frame::Notice(Notice::Links(payload.to_vec())),
         SUB_PAGES_MISSING | SUB_PAGES_REQUEST => {
             let (mpp, part) = (cursor.u16()?, cursor.byte()?);
             cursor.end()?;

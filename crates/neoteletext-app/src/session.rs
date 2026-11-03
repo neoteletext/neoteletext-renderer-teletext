@@ -39,6 +39,8 @@ pub struct Session {
     /// kept, oldest first, at most [`MAX_KEPT`].
     keep: Option<fn(&Packet) -> bool>,
     kept: VecDeque<Packet>,
+    /// A live channel's index, when its connection sent one (DOC-1955).
+    pub channel_index: Vec<crate::pipe::IndexEntry>,
 }
 
 /// The most packets kept between two takes: a channel's records for its
@@ -68,6 +70,7 @@ impl Session {
             tracing,
             keep: None,
             kept: VecDeque::new(),
+            channel_index: Vec::new(),
         }
     }
 
