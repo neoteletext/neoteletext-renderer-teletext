@@ -10,7 +10,7 @@
 mod common;
 
 use common::{
-    Receiver, build, build_25, char_of, colours, damage, display_page, end, g0, grid_of, local_data, row_0, set_of,
+    Receiver, build, build_both, char_of, colours, damage, display_page, end, g0, grid_of, local_data, row_0, set_of,
     set_position, text, x26, x28,
 };
 use neoteletext_core::charset::{CharSet, G0, G0Set, G2Set};
@@ -78,7 +78,7 @@ fn every_character_mode_writes_its_set() {
 fn national_options_apply_to_level_1_only() {
     // C14 set: national option index 1, German in group 0000.
     let packets = display_page(1 << 14, &[(1, b"[[")], local_data(&[set_position(1, 0), g0(1, b'[')]));
-    let grid = build_25(&packets);
+    let grid = build_both(&packets);
     assert_eq!((char_of(&grid.cells[1][0]), char_of(&grid.cells[1][1])), ('Ä', '['));
 }
 
@@ -93,7 +93,7 @@ fn g3_cells_convert_to_unicode_and_drcs_is_not_drawn() {
         TripletFunction::G3Character { column: 1, code: 0x5F, level_15_form: false },
         TripletFunction::UnsupportedColumn { column: 2, mode: 0b01101, data: 0x43 },
     ];
-    let grid = build_25(&page(&[(1, b"ABC")], &local));
+    let grid = build_both(&page(&[(1, b"ABC")], &local));
     let converted: Vec<char> = grid.cells[1][..3].iter().map(char_of).collect();
     assert_eq!(converted, ['\u{2500}', ' ', 'C']);
 }
@@ -122,7 +122,7 @@ fn only_three_row_triplets_set_the_active_row() {
         g0(17, b'e'),
     ];
     let more = [row_0(0, 0b01), g0(18, b'f'), set_position(24, 2), g0(3, b'g'), end()];
-    let grid = build_25(&display_page(0, &[], vec![x26(0, &local), x26(1, &more)]));
+    let grid = build_both(&display_page(0, &[], vec![x26(0, &local), x26(1, &more)]));
     assert_eq!(char_of(&grid.cells[5][3]), 'a', "Full Row Colour: row 5");
     assert_eq!(char_of(&grid.cells[6][13]), 'b', "Set Active Position");
     assert_eq!(char_of(&grid.cells[7][15]), 'c', "column kept, row 7");
@@ -157,7 +157,7 @@ fn column_triplets_set_the_column() {
     ];
     for (function, column) in cases {
         let local = [set_position(4, 2), function, invoke, end()];
-        let grid = build_25(&display_page(0, &[], vec![x26(0, &local), x26(1, &object)]));
+        let grid = build_both(&display_page(0, &[], vec![x26(0, &local), x26(1, &object)]));
         assert_eq!(char_of(&grid.cells[4][usize::from(column)]), 'X', "{function:?}");
     }
 }
@@ -221,7 +221,7 @@ fn colour_map_from_page_packets() {
         assert_eq!(grid.colour_map.entry(1), clut_0, "{level:?}");
         assert!(ColourMap::is_transparent(colour_index(1, 0)));
     }
-    let grid = build_25(&display_page(0, &[(1, b"A")], vec![]));
+    let grid = build_both(&display_page(0, &[(1, b"A")], vec![]));
     assert_eq!(grid.colour_map, ColourMap::DEFAULT, "Table 30");
 }
 
@@ -242,7 +242,7 @@ fn screen_and_row_colours() {
         full_row(14, 22, 0b01),
         g0(1, b'x'),
     ];
-    let grid = build_25(&page(&[], &local));
+    let grid = build_both(&page(&[], &local));
     assert_eq!(grid.screen_colour, 17);
     let expected: Vec<u8> =
         [21, 17, 17, 17, 17, 18, 17, 17, 17, 17, 19, 19, 20, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 17].to_vec();
@@ -252,7 +252,7 @@ fn screen_and_row_colours() {
     // a reserved Full Screen Colour is ignored.
     let local = [TripletFunction::FullScreenColour(ColourData { index: 9, high: 0b10 })];
     let packets = display_page(0, &[], vec![x28(0, &colours(11, 12, false, 0)), x26(0, &[local[0], end()])]);
-    let grid = build_25(&packets);
+    let grid = build_both(&packets);
     assert_eq!((grid.screen_colour, grid.row_colours[3]), (11, 12));
 }
 
@@ -267,8 +267,8 @@ fn programme_delivery_control_has_no_display_effect() {
         TripletFunction::ReservedColumn { column: 9, mode: 0b00101, data: 0x41 },
         TripletFunction::ReservedRow { mode: 0b11001, address: 44, data: 0x41 },
     ];
-    let with = build_25(&page(&[(2, b"ABCDEFGHIJ")], &local));
-    let without = build_25(&page(&[(2, b"ABCDEFGHIJ")], &[]));
+    let with = build_both(&page(&[(2, b"ABCDEFGHIJ")], &local));
+    let without = build_both(&page(&[(2, b"ABCDEFGHIJ")], &[]));
     common::assert_same_cells(&with, &without, "PDC");
 }
 
@@ -287,13 +287,13 @@ fn processing_order_of_local_data() {
             x26(0, &[set_position(1, 0), g0(1, b'a')]),
         ],
     );
-    let grid = build_25(&packets);
+    let grid = build_both(&packets);
     assert_eq!((char_of(&grid.cells[1][1]), char_of(&grid.cells[2][3])), ('a', 'b'));
     assert_eq!(char_of(&grid.cells[2][5]), 'd', "code 2 missing: skipped");
     assert_eq!(char_of(&grid.cells[2][6]), ' ', "after the Termination Marker");
     let definition = common::define(ObjectKind::Active, 0b11, common::local_number(0, 2));
     let grid =
-        build_25(&display_page(0, &[], vec![x26(0, &[set_position(1, 0), g0(1, b'a'), definition, g0(2, b'b')])]));
+        build_both(&display_page(0, &[], vec![x26(0, &[set_position(1, 0), g0(1, b'a'), definition, g0(2, b'b')])]));
     assert_eq!(text(&grid, 1).trim_end(), " a", "an Object Definition ends the local data");
 }
 
@@ -341,7 +341,7 @@ fn faults_leave_the_level_1_page() {
 #[test]
 fn plain_page_matches_level_1() {
     let rows: &[(u8, &[u8])] = &[(1, b"PLAIN TEXT"), (2, &[ALPHA_GREEN, b'G', ALPHA_BLUE, b'B', ALPHA_WHITE, b'W'])];
-    let enhanced = build_25(&display_page(0, rows, vec![]));
+    let enhanced = build_both(&display_page(0, rows, vec![]));
     let level_1 = build(&display_page(0, rows, vec![]), PresentationLevel::Level1).0;
     common::assert_same_cells(&enhanced, &level_1, "no enhancement data, no re-mapping: the Level 1 page");
 }
@@ -353,7 +353,7 @@ fn hold_mosaics_and_enhancement_characters() {
     use neoteletext_core::consts::HOLD_MOSAICS;
     let row: &[u8] = &[MOSAIC_RED, 0x7F, HOLD_MOSAICS, MOSAIC_RED, b' '];
     let local = [set_position(1, 0), TripletFunction::G3Character { column: 2, code: 0x51, level_15_form: false }];
-    let grid = build_25(&page(&[(1, row)], &local));
+    let grid = build_both(&page(&[(1, row)], &local));
     assert_eq!(set_of(&grid.cells[1][2]), Some(CharSet::G3), "not replaced by the held mosaic");
     let held = Glyph::Mosaic { pattern: 0x3F, separated: false };
     assert_eq!((grid.cells[1][3].glyph, grid.cells[1][3].held), (held, true), "the held mosaic is unchanged");
@@ -384,7 +384,7 @@ fn walk_transitions() {
         end(),
     ];
     let packets = display_page(0, &[], vec![damage(x26(0, &local), 5), x26(1, &object)]);
-    let grid = build_25(&packets);
+    let grid = build_both(&packets);
     assert_eq!(char_of(&grid.cells[4][12]), 'o', "placed with the modifier");
     assert_eq!(char_of(&grid.cells[4][13]), ' ', "the Termination Marker ended the object");
     assert_eq!(char_of(&grid.cells[3][5]), 'o', "the second object at 3,5: position restored, offsets discarded");
@@ -399,7 +399,7 @@ fn walk_transitions() {
 #[test]
 fn every_mode_with_every_class_of_data() {
     use neoteletext_core::packet::Triplet;
-    let reference = build_25(&page(&[], &[]));
+    let reference = build_both(&page(&[], &[]));
     for level in [L25, L35] {
         for row_group in [false, true] {
             for mode in 0..32u8 {

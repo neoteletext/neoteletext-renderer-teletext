@@ -15,8 +15,8 @@ mod common;
 
 use common::reorder::{interleaved, page_orders, service_orders, with_gaps};
 use common::{
-    DISPLAY, Mot, ObjectDef, Receiver, background, colours, display_page, end, foreground, g0, invoke, link,
-    local_data, mag, mot_packets, null_link, object_link, object_page, page_grid, public_number, set_position,
+    DISPLAY, Mot, ObjectDef, ObjectLayout, Receiver, background, colours, display_page, end, foreground, g0, invoke,
+    link, local_data, mag, mot_packets, null_link, object_link, object_page, page_grid, public_number, set_position,
     worst_case_page, x26, x27, x28,
 };
 use neoteletext_core::acq::StoredPage;
@@ -216,9 +216,12 @@ fn every_order_of_an_enhanced_service() {
 /// GOP, in both orders of the two pages and each page in each named order.
 /// The shuffles are left out: each build of this page is the slowest there
 /// is, by design, and the named orders already move every packet 26 to 28.
+/// Its objects share one sub-page of the GOP (`ObjectLayout::Shared`): the
+/// layout of REQ-TST-019's bound, an object page sub-page for each, reads
+/// three times as many triplets and would make this test take minutes.
 #[test]
 fn every_named_order_of_the_worst_case_page() {
-    let all = worst_case_page();
+    let all = worst_case_page(ObjectLayout::Shared);
     let second_header = all.iter().skip(1).position(|packet| decode_address(packet).unwrap().number == 0).unwrap() + 1;
     let pages = vec![all[..second_header].to_vec(), all[second_header..].to_vec()];
     let named: Vec<_> = service_orders(&pages).into_iter().filter(|(name, _)| !name.contains("shuffle")).collect();

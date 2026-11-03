@@ -83,7 +83,7 @@ fn the_tunnels_first_bytes_reach_the_connection() {
     let mut buffer = [0_u8; 16];
     let started = std::time::Instant::now();
     while seen.len() < b"HOST".len() && started.elapsed() < Duration::from_secs(5) {
-        match receive(&mut connection, &mut buffer) {
+        match connection.receive(&mut buffer) {
             Received::Data(count) => seen.extend_from_slice(&buffer[..count]),
             Received::Nothing => std::thread::yield_now(),
             Received::Closed => break,
@@ -171,4 +171,51 @@ fn a_connection_opened_on_its_thread_is_taken_up() {
     transport.connect(ConnectionId::Push, "127.0.0.1", port, Security::Plain).unwrap();
     assert!(matches!(woken.recv_timeout(Duration::from_secs(10)), Ok(Wake::Network)), "the opening woke nobody");
     assert_eq!(transport.state(ConnectionId::Push), LinkState::Open(web_address(IpAddr::from([127, 0, 0, 1]))));
+}
+
+/// What one send of the test of a peer that stops reading hands over: the
+/// longest input message.
+const PIECE: usize = neoteletext_web::consts::INPUT_MESSAGE_MAX;
+/// The most bytes that test sends before it must have seen the writer
+/// thread hold some: 64 MiB, beyond what the operating system buffers for a
+/// connection on this computer (a few MiB on Linux and macOS).
+const STALL_WITHIN: usize = 64 << 20;
+
+// REQ-490, REQ-RCH-035: a send does not block the loop. A peer that accepts
+// the connection and never reads fills the socket's buffers; each send still
+// returns at once, the bytes the writer thread holds are counted by
+// `unsent`, and a send past the writer's bound fails rather than waits.
+// Before the writer thread, the send that found the buffer full blocked for
+// the write limit of ten seconds, and `unsent` was always 0.
+#[test]
+fn a_send_returns_at_once_while_the_peer_does_not_read() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        // Held, never read, until the test ends.
+        std::thread::sleep(Duration::from_secs(60));
+        drop(stream);
+    });
+    let (wake, woken) = mpsc::channel();
+    let mut transport = StdTransport::new(&[IpAddr::from([127, 0, 0, 1])], wake, None);
+    transport.connect(ConnectionId::Push, "127.0.0.1", port, Security::Plain).unwrap();
+    assert!(matches!(woken.recv_timeout(Duration::from_secs(10)), Ok(Wake::Network)), "the opening woke nobody");
+    assert!(matches!(transport.state(ConnectionId::Push), LinkState::Open(_)));
+    let piece = vec![0_u8; PIECE];
+    let (mut held, mut refused) = (0, false);
+    for _ in 0..STALL_WITHIN / PIECE {
+        let started = std::time::Instant::now();
+        let sent = transport.send(ConnectionId::Push, &piece);
+        let took = started.elapsed();
+        assert!(took < AT_ONCE, "a send blocked for {took:?}");
+        held = held.max(transport.unsent(ConnectionId::Push));
+        if sent.is_err() {
+            refused = true;
+            break;
+        }
+    }
+    assert!(held > 0, "the writer thread never held a byte: the peer's buffers took {STALL_WITHIN} bytes");
+    assert!(refused, "a writer holding {held} bytes took more past its bound");
+    assert!(held <= writer::MAX_UNSENT, "held {held}");
 }

@@ -13,7 +13,8 @@
 mod common;
 
 use common::{
-    background, build, colours, display_page, end, foreground, g0, local_data, set_position, worst_case_page, x26, x28,
+    ObjectLayout, background, build, colours, display_page, end, foreground, g0, local_data, set_position,
+    worst_case_page, x26, x28,
 };
 use neoteletext_core::config::{Config, PresentationLevel};
 use neoteletext_core::consts::{PAGE_WIDTH, ROWS};
@@ -181,7 +182,11 @@ fn pages() -> Vec<(&'static str, Box<Grid>, RenderOptions)> {
         ("Level 1", level_1_page(), palette_options()),
         ("Level 1.5", level_15_page(), palette_options()),
         ("Level 2.5", level_25_page(), resolved_options(0)),
-        ("Level 3.5 worst case", build(&worst_case_page(), PresentationLevel::Level35).0, resolved_options(3)),
+        (
+            "Level 3.5 worst case",
+            build(&worst_case_page(ObjectLayout::SubPageEach), PresentationLevel::Level35).0,
+            resolved_options(3),
+        ),
     ]
 }
 

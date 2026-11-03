@@ -19,8 +19,8 @@ use neoteletext_core::charset::{CharSet, to_unicode};
 use neoteletext_core::compose::compose_level;
 use neoteletext_core::config::{Config, PresentationLevel};
 use neoteletext_core::consts::{
-    COMPOSITIONAL_LINKS, DATA_BYTES, DESIGNATION_CODES, MAGAZINES, OBJECT_POINTER_UNUSED, PACKET_ENHANCEMENT,
-    PAGE_FUNCTION_DRCS, PAGE_TIME_FILLING, ROW_ADDRESS_LAST, TRIPLETS_PER_PACKET,
+    COMPOSITIONAL_LINKS, DATA_BYTES, DESIGNATION_CODES, MAGAZINES, OBJECT_BODY_TRIPLETS, OBJECT_POINTER_UNUSED,
+    PACKET_ENHANCEMENT, PAGE_FUNCTION_DRCS, PAGE_TIME_FILLING, ROW_ADDRESS_LAST, TRIPLETS_PER_PACKET,
 };
 use neoteletext_core::ecc::with_odd_parity;
 use neoteletext_core::enhance;
@@ -196,7 +196,7 @@ pub struct ObjectPageData {
 
 pub fn object_page_data(s1: u8, objects: &[ObjectDef]) -> ObjectPageData {
     let end = TripletFunction::Termination { kind: 0b011 }.to_triplet();
-    let mut triplets = vec![end; 507];
+    let mut triplets = vec![end; usize::from(OBJECT_BODY_TRIPLETS)];
     let mut pointers = [[(OBJECT_POINTER_UNUSED, OBJECT_POINTER_UNUSED); TRIPLETS_PER_PACKET]; 2];
     let mut position = 0usize;
     for object in objects {
@@ -452,6 +452,15 @@ pub fn build_35(packets: &[Packet]) -> Box<Grid> {
     build(packets, PresentationLevel::Level35).0
 }
 
+/// Builds page 100 at Level 2.5 and at Level 3.5, asserts that the two give
+/// the same cells, and returns them: a test of a Level 2.5 rule that holds at
+/// both levels runs at both (REQ-TST-015).
+pub fn build_both(packets: &[Packet]) -> Box<Grid> {
+    let grid = build_25(packets);
+    assert_same_cells(&grid, &build_35(packets), "Level 3.5 against Level 2.5");
+    grid
+}
+
 /// The character a cell shows, as Unicode: a space for no glyph and `#`
 /// for a mosaic.
 pub fn char_of(cell: &Cell) -> char {
@@ -500,32 +509,68 @@ pub fn row_0(colour: u8, high: u8) -> TripletFunction {
 
 pub const DESIGNATIONS: usize = DESIGNATION_CODES;
 
+/// How the worst-case page's three objects are laid out on its GPOP.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ObjectLayout {
+    /// Each object fills a sub-page of its own: 507 triplets with its
+    /// definition and Termination Marker (Annex A.8), the Active object on
+    /// sub-page 0, the Adaptive on 1 and the Passive on 2. The worst case of
+    /// REQ-TST-019.
+    SubPageEach,
+    /// The three share sub-page 0, 169 triplets each: the same invocations
+    /// for a third of the reading, for tests of something other than the
+    /// bound that build the page many times.
+    Shared,
+}
+
 /// The worst-case page of REQ-TST-019: page 100 invoking, from all sixteen
 /// packets X/26, an Active object of its GPOP 1A1 at 100 positions; each
-/// object writes its cell, invokes the next type twice (Active, Adaptive,
-/// Passive) and is padded so that the three fill the object page.
-pub fn worst_case_page() -> Vec<Packet> {
+/// object writes its cell and invokes the next type twice (Active, Adaptive,
+/// Passive), and is padded to fill its sub-page, alone or shared as
+/// `layout` says.
+pub fn worst_case_page(layout: ObjectLayout) -> Vec<Packet> {
     const GPOP: u16 = 0x1A1;
+    const TYPES: usize = 3;
+    // The triplets an object page sub-page holds, less the definition and
+    // the Termination Marker each object has.
+    let page_triplets = usize::from(OBJECT_BODY_TRIPLETS);
+    let body_triplets = match layout {
+        ObjectLayout::SubPageEach => page_triplets - 2,
+        ObjectLayout::Shared => page_triplets / TYPES - 2,
+    };
+    let s1_of = |kind: u8| if layout == ObjectLayout::SubPageEach { kind } else { 0 };
     let pad = |count: usize| {
         core::iter::repeat_n(TripletFunction::ReservedRow { mode: 0b00010, address: 41, data: 0 }, count)
     };
-    let nested = |letter: u8, next: Option<ObjectKind>| {
+    let nested = |letter: u8, next: Option<(ObjectKind, u8)>| {
         let mut body = vec![g0(0, letter)];
-        if let Some(kind) = next {
-            body.extend(core::iter::repeat_n(invoke(ObjectSource::Global, kind, public_number(0, 0)), 2));
+        if let Some((kind, s1)) = next {
+            body.extend(core::iter::repeat_n(invoke(ObjectSource::Global, kind, public_number(s1, 0)), 2));
         }
-        body.extend(pad(162 - body.len()));
+        body.extend(pad(body_triplets - body.len()));
         body
     };
-    let gpop = object_page(
-        GPOP,
-        0,
-        &[
-            ObjectDef::new(ObjectKind::Active, 0, nested(b'a', Some(ObjectKind::Adaptive))),
-            ObjectDef::new(ObjectKind::Adaptive, 0, nested(b'd', Some(ObjectKind::Passive))),
-            ObjectDef::new(ObjectKind::Passive, 0, nested(b'w', None)),
-        ],
-    );
+    let objects = [
+        ObjectDef::new(ObjectKind::Active, 0, nested(b'a', Some((ObjectKind::Adaptive, s1_of(1))))),
+        ObjectDef::new(ObjectKind::Adaptive, 0, nested(b'd', Some((ObjectKind::Passive, s1_of(2))))),
+        ObjectDef::new(ObjectKind::Passive, 0, nested(b'w', None)),
+    ];
+    let gpop: Vec<Packet> = match layout {
+        ObjectLayout::SubPageEach => objects
+            .iter()
+            .zip(0u8..)
+            .flat_map(|(object, s1)| {
+                let data = object_page_data(s1, core::slice::from_ref(object));
+                assert_eq!(data.used, page_triplets, "each object fills its sub-page");
+                object_page_packets(GPOP, s1, &data)
+            })
+            .collect(),
+        ObjectLayout::Shared => {
+            let data = object_page_data(0, &objects);
+            assert_eq!(data.used, page_triplets, "the three fill the sub-page");
+            object_page_packets(GPOP, 0, &data)
+        }
+    };
     let mut local = vec![];
     for index in 0..100u8 {
         if index % 39 == 0 {

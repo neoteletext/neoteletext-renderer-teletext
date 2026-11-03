@@ -3,11 +3,15 @@
 
 Test code, not part of the library. Serves a service descriptor, TTI pages
 with ETag validators, a versioned session cookie (and, at /sessions, how many
-requests brought it back), WebSocket push, an ordinary web page at /web/ that
-points to the regional channel by a Link header field, a <link> element and,
-for a receiver asking for teletext, a 303 that varies by Accept (REQ-501),
-and fault injection (/fault/slow?seconds=N waits N seconds, 40 by default).
-Standard library only.
+requests brought it back; at /requests, the paths asked for), WebSocket push,
+an ordinary web page at /web/ that points to the regional channel by a Link
+header field, a <link> element and, for a receiver asking for teletext, a 303
+that varies by Accept (REQ-501), a channel published as a folder at /channel/
+(its settings, its bundle index.t42, contents.txt, page files, a page whose
+sub-pages are files of their own with its list in parts, a 404 for any other
+file, and a redirect kept inside the folder: REQ-501's guidance), and fault
+injection (/fault/slow?seconds=N waits N seconds, 40 by default). Standard
+library only.
 
 Usage: server.py PORT
 """
@@ -108,14 +112,17 @@ def row_codes(text, width):
     return bytes(odd_parity(code) for code in (codes + [0x20] * width)[:width])
 
 
-def t42_page(tti):
+def t42_page(tti, subcode=0):
     """A TTI page's header and rows as T42 packets (a test's own encoder:
-    sub-code 0, the erase bit and serial mode set)."""
+    the sub-code given, the erase bit and serial mode set)."""
     lines = [line for line in tti.split("\r\n") if line]
     number = next(line[3:6] for line in lines if line.startswith("PN,"))
     magazine, tens, units = int(number[0]), int(number[1], 16), int(number[2], 16)
+    # The sub-code's four nibbles S1 to S4 (clause 9.3.1.2): S2 has three
+    # bits beside C4, S4 two beside C5 and C6.
+    s1, s2, s3, s4 = subcode & 0xF, (subcode >> 4) & 0x7, (subcode >> 8) & 0xF, (subcode >> 12) & 0x3
     header = address(magazine, 0) + bytes(
-        HAMMING_84[nibble] for nibble in [units, tens, 0, C4_ERASE_IN_S2, 0, 0, 0, C11_SERIAL]
+        HAMMING_84[nibble] for nibble in [units, tens, s1, s2 | C4_ERASE_IN_S2, s3, s4, 0, C11_SERIAL]
     ) + row_codes("", HEADER_TEXT)
     packets = [header]
     for line in lines:
@@ -157,6 +164,88 @@ CHANNEL_POINTER = '</regional/>; rel="alternate"; type="application/vnd.neotelet
 TELETEXT_TYPES = ("application/vnd.neoteletext+json", "text/x-teletext-tti", "application/x-teletext-t42")
 # How long /fault/slow waits when the request does not say (seconds).
 SLOW_DEFAULT_SECONDS = 40
+
+
+# A channel published as a folder (REQ-501, decision E.70): its files under
+# their fixed names (REQ-WEB-019), each with its media type (REQ-WEB-027).
+CHANNEL_FOLDER = "/channel/"
+CHANNEL_SETTINGS = '{"name":"Folder channel","initial_page":"100"}'
+# The page whose sub-pages are files of their own (REQ-1887), and its
+# sub-codes.
+SUBPAGED = "400"
+SUBCODES = (0x0001, 0x0002, 0x0003)
+# Page 300's file moved; its old name answers with a redirect to the new one,
+# inside the folder (REQ-WEB-021).
+MOVED_PAGE, MOVED_TO = "300.t42", "moved/300.t42"
+# A file's validator in a list of sub-pages (DOC-2035): the first 64 bits of
+# its SHA-256 digest in lower-case hexadecimal.
+VALIDATOR_DIGITS = 16
+
+
+def validator(data):
+    """The validator the engine's writers give a file (DOC-2035)."""
+    return hashlib.sha256(data).hexdigest()[:VALIDATOR_DIGITS]
+
+
+def subpage_file(subcode):
+    """Sub-page `subcode` of page 400, as T42."""
+    tti = "\r\n".join([
+        "PN," + SUBPAGED + "00",
+        "OL,1," + esc(CYAN) + "SUB-PAGE %04X OF THE FOLDER" % subcode,
+        "",
+    ])
+    return t42_page(tti, subcode)
+
+
+def subpage_list():
+    """Part 0 of page 400's list of sub-pages (REQ-1888, DOC-2038): the
+    number of sub-pages and the page's version, then a row for each."""
+    files = [subpage_file(subcode) for subcode in SUBCODES]
+    version = validator(b"".join(files))
+    rows = ["%d\t%s" % (len(files), version)]
+    rows += ["%04X\t%s\tSub-page %d" % (subcode, validator(data), index + 1)
+             for index, (subcode, data) in enumerate(zip(SUBCODES, files))]
+    return "\r\n".join(rows) + "\r\n"
+
+
+def channel_files():
+    """Every file of the folder channel, by its name in the folder: the
+    body and its media type."""
+    t42 = "application/x-teletext-t42"
+    files = {
+        "channel.ttx": (CHANNEL_SETTINGS, "application/json"),
+        # REQ-WEB-019: the bundle may hold any of the channel's pages; here
+        # 100 and 200, so that 300 and 400 are fetched on their own.
+        "index.t42": (t42_page(PAGES["100"]) + t42_page(PAGES["200"]), t42),
+        "contents.txt": ("\r\n".join([
+            "# The folder channel of the local test server (REQ-WEB-025).",
+            "s\tPages",
+            "p\t100\tIndex\t2026-11-04",
+            "p\t200\tWeather",
+            "p\t300\tNews",
+            "p\t400\tSub-pages",
+            "x\tother:100\tOther service",
+            "",
+        ]), "text/plain"),
+        MOVED_TO: (t42_page(PAGES["300"]), t42),
+        SUBPAGED + ".t42": (subpage_file(SUBCODES[0]), t42),
+        SUBPAGED + "/0.sub": (subpage_list(), "text/plain"),
+    }
+    for page in ("100", "200"):
+        files[page + ".t42"] = (t42_page(PAGES[page]), t42)
+    for subcode in SUBCODES:
+        files["%s/%04X.t42" % (SUBPAGED, subcode)] = (subpage_file(subcode), t42)
+    return files
+
+
+CHANNEL_FILES = channel_files()
+
+# A service whose server closes each kept-alive connection after its answer
+# without saying so (no `Connection: close`), as a server whose idle timeout
+# is shorter than the client's does: the client meets the close only when it
+# reuses the connection (REQ-502: behaviour that needs a real socket).
+CLOSING = "/closing/"
+CLOSING_DESCRIPTOR = '{"name": "Closing service", "initial_page": "100", "page_template": "/closing/pages/{mpp}.tti"}'
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -213,6 +302,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if session is not None:
             with self.server.lock:
                 self.server.sessions_returned += 1
+        if path == "/requests":
+            # The paths asked for so far, one a line (REQ-502: a test sees
+            # which of a channel's files a receiver fetched).
+            with self.server.lock:
+                asked = "\n".join(self.server.requested)
+            return self.send(200, asked, "text/plain")
+        with self.server.lock:
+            self.server.requested.append(path)
         if path == "/sessions":
             # How many requests have brought the session cookie back
             # (REQ-502: a test sees that the cookie returns).
@@ -243,6 +340,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.validated(PAGES[page], "text/x-teletext-tti", cookies)
         if path.startswith("/undeclared/"):
             return self.undeclared(path, cookies)
+        if path.startswith(CLOSING):
+            return self.closing(path[len(CLOSING) - 1:], cookies)
+        if path.startswith(CHANNEL_FOLDER):
+            return self.channel_file(path[len(CHANNEL_FOLDER):], cookies)
         if path == "/push":
             return self.push_websocket()
         if path == "/invalid.json":
@@ -250,6 +351,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/push-invalid":
             return self.push_websocket(invalid=True)
         return self.fault(path, query)
+
+    def closing(self, path, cookies):
+        """The closing service: its descriptor and pages, each answer
+        followed by the connection's close."""
+        self.close_connection = True
+        if path == "/service.json":
+            return self.send(200, CLOSING_DESCRIPTOR, "application/json", cookies)
+        page = path[len("/pages/"):-len(".tti")] if path.startswith("/pages/") and path.endswith(".tti") else None
+        if page not in PAGES:
+            return self.send(404, "", "text/plain", cookies)
+        return self.validated(PAGES[page], "text/x-teletext-tti", cookies)
+
+    def channel_file(self, name, cookies):
+        """A file of the folder channel (REQ-501): validated, as every page
+        is; a redirect inside the folder for a moved file; and 404, never a
+        page with status 200, for a file the channel does not have."""
+        if name == MOVED_PAGE:
+            self.send_response(302)
+            self.send_header("Location", CHANNEL_FOLDER + MOVED_TO)
+            self.send_header("Content-Length", "0")
+            for header in cookies:
+                self.send_header(*header)
+            self.end_headers()
+            return None
+        if name not in CHANNEL_FILES:
+            return self.send(404, "", "text/plain", cookies)
+        body, media = CHANNEL_FILES[name]
+        return self.validated(body, media, cookies)
 
     def web_page(self):
         """A web page that points to the channel (REQ-501's guidance): a
@@ -330,6 +459,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
         super().__init__(*args, **kwargs)
         self.lock = threading.Lock()
         self.sessions_returned = 0
+        self.requested = []
 
 
 def main():
