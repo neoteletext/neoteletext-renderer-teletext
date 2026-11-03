@@ -4,6 +4,9 @@
 use super::Packet;
 use super::editorial_links::page_reference;
 use crate::consts::STATUS_MESSAGE_BYTES;
+use crate::consts::{
+    SERVICE_DATE_TIME, SERVICE_INITIAL_PAGE, SERVICE_NETWORK_ID, SERVICE_PDC, SERVICE_STATUS, SERVICE_TIME_OFFSET,
+};
 use crate::ecc::reverse_bits;
 use crate::types::{Magazine, PageNumber, SubCode};
 
@@ -25,16 +28,6 @@ pub struct ServicePacket {
     /// Status message bytes 26 to 45, raw with parity.
     pub status: [u8; STATUS_MESSAGE_BYTES],
 }
-
-/// Indices within 8/30 (clause 9.8.1, Table 18): initial page bytes 7 to
-/// 12, network identification 13 and 14, time offset 15, date and time 16 to
-/// 21, Programme Delivery Control 13 to 25, status 26 to 45.
-pub(super) const SERVICE_INITIAL_PAGE: usize = 3;
-const SERVICE_NETWORK_ID: usize = 9;
-const SERVICE_TIME_OFFSET: usize = 11;
-const SERVICE_DATE_TIME: usize = 12;
-const SERVICE_PDC: usize = 9;
-const SERVICE_STATUS: usize = 22;
 
 fn copy_bytes<const N: usize>(packet: &Packet, start: usize) -> [u8; N] {
     let mut out = [0; N];

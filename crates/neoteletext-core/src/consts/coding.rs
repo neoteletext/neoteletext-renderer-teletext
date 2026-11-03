@@ -9,6 +9,9 @@ pub const PARITY_BIT: u8 = 0x80;
 pub const NIBBLE_MASK: u8 = 0x0F;
 /// Bits in a Hamming 24/18 triplet.
 pub const TRIPLET_BITS: u32 = 24;
+/// The shift of P6, a triplet's last bit (bit 24), which makes test F odd
+/// (clause 8.3).
+pub const TRIPLET_P6_SHIFT: u32 = TRIPLET_BITS - 1;
 /// Data bits in a Hamming 24/18 triplet.
 pub const TRIPLET_DATA_BITS: u32 = 18;
 /// Mask of the 18 data bits of a triplet.

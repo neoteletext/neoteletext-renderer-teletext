@@ -9,7 +9,7 @@
 #[cfg(test)]
 use super::*;
 
-use super::header::HEADER_UNITS;
+use crate::consts::HEADER_UNITS;
 use crate::consts::{
     C4_ERASE, C8_UPDATE, C11_SERIAL, C12, C14, OBJECT_POINTER_DATA_BIT, OBJECT_POINTER_UNUSED, TRIPLET_BYTES,
 };

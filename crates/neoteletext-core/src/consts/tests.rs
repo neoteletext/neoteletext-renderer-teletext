@@ -46,3 +46,27 @@ fn palette_ranges_do_not_overlap() {
     assert!(flash_end <= usize::from(PALETTE_CONCEAL_BASE));
     assert_eq!(usize::from(PALETTE_CONCEAL_BASE) + COLOURS * COLOURS, PALETTE_SIZE);
 }
+
+/// REQ-GEN-014: the fixed packet layouts fit together as the standard's
+/// figures lay them out, so a mistyped position is caught here.
+#[test]
+fn packet_layouts_fit_together() {
+    // A header's eight Hamming bytes follow the address (Figure 9).
+    assert_eq!(HEADER_UNITS, DATA_START);
+    assert_eq!(HEADER_C11_C14, HEADER_UNITS + 7);
+    // X/27/0: six page links, then the link control byte, then the
+    // two checksum bytes, which end the packet (Figure 12).
+    assert_eq!(EDITORIAL_LINK_START, DATA_START + 1);
+    assert_eq!(EDITORIAL_LINK_CONTROL, EDITORIAL_LINK_START + EDITORIAL_LINKS * PAGE_LINK_BYTES);
+    assert_eq!(EDITORIAL_LINK_CHECKSUM, EDITORIAL_LINK_CONTROL + 1);
+    assert_eq!(EDITORIAL_LINK_CHECKSUM + 2, PACKET_BYTES);
+    const { assert!(EDITORIAL_INDEX_LINK < EDITORIAL_LINKS) };
+    // 8/30: the initial page is a page link after the designation code,
+    // and the status display ends the packet (Table 18).
+    assert_eq!(SERVICE_INITIAL_PAGE, DATA_START + 1);
+    assert_eq!(SERVICE_NETWORK_ID, SERVICE_INITIAL_PAGE + PAGE_LINK_BYTES);
+    assert_eq!(SERVICE_STATUS + STATUS_MESSAGE_BYTES, PACKET_BYTES);
+    // An object link's last field is a two-byte object number (Table 21).
+    assert_eq!(MOT_LINK_DEFAULT_SECOND + 2, MOT_OBJECT_LINK_BYTES);
+    assert_eq!(DATA_FIRST_BYTE_NUMBER, 6);
+}

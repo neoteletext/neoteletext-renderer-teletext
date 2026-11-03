@@ -5,20 +5,15 @@
 //! packet decoder itself does not report.
 
 use super::Packet;
-use super::editorial_links::{LINK_BYTES, LINK_CONTROL, LINK_START};
-use super::service_data::SERVICE_INITIAL_PAGE;
 use crate::consts::{
     ADDRESS_BYTE_0, ADDRESS_BYTE_1, DATA_START, HEADER_DISPLAY_START, PACKET_ENHANCEMENT, PACKET_HEADER, PACKET_LINKS,
     PACKET_MAGAZINE_ENHANCEMENT, PACKET_SERVICE, SERVICE_MAGAZINE, TRIPLET_BYTES, TRIPLETS_PER_PACKET,
 };
+use crate::consts::{
+    EDITORIAL_LAST_DESIGNATION, EDITORIAL_LINK_CONTROL, EDITORIAL_LINK_START, EDITORIAL_LINKS, PAGE_LINK_BYTES,
+    SERVICE_INITIAL_PAGE,
+};
 use crate::ecc::{Status, hamming84_decode, hamming2418_decode};
-
-/// Links of an editorial link packet X/27/0 to X/27/3 (Figure 12).
-const EDITORIAL_LINKS: usize = 6;
-/// The highest designation code of an editorial link packet (clause 9.6.1).
-const EDITORIAL_LAST_DESIGNATION: u8 = 3;
-/// Bytes of an initial page reference in packet 8/30 (Figure 12's layout).
-const PAGE_REFERENCE_BYTES: usize = 6;
 
 /// What a packet's error protection found.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -87,15 +82,15 @@ pub fn protection(packet: &Packet) -> Protection {
     }
     counts.hamming84(packet, DATA_START..after_designation);
     let designation = crate::ecc::hamming84(packet.byte(DATA_START));
-    let last_link = LINK_START.saturating_add(EDITORIAL_LINKS.saturating_mul(LINK_BYTES));
+    let last_link = EDITORIAL_LINK_START.saturating_add(EDITORIAL_LINKS.saturating_mul(PAGE_LINK_BYTES));
     match (number, designation) {
         (_, None) => {}
         (PACKET_LINKS, Some(code)) if code <= EDITORIAL_LAST_DESIGNATION => {
-            let end = if code == 0 { LINK_CONTROL.saturating_add(1) } else { last_link };
-            counts.hamming84(packet, LINK_START..end);
+            let end = if code == 0 { EDITORIAL_LINK_CONTROL.saturating_add(1) } else { last_link };
+            counts.hamming84(packet, EDITORIAL_LINK_START..end);
         }
         (PACKET_SERVICE, Some(_)) => {
-            counts.hamming84(packet, SERVICE_INITIAL_PAGE..SERVICE_INITIAL_PAGE.saturating_add(PAGE_REFERENCE_BYTES));
+            counts.hamming84(packet, SERVICE_INITIAL_PAGE..SERVICE_INITIAL_PAGE.saturating_add(PAGE_LINK_BYTES));
         }
         _ => counts.triplets(packet),
     }

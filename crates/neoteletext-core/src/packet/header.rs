@@ -2,6 +2,9 @@
 //! bytes, decoded and encoded.
 
 use super::{Packet, nibble};
+use crate::consts::{
+    HEADER_C7_C10, HEADER_C11_C14, HEADER_S1, HEADER_S2_C4, HEADER_S3, HEADER_S4_C5_C6, HEADER_TENS, HEADER_UNITS,
+};
 use crate::consts::{HEADER_DISPLAY_BYTES, HEADER_DISPLAY_START};
 use crate::limits::sub_code;
 use crate::types::{ControlBits, Magazine, PageNumber, SubCode};
@@ -36,16 +39,6 @@ impl Header {
         self.control.map(|control| control.has(crate::consts::C11_SERIAL))
     }
 }
-
-/// Indices of the header's Hamming bytes, packet bytes 6 to 13.
-pub(super) const HEADER_UNITS: usize = 2;
-const HEADER_TENS: usize = 3;
-const HEADER_S1: usize = 4;
-const HEADER_S2_C4: usize = 5;
-const HEADER_S3: usize = 6;
-const HEADER_S4_C5_C6: usize = 7;
-const HEADER_C7_C10: usize = 8;
-const HEADER_C11_C14: usize = 9;
 
 /// Decodes a page header (clause 9.3.1, REQ-PKT-002).
 pub(super) fn decode_header(packet: &Packet, magazine: Magazine) -> Header {

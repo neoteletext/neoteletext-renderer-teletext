@@ -4,18 +4,16 @@
 
 use super::triplet_fields::ObjectKind;
 use crate::consts::{
-    DATA_BYTES, DATA_START, MAGAZINE_MASK, MOT_DECIMAL_DIGITS, MOT_DECIMAL_FIRST_PACKET, MOT_DEFAULT_SECOND_SHIFT,
-    MOT_FALLBACK_NONE, MOT_FALLBACK_PANELS_MASK, MOT_FALLBACK_PANELS_SHIFT, MOT_FALLBACK_SUBSTITUTION, MOT_GLOBAL_FLAG,
-    MOT_HEX_DIGITS, MOT_HEX_TENS_FIRST_PACKET, MOT_HEX_UNITS_FIRST_PACKET, MOT_LINK_NUMBER_MASK, MOT_LINK_X27_FLAG,
-    MOT_OBJECT_LINK_BYTES, MOT_OBJECT_LINK_FIRST_BYTE, MOT_OBJECT_LINKS_PER_PACKET, MOT_PAIRS_DECIMAL_UNITS,
-    MOT_PAIRS_HEX_UNITS, MOT_TOTALS_BYTE, PACKET_FIRST_BYTE_NUMBER, SIDE_PANEL_HALF_COLUMNS,
+    DATA_BYTES, DATA_FIRST_BYTE_NUMBER, MAGAZINE_MASK, MOT_DECIMAL_DIGITS, MOT_DECIMAL_FIRST_PACKET,
+    MOT_DEFAULT_SECOND_SHIFT, MOT_FALLBACK_NONE, MOT_FALLBACK_PANELS_MASK, MOT_FALLBACK_PANELS_SHIFT,
+    MOT_FALLBACK_SUBSTITUTION, MOT_GLOBAL_FLAG, MOT_HEX_DIGITS, MOT_HEX_TENS_FIRST_PACKET, MOT_HEX_UNITS_FIRST_PACKET,
+    MOT_LINK_DEFAULT_FIRST, MOT_LINK_DEFAULT_SECOND, MOT_LINK_DEFAULT_TYPES, MOT_LINK_FALLBACK, MOT_LINK_NUMBER_MASK,
+    MOT_LINK_SUBPAGES, MOT_LINK_TENS, MOT_LINK_UNITS, MOT_LINK_X27_FLAG, MOT_OBJECT_LINK_BYTES,
+    MOT_OBJECT_LINK_FIRST_BYTE, MOT_OBJECT_LINKS_PER_PACKET, MOT_PAIRS_DECIMAL_UNITS, MOT_PAIRS_HEX_UNITS,
+    MOT_TOTALS_BYTE, SIDE_PANEL_HALF_COLUMNS,
 };
 use crate::ecc::hamming84;
 use crate::types::{FallbackFields, Magazine, PageNumber, SidePanelFields};
-
-/// The packet byte number of the first stored data byte, byte 6: tables
-/// give positions as packet byte numbers.
-const DATA_FIRST_BYTE_NUMBER: usize = PACKET_FIRST_BYTE_NUMBER + DATA_START;
 
 /// Where the byte pair of a page lies in its Magazine Organization Table:
 /// the packet and the index of the first byte within the 40 data bytes.
@@ -116,15 +114,6 @@ pub struct MotObjectLink {
     pub default_objects: [Option<DefaultObject>; 2],
 }
 
-/// Byte offsets within an object link (Table 21).
-const LINK_TENS: usize = 1;
-const LINK_UNITS: usize = 2;
-const LINK_SUBPAGES: usize = 3;
-const LINK_FALLBACK: usize = 4;
-const LINK_DEFAULT_TYPES: usize = 5;
-const LINK_DEFAULT_FIRST: usize = 6;
-const LINK_DEFAULT_SECOND: usize = 8;
-
 /// The side panels a fallback value selects (Table 21, byte N+4 bits 3 and
 /// 2): none, left 16, right 16, or both 8, in the X/28 field form.
 const fn fallback_panels(bits: u8) -> SidePanelFields {
@@ -163,7 +152,7 @@ pub fn mot_object_link(row: &[u8; DATA_BYTES], link: usize) -> Option<MotObjectL
         .saturating_sub(DATA_FIRST_BYTE_NUMBER);
     let bytes = nibbles::<MOT_OBJECT_LINK_BYTES>(row, start)?;
     let byte = |offset: usize| bytes.get(offset).copied().unwrap_or(0);
-    let types = byte(LINK_DEFAULT_TYPES);
+    let types = byte(MOT_LINK_DEFAULT_TYPES);
     let default = |kind_bits: u8, number_offset: usize| {
         ObjectKind::from_bits(kind_bits).map(|kind| DefaultObject {
             kind,
@@ -173,12 +162,12 @@ pub fn mot_object_link(row: &[u8; DATA_BYTES], link: usize) -> Option<MotObjectL
     Some(MotObjectLink {
         magazine: Magazine::from_bits(byte(0) & MAGAZINE_MASK),
         x27_flag: byte(0) & MOT_LINK_X27_FLAG != 0,
-        page: PageNumber(byte(LINK_TENS) << 4 | byte(LINK_UNITS)),
-        subpage_count: byte(LINK_SUBPAGES),
-        fallback: mot_fallback(byte(LINK_FALLBACK)),
+        page: PageNumber(byte(MOT_LINK_TENS) << 4 | byte(MOT_LINK_UNITS)),
+        subpage_count: byte(MOT_LINK_SUBPAGES),
+        fallback: mot_fallback(byte(MOT_LINK_FALLBACK)),
         default_objects: [
-            default(types, LINK_DEFAULT_FIRST),
-            default(types >> MOT_DEFAULT_SECOND_SHIFT, LINK_DEFAULT_SECOND),
+            default(types, MOT_LINK_DEFAULT_FIRST),
+            default(types >> MOT_DEFAULT_SECOND_SHIFT, MOT_LINK_DEFAULT_SECOND),
         ],
     })
 }
@@ -208,13 +197,12 @@ pub fn mot_totals(row: &[u8; DATA_BYTES]) -> Option<MotTotals> {
 /// Encoders for the table's byte groups, as Hamming 8/4 values before
 /// coding: the inverse of the decoders above.
 pub(super) mod encode {
-    use super::{
-        LINK_DEFAULT_FIRST, LINK_DEFAULT_SECOND, LINK_DEFAULT_TYPES, LINK_FALLBACK, LINK_SUBPAGES, LINK_TENS,
-        LINK_UNITS, MotObjectLink, MotPageEntry, MotTotals,
-    };
+    use super::{MotObjectLink, MotPageEntry, MotTotals};
     use crate::consts::{
         MAGAZINE_MASK, MOT_DEFAULT_SECOND_SHIFT, MOT_FALLBACK_PANELS_SHIFT, MOT_FALLBACK_SUBSTITUTION, MOT_GLOBAL_FLAG,
-        MOT_LINK_NUMBER_MASK, MOT_LINK_X27_FLAG, MOT_OBJECT_LINK_BYTES, NIBBLE_MASK,
+        MOT_LINK_DEFAULT_FIRST, MOT_LINK_DEFAULT_SECOND, MOT_LINK_DEFAULT_TYPES, MOT_LINK_FALLBACK,
+        MOT_LINK_NUMBER_MASK, MOT_LINK_SUBPAGES, MOT_LINK_TENS, MOT_LINK_UNITS, MOT_LINK_X27_FLAG,
+        MOT_OBJECT_LINK_BYTES, NIBBLE_MASK,
     };
 
     /// The two values of a byte pair; the second, for DRCS pages, is 0.
@@ -234,9 +222,9 @@ pub(super) mod encode {
             }
         };
         set(0, link.magazine.bits() & MAGAZINE_MASK | if link.x27_flag { MOT_LINK_X27_FLAG } else { 0 });
-        set(LINK_TENS, link.page.tens());
-        set(LINK_UNITS, link.page.units());
-        set(LINK_SUBPAGES, link.subpage_count);
+        set(MOT_LINK_TENS, link.page.tens());
+        set(MOT_LINK_UNITS, link.page.units());
+        set(MOT_LINK_SUBPAGES, link.subpage_count);
         let panels = link.fallback.side_panels;
         let panel_bits = match (panels.left, panels.right) {
             (false, false) => 0b00,
@@ -246,11 +234,11 @@ pub(super) mod encode {
             (true, true) => 0b11,
         };
         let substitution = if link.fallback.black_background_substitution { MOT_FALLBACK_SUBSTITUTION } else { 0 };
-        set(LINK_FALLBACK, panel_bits << MOT_FALLBACK_PANELS_SHIFT | substitution);
+        set(MOT_LINK_FALLBACK, panel_bits << MOT_FALLBACK_PANELS_SHIFT | substitution);
         let kind_bits =
             |index: usize| link.default_objects.get(index).copied().flatten().map_or(0, |object| object.kind.bits());
-        set(LINK_DEFAULT_TYPES, kind_bits(0) | kind_bits(1) << MOT_DEFAULT_SECOND_SHIFT);
-        for (index, offset) in [(0, LINK_DEFAULT_FIRST), (1, LINK_DEFAULT_SECOND)] {
+        set(MOT_LINK_DEFAULT_TYPES, kind_bits(0) | kind_bits(1) << MOT_DEFAULT_SECOND_SHIFT);
+        for (index, offset) in [(0, MOT_LINK_DEFAULT_FIRST), (1, MOT_LINK_DEFAULT_SECOND)] {
             let number = link.default_objects.get(index).copied().flatten().map_or(0, |object| object.number);
             set(offset, number);
             set(offset.saturating_add(1), number >> 4);
