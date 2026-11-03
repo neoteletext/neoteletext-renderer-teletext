@@ -2,7 +2,6 @@
 //! from descriptor to decoded page, through the fetcher process. Only a
 //! build with live feeds has web mode (decision E.61).
 #![cfg(feature = "live")]
-#![allow(missing_docs)]
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;

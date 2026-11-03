@@ -1,6 +1,9 @@
 //! `neottx show` drawing a page with each terminal graphics protocol when
 //! one is forced (REQ-382, REQ-RND-029).
-#![allow(clippy::unwrap_used, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 mod common;
 

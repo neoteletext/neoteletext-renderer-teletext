@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::string_slice, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::string_slice,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, slicing strings it wrote itself and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 use super::spake2::{SCALAR_BYTES, reduce};
 use super::*;

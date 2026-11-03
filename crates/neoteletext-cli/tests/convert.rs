@@ -1,6 +1,9 @@
 //! `neottx convert --page` (REQ-CLI-003, REQ-INP-014, REQ-INP-018): a
 //! selection writes that page, and a sub-code that one sub-page.
-#![allow(clippy::unwrap_used, missing_docs, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 mod common;
 use common::{folder, neottx};

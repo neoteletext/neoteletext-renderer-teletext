@@ -162,7 +162,11 @@ fn forward(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::panic, reason = "a test")]
+#[allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `panic!` on outcomes it rules out"
+)]
 mod tests {
     use super::*;
     use neoteletext_web::zxnet::HeaderField;

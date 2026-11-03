@@ -1,6 +1,11 @@
 //! The table of the wire's own bytes (`neoteletext-common/wire-vectors.tsv`,
 //! DEC-1759 lesson 3): every row, read and written by the engine.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and `panic!` on outcomes it rules out"
+)]
 
 use neoteletext_core::limits::SUBCODE_ANY;
 use neoteletext_core::packet::Packet;
