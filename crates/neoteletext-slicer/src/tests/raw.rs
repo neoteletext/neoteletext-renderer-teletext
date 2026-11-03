@@ -77,8 +77,10 @@ fn raw_bt8x8_file_in_odd_chunks() {
 
 #[test]
 fn raw_reader_other_presets() {
-    // One frame of each 16-line preset with a packet on every line.
-    for preset in [Preset::Cx88, Preset::Saa7131, Preset::TbcVbi] {
+    // One frame of each preset but bt8x8 (tested above) with a packet on
+    // every line; tbc is a whole frame, its used lines those of the
+    // blanking interval (REQ-175).
+    for preset in [Preset::Cx88, Preset::Saa7131, Preset::Tbc, Preset::TbcVbi] {
         let geometry = RawGeometry::preset(preset);
         let mut generator = Generator::new(22);
         let rate = geometry.sample_rate_hz;

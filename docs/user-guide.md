@@ -44,7 +44,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx text INPUT PAGE` | Writes one page, or `all`, as UTF-8 text on standard output. |
 | `neottx render INPUT PAGE -o FILE` | Writes one page as a PNG or PPM image; with `all`, `-o` names a directory. |
 | `neottx convert INPUT --to t42\|tti\|edittf -o FILE` | Converts a recording or page files to T42 packets, TTI pages, or edit.tf page addresses (one page a line, each `https://edit.tf/#` and the page, which the editor opens). `--page 100` keeps one page, `--page 100/0001` one sub-page. |
-| `neottx slice RAW -o OUT.t42` | Slices raw sampled video into T42 packets and prints quality statistics. |
+| `neottx slice RAW -o OUT.t42` | Slices raw sampled video into T42 packets and prints quality statistics. `--preset bt8x8\|cx88\|saa7131\|tbc\|tbc-vbi` names a capture device's geometry (bt8x8 by default); `--sample-rate HZ`, `--samples-per-line N`, `--sample-size 8\|16`, `--lines-per-field N`, `--used-lines FIRST-LAST` (counted from 0) and `--first-lines A,B` (the television line number of each field's first line) replace parts of it. A geometry the reader cannot use exits with status 2. |
 | `neottx services INPUT` | Lists the teletext streams, languages and subtitle pages of a transport stream. |
 | `neottx service-info INPUT` | Prints the broadcast service data of packet 8/30: network, time, programme label and status message. |
 | `neottx check FILES...` | Checks TTI page files for authoring problems, a row longer than the page among them. `--descriptor FILE` resolves link targets against a channel's `channel.ttx` or a service's descriptor. |

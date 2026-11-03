@@ -54,7 +54,7 @@ pub use render::render;
 pub use service_info::service_info;
 pub use services::services;
 pub use show::show;
-pub use slice::slice;
+pub use slice::{SliceGeometry, slice};
 pub use sound::{PLAYER_PACKETS_PER_SECOND, SoundOptions, sound};
 pub use text::text;
 pub use view::view;
