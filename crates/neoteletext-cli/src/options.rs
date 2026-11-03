@@ -55,6 +55,7 @@ impl Common {
             }),
             no_rounding: self.no_rounding,
             single_start_box: self.single_start_box,
+            rom_variant: self.variant,
             verbose: self.verbose,
             no_sandbox: self.no_sandbox,
             allow_local: self.allow_local.clone(),

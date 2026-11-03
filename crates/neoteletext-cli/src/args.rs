@@ -2,6 +2,7 @@
 //! command and option, as clap parses them.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use neoteletext_core::config::RomVariant;
 use std::path::PathBuf;
 
 /// neoteletext: a software teletext receiver (ETSI EN 300 706 Levels 1.0, 1.5, 2.5 and 3.5).
@@ -56,6 +57,11 @@ pub struct Common {
     /// Accept a single Start Box (decision E.17).
     #[arg(long)]
     pub single_start_box: bool,
+    /// The SAA5246A's national option ROM variant, E, H, T, J, K, L, I or
+    /// S: C12 to C14 then choose among its sets alone (REQ-PRF-003). The
+    /// saa5246a profile's is E.
+    #[arg(long, value_name = "LETTER", value_parser = parse_rom_variant)]
+    pub variant: Option<RomVariant>,
     /// Print diagnostics, and with -vv the state machine trace (REQ-FSM-010).
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
@@ -497,3 +503,12 @@ pub(crate) enum FontCommand {
 
 #[cfg(test)]
 mod tests;
+
+/// A ROM variant named by its datasheet letter (REQ-PRF-003).
+fn parse_rom_variant(text: &str) -> Result<RomVariant, String> {
+    let mut letters = text.chars();
+    match (letters.next().and_then(RomVariant::from_letter), letters.next()) {
+        (Some(variant), None) => Ok(variant),
+        _ => Err("expected one of E, H, T, J, K, L, I or S".to_owned()),
+    }
+}

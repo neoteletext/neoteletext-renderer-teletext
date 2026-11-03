@@ -191,6 +191,7 @@ Every command accepts these options. Each one changes a setting that a decision 
 | `--level 1\|1.5\|2.5\|3.5` | The presentation level, overriding the profile's (REQ-CLI-007, decision E.40). | The profile's level |
 | `--no-rounding` | Turns character rounding off (REQ-RND-012). | Rounding on |
 | `--single-start-box` | Accepts a single Start Box code (decision E.17). | Two required |
+| `--variant LETTER` | The SAA5246A's national option ROM variant, E, H, T, J, K, L, I or S: C12 to C14 choose among its sets alone, a combination it lacks gives its default language, and X/28 and M/29 are not read (REQ-PRF-003). | E under `saa5246a`; none otherwise |
 | `--pages N` | Pages and sub-pages kept in memory. | 4096 |
 | `-v`, `-vv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds the state machine trace (REQ-FSM-010). | Off |
 
@@ -200,7 +201,7 @@ Every command accepts these options. Each one changes a setting that a decision 
 |---|---|---|---|
 | Presentation level (E.40) | 3.5 | 1 | 1.5 |
 | X/26/15 processed (E.2) | Yes | Yes | No |
-| National option | From C12 to C14 | Fixed: English | From C12 to C14 |
+| Character set | X/28, M/29 and C12 to C14 | Fixed: Latin English, whatever the page designates | The ROM variant's set for C12 to C14 (`--variant`, /E by default) |
 | Black colour codes 0/0 and 1/0 (E.18) | Black | No function | Black |
 | Row 24 (E.23) | Annex H flag | Never | Whenever X/24 is present |
 | Cell size | 12 by 20 | 12 by 20 | 12 by 10 |
@@ -218,7 +219,8 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `strict_row_setting` | E.3: the clause 12.3.2 rule instead of Annex A.3 | Off |
 | `ignore_out_of_order_triplets` | REQ-L15-009 | Off |
 | `default_region` | E.4 | 0 |
-| `fixed_national_index` | REQ-PRF-002 | None |
+| `fixed_designation` | REQ-PRF-002: one Table 32 value for every page, no designation read | None |
+| `rom_variant` | REQ-PRF-003: the SAA5246A ROM variant whose sets C12 to C14 choose among | None |
 | `parity_policy` | E.8 | Keep the last good character |
 | `rolling_header` | E.11 | On |
 | `flash_shown_us`, `flash_hidden_us` | E.12: 0.75 hertz, 3 to 1 | 960 ms, 320 ms |

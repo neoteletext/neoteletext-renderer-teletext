@@ -21,6 +21,12 @@ pub enum DesignationSource {
     MagazineM29Format4,
     /// None was sent: the receiver's configured region (decision E.4).
     Receiver,
+    /// The receiver's one fixed designation (`Config::fixed_designation`,
+    /// the SAA5050 profile); no packet is read.
+    Fixed,
+    /// The SAA5246A ROM variant's set for C12 to C14
+    /// (`Config::rom_variant`); no packet is read.
+    RomVariant,
 }
 
 /// Where the three national option bits came from.
@@ -30,7 +36,7 @@ pub enum NationalSource {
     Header,
     /// Bits 8 to 10 of the designation, at Levels 2.5 and 3.5 (Annex E.9).
     Designation,
-    /// The receiver's fixed setting (`Config::fixed_national_index`).
+    /// The receiver's fixed designation (`Config::fixed_designation`).
     Fixed,
 }
 
@@ -52,7 +58,9 @@ pub struct DesignationReport {
     pub value: u8,
     /// The entry used: the value's, or the fallback's.
     pub designation: Designation,
-    /// The value's entry is reserved and REQ-CHR-003's fallback was used.
+    /// The value's entry is reserved and REQ-CHR-003's fallback was used,
+    /// or the ROM variant lacks the header's national option and its
+    /// default language was used (REQ-PRF-003).
     pub fallback: bool,
     /// The second G0 set and national option of Table 33, if any.
     pub second: Option<G0>,
@@ -71,8 +79,27 @@ pub struct DesignationReport {
 /// The national option comes from C12 to C14, except at Levels 2.5 and
 /// 3.5, where bits 8 to 10 of the chosen designation give it when there is
 /// one (Annex E.9, decisions E.4 and E.50; REQ-L25-012).
+///
+/// A receiver whose sets were fixed in ROM reads none of these packets: a
+/// fixed designation is used as it is (REQ-PRF-002), and a ROM variant
+/// maps C12 to C14 to its own sets (REQ-PRF-003).
 #[must_use]
 pub fn designation_report(page: Option<&StoredPage>, magazine: &MagazineData, config: &Config) -> DesignationReport {
+    let header_national = page.map_or(0, |page| page.control.national_index()) & NATIONAL_INDEX_MASK;
+    // A receiver with its sets fixed in ROM reads no designation packet
+    // (REQ-PRF-002, REQ-PRF-003).
+    if let Some(value) = config.fixed_designation {
+        let (designation, fallback) = designation_with_fallback(value);
+        let report = fixed_report(header_national, value, designation, fallback, DesignationSource::Fixed);
+        return DesignationReport { national_source: NationalSource::Fixed, esc_rows: esc_rows(page), ..report };
+    }
+    if let Some(variant) = config.rom_variant {
+        let (value, lacked) = variant.designation(header_national);
+        let (designation, fallback) = designation_with_fallback(value);
+        let report =
+            fixed_report(header_national, value, designation, fallback || lacked, DesignationSource::RomVariant);
+        return DesignationReport { esc_rows: esc_rows(page), ..report };
+    }
     let level_35 = config.level.is_level35();
     // A page's own X/28/0 or X/28/4 counts only when it is a basic Level 1
     // page; then the magazine's packets apply (decision E.4).
@@ -93,10 +120,8 @@ pub fn designation_report(page: Option<&StoredPage>, magazine: &MagazineData, co
         (None, None, None, Some(found)) => (Some(found), DesignationSource::MagazineM29Format4),
         (None, None, None, None) => (None, DesignationSource::Receiver),
     };
-    let header_national = page.map_or(0, |page| page.control.national_index()) & NATIONAL_INDEX_MASK;
-    let (national, national_source) = match (config.fixed_national_index, designations) {
-        (Some(fixed), _) => (fixed, NationalSource::Fixed),
-        (None, Some(designations)) if config.level.is_enhanced() => (designations.default, NationalSource::Designation),
+    let (national, national_source) = match designations {
+        Some(designations) if config.level.is_enhanced() => (designations.default, NationalSource::Designation),
         _ => (header_national, NationalSource::Header),
     };
     let national = national & NATIONAL_INDEX_MASK;
@@ -111,11 +136,6 @@ pub fn designation_report(page: Option<&StoredPage>, magazine: &MagazineData, co
         None if fallback => None,
         None => default_second_g0(value),
     };
-    let esc_rows = page.map_or(0, |page| {
-        let rows = page.cells.iter().take(ROWS).skip(1);
-        let with_esc = rows.filter(|row| row.iter().any(|&byte| byte & CODE_MASK_7BIT == ESC)).count();
-        u8::try_from(with_esc).unwrap_or(u8::MAX)
-    });
     DesignationReport {
         header_national,
         group,
@@ -126,8 +146,40 @@ pub fn designation_report(page: Option<&StoredPage>, magazine: &MagazineData, co
         designation,
         fallback,
         second,
-        esc_rows,
+        esc_rows: esc_rows(page),
     }
+}
+
+/// The report of a designation fixed by the receiver: the value's group
+/// and national option, and the second set its own default gives.
+fn fixed_report(
+    header_national: u8,
+    value: u8,
+    designation: Designation,
+    fallback: bool,
+    source: DesignationSource,
+) -> DesignationReport {
+    DesignationReport {
+        header_national,
+        group: value >> DESIGNATION_GROUP_SHIFT,
+        source,
+        national: value & NATIONAL_INDEX_MASK,
+        national_source: NationalSource::Header,
+        value,
+        designation,
+        fallback,
+        second: if fallback { None } else { default_second_g0(value) },
+        esc_rows: 0,
+    }
+}
+
+/// Display rows 1 to 24 holding an ESC code.
+fn esc_rows(page: Option<&StoredPage>) -> u8 {
+    page.map_or(0, |page| {
+        let rows = page.cells.iter().take(ROWS).skip(1);
+        let with_esc = rows.filter(|row| row.iter().any(|&byte| byte & CODE_MASK_7BIT == ESC)).count();
+        u8::try_from(with_esc).unwrap_or(u8::MAX)
+    })
 }
 
 /// Resolves the page's character sets (decision E.4, REQ-CHR-003): the

@@ -168,6 +168,136 @@ fn the_designation_report() {
     assert_eq!(report.designation, charset::designation(1).unwrap());
 }
 
+/// A page with C12 to C14 set to `national` and an X/28/0 Format 1
+/// designating `group`, and a magazine whose M/29/0 designates it too.
+fn page_designating(national: u8, group: u8) -> (StoredPage, MagazineData) {
+    use crate::packet::{PageEnhancement, PageFormat};
+    use crate::types::{ControlBits, Designations, PresentationFields};
+    let fields = PresentationFields {
+        designations: Some(Designations { default: group << DESIGNATION_GROUP_SHIFT, second: 0x7F }),
+        ..PresentationFields::default()
+    };
+    let mut page = StoredPage::EMPTY;
+    let bit = |index: u8, shift: u16| u16::from((national >> index) & 1) << shift;
+    page.control = ControlBits(bit(2, 12) | bit(1, 13) | bit(0, 14));
+    assert_eq!(page.control.national_index(), national);
+    let basic = Some(PageFormat { function: PAGE_FUNCTION_BASIC, coding: 0 });
+    page.page_data = Some(PageEnhancement { format: basic, fields });
+    (page, MagazineData { data: Some(fields), ..MagazineData::default() })
+}
+
+/// REQ-368: the "SAA5050" profile has a single fixed national character
+/// set: a page whose X/28/0 and magazine's M/29/0 designate group 0100
+/// (Cyrillic), with C12 to C14 asking for German, still draws Latin
+/// English, as the chip's one ROM did.
+#[test]
+fn the_saa5050_profile_uses_one_fixed_set_whatever_the_page_designates() {
+    let (page, magazine) = page_designating(0b001, 0b0100);
+    let report = designation_report(Some(&page), &magazine, &Config::saa5050());
+    assert_eq!(report.source, DesignationSource::Fixed);
+    assert_eq!(report.national_source, NationalSource::Fixed);
+    assert_eq!(report.designation, charset::designation(crate::consts::DESIGNATION_LATIN_ENGLISH).unwrap());
+    assert_eq!(report.designation.g0.national, Some(charset::NationalOption::English));
+    assert_eq!(report.second, None);
+}
+
+/// REQ-369: each SAA5246A ROM variant gives, for each of the eight values
+/// of C12 to C14, the set its datasheet table lists, and its default
+/// language for a combination it lacks; X/28/0 and M/29/0 are not read.
+#[test]
+fn each_saa5246a_variant_gives_its_sets_and_falls_back_to_its_default() {
+    use crate::config::RomVariant;
+    use charset::{G0Set, NationalOption as N};
+    let latin = |national| G0 { set: G0Set::Latin, national: Some(national) };
+    let whole = |set| G0 { set, national: None };
+    // (variant, [the G0 set for each national option index 000 to 111]),
+    // read from the SAA5246A product specification's Tables 15 to 23 and
+    // DEC-2430.
+    let expected: [(RomVariant, [G0; 8]); 8] = [
+        (
+            RomVariant::WestEuropean,
+            [
+                latin(N::English),
+                latin(N::German),
+                latin(N::SwedishFinnishHungarian),
+                latin(N::Italian),
+                latin(N::French),
+                latin(N::PortugueseSpanish),
+                latin(N::English),
+                latin(N::English),
+            ],
+        ),
+        (
+            RomVariant::EastEuropean,
+            [
+                latin(N::Polish),
+                latin(N::German),
+                latin(N::SwedishFinnishHungarian),
+                latin(N::German),
+                latin(N::German),
+                latin(N::SerbianCroatianSlovenian),
+                latin(N::CzechSlovak),
+                latin(N::Rumanian),
+            ],
+        ),
+        (
+            RomVariant::WestEuropeanTurkish,
+            [
+                latin(N::English),
+                latin(N::German),
+                latin(N::English),
+                latin(N::Italian),
+                latin(N::French),
+                latin(N::PortugueseSpanish),
+                latin(N::Turkish),
+                latin(N::English),
+            ],
+        ),
+        (
+            RomVariant::Yugoslav,
+            [
+                latin(N::SerbianCroatianSlovenian),
+                latin(N::SerbianCroatianSlovenian),
+                latin(N::SerbianCroatianSlovenian),
+                latin(N::SerbianCroatianSlovenian),
+                whole(G0Set::Cyrillic1),
+                latin(N::SerbianCroatianSlovenian),
+                latin(N::SerbianCroatianSlovenian),
+                latin(N::Rumanian),
+            ],
+        ),
+        (RomVariant::FrenchArabic, {
+            let mut sets = [latin(N::French); 8];
+            sets[0b111] = whole(G0Set::Arabic);
+            sets
+        }),
+        (RomVariant::ArabicHebrew, {
+            let mut sets = [whole(G0Set::Hebrew); 8];
+            sets[0b111] = whole(G0Set::Arabic);
+            sets
+        }),
+        (RomVariant::GreekTurkish, {
+            let mut sets = [latin(N::Turkish); 8];
+            sets[0b111] = whole(G0Set::Greek);
+            sets
+        }),
+        (RomVariant::EnglishThai, [latin(N::English); 8]),
+    ];
+    for (variant, sets) in expected {
+        let config = Config { rom_variant: Some(variant), ..Config::saa5246a() };
+        for (national, want) in (0u8..).zip(sets) {
+            // Group 0100 is designated, which no variant reads.
+            let (page, magazine) = page_designating(national, 0b0100);
+            let report = designation_report(Some(&page), &magazine, &config);
+            assert_eq!(report.source, DesignationSource::RomVariant, "/{}", variant.letter());
+            assert_eq!(report.designation.g0, want, "/{} with C12 to C14 {national:03b}", variant.letter());
+            let supported = variant.sets().by_national[usize::from(national)].is_some();
+            assert_eq!(report.fallback, !supported, "/{} {national:03b}", variant.letter());
+        }
+        assert_eq!(RomVariant::from_letter(variant.letter().to_ascii_lowercase()), Some(variant));
+    }
+}
+
 /// REQ-CHR-012: neoteletext's own designations name Latin English as
 /// the second set when no Table 33 value is received, and a received
 /// "no second set" is kept.

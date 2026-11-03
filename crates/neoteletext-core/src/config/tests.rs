@@ -47,12 +47,11 @@ fn saa5050_profile_matches_req_prf_002() {
     assert!(config.rounding);
     assert_eq!(config.level, PresentationLevel::Level1);
     assert_eq!(config.row24, Row24Policy::Never);
-    assert_eq!(config.fixed_national_index, Some(0));
+    assert_eq!(config.fixed_designation, Some(DESIGNATION_LATIN_ENGLISH));
     assert_eq!(config.reveal, RevealStyle::Momentary);
 }
 
-/// REQ-369: the profile's settings. Its variant setting, which would choose
-/// the character set group of Part D.5, is not built.
+/// REQ-369: the profile's settings, with the West European ROM variant.
 #[test]
 fn saa5246a_profile_matches_req_prf_003() {
     let config = Config::saa5246a();
@@ -62,5 +61,6 @@ fn saa5246a_profile_matches_req_prf_003() {
     assert_eq!(config.row24, Row24Policy::WhenPresent);
     assert_eq!(config.cell_mode, CellMode::Saa5246a, "12 by 10 cells");
     assert!(!config.rounding, "without rounding");
+    assert_eq!(config.rom_variant, Some(RomVariant::WestEuropean));
     assert_eq!(Config::profile("saa5246a"), Some(config));
 }

@@ -3,7 +3,7 @@
 
 use crate::session::Session;
 use crate::{Failure, exit};
-use neoteletext_core::config::{Config, ParityPolicy, PresentationLevel};
+use neoteletext_core::config::{Config, ParityPolicy, PresentationLevel, RomVariant};
 use neoteletext_core::types::PageAddress;
 use neoteletext_formats::Item;
 use neoteletext_formats::detect::{AutoConfig, AutoReader, Format};
@@ -48,6 +48,9 @@ pub struct Options {
     pub no_rounding: bool,
     /// Accept a single Start Box (decision E.17).
     pub single_start_box: bool,
+    /// The SAA5246A national option ROM variant, overriding the profile's
+    /// (REQ-PRF-003).
+    pub rom_variant: Option<RomVariant>,
     /// Diagnostics: 1 prints them, 2 adds the state machine trace
     /// (REQ-FSM-010).
     pub verbose: u8,
@@ -81,6 +84,9 @@ pub fn config(options: &Options) -> Result<Config, Failure> {
     }
     if options.single_start_box {
         config.double_start_box = false;
+    }
+    if let Some(variant) = options.rom_variant {
+        config.rom_variant = Some(variant);
     }
     config.trace = options.verbose >= 2;
     Ok(config)
@@ -234,6 +240,7 @@ mod tests {
             level: None,
             no_rounding: false,
             single_start_box: false,
+            rom_variant: None,
             verbose: 0,
             no_sandbox: false,
             allow_local: Vec::new(),
@@ -254,6 +261,7 @@ mod tests {
             level: Some(PresentationLevel::Level35),
             no_rounding: true,
             single_start_box: true,
+            rom_variant: Some(RomVariant::GreekTurkish),
             ..options("saa5050")
         };
         let changed = Config {
@@ -262,6 +270,7 @@ mod tests {
             level: PresentationLevel::Level35,
             rounding: false,
             double_start_box: false,
+            rom_variant: Some(RomVariant::GreekTurkish),
             ..profile
         };
         assert_eq!(config(&given).unwrap(), changed);
