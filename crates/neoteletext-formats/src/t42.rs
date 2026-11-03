@@ -11,9 +11,12 @@ use neoteletext_core::packet::{Packet, PacketMeta};
 use crate::item::{Diagnostic, DiagnosticKind, Item, Reader, offset_of, saturate_u32};
 use crate::text::copy_prefix;
 
-/// The leading bytes of the 45-byte form, in transmission order.
+/// The leading bytes of the 45-byte form, in transmission order: the two
+/// bytes of clock run-in (EN 300 706 clause 6.1) and the framing code
+/// (clause 6.2) that begin every teletext data line.
 const RUN_IN_PREFIX: [u8; 3] = [CLOCK_RUN_IN, CLOCK_RUN_IN, FRAMING_CODE];
-/// The leading byte of the 43-byte form.
+/// The leading byte of the 43-byte form: the framing code alone (EN 300 706
+/// clause 6.2), the clock run-in having been used up by the slicer.
 const FRAMING_PREFIX: [u8; 1] = [FRAMING_CODE];
 
 /// The packet stream layouts.

@@ -244,8 +244,8 @@ fn every_transition_of_the_walk() {
     assert_eq!(walk_transition(S::Returning, E::EndOfData), (S::Returning, A::None));
 }
 
-/// Annex C.2 rule 3: the later of two changes at one cell wins, type by
-/// type.
+/// REQ-265, Annex C.2 rule 3: the later of two changes at one cell wins,
+/// type by type.
 #[test]
 fn changes_at_one_cell() {
     let first = AttrChange { foreground: Some(1), background: Some(2), ..AttrChange::default() };
@@ -667,7 +667,7 @@ fn conceal_and_invert_of_the_display_attributes() {
     assert!(!grid.cells[4][12].attributes.invert() && grid.cells[4][13].attributes.invert());
 }
 
-/// REQ-L25-023, REQ-L25-011, Table 26 notes 11 and 12: the underline bit
+/// REQ-L25-023, REQ-L25-011, REQ-407, Table 26 notes 11 and 12: the underline bit
 /// separates Level 1 mosaics and 1/9 does not cancel it; clearing it also
 /// clears a Level 1 1/A; it separates G1 characters of triplets and
 /// underlines G0 and G2 characters, never G3 ones.
@@ -698,8 +698,8 @@ fn underline_and_separated_mosaics() {
     assert_eq!(underlined, [false, true, false, true]);
 }
 
-/// Decision E.48: Level 1 Flash is slow flash in normal mode at Levels 2.5
-/// and 3.5, until Steady.
+/// REQ-271, REQ-412, decision E.48: Level 1 Flash is slow flash in normal
+/// mode at Levels 2.5 and 3.5, until Steady.
 #[test]
 fn level_1_flash_is_normal_flash_at_the_level_1_rate() {
     let codes = [FLASH, b'A', STEADY, b'B'];
@@ -710,8 +710,8 @@ fn level_1_flash_is_normal_flash_at_the_level_1_rate() {
     assert!(!grid.cells[7][2].flash && !grid.cells[7][3].flash);
 }
 
-/// Decision E.47: the Level 1 box codes act only on a newsflash or subtitle
-/// page, Start Box doubled as the configuration asks (REQ-L1 decision E.17).
+/// REQ-1639, decision E.47: the Level 1 box codes act only on a newsflash
+/// or subtitle page, Start Box doubled as the configuration asks (REQ-L1 decision E.17).
 #[test]
 fn level_1_boxes_only_on_boxed_pages() {
     let codes = [START_BOX, START_BOX, b'A', END_BOX, b'B'];
@@ -725,7 +725,7 @@ fn level_1_boxes_only_on_boxed_pages() {
     assert_eq!(boxed, [true, false, false, false]);
 }
 
-/// REQ-FSM-006 step 2, decision E.50: Hold Mosaics shows the held mosaic at
+/// REQ-262, REQ-232, REQ-FSM-006 step 2, decision E.50: Hold Mosaics shows the held mosaic at
 /// attribute cells; a G3 character of a triplet does not change it, and it
 /// never replaces a character of a triplet; Release Mosaics ends it after
 /// its cell, and a change of size or of mosaic mode forgets the held one.

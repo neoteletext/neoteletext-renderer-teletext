@@ -41,7 +41,8 @@ impl PresentationLevel {
     }
 
     /// The level pages are composed at in this build: this level, or the
-    /// highest level below it whose feature is compiled in (decision E.61).
+    /// highest level below it whose feature is compiled in (decision E.61,
+    /// REQ-1642 rule 4).
     #[must_use]
     pub const fn available(self) -> Self {
         match self {

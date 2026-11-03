@@ -30,7 +30,7 @@ neoteletext-formats = { version = "...", default-features = false }  # T42 only
 
 | Crate | Features |
 |---|---|
-| `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); and the profiles `classic` (Level 1.5 alone, DEC-1757) and `modern-classic` |
+| `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); the glyph line cache `glyph-cache` (not default, REQ-392); and the profiles `classic` (Level 1.5 alone, DEC-1757) and `modern-classic` |
 | `neoteletext-formats` | `transport`, `sliced`, `pages`, `tti`, `ep1`, `edittf`, `dump`, `check`, `bdf` (default); `alloc`, `std`, `write-text` |
 | `neoteletext-web` | `push`, `cookies` (default); `dbsc`, `error-trait`, `alloc`, `std` |
 
@@ -94,6 +94,7 @@ A page may have up to 3,199 sub-pages (area NUM, decision E.130), each in its ow
 - The renderer writes palette indices, never colours (REQ-RND-023): 0 to 7 the colours, 8 transparent, 16 to 79 flashing, 80 to 143 concealed.
 - Flash and reveal are palette changes: refill your palette with `neoteletext_core::render::fill_palette` when the flash phase (`render::flash_visible`) or reveal changes. If your display has a hardware palette, no redraw is needed.
 - `neoteletext_image::convert` turns indices into RGB565, RGB888, RGBA8888, grey or 1-bit, with byte order, stride and rotation.
+- With the feature `glyph-cache` (REQ-392), keep a `glyphs::GlyphLineCache` (3,840 bytes, in memory you provide), fill it with `fill(&glyphs, CharSet::G0(grid.designation.g0))` when the page's designated set changes, and draw with `glyphs.with_line_cache(&cache)`. A text cell of that set is then found by table lookup instead of a search of the font: a screen of 1,000 Latin characters drew 3.7 times faster (about 660 to 177 microseconds on an AMD Ryzen 9 5900X, 4 November 2026). Every other character is drawn as before, and the pixels are the same.
 
 ## Aspect ratio
 

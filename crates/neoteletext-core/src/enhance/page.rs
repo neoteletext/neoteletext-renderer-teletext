@@ -8,7 +8,7 @@ use crate::colour::{self, ColourIndex, ColourMap, PagePresentation, Presentation
 use crate::config::{Config, PresentationLevel};
 use crate::consts::{
     C5_NEWSFLASH, C6_SUBTITLE, COLUMNS, PAGE_FUNCTION_DRCS, PAGE_FUNCTION_GDRCS, PAGE_FUNCTION_GPOP, PAGE_FUNCTION_MOT,
-    PAGE_FUNCTION_POP, PAGE_MOT, RECEIVER_COLUMNS, ROWS,
+    PAGE_FUNCTION_POP, PAGE_MOT, ROWS,
 };
 use crate::level1::{Cell, DisplayOptions, Grid, PageRows, Size, resolve_designation};
 use crate::objects::{self, EnhancementLinks};
@@ -19,7 +19,8 @@ use crate::trace::{Machine, TraceSink};
 const ROW_RESOLUTION: &str = "Resolving the row";
 
 /// True when the page is an enhancement page and so never shown as text
-/// (REQ-OBJ-041): the Magazine Organization Table, or a page whose stored
+/// (REQ-OBJ-041; EN 300 706 clause 9.4.2.1: its page function says it is
+/// not for direct display; DEC-581, REQ-1639 item 13): the Magazine Organization Table, or a page whose stored
 /// enhancement copy names an object, DRCS or table page function. A page
 /// named only by a link is still shown, so that a wrong link never hides a
 /// display page.
@@ -73,7 +74,10 @@ pub fn apply_traced(
     process(grid, page, magazine, lookup, config, options, config.trace.then_some(trace))
 }
 
-/// [`apply`], with `trace` `None` when tracing is off.
+/// [`apply`], with `trace` `None` when tracing is off. It acts only at
+/// Levels 2.5 and 3.5, where EN 300 706 Table 1 gives X/26 its
+/// non-spacing attributes and objects (clause 10.2), in place of the Level
+/// 1.5 pass (DEC-564).
 fn process(
     grid: &mut Grid,
     page: &StoredPage,
@@ -198,7 +202,10 @@ fn store_presentation(
 }
 
 /// Rebuilds the rows the page shows, top to bottom, so that each row knows
-/// the row above it (REQ-L25-025, REQ-L25-026).
+/// the row above it (REQ-L25-025, REQ-L25-026). A row the page hides keeps
+/// its Level 1 cells (DEC-581, REQ-1639 item 12), and the row below spacing
+/// double height or size shows the local background and no foreground
+/// (EN 300 706 Table 26, codes 0/D and 0/F).
 /// Each undefined character position a row shows is traced, when `trace`
 /// is given, as a transition of that row's attribute machine (REQ-L25-010,
 /// decision E.50): the position is found only here, where the row's sets
@@ -210,9 +217,6 @@ fn rebuild_rows(
     report: &mut EnhancementReport,
     mut trace: Option<&mut TraceSink<'_>>,
 ) {
-    let receiver_area: [Cell; RECEIVER_COLUMNS] = core::array::from_fn(|column| {
-        grid.cells.first().and_then(|row| row.get(column)).copied().unwrap_or(Cell::BLANK)
-    });
     let mut cells = RowCells::new();
     let mut lower = false;
     for row in 0..ROWS {
@@ -243,12 +247,11 @@ fn rebuild_rows(
             }
         }
         for (column, cell) in cells.cells.iter().enumerate() {
-            let mut cell = cell.unwrap_or_else(|| fill.get(column).copied().unwrap_or(Cell::BLANK));
-            // REQ-L25-050: row 0 columns 0 to 7 stay the receiver's.
-            if row == 0
-                && let Some(receiver) = receiver_area.get(column)
-            {
-                cell = *receiver;
+            let cell = cell.unwrap_or_else(|| fill.get(column).copied().unwrap_or(Cell::BLANK));
+            // REQ-L25-050, REQ-SEC-005: the receiver's cells keep what the
+            // Level 1 pass drew there; nothing the page enhances reaches them.
+            if crate::policy::is_receiver_column(row, column) {
+                continue;
             }
             if let Some(target) = grid.cell_mut(row, column) {
                 *target = cell;

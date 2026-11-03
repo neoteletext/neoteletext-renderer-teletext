@@ -64,3 +64,33 @@ fn saa5246a_profile_matches_req_prf_003() {
     assert_eq!(config.rom_variant, Some(RomVariant::WestEuropean));
     assert_eq!(Config::profile("saa5246a"), Some(config));
 }
+
+/// REQ-1642, decision E.61: a presentation level whose feature is not
+/// compiled in falls back to the highest compiled level below it, and a
+/// compiled level is kept. Each build checks its own feature set; the core's
+/// tests run with all features and with none (and `cargo xtask features`
+/// builds the combinations between).
+#[test]
+fn a_level_not_compiled_in_falls_back_to_the_highest_below_it() {
+    use PresentationLevel::{Level1, Level15, Level25, Level35};
+    assert_eq!(Level1.available(), Level1, "Level 1 is always compiled in");
+    #[cfg(feature = "level25")]
+    {
+        assert_eq!(Level25.available(), Level25);
+        assert_eq!(Level35.available(), Level35);
+    }
+    #[cfg(all(not(feature = "level25"), feature = "level15"))]
+    {
+        assert_eq!(Level25.available(), Level15, "Level 2.5 falls to Level 1.5");
+        assert_eq!(Level35.available(), Level15, "Level 3.5 falls to Level 1.5");
+    }
+    #[cfg(all(not(feature = "level25"), not(feature = "level15")))]
+    {
+        assert_eq!(Level25.available(), Level1, "Level 2.5 falls to Level 1");
+        assert_eq!(Level35.available(), Level1, "Level 3.5 falls to Level 1");
+    }
+    #[cfg(feature = "level15")]
+    assert_eq!(Level15.available(), Level15);
+    #[cfg(not(feature = "level15"))]
+    assert_eq!(Level15.available(), Level1, "Level 1.5 falls to Level 1");
+}

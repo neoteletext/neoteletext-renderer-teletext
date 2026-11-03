@@ -10,8 +10,9 @@ use crate::colour::ColourMap;
 use crate::config::{Config, ParityPolicy, Row24Policy};
 use crate::consts::{
     C5_NEWSFLASH, C6_SUBTITLE, C7_SUPPRESS_HEADER, C10_INHIBIT_DISPLAY, CLOCK_COLUMN, CODE_MASK_7BIT, COLOUR_GREEN,
-    COLOUR_WHITE, COLUMNS, HEADER_DISPLAY_COLUMN, RECEIVER_COLUMNS, ROWS, SPACE, STATUS_ATTRIBUTE_COLUMN,
+    COLOUR_WHITE, COLUMNS, HEADER_DISPLAY_COLUMN, ROWS, SPACE, STATUS_ATTRIBUTE_COLUMN,
 };
+use crate::policy::is_receiver_column;
 use crate::trace::TraceSink;
 
 /// The 7-bit codes and parity-failure mask of a stored row under the parity
@@ -143,7 +144,8 @@ const RECEIVER_SET: CharSet =
 /// designates, so that a Cyrillic, Arabic-script or Japanese page cannot turn
 /// "P100" into other letters, join it or draw it from a font without it.
 fn draw_receiver_columns_in_receiver_set(cells: &mut [Cell; COLUMNS]) {
-    for cell in cells.iter_mut().take(RECEIVER_COLUMNS) {
+    let receiver = cells.iter_mut().enumerate().take_while(|&(column, _)| is_receiver_column(0, column));
+    for (_, cell) in receiver {
         if let Glyph::Char(character) = &mut cell.glyph {
             *character = CharRef::new(RECEIVER_SET, character.code);
         }
@@ -233,7 +235,10 @@ pub fn row_24_shown(page: &StoredPage, config: &Config) -> bool {
 }
 
 /// True when no row of `page` below row 0 is displayed: REQ-L1-016 inhibit
-/// display, REQ-ACQ-014 a page that is not text.
+/// display, REQ-ACQ-014 a page that is not text. C10, Inhibit Display, says
+/// data addressed to rows 1 to 24 is not to be displayed (EN 300 706 clause
+/// 9.3.1.3, Table 2), and a page whose X/28 page function is not basic text
+/// is not for direct display (clause 9.4.2.1).
 fn inhibited(page: &StoredPage) -> bool {
     page.control.0 & C10_INHIBIT_DISPLAY != 0 || !page.is_text_page()
 }
@@ -277,7 +282,9 @@ impl PageRows {
 }
 
 /// Blanks row 0 for a page with C7 set, keeping the status area when asked
-/// (REQ-L1-014).
+/// (REQ-L1-014): C7, Suppress Header, says data addressed to row 0 is not
+/// to be displayed (EN 300 706 clause 9.3.1.3, Table 2); the status area is
+/// the receiver's, not the page's (decision E.10).
 fn hide_header(grid: &mut Grid, keep_status: bool) {
     if let Some(cells) = grid.cells.get_mut(0) {
         for (column, cell) in cells.iter_mut().enumerate() {
@@ -288,13 +295,15 @@ fn hide_header(grid: &mut Grid, keep_status: bool) {
     }
 }
 
-/// On a boxed page everything outside a box is the picture (REQ-L1-011),
+/// On a boxed page everything outside a box is the picture (REQ-L1-011;
+/// EN 300 706 clause 9.3.1.3, Table 2, bits C5 and C6; Table 26, code 0/B),
 /// so the receiver's own cells are boxed while a security indicator is on:
 /// REQ-SEC-005 and REQ-SEC-008 require it to show on every page, a
 /// newsflash or subtitle page among them.
 fn box_receiver_columns(grid: &mut Grid) {
     if let Some(cells) = grid.cells.get_mut(0) {
-        for cell in cells.iter_mut().take(RECEIVER_COLUMNS) {
+        let receiver = cells.iter_mut().enumerate().take_while(|&(column, _)| is_receiver_column(0, column));
+        for (_, cell) in receiver {
             cell.boxed = true;
         }
     }

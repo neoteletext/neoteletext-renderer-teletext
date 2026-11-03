@@ -70,6 +70,7 @@ Each capability is a Cargo feature of `neoteletext-core`:
 | `additional-flash-functions` | `nonspacing-attributes` | The Additional Flash Functions of Table 29, column mode 00111 |
 | `modern-classic` | — | The profile: `level15`, `level25`, `nonspacing-attributes`, `render`, `viewer` and `objects` |
 | `classic` | — | The classic profile (DEC-1757): `level15`, `render` and `viewer`, and nothing of Levels 2.5 and 3.5 |
+| `glyph-cache` | `render` | The glyph line cache (REQ-392): `GlyphLineCache`, 3,840 bytes the port provides, holding the lines of one G0 set so that a text cell is drawn by table lookup; not default |
 
 **The default build** (decision E.105, the owner's instruction of 22 October 2026, amending decision E.61's rule that every feature is on): Levels 1.0 and 1.5, and of Levels 2.5 and 3.5 the non-spacing attributes and the Colour Map of both levels: `level15`, `level25`, `nonspacing-attributes`, `level25-32colors`, `level35-32colors`, with `render`, `viewer` and `extended-sets`. Objects and the Additional Flash Functions are not default: a build names them, as the conformance tests do (the gate runs them with every feature). `neottx` uses the default. A port chooses the profile by turning the defaults off:
 

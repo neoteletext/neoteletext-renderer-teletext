@@ -48,7 +48,8 @@ pub(super) enum Flash {
 pub(super) const ATTRIBUTES: bool = cfg!(feature = "nonspacing-attributes");
 
 /// Level 1 Flash at Levels 2.5 and 3.5: normal mode, at the Level 1 rate
-/// (decisions E.12 and E.48).
+/// (decisions E.12 and E.48; REQ-271, which the Additional Flash Functions
+/// never change, and REQ-412).
 pub(super) const LEVEL_1_FLASH: Flash =
     Flash::On { mode: FlashMode::Normal, rate: Rate::Fixed(FlashRate::Level1), start: 0 };
 
@@ -91,7 +92,8 @@ impl Attrs {
 }
 
 impl AttrChange {
-    /// This change followed by a later one at the same cell.
+    /// This change followed by a later one at the same cell: type by type,
+    /// the later wins (Annex C.2 rule 3, REQ-265).
     pub(super) fn then(self, later: Self) -> Self {
         Self {
             foreground: later.foreground.or(self.foreground),
@@ -114,7 +116,8 @@ pub(super) const fn flash_of(_mode: u8, _rate: u8, _reserved: u8, _column: u8) -
 #[cfg(feature = "additional-flash-functions")]
 pub(super) use super::additional_flash::flash_of;
 
-/// The phase of the cell in column `column` (decision E.48): successive
+/// The phase of the cell in column `column` (decision E.48; REQ-271,
+/// REQ-1639 item 11, REQ-L25-027): successive
 /// characters rightwards from the triplet's column take phases 1, 2, 3 for
 /// incremental flash and 1, 3, 2 for decremental.
 pub(super) fn flash_rate(rate: Rate, start: u8, column: usize) -> FlashRate {

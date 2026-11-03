@@ -82,7 +82,9 @@ impl ColourMap {
     }
 
     /// The 8-bit red, green and blue of an index: each 4-bit primary times
-    /// 17 (REQ-RND-030). Transparent gives its stored value; callers draw
+    /// 17 (REQ-RND-030). The Colour Map's entries have four bits a primary
+    /// (EN 300 706 clause 12.4, Table 30), and 255 / 15 = 17 maps 0 to 15
+    /// onto 0 to 255 in equal steps. Transparent gives its stored value; callers draw
     /// it as the picture.
     #[must_use]
     pub fn rgb888(&self, index: ColourIndex) -> [u8; 3] {

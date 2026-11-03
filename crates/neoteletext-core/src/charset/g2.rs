@@ -1,4 +1,4 @@
-//! The G2 sets (Tables 37, 41, 43 and 45).
+//! The G2 sets (Tables 37, 41, 43 and 45; REQ-75).
 
 use super::code_table::CodeTable;
 

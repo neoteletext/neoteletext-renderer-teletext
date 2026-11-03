@@ -9,7 +9,9 @@ use crate::glyphs::{CharClass, class};
 use crate::level1::{Cell, Glyph, Grid};
 
 /// Change tracking (REQ-RND-019, REQ-RND-032): which rows changed since the
-/// port last asked.
+/// port last asked. EN 300 706 says nothing of redrawing; the port redraws
+/// only the rows reported, and a flashing page is redrawn the same way
+/// with no second renderer (DEC-553, DEC-631).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ChangeTracker {
     hashes: [u64; ROWS],

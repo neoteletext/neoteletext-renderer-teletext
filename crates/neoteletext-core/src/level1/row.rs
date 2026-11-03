@@ -34,7 +34,10 @@ pub struct RowState {
 }
 
 impl RowState {
-    /// The default state at the start of every row (REQ-L1-002).
+    /// The default state at the start of every row (REQ-L1-002): white
+    /// alphanumerics, steady, end box, normal size, black background,
+    /// contiguous and released, the start-of-row defaults of EN 300 706
+    /// clause 12.2, Table 26; the first G0 set (Table 26, code 1/B).
     pub const DEFAULT: Self = Self {
         foreground: COLOUR_WHITE,
         background: COLOUR_BLACK,
@@ -157,6 +160,8 @@ fn cell_glyph(state: &RowState, code: u8, context: &RowContext<'_>) -> (Glyph, b
         }
         return (Glyph::Space, false);
     }
+    // EN 300 706 clause 15.3 and Table 26 code 1/B: ESC toggles between
+    // the first and second G0 sets; without a second set the first stays.
     let g0 = if state.second_g0 { context.second_g0.unwrap_or(context.default_g0) } else { context.default_g0 };
     // REQ-L1-006: the G1 pattern keeps the form in force at this cell.
     if state.mosaic && code & MOSAIC_BIT5 != 0 {
@@ -210,6 +215,8 @@ fn set_after(state: &mut RowState, code: u8, next: u8, context: &RowContext<'_>)
             state.double = true;
             return true;
         }
+        // EN 300 706 Table 26, code 1/B (set-after): each ESC toggles the
+        // G0 set; clause 15.3 (REQ-CHR-009, REQ-L1-013).
         ESC => state.second_g0 = !state.second_g0,
         RELEASE_MOSAICS => state.hold = false,
         _ => {}

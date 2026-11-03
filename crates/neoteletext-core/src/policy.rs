@@ -4,7 +4,10 @@
 
 use crate::consts::{RECEIVER_COLUMNS, STATUS_COLUMNS};
 
-/// True when a row-0 column belongs to the receiver alone (REQ-SEC-005).
+/// True when a row-0 column belongs to the receiver alone (REQ-SEC-005):
+/// columns 0 to 7, where a header carries its 8 control bytes and no
+/// display data (EN 300 706 clause 12.1, Table 25), and where the receiver
+/// writes its status (decision E.10).
 #[must_use]
 pub const fn is_receiver_column(row: usize, column: usize) -> bool {
     row == 0 && column < RECEIVER_COLUMNS

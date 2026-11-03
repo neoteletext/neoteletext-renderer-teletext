@@ -161,7 +161,9 @@ fn double_half(six: u16) -> u16 {
 }
 
 /// Double width (REQ-RND-034): the left or right six half-dots of the
-/// normal-width line, each drawn twice. Kept out of line, like
+/// normal-width line, each drawn twice, since a double-width character is
+/// stretched to occupy the next character space (EN 300 706 Table 26, code
+/// 0/E; Table 29, column mode 01100 bit D6). Kept out of line, like
 /// [`styled_line`].
 #[inline(never)]
 fn widen_mask(mask: u16, width: Width) -> u16 {
@@ -173,7 +175,10 @@ fn widen_mask(mask: u16, width: Width) -> u16 {
 }
 
 /// The line of the normal-height character that output line `line` of a
-/// cell shows: the vertical part of the size (REQ-RND-011).
+/// cell shows: the vertical part of the size (REQ-RND-011). Double height
+/// stretches a character into the row below, its origin the upper cell
+/// (EN 300 706 Table 26, code 0/D), so each half draws each source line of
+/// its half twice.
 const fn source_line(size: Size, line: usize, height: usize) -> usize {
     match size {
         Size::Normal => line,
@@ -227,8 +232,8 @@ pub fn cell_line(
         Glyph::Mosaic { pattern, separated } => mosaic_line(pattern, separated, source, height),
         Glyph::Char(character) => match class(character) {
             CharClass::Text => {
-                // REQ-FNT-005: row 0 is the receiver's, always in the
-                // compiled font, so that no loaded font can redraw what the
+                // REQ-FNT-005, DEC-596: row 0 is the receiver's, always in
+                // the compiled font, so that no loaded font can redraw what the
                 // status area says (REQ-SEC-005).
                 let mask = if glyphs.has_fonts() && row != 0 {
                     font_or_text_line(cell, glyphs, source, options)

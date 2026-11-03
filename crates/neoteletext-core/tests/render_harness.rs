@@ -13,17 +13,19 @@
 mod common;
 
 use common::{
-    ObjectLayout, background, build, colours, display_page, end, foreground, g0, local_data, set_position,
-    worst_case_page, x26, x28,
+    DISPLAY, ObjectLayout, Receiver, background, build, colours, display_page, end, foreground, g0, local_data, row,
+    set_position, worst_case_page, x26, x28,
 };
 use neoteletext_core::config::{Config, PresentationLevel};
-use neoteletext_core::consts::{PAGE_WIDTH, ROWS};
+use neoteletext_core::consts::{COLUMNS, PAGE_WIDTH, ROWS, STORED_ROWS};
+use neoteletext_core::ecc::with_odd_parity;
 use neoteletext_core::glyphs::GlyphSet;
 use neoteletext_core::level1::{Glyph, Grid, Size, Zoom};
 use neoteletext_core::packet::TripletFunction;
 use neoteletext_core::render::{
     ChangeTracker, Field, FlashPhase, IndexBuffer, IndexFormat, RenderOptions, render_line, render_row, render_screen,
 };
+use neoteletext_core::types::{PageAddress, SubCode};
 
 /// Every row, as the tracker's and `render_screen`'s bitmask.
 const ALL_ROWS: u32 = (1 << ROWS) - 1;
@@ -32,13 +34,13 @@ const SHUFFLES: u64 = 8;
 
 /// The reference caller: the renderer, called in the ways a port may call
 /// it, each giving a whole screen of 8-bit indices.
-struct Harness {
-    glyphs: GlyphSet<'static>,
+struct Harness<'a> {
+    glyphs: GlyphSet<'a>,
 }
 
-impl Harness {
-    fn new() -> Self {
-        Self { glyphs: GlyphSet::noto_teletext() }
+impl Harness<'_> {
+    fn new() -> Harness<'static> {
+        Harness { glyphs: GlyphSet::noto_teletext() }
     }
 
     fn screen_bytes(options: RenderOptions) -> usize {
@@ -281,4 +283,114 @@ fn redrawing_the_reported_rows_gives_a_whole_redraw() {
     let revealed = RenderOptions { reveal: true, ..resolved_options(0) };
     kept.update(&harness, &grid, revealed);
     assert_eq!(kept.frame, harness.screen(&grid, revealed), "resolved mode, reveal on");
+}
+
+/// REQ-7, DEC-1118: packet X/25 carries a page's key-word search labels
+/// (EN 300 706 clause 9.1, Table 1), not a display row. It is kept in the
+/// stored page, and a page with an X/25 of visible characters is drawn
+/// exactly as the same page without it, at every level.
+#[test]
+fn packet_x25_is_stored_and_never_shown() {
+    const X25: u8 = 25;
+    const LABELS: &[u8] = b"KEYWORD LABELS ARE NEVER DRAWN ON SCREEN";
+    let rows: &[(u8, &[u8])] = &[(1, b"\x0dTITLE"), (12, b"\x01RED TEXT"), (23, b"\x16\x7f\x7f")];
+    let without = display_page(0, rows, vec![]);
+    let mut with = without.clone();
+    with.push(row(X25, LABELS));
+
+    let config = Config::default();
+    let stored = Receiver::new().run(&with, config, |decoder| {
+        let page = decoder.store().get(PageAddress::from_mpp(DISPLAY).unwrap(), SubCode::ANY).unwrap();
+        page.cells[usize::from(X25)]
+    });
+    assert_eq!(usize::from(X25), STORED_ROWS - 1, "X/25 is the last stored row");
+    assert!(usize::from(X25) >= ROWS, "and lies below the display rows");
+    let expected: [u8; COLUMNS] = core::array::from_fn(|column| with_odd_parity(LABELS[column]));
+    assert_eq!(stored, expected, "X/25 is kept in the stored page");
+
+    let harness = Harness::new();
+    for (level, options) in [
+        (PresentationLevel::Level1, palette_options()),
+        (PresentationLevel::Level15, palette_options()),
+        (PresentationLevel::Level25, resolved_options(0)),
+        (PresentationLevel::Level35, resolved_options(0)),
+    ] {
+        let shown = harness.screen(&build(&with, level).0, options);
+        let plain = harness.screen(&build(&without, level).0, options);
+        assert!(shown == plain, "{level:?}: X/25 changes nothing drawn");
+    }
+}
+
+/// The glyph line cache of REQ-392, compiled in with `glyph-cache`.
+#[cfg(feature = "glyph-cache")]
+mod line_cache {
+    use super::*;
+    use neoteletext_core::charset::{CharRef, CharSet, designation};
+    use neoteletext_core::config::CellMode;
+    use neoteletext_core::consts::{CODE_MASK_7BIT, SPACE};
+    use neoteletext_core::glyphs::GlyphLineCache;
+    use neoteletext_core::level1::Cell;
+    use neoteletext_core::render::cell_line;
+
+    /// Every G0 set and national option Table 32 designates.
+    fn every_g0_set() -> Vec<CharSet> {
+        let mut sets: Vec<CharSet> = (0..=CODE_MASK_7BIT).filter_map(designation).map(|d| CharSet::G0(d.g0)).collect();
+        sets.dedup();
+        sets
+    }
+
+    /// REQ-392: every entry of the cache, filled for each G0 set Table 32
+    /// designates, draws every line of its character exactly as the cell
+    /// raster draws it through the font, in both cell modes and with
+    /// rounding on and off; a cell of another set, or with a diacritical
+    /// mark, is not taken from the cache.
+    #[test]
+    fn every_cache_entry_is_the_cell_rasters_line() {
+        let glyphs = GlyphSet::noto_teletext();
+        let grid = Grid::EMPTY;
+        let mut cache = Box::new(GlyphLineCache::EMPTY);
+        for set in every_g0_set() {
+            cache.fill(&glyphs, set);
+            let cached = glyphs.with_line_cache(&cache);
+            for (mode, rounding) in [(CellMode::Saa5050, true), (CellMode::Saa5050, false), (CellMode::Saa5246a, true)]
+            {
+                let config = Config { cell_mode: mode, rounding, ..Config::default() };
+                let options = RenderOptions::from_config(&config, false);
+                for code in SPACE..=CODE_MASK_7BIT {
+                    let character = CharRef::new(set, code);
+                    assert!(cached.cached_rows(character).is_some(), "{set:?} {code:#04X} is held");
+                    let cell = Cell { glyph: Glyph::Char(character), ..Cell::BLANK };
+                    for line in 0..options.row_height() {
+                        let font = cell_line(&cell, &grid, 1, 0, line, &glyphs, options);
+                        let table = cell_line(&cell, &grid, 1, 0, line, &cached, options);
+                        assert_eq!(table, font, "{set:?} {code:#04X} line {line} {mode:?} rounding {rounding}");
+                    }
+                    let marked = CharRef { diacritic: 1, ..character };
+                    assert!(cached.cached_rows(marked).is_none(), "a marked character is drawn through the font");
+                }
+            }
+            for other in every_g0_set().into_iter().filter(|&other| other != set) {
+                assert!(cached.cached_rows(CharRef::new(other, b'A')).is_none(), "{other:?} is not {set:?}");
+            }
+        }
+    }
+
+    /// REQ-392: whole screens of the pages of every level, drawn with the
+    /// cache filled for the page's designated set, with it filled for
+    /// another set, and with none, are the same pixels.
+    #[test]
+    fn whole_screens_are_the_same_with_and_without_the_cache() {
+        let harness = Harness::new();
+        let mut cache = Box::new(GlyphLineCache::EMPTY);
+        for (name, grid, options) in pages() {
+            let plain = harness.screen(&grid, options);
+            let page_set = CharSet::G0(grid.designation.g0);
+            let other = every_g0_set().into_iter().find(|&set| set != page_set).unwrap();
+            for set in [page_set, other] {
+                cache.fill(&harness.glyphs, set);
+                let cached = Harness { glyphs: harness.glyphs.with_line_cache(&cache) };
+                assert!(cached.screen(&grid, options) == plain, "{name}, cache of {set:?}");
+            }
+        }
+    }
 }

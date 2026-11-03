@@ -226,8 +226,8 @@ fn attributes_apply() {
     assert_eq!(drawn[..CELL_FIELD_LINES - 1], PATTERN[..CELL_FIELD_LINES - 1]);
 }
 
-/// Decision E.72 item 8: mosaics and G3 characters are never drawn from a
-/// font.
+/// REQ-121, decision E.72 item 8: mosaics and G3 characters are never
+/// drawn from a font.
 #[test]
 fn mosaics_and_g3_are_unchanged() {
     for glyph in [

@@ -120,7 +120,8 @@ impl RowState {
                 self.level_1_conceal = false;
             }
             FLASH => self.attrs.flash = LEVEL_1_FLASH,
-            // Decision E.47: the Level 1 box codes act only on boxed pages.
+            // Decision E.47, REQ-1639: the Level 1 box codes act only on
+            // boxed pages.
             END_BOX if context.boxed_page => self.attrs.boxed = false,
             START_BOX if context.boxed_page && (!context.double_start_box || next == START_BOX) => {
                 self.attrs.boxed = true;
@@ -130,6 +131,8 @@ impl RowState {
                 // REQ-L25-026: the row below is suppressed.
                 self.spacing_double |= context.double_allowed;
             }
+            // EN 300 706 Table 26, codes 0/E and 0/F: double width and
+            // double size have effect at Levels 2.5 and 3.5.
             DOUBLE_WIDTH => self.size(false, true),
             ESC => self.second_g0 = !self.second_g0,
             RELEASE_MOSAICS => self.hold = false,
@@ -215,7 +218,9 @@ impl Resolved {
     }
 }
 
-/// Builds a cell from a glyph and the attributes it is drawn with.
+/// Builds a cell from a glyph and the attributes it is drawn with;
+/// underline only for the glyphs [`is_text`](super::characters::is_text)
+/// accepts (REQ-407).
 pub(super) fn cell_of(glyph: Glyph, attrs: &Attrs, source: CharSource, column: usize) -> Resolved {
     let text = is_text(glyph);
     let mut attributes = CellAttributes::DEFAULT.with_source(source).with_invert(attrs.invert);
@@ -353,7 +358,7 @@ fn resolve_segment(
             *slot = cell;
         }
         // Step 7: the held mosaic, from Level 1 characters only (decision
-        // E.50), in the form shown at this cell.
+        // E.50, REQ-262, REQ-232), in the form shown at this cell.
         if segment.codes.is_some() {
             if state.mosaic && code > ATTRIBUTE_LAST && code & MOSAIC_BIT5 != 0 {
                 state.held = Some((mosaic_pattern(code), level_1_separated || plane_attrs.underline));
@@ -366,7 +371,9 @@ fn resolve_segment(
 
 /// What a Level 1 byte shows (REQ-FSM-006 step 2): a space or the held
 /// mosaic for an attribute, a mosaic, or a character of the Level 1 G0 set
-/// with its national option.
+/// with its national option. ESC selects the second G0 set for these bytes
+/// only: it "does not affect characters written via packets X/26 or as part
+/// of an object" (EN 300 706 Table 26, code 1/B; clause 15.4).
 fn level_1_glyph(state: &RowState, code: u8, separated: bool, context: &RowContext) -> (Glyph, bool) {
     if code <= ATTRIBUTE_LAST {
         if state.hold

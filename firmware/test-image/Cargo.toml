@@ -32,6 +32,8 @@ capabilities = [
 ]
 modern-classic = ["level25", "neoteletext-core/objects", "neoteletext-core/nonspacing-attributes"]
 render = ["neoteletext-core/render"]
+# The glyph line cache of REQ-392: its filling, with the renderer.
+glyph-cache = ["render", "neoteletext-core/glyph-cache"]
 font = ["render"]
 extended-sets = ["neoteletext-core/extended-sets"]
 viewer = ["neoteletext-core/viewer"]

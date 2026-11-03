@@ -8,16 +8,19 @@ use super::super::attributes::{ATTRIBUTES, Flash, flash_of};
 use super::super::characters::EnhChar;
 use super::super::planes::Plane;
 use crate::charset::{self, G0Set, G2Set};
-use crate::consts::{COLUMNS, MODE_ROW_SET, RECEIVER_COLUMNS, ROWS, TRIPLET_AT_SIGN_CODE, TRIPLET_FIRST_CHARACTER};
+use crate::consts::{COLUMNS, MODE_ROW_SET, ROWS, TRIPLET_AT_SIGN_CODE, TRIPLET_FIRST_CHARACTER};
 use crate::packet::TripletFunction;
 
 impl<'s> Walker<'_, 's> {
     /// The cell of the active position, when an element may be placed there
     /// (REQ-OBJ-014, REQ-L25-050, REQ-1644): an element outside rows 0 to
-    /// 24 or columns 0 to 39 is discarded, and the source continues.
+    /// 24 or columns 0 to 39 is discarded, and the source continues, since an
+    /// object writes only into the area of its origin (DEC-581) and there
+    /// are no side panels (DEC-1636); row 0, columns 0 to 7, are the
+    /// receiver's (decision E.10, DEC-529 rule (j)).
     fn placeable(&mut self, frame: &Frame<'s>) -> Option<(usize, usize)> {
         let (row, column) = frame.position();
-        let receiver = row == 0 && column < RECEIVER_COLUMNS;
+        let receiver = crate::policy::is_receiver_column(row, column);
         if row >= ROWS || column >= COLUMNS || receiver {
             self.report.faults.discarded_writes = self.report.faults.discarded_writes.saturating_add(1);
             return None;

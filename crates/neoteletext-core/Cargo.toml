@@ -68,6 +68,11 @@ classic = ["level15", "render", "viewer"]
 modern-classic = ["level15", "level25", "nonspacing-attributes", "render", "viewer", "objects"]
 # The row renderer and the generated G3 glyphs (area RND).
 render = []
+# The glyph line cache of REQ-392: 3,840 bytes the port provides, holding
+# the lines of one G0 set's characters so that the renderer draws them by
+# table lookup instead of searching the font for every line (TODO-2068).
+# Not default: a microcontroller port may not spare the memory.
+glyph-cache = ["render"]
 # The viewer state machine, navigation and history (area NAV).
 viewer = []
 # REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types,

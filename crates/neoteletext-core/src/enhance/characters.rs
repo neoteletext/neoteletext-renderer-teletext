@@ -49,7 +49,7 @@ pub(super) fn enhancement_glyph(character: EnhChar, sets: (G0Set, G2Set), separa
 }
 
 /// True for a G0 or G2 character, the only ones that take underline
-/// (decisions E.47 and E.50).
+/// (decisions E.47 and E.50, REQ-407).
 pub(super) const fn is_text(glyph: Glyph) -> bool {
     matches!(glyph, Glyph::Char(CharRef { set: CharSet::G0(_) | CharSet::G2(_), .. }))
 }

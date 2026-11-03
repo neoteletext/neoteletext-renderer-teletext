@@ -51,7 +51,10 @@ fn write_cell(out: &mut [u8], slot: usize, raster: CellLine, format: IndexFormat
     Ok(())
 }
 
-/// Writes one pixel row of a text row into `out`.
+/// Writes one pixel row of a text row into `out`: 40 cells, the 40
+/// character spaces of a row (EN 300 706 clause 12.1, Table 25), each of 12
+/// half-dots, the SAA5050's 6-dot cell drawn at twice its width (decisions
+/// E.13 and E.14), so [`PAGE_WIDTH`] pixels (REQ-1644).
 fn write_line(
     grid: &Grid,
     row: usize,
@@ -95,7 +98,9 @@ fn check_mode(grid: &Grid, row: usize, options: RenderOptions) -> Result<(), Ren
 
 /// Renders text row `row`, 0 to [`ROWS`] − 1, into `buffer` at the
 /// buffer's row stride (REQ-RND-017). In the 12-by-20 mode this draws 20 lines for
-/// [`Field::Both`] and 10 for one field. Each line is [`PAGE_WIDTH`] pixels.
+/// [`Field::Both`] and 10 for one field: the even lines are the first field
+/// and the odd ones the second, as an interlaced SAA5050 display draws them,
+/// so the line number alone carries the field (DEC-553, DEC-2458). Each line is [`PAGE_WIDTH`] pixels.
 /// On an error the buffer's contents are unspecified.
 ///
 /// # Errors
@@ -137,7 +142,9 @@ pub fn render_row(
 }
 
 /// Renders screen line `y` (0 to 499 in the 12-by-20 mode) into `out`,
-/// applying page zoom (REQ-L1-020).
+/// applying page zoom (REQ-L1-020). EN 300 706 defines no zoom; it is the
+/// SAA5050 and SAA5246A's, and belongs to this call alone (DEC-2458), with
+/// the leftover lines of DEC-2197.
 ///
 /// # Errors
 /// [`RenderError::OutOfRange`] when `y` is past the page's last line for
@@ -173,11 +180,13 @@ pub fn render_line(
     write_line(grid, row, line, glyphs, options, format, out)
 }
 
-/// Rows in each half of a zoomed page (REQ-L1-020).
+/// Rows in each half of a zoomed page (REQ-L1-020): rows 0 to 11 or 12 to
+/// 23, each shown double height as the SAA5050 and SAA5246A did (DEC-2197).
 pub const ZOOM_ROWS: usize = 12;
 
 /// Renders every row, or only changed rows, into a whole-screen framebuffer
-/// (REQ-RND-022), the reference caller of REQ-RND-021. `rows` is a bitmask
+/// (REQ-RND-022), the reference caller of REQ-RND-021. The port asks for
+/// pixels and the library never pushes them (DEC-553). `rows` is a bitmask
 /// of rows to draw: bit n for row n, rows 0 to [`ROWS`] − 1, higher bits
 /// ignored. Each row is [`PAGE_WIDTH`] pixels wide from the start of
 /// the framebuffer's lines; filling any border beyond it with

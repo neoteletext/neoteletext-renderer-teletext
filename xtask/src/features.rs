@@ -33,6 +33,8 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-core", features: "level15,level25,level25-32colors" },
     Build { package: "neoteletext-core", features: "classic" },
     Build { package: "neoteletext-core", features: "render" },
+    // The glyph line cache of REQ-392 (TODO-2068), not default.
+    Build { package: "neoteletext-core", features: "glyph-cache" },
     Build { package: "neoteletext-core", features: "extended-sets" },
     Build { package: "neoteletext-core", features: "viewer" },
     // Error and Display on the core's types, which needs core::fmt

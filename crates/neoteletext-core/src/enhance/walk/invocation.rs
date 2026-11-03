@@ -35,7 +35,10 @@ impl<'s> Walker<'_, 's> {
         self.accept(object, (0, 0), (0, 0))
     }
 
-    /// An Object Invocation (REQ-OBJ-001 to REQ-OBJ-008).
+    /// An Object Invocation (REQ-OBJ-001 to REQ-OBJ-008). The origin is the
+    /// active position plus the offsets of an Origin Modifier immediately
+    /// before it, and the active position returns after the object
+    /// (EN 300 706 Table 28, mode 10000; clause 13.7; REQ-OBJ-002).
     pub(super) fn invoke(
         &mut self,
         frame: &Frame<'s>,
