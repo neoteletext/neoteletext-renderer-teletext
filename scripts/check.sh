@@ -279,6 +279,11 @@ full_steps() {
 
     step "cargo-deny: licences and advisories (REQ-GEN-017, REQ-SEC-014)"
     cargo deny check
+
+    # The fuzz targets are a workspace of their own (fuzz/Cargo.toml says why),
+    # with their own lockfile, which the main workspace's check never reads.
+    step "cargo-deny: the fuzz workspace's licences and advisories (REQ-GEN-017, REQ-SEC-014)"
+    cargo deny --config deny.toml --manifest-path fuzz/Cargo.toml check
 }
 
 if [[ "${1:-}" == full ]]; then check_full_tools; fi

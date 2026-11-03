@@ -6,6 +6,8 @@ name = "neoteletext-fuzz"
 version = "0.0.0"
 edition = "2024"
 publish = false
+# The project's licence (LICENSE): cargo-deny refuses a crate with none.
+license = "MIT"
 
 [package.metadata]
 cargo-fuzz = true
