@@ -83,7 +83,8 @@ fn every_diacritic_overlays_its_spacing_form() {
         let combining = to_unicode(character).combining.unwrap();
         assert_eq!(spacing_mark(combining), Some(spacing), "mark {mark}");
         assert_eq!(compose('q', combining), None);
-        let mark_glyph = set.lookup(spacing).unwrap();
+        // TODO-1110: the dot below is the font's own, from ạ, not the full stop.
+        let mark_glyph = if combining == '\u{0323}' { &dot_below(&set) } else { set.lookup(spacing).unwrap() };
         assert_ne!(*mark_glyph, [0; CELL_HEIGHT], "mark {mark} draws something");
         let overlay: GlyphRows = core::array::from_fn(|row| base[row] | mark_glyph[row]);
         assert_eq!(set.glyph(character), overlay, "mark {mark}");
@@ -91,6 +92,38 @@ fn every_diacritic_overlays_its_spacing_form() {
     // A combining character outside the fifteen has no spacing form.
     assert_eq!(spacing_mark('\u{0305}'), None);
     assert_eq!(spacing_mark('a'), None);
+}
+
+/// The dot ạ adds to a in `set`.
+fn dot_below(set: &GlyphSet<'_>) -> GlyphRows {
+    let (dotted, plain) = (set.lookup('\u{1EA1}').unwrap(), set.lookup('a').unwrap());
+    core::array::from_fn(|row| dotted[row] & !plain[row])
+}
+
+/// REQ-RND-014, TODO-1110: a letter with the dot below and no precomposed
+/// form, such as q, has the dot drawn under it, below the baseline where
+/// ạ has it, and not the full stop, which stands on the baseline beside
+/// the letter's foot.
+#[test]
+fn the_dot_below_is_drawn_under_the_letter() {
+    const DOT_BELOW: u8 = 9;
+    const BASELINE: usize = 16;
+    let set = GlyphSet::noto_teletext();
+    let latin = CharSet::G0(G0 { set: G0Set::Latin, national: None });
+    let character = CharRef { diacritic: DOT_BELOW, ..CharRef::new(latin, b'q') };
+    assert_eq!(compose('q', to_unicode(character).combining.unwrap()), None, "q has no precomposed dotted form");
+    let dot = dot_below(&set);
+    let dot_lines: std::vec::Vec<usize> = (0..CELL_HEIGHT).filter(|&line| dot[line] != 0).collect();
+    assert!(
+        !dot_lines.is_empty() && dot_lines.iter().all(|&line| line >= BASELINE),
+        "the dot lies below the baseline: {dot_lines:?}"
+    );
+    let base = set.lookup('q').unwrap();
+    let expected: GlyphRows = core::array::from_fn(|row| base[row] | dot[row]);
+    assert_eq!(set.glyph(character), expected);
+    let full_stop = set.lookup('.').unwrap();
+    let with_full_stop: GlyphRows = core::array::from_fn(|row| base[row] | full_stop[row]);
+    assert_ne!(set.glyph(character), with_full_stop, "not the full stop");
 }
 
 /// REQ-RND-014, decision E.26: a precomposed glyph when the set has

@@ -281,7 +281,11 @@ impl<'a> GlyphSet<'a> {
         if let Some(both) = self.on_dotted_letter(unicode.base, mark) {
             return both;
         }
-        let spacing = spacing_mark(mark).and_then(|c| self.lookup(c)).copied().unwrap_or([0; CELL_HEIGHT]);
+        let spacing = (mark == DOT_BELOW)
+            .then(|| self.dot_below())
+            .flatten()
+            .or_else(|| spacing_mark(mark).and_then(|c| self.lookup(c)).copied())
+            .unwrap_or([0; CELL_HEIGHT]);
         let mut out = *base;
         for (row, mark_row) in out.iter_mut().zip(spacing.iter()) {
             *row |= *mark_row;
@@ -291,6 +295,22 @@ impl<'a> GlyphSet<'a> {
 }
 
 impl GlyphSet<'_> {
+    /// The dot below on its own, where the font draws it under a letter
+    /// (TODO-1110): what the reference letter ạ adds to a. Unicode has no
+    /// spacing dot below, and the full stop that stands for it in
+    /// [`SPACING_MARKS`] sits on the baseline, beside the letter's foot
+    /// rather than under it. `None` when the font lacks either letter.
+    fn dot_below(&self) -> Option<GlyphRows> {
+        let (dotted, plain) = DOT_BELOW_REFERENCE;
+        let with_dot = self.lookup(dotted)?;
+        let without = self.lookup(plain)?;
+        let mut out = [0; CELL_HEIGHT];
+        for ((row, with_dot), without) in out.iter_mut().zip(with_dot).zip(without) {
+            *row = with_dot & !without;
+        }
+        Some(out)
+    }
+
     /// A mark on a letter with a dot below, such as Igbo's `Ọ̀`, which
     /// Unicode gives no single character (TODO-1988). A spacing mark sits at
     /// the height of a small letter, so overlaid on a capital it merges into
@@ -308,9 +328,20 @@ impl GlyphSet<'_> {
     }
 }
 
+/// U+0323, the combining dot below (REQ-CHR-008, column 4/9 of the G2 set).
+const DOT_BELOW: char = '\u{0323}';
+
+/// The letter whose dot below is the one drawn under a letter that has no
+/// precomposed form with it, and the same letter without it: ạ and a. A
+/// small letter is used because its dot lies wholly under the baseline,
+/// where the dot of every letter is drawn.
+const DOT_BELOW_REFERENCE: (char, char) = ('\u{1EA1}', 'a');
+
 /// Each combining mark of the diacritical marks (REQ-CHR-008) and the
 /// spacing character whose glyph is overlaid for it (decision E.26). Every
-/// glyph set needs a glyph for each spacing character.
+/// glyph set needs a glyph for each spacing character. The dot below is
+/// drawn from the font's own ạ where it has one ([`GlyphSet::glyph`]), and
+/// the full stop only when it has not.
 pub const SPACING_MARKS: [(char, char); 16] = [
     ('\u{0300}', '`'),
     ('\u{0301}', '\u{00B4}'),
