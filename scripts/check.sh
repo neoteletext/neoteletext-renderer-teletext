@@ -126,6 +126,12 @@ commit_steps() {
     step "the wire vectors are neoteletext-common's table (DEC-1759 lesson 3)"
     cmp "$common/wire-vectors.tsv" crates/neoteletext-web/src/wire_vectors.tsv
 
+    step "every workspace's Cargo.lock is current, so no build resolves anew (DEVELOPMENT.md section 7)"
+    local workspace
+    for workspace in . fuzz firmware/test-image; do
+        (cd "$workspace" && cargo metadata --locked --format-version 1 >/dev/null)
+    done
+
     step "rustfmt (REQ-GEN-006)"
     cargo fmt --all --check
 

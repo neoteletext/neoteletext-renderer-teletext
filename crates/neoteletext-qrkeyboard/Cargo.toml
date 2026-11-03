@@ -13,20 +13,23 @@ publish.workspace = true
 [dependencies]
 neoteletext-web = { workspace = true, features = ["std"] }
 neoteletext-transport.workspace = true
-# Transport Layer Security to the relay.
-rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+# Pinned exactly, each with its licence, as an application crate's
+# dependencies are (DEVELOPMENT.md section 7).
+# Apache-2.0, ISC or MIT: Transport Layer Security to the relay.
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 # RustCrypto (NeoTeletext's decision 44 item 8): AES-256-GCM, HKDF and
 # HMAC over SHA-256, and P-256 for SPAKE2 with a PIN, as qrkeyboard's
-# endpoints use them.
-aes-gcm = "0.10.3"
-hkdf = "0.12.4"
-hmac = "0.12.1"
-sha2 = "0.10.9"
-p256 = { version = "0.14.0", default-features = false, features = ["arithmetic"] }
-# The operating system's random numbers: salts, keys and SPAKE2 scalars.
-getrandom = "0.2.16"
+# endpoints use them. Each MIT or Apache-2.0.
+aes-gcm = "=0.10.3"
+hkdf = "=0.12.4"
+hmac = "=0.12.1"
+sha2 = "=0.10.9"
+p256 = { version = "=0.14.0", default-features = false, features = ["arithmetic"] }
+# MIT or Apache-2.0: the operating system's random numbers: salts, keys
+# and SPAKE2 scalars.
+getrandom = "=0.2.17"
 # Project Nayuki's QR Code generator (MIT): the join address as a QR.
-qrcodegen = "1.8.0"
+qrcodegen = "=1.8.0"
 
 [lints]
 workspace = true

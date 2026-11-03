@@ -20,13 +20,19 @@ neoteletext-slicer = { workspace = true, optional = true }
 neoteletext-web = { workspace = true, optional = true, features = ["default", "std"] }
 embedded-io = { workspace = true, optional = true }
 neoteletext-transport = { workspace = true, optional = true }
-rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
+# Apache-2.0, ISC or MIT: TLS for live feeds and web services. Pinned
+# exactly, as an application crate's dependencies are (DEVELOPMENT.md
+# section 7).
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # REQ-SEC-017: every build sandboxes itself.
-landlock = "0.4.3"
-seccompiler = "0.5.0"
-libc = "0.2.177"
+# MIT or Apache-2.0.
+landlock = "=0.4.7"
+# Apache-2.0 or BSD-3-Clause.
+seccompiler = "=0.5.0"
+# MIT or Apache-2.0.
+libc = "=0.2.190"
 
 [features]
 # Decision E.61: coarse, additive areas, all on by default. A program that

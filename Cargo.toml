@@ -63,6 +63,11 @@ cast_possible_truncation = "allow"
 module_name_repetitions = "allow"
 # Error docs are written per type, not per function.
 missing_errors_doc = "allow"
+# neoteletext-common DEVELOPMENT.md section 6: debugging output and
+# unfinished code never reach a commit.
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
 
 [profile.release]
 panic = "abort"
