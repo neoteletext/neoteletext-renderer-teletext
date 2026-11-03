@@ -36,6 +36,7 @@ This is the threat model REQ-SEC-002 requires. Security overrides every other re
 | A channel's log lines | 1 | A developer's console, trust | `LG` lines are refused whole unless one of three levels and 1 to 200 bytes of UTF-8 with no control or bidirectional formatting character, at most 16 per page; never drawn on a page; fuzzed (REQ-INP-026, decision E.109). Reviewed 23 October 2026. |
 | The `neottx` process | 1 | Host | No `unsafe` code; the library crates have no operating-system access (REQ-SEC-016); Landlock and seccomp on Linux after inputs and outputs are open (REQ-SEC-017). |
 | Fetcher to decoder (web mode) | 1, 2 | Host | Privilege separation (REQ-SEC-018): the fetcher process holds the network and TLS, the decoder holds the terminal and files. They speak a framed pipe protocol whose every frame is length-checked and validated by the receiver; the decoder ignores frame kinds only it may send. |
+| Picture files into `neoteletext-picture` and `neottx-picture` | 1 | Host | File, sides and decoded size bounded before pixels are decoded; checked arithmetic on the picture's sizes; no operating-system access in the library, so a program confines it; fuzzed by `picture_convert` (REQ-2330, DEC-2325). |
 | Dependencies and tools | 3 | Build | Microcontroller crates have no dependencies beyond `embedded-io` (decision E.38, as amended); `Cargo.lock` committed; toolchain pinned (REQ-SEC-014). |
 
 ## Status at this milestone

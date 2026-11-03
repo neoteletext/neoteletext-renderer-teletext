@@ -42,6 +42,8 @@ const APPLICATION_CRATES: &[(&str, &[&str])] = &[
     // A phone as a keyboard through qrkeyboard's relay (decision E.93):
     // sockets, TLS and cryptography, for desktop programs only.
     ("neoteletext-qrkeyboard", &["neoteletext-web", "neoteletext-transport"]),
+    // The program `neottx-picture` (DEC-2325 item 2): the converter alone.
+    ("neoteletext-picture-cli", &["neoteletext-picture"]),
     (
         "neoteletext-app",
         &[
@@ -80,6 +82,8 @@ const LIBRARY_CRATES: &[&str] = &[
     "neoteletext-audio-mix",
     "neoteletext-opus",
     "neoteletext-input",
+    // The picture converter (DEC-2325 item 1, REQ-2327).
+    "neoteletext-picture",
 ];
 
 fn report(violations: &[String]) -> Result<(), String> {

@@ -251,6 +251,10 @@ Sound carried with teletext sits beside the page layers, as the web user agent d
 
 The input system's protocol (DOC-1781 of `neoteletext-common/PROTOCOL.html`), beside the page layers as audio is: it shares the packet type with L1 and the record frame and data-line carriage with `neoteletext-audio`. `no_std`, with no allocation, so a microcontroller can be a receiver or a channel. `event` encodes and decodes the input stream, MOUSE's device and gone, HOVER, TOUCH and RESUME among it; `cursor` and `control` the channel's records, WELCOME with a session's token; `session::SessionOf` is a receiver's side of a session, the rate and the input count, and with RESUME the unacknowledged messages kept to send again (`ResumableSession`; `Session` keeps none); `pace::Pacer` paces the pointer's moves at 60 a second, one slot a contact, and `contacts::Contacts` numbers a touch screen's contacts (decision E.133). The browser's trusted core and `neottx` use them alike; the web agent carries the messages and knows only that a message is a contact's move.
 
+### Pictures — `neoteletext-picture`, `neoteletext-picture-cli` (DEC-2325)
+
+The picture-to-page converter sits beside the page layers, as audio and input do: it writes pages, and shares only Foundation's constants with the core and the TTI reader and T42 writer with L0. `neoteletext-picture` is a sans-IO `std` library (REQ-2327): `convert` takes a picture file's bytes and an `Options` value and returns the page as TTI text, and `Page::t42` the same page as T42 packets. `decode` reads the five formats of DEC-2114 through the `image` crate within fixed bounds (REQ-2330), `raster` holds the picture and its fixed-point resampler, `fit` places it on the page and averages the sixels (REQ-2331 to REQ-2334), `quant` reduces it to starting palettes, `level1` and `enhanced` are the encoders of Levels 1 and 1.5 and of 2.5 and 3.5 (REQ-2335), and `tti` writes the page file. It opens nothing, so a program may run it in a confined process, as the browser does. `neoteletext-picture-cli` is the program `neottx-picture` (REQ-2337), which reads the file and writes the page; it is not part of `neottx` (DEC-2325 item 2).
+
 ### Cross-cutting modules — `neoteletext-core::{policy, config, trace}`
 
 | Module | Contents |
@@ -429,6 +433,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | L7 to L0 across processes | TTI or T42 bytes and framed control messages | Both sides validate; the decoder process has no rights (REQ-SEC-018) |
 | L5 to the terminal | Text and escape sequences | Allow-list sanitising (REQ-SEC-010) |
 | Fonts from a file | BDF files and library indexes | Read by strict, bounded, fuzzed readers; the decoder checks the glyph table's shape before drawing with it (REQ-FNT-002, REQ-FNT-003, REQ-FNT-008) |
+| Untrusted picture files into `neoteletext-picture` | PNG, JPEG, GIF, BMP and WebP bytes | Bounded file, sides and decoder memory before pixels are decoded; no panicking constructs on the input's sizes; fuzzing (REQ-2330) |
 | Untrusted bytes into the audio receiver | Independent data lines, records from a network or a file | Bounded records and fragments, CRCs, no panicking constructs, fuzzing (REQ-AUD-021) |
 | L8, the port contract | Everything the platform supplies | Narrow traits; the library holds no ambient authority (REQ-SEC-016) |
 
@@ -446,6 +451,8 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | `neoteletext-audio` | Audio (area AUD, section 3, "Audio"): carriage, records, store, control, PCM16, IMA ADPCM and Opus | `no_std`, no allocation; the `encode` feature allocates |
 | `neoteletext-audio-mix` | Audio: the software mixer for ports with an operating system's audio output | `no_std` with `alloc` |
 | `neoteletext-opus` | Audio: the Opus decoder of the audio profile (decision E.123) | `no_std`, no allocation, integer only |
+| `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages | `std`, sans-IO |
+| `neoteletext-picture-cli` | L9: the program `neottx-picture` | `std` |
 | `neoteletext-transport` | L9: a client's sockets: the reader thread, the TLS pump, the blocking writes and the connection through a proxy, shared by `neoteletext-app`, `neoteletext-qrkeyboard` and the browser's fetcher (DEC-1905) | `std` |
 | `neoteletext-app` | L9: the application layer of `neottx` and any other viewer program: sessions, inputs, live mode's two processes, sandboxing | `std` |
 | `neoteletext-cli` | L9 (and text output of L5) | `std` |
@@ -491,6 +498,9 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 
 **`neoteletext-image`**
 - `png/`: the PNG writer's deflate encoder.
+
+**`neoteletext-picture`**
+- `raster/`: the resampler's tests against stored output.
 
 **`neoteletext-web`**
 - `http/`: the response head parser, the head as the profile reads it, and the body's framing.
@@ -643,6 +653,7 @@ What each library crate may use of `neoteletext-core`, which `cargo xtask check-
 | `neoteletext-input` | Foundation, `packet` |
 | `neoteletext-audio-mix` | — |
 | `neoteletext-opus` | — |
+| `neoteletext-picture` | Foundation (the page's geometry, attributes, triplet fields and the Colour Map's defaults) |
 
 The application crates use whatever they need of it.
 
