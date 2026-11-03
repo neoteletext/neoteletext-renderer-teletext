@@ -461,3 +461,23 @@ fn sc_with_control_bits_is_masked_and_reported() {
         assert_eq!(page.map(|page| page.subcode.value()), Some(masked), "{value:04X}");
     }
 }
+
+/// REQ-177 (REQ-INP-013): `OL` carries rows 0 to 25 and packets 26 to 29
+/// only. `OL,30`, `OL,31` and any larger number name no packet of a page
+/// (EN 300 706 clause 9.1, Table 1: packets 30 and 31 are magazine 8's
+/// broadcast service data and independent data services), so each such
+/// line is reported as a bad argument at its line number, and the page is
+/// still read with its other rows.
+#[test]
+fn ol_lines_above_29_are_refused_and_the_page_is_still_read() {
+    let text = b"PN,10000\nOL,1,FIRST\nOL,30,THIRTY\nOL,31,THIRTY-ONE\nOL,99,LATER\nOL,2,SECOND\n";
+    let (pages, diagnostics) = read(text);
+    let bad = DiagnosticKind::BadArgument { command: *b"OL" };
+    let kinds: Vec<_> = diagnostics.iter().map(|diagnostic| (diagnostic.line, diagnostic.kind)).collect();
+    assert_eq!(kinds, [(Some(3), bad), (Some(4), bad), (Some(5), bad)]);
+    assert_eq!(pages.len(), 1, "the page is still read");
+    let page = &pages[0];
+    assert!(page.row(1).is_some_and(|row| row.starts_with(b"FIRST")));
+    assert!(page.row(2).is_some_and(|row| row.starts_with(b"SECOND")));
+    assert!(page.raw_packets.as_slice().is_empty(), "no packet is made of a refused line");
+}

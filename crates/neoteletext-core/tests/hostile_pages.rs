@@ -25,7 +25,7 @@ use neoteletext_core::consts::{
 use neoteletext_core::enhance;
 use neoteletext_core::level1::{DisplayOptions, Grid, build_grid};
 use neoteletext_core::packet::{ObjectKind, ObjectSource, Packet, TripletFunction};
-use neoteletext_core::types::{PageAddress, SubCode};
+use neoteletext_core::types::{ControlBits, PageAddress, SubCode};
 
 const LEVELS: [PresentationLevel; 3] =
     [PresentationLevel::Level15, PresentationLevel::Level25, PresentationLevel::Level35];
@@ -160,5 +160,103 @@ fn an_enhancement_that_overlaps_a_pages_prompt_takes_its_key_away() {
         assert_eq!(shown, [true, false, false, false], "{level:?}: the prompt alone");
         let overlapped = build(&hostile, level, Row24Policy::WhenPresent, &options).prompts_shown();
         assert_eq!(overlapped, [false; 4], "{level:?}: the prompt overlapped");
+    }
+}
+
+/// The receiver's cells as the renderer draws them (needs the renderer).
+#[cfg(feature = "render")]
+mod rendering {
+    use super::*;
+    use neoteletext_core::consts::{CELL_WIDTH, HEADER_DISPLAY_BYTES, PAGE_WIDTH};
+    use neoteletext_core::ecc::with_odd_parity;
+    use neoteletext_core::glyphs::GlyphSet;
+    use neoteletext_core::packet::encode;
+    use neoteletext_core::policy::is_receiver_column;
+    use neoteletext_core::render::{Field, FlashPhase, IndexBuffer, IndexFormat, RenderOptions, render_row};
+
+    /// The display bytes of a hostile header: every kind of spacing attribute
+    /// a page can send in row 0 (colour, background, double height, conceal,
+    /// mosaics held, and a box), placed from the first column the page owns.
+    const HOSTILE_HEADER: &[u8; HEADER_DISPLAY_BYTES] = b"\x1d\x0d\x18\x01\x1e\x12\x0b\x0bHOSTILE HEADER  12:00:00";
+
+    /// REQ-418 (REQ-SEC-005, REQ-SEC-001): on the rendering path, every cell
+    /// that `policy::is_receiver_column` gives the receiver is a receiver cell
+    /// of the grid, and is drawn pixel for pixel as on the same page without
+    /// any hostile data, whatever the page sends by every route at once:
+    /// spacing attributes in its header, an X/26 character written through
+    /// Address Display Row 0, a colour change there, an object invoked there,
+    /// Level 1.5's G0 with a diacritical mark, G2 and G3 characters there, and
+    /// a full row colour for row 0; at Levels 1, 1.5, 2.5 and 3.5, with
+    /// and without a security indicator. All the levels' writes to those cells
+    /// go through the one policy function (TODO-2488), so this test checks
+    /// what that function decides reaches the screen.
+    #[test]
+    fn the_receivers_cells_render_unchanged_by_every_route() {
+        // Level 1.5's own character modes (REQ-L15-006), then Level 2.5's.
+        let mut local: Vec<TripletFunction> = vec![
+            row_0(COLOUR_RED_BIT, 0),
+            TripletFunction::G0Diacritic { column: 0, code: b'X', diacritic: 1 },
+            TripletFunction::G2Character { column: 1, code: 0x41 },
+            TripletFunction::G3Character { column: 2, code: 0x2F, level_15_form: true },
+        ];
+        local.extend(text_at(3, b"FORGE"));
+        local.extend([background(0, COLOUR_RED_BIT), foreground(1, COLOUR_WHITE), invoke_local_object(), end()]);
+        let address = PageAddress::from_mpp(DISPLAY).unwrap();
+        let header_bytes: [u8; HEADER_DISPLAY_BYTES] =
+            core::array::from_fn(|index| with_odd_parity(HOSTILE_HEADER[index]));
+        let hostile_header =
+            encode::header(address.magazine, address.page, SubCode::new(0), ControlBits(0), &header_bytes).unwrap();
+        let plain = display_page(0, &[(1, b"PAGE")], vec![]);
+        let mut hostile = display_page(0, &[(1, b"PAGE")], vec![x26(0, &local), local_object(b"OBJECT!!")]);
+        hostile[0] = hostile_header;
+
+        let glyphs = GlyphSet::noto_teletext();
+        let draw_row_0 = |grid: &Grid, options: RenderOptions| {
+            let mut frame = vec![0u8; PAGE_WIDTH * options.row_height()];
+            let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut frame, stride: PAGE_WIDTH };
+            render_row(grid, 0, Field::Both, &glyphs, options, &mut buffer).unwrap();
+            frame
+        };
+        let mut status = [b' '; STATUS_COLUMNS];
+        status[..4].copy_from_slice(b"P100");
+        let receiver: Vec<usize> = (0..COLUMNS).filter(|&column| is_receiver_column(0, column)).collect();
+        assert_eq!(receiver, (0..RECEIVER_COLUMNS).collect::<Vec<_>>(), "the policy gives the receiver columns 0 to 7");
+        for security_indicator in [false, true] {
+            let display = DisplayOptions { status, security_indicator, ..DisplayOptions::default() };
+            for level in [
+                PresentationLevel::Level1,
+                PresentationLevel::Level15,
+                PresentationLevel::Level25,
+                PresentationLevel::Level35,
+            ] {
+                let config = Config { level, ..Config::default() };
+                let render = if level.is_enhanced() {
+                    RenderOptions::resolved(&config, false, FlashPhase::at_unit(0))
+                } else {
+                    RenderOptions::from_config(&config, false)
+                };
+                let expected = build(&plain, level, Row24Policy::AnnexH, &display);
+                let grid = build(&hostile, level, Row24Policy::AnnexH, &display);
+                let label = format!("indicator {security_indicator}, {level:?}");
+                for column in 0..COLUMNS {
+                    assert_eq!(
+                        grid.is_receiver_cell(0, column),
+                        is_receiver_column(0, column),
+                        "{label}, column {column}"
+                    );
+                }
+                let (want, got) = (draw_row_0(&expected, render), draw_row_0(&grid, render));
+                for line in 0..render.row_height() {
+                    for &column in &receiver {
+                        let cell =
+                            line * PAGE_WIDTH + column * CELL_WIDTH..line * PAGE_WIDTH + (column + 1) * CELL_WIDTH;
+                        assert_eq!(got[cell.clone()], want[cell], "{label}, line {line}, column {column}");
+                    }
+                }
+                // The routes are live: the header's own text, past the
+                // receiver's columns, is the hostile page's.
+                assert_ne!(got, want, "{label}: the hostile page changes row 0 outside the receiver's cells");
+            }
+        }
     }
 }

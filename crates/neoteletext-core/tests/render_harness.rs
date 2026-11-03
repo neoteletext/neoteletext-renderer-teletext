@@ -13,16 +13,19 @@
 mod common;
 
 use common::{
-    background, build, colours, display_page, end, foreground, g0, local_data, set_position, worst_case_page, x26, x28,
+    DISPLAY, Receiver, background, build, colours, display_page, end, foreground, g0, local_data, row, set_position,
+    worst_case_page, x26, x28,
 };
 use neoteletext_core::config::{Config, PresentationLevel};
-use neoteletext_core::consts::{PAGE_WIDTH, ROWS};
+use neoteletext_core::consts::{COLUMNS, PAGE_WIDTH, ROWS, STORED_ROWS};
+use neoteletext_core::ecc::with_odd_parity;
 use neoteletext_core::glyphs::GlyphSet;
 use neoteletext_core::level1::{Glyph, Grid, Size, Zoom};
 use neoteletext_core::packet::TripletFunction;
 use neoteletext_core::render::{
     ChangeTracker, Field, FlashPhase, IndexBuffer, IndexFormat, RenderOptions, render_line, render_row, render_screen,
 };
+use neoteletext_core::types::{PageAddress, SubCode};
 
 /// Every row, as the tracker's and `render_screen`'s bitmask.
 const ALL_ROWS: u32 = (1 << ROWS) - 1;
@@ -276,4 +279,40 @@ fn redrawing_the_reported_rows_gives_a_whole_redraw() {
     let revealed = RenderOptions { reveal: true, ..resolved_options(0) };
     kept.update(&harness, &grid, revealed);
     assert_eq!(kept.frame, harness.screen(&grid, revealed), "resolved mode, reveal on");
+}
+
+/// REQ-7, DEC-1118: packet X/25 carries a page's key-word search labels
+/// (EN 300 706 clause 9.1, Table 1), not a display row. It is kept in the
+/// stored page, and a page with an X/25 of visible characters is drawn
+/// exactly as the same page without it, at every level.
+#[test]
+fn packet_x25_is_stored_and_never_shown() {
+    const X25: u8 = 25;
+    const LABELS: &[u8] = b"KEYWORD LABELS ARE NEVER DRAWN ON SCREEN";
+    let rows: &[(u8, &[u8])] = &[(1, b"\x0dTITLE"), (12, b"\x01RED TEXT"), (23, b"\x16\x7f\x7f")];
+    let without = display_page(0, rows, vec![]);
+    let mut with = without.clone();
+    with.push(row(X25, LABELS));
+
+    let config = Config::default();
+    let stored = Receiver::new().run(&with, config, |decoder| {
+        let page = decoder.store().get(PageAddress::from_mpp(DISPLAY).unwrap(), SubCode::ANY).unwrap();
+        page.cells[usize::from(X25)]
+    });
+    assert_eq!(usize::from(X25), STORED_ROWS - 1, "X/25 is the last stored row");
+    assert!(usize::from(X25) >= ROWS, "and lies below the display rows");
+    let expected: [u8; COLUMNS] = core::array::from_fn(|column| with_odd_parity(LABELS[column]));
+    assert_eq!(stored, expected, "X/25 is kept in the stored page");
+
+    let harness = Harness::new();
+    for (level, options) in [
+        (PresentationLevel::Level1, palette_options()),
+        (PresentationLevel::Level15, palette_options()),
+        (PresentationLevel::Level25, resolved_options(0)),
+        (PresentationLevel::Level35, resolved_options(0)),
+    ] {
+        let shown = harness.screen(&build(&with, level).0, options);
+        let plain = harness.screen(&build(&without, level).0, options);
+        assert!(shown == plain, "{level:?}: X/25 changes nothing drawn");
+    }
 }
