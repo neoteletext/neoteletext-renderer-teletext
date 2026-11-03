@@ -11,15 +11,17 @@ This is the whole of a port (REQ-ARCH-009, decision E.29). A port supplies the i
 | A time source | Implement `neoteletext_core::port::Clock`: monotonic microseconds. Used for page completion, flash and reveal. | Yes |
 | Key input | Implement `neoteletext_core::port::Keys` returning `neoteletext_core::viewer::Key`. | For interactive ports |
 | Sleep | Implement `neoteletext_core::port::Sleep` if your platform must yield. | Optional |
-| A network transport | Implement the transport trait of `neoteletext-web` (connect, send, non-blocking receive, close; TLS is yours). | Only for web sources |
+| A network transport | Implement `neoteletext_web::port::Transport` (connect, send, non-blocking receive, close; TLS is yours). | Only for web sources |
+| Random bytes | Implement `neoteletext_web::port::RandomSource`: the WebSocket handshake key and every frame mask (RFC 6455 sections 4.1 and 5.3). Use a cryptographic generator, since RFC 6455 requires masks an attacker cannot predict. The web agent takes one whatever its features. | Only for web sources |
 | An audio sink | Implement `neoteletext_audio::port::VoiceSink`, and pass each packet to `neoteletext_audio::receiver::Receiver::push_packet` before the decoder; on a desktop, `neoteletext-audio-mix` mixes for you (area AUD, `audio-platforms.md`). | Only for sound |
-| Cookie storage | Implement the cookie storage trait of `neoteletext-web`. Store saved cookies as secrets (REQ-SEC-013). | Optional |
+| Cookie storage | Implement `neoteletext_web::port::CookieStorage`. Store saved cookies as secrets (REQ-SEC-013). | Optional |
+| Device keys | Implement `neoteletext_web::dbsc::DeviceKeys`: create a key pair bound to the device, sign with it, and never let the private key leave the device's store (REQ-WEB-017, decision E.110). | Only with the feature `dbsc` |
 
 A complete minimal port is `crates/neoteletext-core/examples/minimal_port.rs`, under 100 lines; it needs the core features `level15` and `render`.
 
 ## Choosing what to compile in
 
-Every crate's optional areas are Cargo features, all on by default (decision E.61). A small port turns the defaults off and names what it uses:
+Every crate's optional areas are Cargo features. The defaults are each crate's optional areas of function; `std`, `alloc`, the formatting of `error-trait`, the writers' `encode` and `write-text`, the profiles and the features a decision leaves off (`dbsc`, and the core's `objects` and `additional-flash-functions`) are never default (REQ-1642 rule 5, DEC-2397). A small port turns the defaults off and names what it uses:
 
 ```toml
 neoteletext-core = { version = "...", default-features = false, features = ["level15", "render"] }
@@ -29,8 +31,8 @@ neoteletext-formats = { version = "...", default-features = false }  # T42 only
 | Crate | Features |
 |---|---|
 | `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); and the profile `modern-classic` |
-| `neoteletext-formats` | `transport`, `sliced`, `pages`, `tti`, `ep1`, `edittf`, `dump`, `check`, and `std` |
-| `neoteletext-web` | `push`, `cookies` |
+| `neoteletext-formats` | `transport`, `sliced`, `pages`, `tti`, `ep1`, `edittf`, `dump`, `check`, `bdf` (default); `alloc`, `std`, `write-text` |
+| `neoteletext-web` | `push`, `cookies` (default); `dbsc`, `error-trait`, `alloc`, `std` |
 
 `level25` alone gives the enhancement processor's non-spacing attributes and characters. Each other capability of Levels 2.5 and 3.5 is a feature of its own (decision E.71); a capability left out is ignored in the page data, never an error. [capabilities.md](capabilities.md) explains the mechanism, which capabilities the profile keeps and why. The `modern-classic` profile keeps the classic display with objects, and leaves out the 32-colour palette and the additional flash functions:
 
