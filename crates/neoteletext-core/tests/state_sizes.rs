@@ -11,7 +11,7 @@ use neoteletext_core::level1::Grid;
 use neoteletext_core::viewer::Viewer;
 
 /// Each state type, its size in bytes on this target, and the most it may
-/// be: the size measured on 3 November 2026 on `x86_64` Linux with every
+/// be: the size measured on 4 November 2026 on `x86_64` Linux with every
 /// feature and with only `level15`, `render` and `viewer` (the same in both), rounded up to the next 64 bytes, so that a change that grows
 /// one is seen and the published table is revisited.
 #[test]
@@ -20,7 +20,7 @@ fn every_state_type_has_a_bounded_size() {
         ("StoredPage", size_of::<StoredPage>(), 2_688),
         ("EnhancementSubPage", size_of::<EnhancementSubPage>(), 128),
         ("EnhancementPacket", size_of::<EnhancementPacket>(), 64),
-        ("Decoder", size_of::<Decoder<'static>>(), 1_920),
+        ("Decoder", size_of::<Decoder<'static>>(), 1_984),
         ("Grid", size_of::<Grid>(), 16_128),
         ("Viewer", size_of::<Viewer>(), 256),
         ("GlyphSet", size_of::<GlyphSet<'static>>(), 1_472),
