@@ -483,7 +483,9 @@ fn the_sub_page_key_enters_a_decimal_sub_code() {
     {
         let (action, state, _) = enter(&mut viewer, &digits);
         assert_eq!(action, Action::Request(page(0x100), SubCode::new(code)), "{digits:?}");
-        assert_eq!(state, ViewerState::Displaying);
+        // REQ-328: the store holds none of them, so the viewer searches
+        // until each comes, as it does for a page.
+        assert_eq!(state, ViewerState::Searching);
     }
     // S4 above 3 and S2 above 7 are refused; the digits before stay.
     let (action, state, status) = enter(&mut viewer, &[4, 1, 2, 8]);
@@ -498,7 +500,7 @@ fn the_sub_page_key_enters_a_decimal_sub_code() {
     let (action, _, _) = enter(&mut viewer, &[3]);
     assert_eq!(action, Action::None);
     assert_eq!(viewer.key(Key::NextPage, &keys), Action::None, "leaves entry and requests nothing");
-    assert_eq!(viewer.state(), ViewerState::Displaying);
+    assert_eq!(viewer.state(), ViewerState::Searching, "the state from before entry, still searching for 0002");
     assert_eq!(viewer.requested(), (page(0x100), SubCode::new(0x0002)));
 }
 

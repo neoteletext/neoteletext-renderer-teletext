@@ -66,7 +66,11 @@ impl ViewState {
             | Notice::Bundle(_)
             | Notice::Aliases(_)
             | Notice::Region(_)
-            | Notice::Refresh(_) => {}
+            | Notice::Refresh(_)
+            // A part of a list is taken by the source; a step waiting for
+            // it is taken up in the same turn.
+            | Notice::SubPages(_)
+            | Notice::SubPagesMissing(..) => {}
             Notice::RedirectToOtherChannel(address) => self.messages.push(format!("redirected to {address}")),
             Notice::PageRedirect(mpp, sub, query) => self.typing.redirected(mpp, sub, query),
             Notice::Denied(status, place) => {

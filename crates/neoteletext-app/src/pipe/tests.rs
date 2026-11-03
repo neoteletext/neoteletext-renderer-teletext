@@ -31,6 +31,15 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
         Frame::Notice(Notice::Bundle(0x199)),
         Frame::Notice(Notice::Aliases(vec![(0x300, "weather:300".into())])),
         Frame::Notice(Notice::Refresh(60)),
+        Frame::SubPages(0x100, 3),
+        Frame::Notice(Notice::SubPagesMissing(0x100, 0)),
+        Frame::Notice(Notice::SubPages(ListPart {
+            page: 0x302,
+            part: 1,
+            total: 66,
+            version: "4be81f7a09c2d635".into(),
+            subcodes: vec![0x65, 0x66],
+        })),
     ];
     let mut buffer = Vec::new();
     for frame in &frames {
@@ -59,6 +68,10 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
         &[b'D', 0, 0, 0, 1, 1],
         // A form's response, once origin 2.
         &[b'T', 0, 0, 0, 2, 1, 2],
+        // A part of a list with more rows than a part holds, 65.
+        &[b'p', 0, 0, 0, 11, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 65],
+        // A request for a part with a byte left over.
+        &[b'x', 0, 0, 0, 4, 1, 0, 0, 9],
     ] {
         assert!(read(&mut &bad[..]).is_err(), "{bad:?}");
     }

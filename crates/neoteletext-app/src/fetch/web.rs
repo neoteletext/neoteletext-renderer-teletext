@@ -18,7 +18,7 @@ use neoteletext_web::http::MediaType;
 use neoteletext_web::port::{ConnectionId, Pump};
 use neoteletext_web::proxy::Proxy;
 use neoteletext_web::records::redirect::RedirectRecord;
-use neoteletext_web::subpages::PartNumber;
+use neoteletext_web::subpages::{self, PartNumber};
 use std::cell::Cell;
 use std::net::IpAddr;
 use std::sync::mpsc::Sender;
@@ -32,6 +32,10 @@ const COOKIE_BYTES: usize = 32 * 1024;
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 /// The window of a report of invalid packets, in the clock's microseconds.
 const INVALID_WINDOW_US: u64 = INVALID_PACKET_REPORT_SECONDS * MICROSECONDS_PER_SECOND;
+
+// The pipe carries a part of a list with the web module's bounds.
+const _: () = assert!(pipe::MAX_LIST_ROWS == subpages::ROWS_PER_PART);
+const _: () = assert!(pipe::MAX_LIST_VERSION == subpages::MAX_VALIDATOR);
 
 /// The agent the loop runs.
 type Agent<'a> = UserAgent<'a, SystemRandom, COOKIE_SLOTS, COOKIE_BYTES>;
@@ -247,6 +251,10 @@ fn forward(
             Ok(())
         }
         Output::Event(Event::PageCurrent { page, .. }) => send(&Frame::Notice(Notice::Current(page.mpp()))),
+        Output::Event(Event::SubPages { page, part, bytes }) => send_list_part(page.mpp(), part, bytes),
+        Output::Event(Event::SubPagesMissing { page, part } | Event::SubPagesFailed { page, part, .. }) => {
+            send(&Frame::Notice(Notice::SubPagesMissing(page.mpp(), part.number())))
+        }
         Output::Event(Event::FetchFailed { page, failure: Failure::Network | Failure::Timeout, .. }) => {
             send(&Frame::Notice(Notice::Offline(page.mpp())))
         }
@@ -263,6 +271,41 @@ fn forward(
         ) => send(&Frame::Notice(Notice::Message(format!("{event:?}")))),
         _ => Ok(()),
     }
+}
+
+/// Reads a part of a page's list with the web module's bounded reader
+/// (REQ-516, REQ-1888) and passes its rows' sub-codes on; a part that does
+/// not read is missing, and a row that does not is ignored and counted in a
+/// message (REQ-523).
+fn send_list_part(page: u16, part: PartNumber, bytes: &[u8]) -> std::io::Result<()> {
+    let Ok(list) = subpages::read(bytes) else {
+        send(&Frame::Notice(Notice::Message(format!(
+            "page {page:03X}'s list of sub-pages, part {}, was not used: it does not read",
+            part.number()
+        ))))?;
+        return send(&Frame::Notice(Notice::SubPagesMissing(page, part.number())));
+    };
+    let mut subcodes = Vec::new();
+    let mut ignored = 0usize;
+    for row in list.entries {
+        match row {
+            Ok(entry) => subcodes.push(entry.subcode.value()),
+            Err(_) => ignored = ignored.saturating_add(1),
+        }
+    }
+    if ignored > 0 {
+        send(&Frame::Notice(Notice::Message(format!(
+            "page {page:03X}'s list of sub-pages, part {}: {ignored} rows ignored",
+            part.number()
+        ))))?;
+    }
+    send(&Frame::Notice(Notice::SubPages(pipe::ListPart {
+        page,
+        part: part.number(),
+        total: list.total,
+        version: list.version.as_str().to_owned(),
+        subcodes,
+    })))
 }
 
 /// Sends a page the agent received to the decoder, with where it came
@@ -322,11 +365,18 @@ fn hand_frame(agent: &mut Agent<'_>, now: Instant, frame: Frame, more: bool, out
                 // The first part of a page's list says whether its sub-pages
                 // are files in its folder, where the page's own file holds
                 // the first alone (DOC-2038). The request after it goes when
-                // it has answered, so one sub-page costs one more request.
-                if subcode.is_some_and(|code| !code.is_any()) {
+                // it has answered, so the first sub-page of a page costs one
+                // more request, and the next ones none once the list answered.
+                if subcode.is_some_and(|code| !code.is_any()) && !agent.is_catalogued(page) {
                     agent.handle(now, Input::FetchSubPages { page, part: PartNumber::FIRST }, out);
                 }
                 agent.handle(now, Input::FetchPage { page, subcode }, out);
+            }
+        }
+        Frame::SubPages(mpp, part) => {
+            let page = neoteletext_core::types::PageAddress::from_mpp(mpp);
+            if let (Some(page), Some(part)) = (page, PartNumber::new(usize::from(part))) {
+                agent.handle(now, Input::FetchSubPages { page, part }, out);
             }
         }
         Frame::Input(message) => {

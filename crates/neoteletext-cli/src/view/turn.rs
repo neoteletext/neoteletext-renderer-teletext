@@ -57,6 +57,9 @@ impl ViewState {
             self.typing.set_drawn(page.and_then(|page| Stamp::new(page.key.address.mpp(), page.key.subcode.value())));
             let page_extras = page.and_then(|page| source.extras(page.key.address, page.key.subcode)).cloned();
             let shown = Shown { page, extras: page_extras.as_ref(), config: &config, now };
+            if let Some(forward) = self.pending_step.take() {
+                self.step_subpage(forward, source, session, &shown);
+            }
             self.compose(session, requested, &shown);
             let reveal = self.viewer.reveal(now);
             // Images change with the flash phase; text flashes by itself.

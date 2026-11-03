@@ -11,6 +11,20 @@ use std::sync::Arc;
 /// for [`Source::poll`] (REQ-INT-008).
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
+/// The next sub-page to step to, from a page's list of sub-pages kept by
+/// the source, outside the store (REQ-328, REQ-1888, decision E.122).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SubPageStep {
+    /// Show this sub-page, asking for it if the store does not hold it.
+    To(SubCode),
+    /// The part of the list that says has been asked for: step again when
+    /// the source has more.
+    Waiting,
+    /// The source has no list for the page: step through what the store
+    /// holds.
+    NoList,
+}
+
 /// Something that feeds packets into the session while the viewer runs.
 pub trait Source {
     /// Asks the source to call `wake` whenever something arrives for
@@ -41,6 +55,13 @@ pub trait Source {
     /// Sends an input message to the channel being typed into (area INT,
     /// REQ-INT-101).
     fn send_input(&mut self, _message: &[u8]) {}
+
+    /// The sub-page after (`forward`) or before `current` in `page`'s list
+    /// of sub-pages, wrapping at either end; `SubCode::ANY` stands before
+    /// the first. A source without such a list steps nothing.
+    fn subpage_step(&mut self, _page: PageAddress, _current: SubCode, _forward: bool) -> SubPageStep {
+        SubPageStep::NoList
+    }
 
     /// Follows a link to another service.
     fn follow(&mut self, _service: u8, _page: PageAddress, _subcode: SubCode) {}

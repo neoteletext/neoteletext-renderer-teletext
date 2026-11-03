@@ -8,8 +8,10 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use neoteletext_app::interact::message_row;
 use neoteletext_app::session::Session;
 use neoteletext_app::source::Source;
+use neoteletext_app::source::SubPageStep;
 use neoteletext_core::nav::PageLinks;
-use neoteletext_core::viewer::{Action, KeyContext};
+use neoteletext_core::types::SubCode;
+use neoteletext_core::viewer::{Action, Key, KeyContext, ViewerState};
 use std::ops::ControlFlow;
 
 impl ViewState {
@@ -76,7 +78,7 @@ impl ViewState {
         if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
             return ControlFlow::Break(());
         }
-        self.viewer_key(key, session, shown);
+        self.viewer_key(key, source, session, shown);
         ControlFlow::Continue(())
     }
 
@@ -92,9 +94,54 @@ impl ViewState {
         self.last_drawn = None;
     }
 
-    /// A key for the viewer machine, with the links of the page shown.
-    fn viewer_key(&mut self, key: KeyEvent, session: &Session, shown: &Shown<'_>) {
+    /// A terminal key for the viewer: a sub-page step goes by the page's
+    /// list where the source keeps one, and every other key to the machine.
+    fn viewer_key(&mut self, key: KeyEvent, source: &mut dyn Source, session: &Session, shown: &Shown<'_>) {
         let Some(key) = map_key(key) else { return };
+        if matches!(key, Key::NextSubPage | Key::PreviousSubPage) {
+            self.pending_step = None;
+            self.step_subpage(key == Key::NextSubPage, source, session, shown);
+        } else {
+            self.machine_key(key, session, shown);
+        }
+    }
+
+    /// A sub-page step (REQ-328, REQ-290): the next or previous sub-page the
+    /// page's list names, which the store need not hold, asked for by
+    /// `Action::Request`; while the part of the list it needs is on its way,
+    /// the step waits for it, and where the source keeps no list it goes
+    /// through the store, as the viewer machine does.
+    pub(super) fn step_subpage(
+        &mut self,
+        forward: bool,
+        source: &mut dyn Source,
+        session: &Session,
+        shown: &Shown<'_>,
+    ) {
+        if !matches!(self.viewer.state(), ViewerState::Displaying | ViewerState::Searching) {
+            return;
+        }
+        let (page, requested) = self.viewer.requested();
+        let current =
+            if requested.is_any() { shown.page.map_or(SubCode::ANY, |page| page.key.subcode) } else { requested };
+        match source.subpage_step(page, current, forward) {
+            SubPageStep::To(subcode) => {
+                self.action = self.viewer.show_subpage(subcode);
+                self.prompt = None;
+            }
+            SubPageStep::Waiting => self.pending_step = Some(forward),
+            SubPageStep::NoList => {
+                // The machine steps only through a page it shows.
+                if self.viewer.state() == ViewerState::Displaying {
+                    let key = if forward { Key::NextSubPage } else { Key::PreviousSubPage };
+                    self.machine_key(key, session, shown);
+                }
+            }
+        }
+    }
+
+    /// A key for the viewer machine, with the links of the page shown.
+    fn machine_key(&mut self, key: Key, session: &Session, shown: &Shown<'_>) {
         let links = shown
             .extras
             .and_then(|extras| extras.links)

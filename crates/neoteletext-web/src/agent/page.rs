@@ -54,8 +54,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     }
 
     /// True when the page's list last answered, so its sub-pages are
-    /// files of their own.
-    pub(super) fn is_catalogued(&self, page: PageAddress) -> bool {
+    /// files of their own: a port need not ask for part 0 of the list again
+    /// before it asks for one of them (REQ-1887).
+    #[must_use]
+    pub fn is_catalogued(&self, page: PageAddress) -> bool {
         let (word, bit) = Self::catalogue_slot(page);
         self.catalogued.get(word).is_some_and(|slot| slot & bit != 0)
     }

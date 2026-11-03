@@ -73,6 +73,9 @@ struct ViewState {
     // until the key is handled, so it is recorded at the start of the next
     // pass, when nothing borrows the decoder.
     unrecorded: Option<EnhancementReport>,
+    // A sub-page step waiting for a part of the page's list: forward or
+    // back (REQ-1888).
+    pending_step: Option<bool>,
 }
 
 /// What a turn knows about the page it shows, for the steps after the
@@ -113,6 +116,7 @@ impl ViewState {
             walk_trace: Vec::new(),
             trace_withheld: false,
             unrecorded: None,
+            pending_step: None,
         }
     }
 

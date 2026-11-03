@@ -4,7 +4,7 @@
 use crate::extras::{self, PageExtras};
 use crate::pipe::{self, Frame, Notice, Origin, PageData};
 use crate::session::Session;
-use crate::source::{Source, Wake};
+use crate::source::{Source, SubPageStep, Wake};
 use fill::Fill;
 use neoteletext_core::consts::{PACKET_HEADER, PACKET_MAGAZINE_ENHANCEMENT};
 use neoteletext_core::packet::{Decoded, Packet, PacketMeta, decode, decode_address};
@@ -20,6 +20,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, OnceLock};
 
 mod fill;
+mod list;
 mod spawn;
 
 pub use spawn::open;
@@ -61,6 +62,9 @@ pub struct Live {
     /// The receiver's own region, from before a service gave one, for a
     /// service that gives none.
     receiver_region: Option<u8>,
+    /// The list of sub-pages of the page asked for last, as far as stepping
+    /// has needed it (REQ-1888).
+    list: Option<list::PageList>,
 }
 
 /// Bounds of a service's refresh interval, in seconds (concept decision 13).
@@ -93,6 +97,7 @@ impl Live {
             wake: Arc::default(),
             region_named,
             receiver_region: None,
+            list: None,
         }
     }
 
@@ -209,6 +214,7 @@ impl Source for Live {
                     session.restart();
                     self.extras.clear();
                     self.last_bytes.clear();
+                    self.list = None;
                     self.services = names;
                 }
                 Frame::Notice(Notice::Refresh(seconds)) => {
@@ -232,10 +238,24 @@ impl Source for Live {
                         self.notices.push(Notice::Offline(mpp));
                     }
                 }
+                // A part of the list of the page asked for; any other
+                // page's is no longer wanted.
+                Frame::Notice(Notice::SubPages(part)) => {
+                    if let Some(list) = self.list.as_mut().filter(|list| list.page == part.page) {
+                        list.take(&part);
+                        self.notices.push(Notice::SubPages(part));
+                    }
+                }
+                Frame::Notice(Notice::SubPagesMissing(page, part)) => {
+                    if let Some(list) = self.list.as_mut().filter(|list| list.page == page) {
+                        list.missing(part);
+                        self.notices.push(Notice::SubPagesMissing(page, part));
+                    }
+                }
                 Frame::Notice(notice) => self.notices.push(notice),
                 // The fetcher never sends these to a decoder; ignore rather
                 // than trust.
-                Frame::Request(..) | Frame::Follow(..) | Frame::Input(_) => {}
+                Frame::Request(..) | Frame::Follow(..) | Frame::Input(_) | Frame::SubPages(..) => {}
             }
         }
         // The decoder is ticked when it says it has work due (decision
@@ -271,6 +291,9 @@ impl Source for Live {
     }
 
     fn request(&mut self, page: PageAddress, subcode: SubCode) {
+        if self.list.as_ref().is_none_or(|list| list.page != page.mpp()) {
+            self.list = Some(list::PageList::new(page.mpp()));
+        }
         self.asked.insert(page.mpp());
         self.requested = Some((page, subcode));
         self.last_retry = self.last_poll;
@@ -291,6 +314,22 @@ impl Source for Live {
         self.extras
             .get(&(page, subcode))
             .or_else(|| self.extras.iter().find(|((address, _), _)| *address == page).map(|(_, extras)| extras))
+    }
+
+    fn subpage_step(&mut self, page: PageAddress, current: SubCode, forward: bool) -> SubPageStep {
+        let mpp = page.mpp();
+        if self.list.as_ref().is_none_or(|list| list.page != mpp) {
+            self.list = Some(list::PageList::new(mpp));
+        }
+        let mut wanted = Vec::new();
+        let step = self
+            .list
+            .as_mut()
+            .map_or(SubPageStep::NoList, |list| list.step(current, forward, &mut |part| wanted.push(part)));
+        for part in wanted {
+            self.send(&Frame::SubPages(mpp, part));
+        }
+        step
     }
 
     fn send_input(&mut self, message: &[u8]) {

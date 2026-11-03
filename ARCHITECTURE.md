@@ -540,7 +540,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `input/`: the live feed's inputs beside the file and pipe reading of the parent.
 - `pipe/`: the frames' wire form between the two processes of live mode.
 - `fetch/`: the fetcher process: the engine's network port over `neoteletext-transport`, its wakes, the pipe to the decoder, and the zxnet and web loops.
-- `live/`: the decoder side of live mode: starting the fetcher and which pages a response may fill.
+- `live/`: the decoder side of live mode: starting the fetcher, which pages a response may fill, and `list.rs`, the parts of the list of sub-pages of the page asked for that stepping has needed (REQ-1888), held in the port because the `no_std` viewer holds no list (decision E.122).
 - `present/`: the palette-index raster and the receiver-drawn page.
 - `convert/`: stored pages back to page files; `convert/channel.rs` (feature `live`) writes them as a static channel's folder through `neoteletext-web`'s `subpages::ChannelFiles` (DEC-2413).
 - `sandbox/`: the Linux sandbox and the platforms without one.

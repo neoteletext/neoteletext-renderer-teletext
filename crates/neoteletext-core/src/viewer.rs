@@ -280,13 +280,17 @@ impl Viewer {
 
     /// Shows a sub-page of the page shown, entered directly (REQ-NAV-005):
     /// one of the 3,199 decimal sub-codes ([`crate::nav::SubPageEntry`];
-    /// REQ-NUM-017), or `SubCode::ANY` to return to the rotating display.
-    /// Ignored unless a page is shown or searched for.
+    /// REQ-NUM-017), a sub-code a port takes from a page's list of
+    /// sub-pages, or `SubCode::ANY` to return to the rotating display.
+    /// Ignored unless a page is shown or searched for. The viewer searches
+    /// until the store holds that sub-page, as it does for a page: one the
+    /// store does not hold is fetched, selected or waited for (REQ-328).
     pub fn show_subpage(&mut self, subcode: SubCode) -> Action {
         if !matches!(self.state, ViewerState::Displaying | ViewerState::Searching) {
             return Action::None;
         }
         self.subcode = subcode;
+        self.state = ViewerState::Searching;
         Action::Request(self.requested, subcode)
     }
 

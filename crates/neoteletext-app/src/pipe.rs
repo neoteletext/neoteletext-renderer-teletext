@@ -14,6 +14,13 @@ pub use codec::{read, write};
 pub const MAX_INPUT_MESSAGE: usize = 8192;
 /// The largest payload: one page response (REQ-WEB-008 default).
 pub const MAX_FRAME: usize = 256 * 1024;
+/// The most rows a part of a page's list of sub-pages holds (DOC-2038): the
+/// web module's `subpages::ROWS_PER_PART`, which this crate may be built
+/// without. The fetcher asserts that they agree.
+pub const MAX_LIST_ROWS: usize = 64;
+/// The longest version of a page's list: 64 bits of a digest in hexadecimal,
+/// the web module's `subpages::MAX_VALIDATOR`, asserted by the fetcher.
+pub const MAX_LIST_VERSION: usize = 16;
 
 /// Where page bytes came from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -57,6 +64,10 @@ pub enum Frame {
     Request(u16, u16),
     /// Decoder to fetcher: follow a link to another service.
     Follow(String, u16, u16),
+    /// Decoder to fetcher: fetch this part of page `0xMPP`'s list of
+    /// sub-pages (REQ-1888), answered by [`Notice::SubPages`] or
+    /// [`Notice::SubPagesMissing`].
+    SubPages(u16, u8),
     /// Decoder to fetcher: one input message for the channel's push
     /// WebSocket (area INT, REQ-INT-101), at most [`MAX_INPUT_MESSAGE`]
     /// bytes.
@@ -111,6 +122,30 @@ pub enum Notice {
     /// Keys may go to the channel now (true) or not (false): its push
     /// WebSocket opened or closed, and its descriptor declares input.
     Input(bool),
+    /// A part of page `0xMPP`'s list of sub-pages (REQ-1888), read and
+    /// checked by the fetcher: its rows' sub-codes, in the list's ascending
+    /// order, at most [`MAX_LIST_ROWS`].
+    SubPages(ListPart),
+    /// Page `0xMPP`'s list has no such part, or it could not be fetched or
+    /// read: the part number. Part 0 missing means the page keeps its
+    /// sub-pages in its page file and has no list (DOC-2038).
+    SubPagesMissing(u16, u8),
+}
+
+/// A part of a page's list of sub-pages, as the fetcher passes it on.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ListPart {
+    /// The page, `0xMPP`.
+    pub page: u16,
+    /// The part's number: it holds the rows from place
+    /// `part × MAX_LIST_ROWS`.
+    pub part: u8,
+    /// The page's number of sub-pages.
+    pub total: u16,
+    /// The list's version: parts of another version belong to another list.
+    pub version: String,
+    /// The rows' sub-codes, in order.
+    pub subcodes: Vec<u16>,
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! The wire form of the frames: the kind bytes, the strict payload reader,
 //! and writing and reading one frame (decision 26 of IMPLEMENTATION-LOG.md).
 
-use super::{Frame, MAX_FRAME, MAX_INPUT_MESSAGE, Notice, Origin, PageData};
+use super::{Frame, ListPart, MAX_FRAME, MAX_INPUT_MESSAGE, MAX_LIST_ROWS, MAX_LIST_VERSION, Notice, Origin, PageData};
 use neoteletext_core::consts::NIBBLE_MASK;
 use std::io::{self, Read, Write};
 
@@ -34,6 +34,9 @@ const PUSH_STOPPED: u8 = b's';
 const KEY: u8 = b'y';
 const INPUT: u8 = b'n';
 const REGION: u8 = b'r';
+const SUB_PAGES: u8 = b'p';
+const SUB_PAGES_MISSING: u8 = b'm';
+const SUB_PAGES_REQUEST: u8 = b'x';
 /// The most strings one frame may carry.
 const MAX_STRINGS: usize = 256;
 
@@ -180,7 +183,36 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
             put(out, ALIASES, &buffer)
         }
         Frame::Notice(Notice::Refresh(seconds)) => put(out, REFRESH, &seconds.to_be_bytes()),
+        Frame::SubPages(mpp, part) => put(out, SUB_PAGES_REQUEST, &[mpp.to_be_bytes().as_slice(), &[*part]].concat()),
+        Frame::Notice(Notice::SubPagesMissing(mpp, part)) => {
+            put(out, SUB_PAGES_MISSING, &[mpp.to_be_bytes().as_slice(), &[*part]].concat())
+        }
+        Frame::Notice(Notice::SubPages(list)) => {
+            if list.subcodes.len() > MAX_LIST_ROWS || list.version.len() > MAX_LIST_VERSION {
+                return Err(io::Error::other("a part of a list too long"));
+            }
+            let mut buffer = [list.page.to_be_bytes().as_slice(), &[list.part], &list.total.to_be_bytes()].concat();
+            put_string(&mut buffer, &list.version);
+            buffer.extend_from_slice(&u16::try_from(list.subcodes.len()).unwrap_or(0).to_be_bytes());
+            for subcode in &list.subcodes {
+                buffer.extend_from_slice(&subcode.to_be_bytes());
+            }
+            put(out, SUB_PAGES, &buffer)
+        }
     }
+}
+
+/// A part of a page's list, read as strictly as the fetcher wrote it.
+fn list_part(cursor: &mut Cursor<'_>) -> io::Result<ListPart> {
+    let invalid = || io::Error::other("malformed frame");
+    let (page, part, total, version) = (cursor.u16()?, cursor.byte()?, cursor.u16()?, cursor.string()?);
+    let count = usize::from(cursor.u16()?);
+    if count > MAX_LIST_ROWS || version.len() > MAX_LIST_VERSION {
+        return Err(invalid());
+    }
+    let subcodes = (0..count).map(|_| cursor.u16()).collect::<io::Result<Vec<_>>>()?;
+    cursor.end()?;
+    Ok(ListPart { page, part, total, version, subcodes })
 }
 
 /// Reads one frame; `None` at the end of the stream.
@@ -274,6 +306,16 @@ fn notice_frame(kind: u8, payload: &[u8]) -> io::Result<Frame> {
             Frame::Notice(Notice::Aliases(aliases))
         }
         REFRESH => Frame::Notice(Notice::Refresh(u32::from_be_bytes(payload.try_into().map_err(|_| invalid())?))),
+        SUB_PAGES => Frame::Notice(Notice::SubPages(list_part(&mut cursor)?)),
+        SUB_PAGES_MISSING | SUB_PAGES_REQUEST => {
+            let (mpp, part) = (cursor.u16()?, cursor.byte()?);
+            cursor.end()?;
+            if kind == SUB_PAGES_REQUEST {
+                Frame::SubPages(mpp, part)
+            } else {
+                Frame::Notice(Notice::SubPagesMissing(mpp, part))
+            }
+        }
         _ => return Err(invalid()),
     })
 }

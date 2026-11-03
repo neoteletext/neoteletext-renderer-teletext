@@ -224,3 +224,42 @@ fn an_address_says_where_a_viewer_opens() {
         assert!(opening(address).is_err(), "{address}");
     }
 }
+
+/// The frames a pipe end kept.
+fn kept_frames(kept: &Kept) -> Vec<Frame> {
+    let bytes = kept.0.lock().map(|bytes| bytes.clone()).unwrap_or_default();
+    let mut reader = bytes.as_slice();
+    std::iter::from_fn(|| pipe::read(&mut reader).ok().flatten()).collect()
+}
+
+// Verifies REQ-1888 and REQ-328: a sub-page step on the page asked for asks
+// the fetcher for part 0 of its list and waits; once the part comes it steps
+// to the next sub-code the list names, which the store does not hold; a part
+// of another page's list is not taken.
+#[test]
+fn a_sub_page_step_asks_for_the_list_and_takes_its_rows() {
+    let (sender, frames) = mpsc::channel();
+    let kept = Kept::default();
+    let mut live = routed(frames, Box::new(kept.clone()));
+    let mut session = Session::new(neoteletext_core::config::Config::default(), 8);
+    let page = PageAddress::from_mpp(0x100).unwrap();
+    live.request(page, SubCode::ANY);
+    assert_eq!(live.subpage_step(page, SubCode::new(1), true), SubPageStep::Waiting);
+    assert!(kept_frames(&kept).contains(&Frame::SubPages(0x100, 0)));
+    let part = |page: u16| {
+        Frame::Notice(Notice::SubPages(pipe::ListPart {
+            page,
+            part: 0,
+            total: 3,
+            version: "v".into(),
+            subcodes: vec![1, 2, 3],
+        }))
+    };
+    sender.send(part(0x200)).unwrap();
+    live.poll(&mut session, Instant(0));
+    assert_eq!(live.subpage_step(page, SubCode::new(1), true), SubPageStep::Waiting, "another page's list");
+    sender.send(part(0x100)).unwrap();
+    live.poll(&mut session, Instant(0));
+    assert_eq!(live.subpage_step(page, SubCode::new(1), true), SubPageStep::To(SubCode::new(2)));
+    assert_eq!(live.subpage_step(page, SubCode::new(1), false), SubPageStep::To(SubCode::new(3)));
+}

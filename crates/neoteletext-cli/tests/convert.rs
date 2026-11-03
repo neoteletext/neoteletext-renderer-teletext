@@ -172,3 +172,36 @@ fn a_channel_never_overwrites_a_file() {
     assert!(String::from_utf8_lossy(&run.stderr).contains("200.t42"), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(fs::read(channel.join("200.t42")).unwrap(), b"kept");
 }
+
+// Verifies REQ-328, REQ-290 and REQ-1888: `neottx view` on a channel written
+// by `convert --to channel`, whose page holds more sub-pages than one part
+// of its list, steps with Right from the first through every sub-page in
+// ascending order, across the boundary between parts, wrapping to the first,
+// and Left from the first wraps to the last; the store held none of them
+// before it was asked for, and each sub-page's file is fetched once.
+#[cfg(all(feature = "live", feature = "view"))]
+#[test]
+fn the_viewer_steps_through_every_sub_page_a_channel_lists() {
+    let folder = folder("convert-channel-view");
+    let input = folder.join("in.tti");
+    fs::write(&input, channel_input()).unwrap();
+    let channel = folder.join("channel");
+    let run = neottx(&["convert", input.to_str().unwrap(), "--to", "channel", "-o", channel.to_str().unwrap()]);
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let (port, asked) = common::serve_folder(channel);
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/web-server/drive_subpages.py");
+    let output = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(script)
+        .arg(env!("CARGO_BIN_EXE_neottx"))
+        .arg(port.to_string())
+        .arg(CHANNEL_SUB_PAGES.to_string())
+        .output()
+        .expect("python3 runs the driver");
+    let asked = asked.lock().unwrap();
+    assert!(output.status.success(), "{}: {asked:?}", String::from_utf8_lossy(&output.stdout));
+    for subcode in 2..=CHANNEL_SUB_PAGES {
+        let file = format!("/ch/100/{subcode:04}.t42");
+        assert_eq!(asked.iter().filter(|target| **target == file).count(), 1, "{file}: {asked:?}");
+    }
+}
