@@ -38,6 +38,12 @@ pub trait Source {
     /// Asks for a page, for sources that fetch on demand.
     fn request(&mut self, _page: PageAddress, _subcode: SubCode) {}
 
+    /// Asks for a page, or a sub-page, the store already holds: a source
+    /// that knows the copy held is current asks for nothing (REQ-523).
+    fn request_held(&mut self, page: PageAddress, subcode: SubCode) {
+        self.request(page, subcode);
+    }
+
     /// Asks for a page the shown page depends on, without making it the
     /// page kept fresh.
     fn prefetch(&mut self, _page: PageAddress) {}
@@ -75,8 +81,20 @@ pub trait Source {
         Vec::new()
     }
 
-    /// Follows a link to another service.
-    fn follow(&mut self, _service: u8, _page: PageAddress, _subcode: SubCode) {}
+    /// Follows a link to the linked service `service` (its place in the
+    /// descriptor's list), to `page`. The number the session gives the
+    /// service it opens, in the order its services opened, the first being
+    /// 0, for the viewer's history (REQ-NAV-010); `None` when the link is
+    /// not followed: the source has no such service, or the session holds
+    /// as many as it may.
+    fn follow(&mut self, _service: u8, _page: PageAddress, _subcode: SubCode) -> Option<u8> {
+        None
+    }
+
+    /// Opens again the session's service numbered `number` by
+    /// [`Source::follow`], at `page`: Back or Forward returned to it
+    /// (REQ-NAV-010).
+    fn reopen(&mut self, _number: u8, _page: PageAddress, _subcode: SubCode) {}
 
     /// A linked service: its short name, the name shown and its origin
     /// (REQ-288).

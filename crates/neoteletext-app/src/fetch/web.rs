@@ -2,6 +2,7 @@
 //! the std transport, its pages and notices sent to the decoder.
 
 use super::decoder_link::{page_request, send};
+use super::services::{Opened, SessionServices};
 use super::transport::{StdTransport, SystemRandom};
 use super::wakes::{Wake, Wakes};
 use super::{clock, neottx};
@@ -81,6 +82,7 @@ pub(super) fn run_web(
             broken.set(true);
         }
     };
+    let mut services = SessionServices::new(Opened { address: address.to_owned(), channel });
     let open = if channel { Input::OpenChannel(address) } else { Input::OpenService(address) };
     agent.handle(clock(start), open, &mut |output| sink(output, &mut pump, &mut next_tick));
     while !broken.get() && !wakes.ended() {
@@ -105,7 +107,9 @@ pub(super) fn run_web(
             busy = true;
             let now = clock(start);
             let more = wakes.next_is_input();
-            hand_frame(&mut agent, now, frame, more, &mut |output| sink(output, &mut pump, &mut next_tick));
+            hand_frame(&mut agent, &mut services, now, frame, more, &mut |output| {
+                sink(output, &mut pump, &mut next_tick);
+            });
         }
         if next_tick.is_some_and(|at| clock(start) >= at) {
             // What a tick asks for, a reconnection above all, is taken up
@@ -388,10 +392,14 @@ fn send_list_part(page: u16, part: PartNumber, bytes: &[u8]) -> std::io::Result<
         return send(&Frame::Notice(Notice::SubPagesMissing(page, part.number())));
     };
     let mut subcodes = Vec::new();
+    let mut validators = Vec::new();
     let mut ignored = 0usize;
     for row in list.entries {
         match row {
-            Ok(entry) => subcodes.push(entry.subcode.value()),
+            Ok(entry) => {
+                subcodes.push(entry.subcode.value());
+                validators.push(entry.validator.as_str().to_owned());
+            }
             Err(_) => ignored = ignored.saturating_add(1),
         }
     }
@@ -407,6 +415,7 @@ fn send_list_part(page: u16, part: PartNumber, bytes: &[u8]) -> std::io::Result<
         total: list.total,
         version: list.version.as_str().to_owned(),
         subcodes,
+        validators,
     })))
 }
 
@@ -478,10 +487,18 @@ fn origin_of(address: &str) -> String {
     }
 }
 
-/// Gives the agent what the decoder asked for: a page, a key, or a link to
-/// another service. `more` says another input message is already waiting,
-/// to be written with this one (REQ-RCH-010).
-fn hand_frame(agent: &mut Agent<'_>, now: Instant, frame: Frame, more: bool, out: &mut dyn FnMut(Output<'_>)) {
+/// Gives the agent what the decoder asked for: a page, a key, a link to
+/// another service, or a return to a service of the session, which
+/// `services` numbers. `more` says another input message is already
+/// waiting, to be written with this one (REQ-RCH-010).
+fn hand_frame(
+    agent: &mut Agent<'_>,
+    services: &mut SessionServices,
+    now: Instant,
+    frame: Frame,
+    more: bool,
+    out: &mut dyn FnMut(Output<'_>),
+) {
     match frame {
         Frame::Request(mpp, sub) => {
             if let Some((page, subcode)) = page_request(mpp, sub) {
@@ -513,10 +530,34 @@ fn hand_frame(agent: &mut Agent<'_>, now: Instant, frame: Frame, more: bool, out
             agent.handle(now, Input::Send(InputMessage { bytes: &message, move_of: None, more }), out);
         }
         Frame::Follow(service, mpp, sub) => {
-            if let Some((page, subcode)) = page_request(mpp, sub) {
+            // The service's address, before following replaces the
+            // descriptor that names it, for a return to it (REQ-295).
+            let opened = agent.descriptor().and_then(|descriptor| {
+                let linked = descriptor.service(&service)?;
+                Some(Opened { address: descriptor.service_address(linked).to_string(), channel: linked.channel })
+            });
+            if services.followed(opened)
+                && let Some((page, subcode)) = page_request(mpp, sub)
+            {
                 agent.handle(now, Input::FollowLink { service: &service, page, subcode }, out);
             }
         }
+        Frame::Reopen(number, mpp, sub) => match (services.get(number), page_request(mpp, sub)) {
+            (Some(opened), Some((page, subcode))) => {
+                let open = if opened.channel {
+                    Input::OpenChannel(&opened.address)
+                } else {
+                    Input::OpenService(&opened.address)
+                };
+                agent.handle(now, open, out);
+                agent.handle(now, Input::FetchPage { page, subcode }, out);
+            }
+            _ => {
+                let _ = send(&Frame::Notice(Notice::Message(format!(
+                    "service {number} of this session cannot be opened again"
+                ))));
+            }
+        },
         _ => {}
     }
 }

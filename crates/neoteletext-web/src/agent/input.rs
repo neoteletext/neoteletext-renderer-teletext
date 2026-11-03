@@ -22,10 +22,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Input::Tick => self.tick(now, sink),
             Input::Net(net) => self.net(now, net, sink),
             Input::OpenService(address) => match Url::parse(address) {
-                Ok(url) if !url.scheme().is_websocket() => {
-                    self.leave_channel();
-                    self.pending_descriptor = Some((url, false, false));
-                }
+                Ok(url) if !url.scheme().is_websocket() => self.open_by_descriptor(&url, false),
                 Ok(_) => event(sink, Event::DescriptorFailed(Failure::Address(UrlError::Scheme))),
                 Err(error) => event(sink, Event::DescriptorFailed(Failure::Address(error))),
             },

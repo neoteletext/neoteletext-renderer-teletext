@@ -837,3 +837,170 @@ fn every_function_of_the_interactive_viewer_has_its_key() {
     assert_eq!(key(KeyCode::Right), Some(Key::NextSubPage));
     assert_eq!(key(KeyCode::Left), Some(Key::PreviousSubPage));
 }
+
+/// A source of a service linking to others that records the links followed
+/// and the services reopened, numbering the services as `Live` does.
+#[derive(Default)]
+struct Travelling {
+    linked: Vec<neoteletext_app::pipe::ServiceEntry>,
+    followed: Vec<(u8, u16)>,
+    reopened: Vec<(u8, u16)>,
+    prefetched: Vec<u16>,
+}
+
+impl neoteletext_app::source::Source for Travelling {
+    fn poll(
+        &mut self,
+        _session: &mut neoteletext_app::session::Session,
+        _now: neoteletext_core::types::Instant,
+    ) -> bool {
+        true
+    }
+
+    fn linked_service(&self, service: u8) -> Option<neoteletext_app::pipe::ServiceEntry> {
+        self.linked.get(usize::from(service)).cloned()
+    }
+
+    fn follow(
+        &mut self,
+        service: u8,
+        page: neoteletext_core::types::PageAddress,
+        _subcode: neoteletext_core::types::SubCode,
+    ) -> Option<u8> {
+        self.followed.push((service, page.mpp()));
+        u8::try_from(self.followed.len()).ok()
+    }
+
+    fn reopen(
+        &mut self,
+        number: u8,
+        page: neoteletext_core::types::PageAddress,
+        _subcode: neoteletext_core::types::SubCode,
+    ) {
+        self.reopened.push((number, page.mpp()));
+    }
+
+    fn prefetch(&mut self, page: neoteletext_core::types::PageAddress) {
+        self.prefetched.push(page.mpp());
+    }
+}
+
+/// REQ-295 (REQ-NAV-010): following a link to another service keeps the
+/// viewer and its history; Back then returns to the first service and its
+/// page, by the number the session gave it, and Forward goes on again to
+/// the service followed, both without asking (REQ-288); a page the
+/// channel's program sends the viewer to is a visit Back returns from.
+#[test]
+fn back_returns_across_a_link_to_another_service_and_forward_goes_on() {
+    use neoteletext_core::nav::{HistoryEntry, LinkTarget};
+    use neoteletext_core::types::{PageAddress, SubCode};
+    use neoteletext_core::viewer::Action;
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut source =
+        Travelling { linked: vec![linked("weather", "Weather", "https://weather.example")], ..Travelling::default() };
+    let mut state = view_state(&session);
+    state.act(&mut session, &mut source);
+    type_number(&mut state, &mut source, &session, None, &"200".chars().map(KeyCode::Char).collect::<Vec<_>>());
+    state.act(&mut session, &mut source);
+    state.action = Action::FollowService(LinkTarget { address: page(0x301), subcode: SubCode::ANY, service: Some(0) });
+    state.act(&mut session, &mut source);
+    assert_eq!(source.followed, [(0, 0x301)]);
+    assert_eq!((state.viewer.service(), state.viewer.requested().0), (1, page(0x301)));
+    // The channel's program sends the viewer to 302 of the service followed.
+    state.typing.redirected(0x302, SubCode::ANY.value(), None);
+    let (requested, subcode) = state.viewer.requested();
+    assert!(state.typing_turn(&mut session, &mut source, requested, subcode));
+    assert_eq!(state.viewer.requested().0, page(0x302));
+    let config = neoteletext_core::config::Config::default();
+    let shown = super::Shown { page: None, extras: None, config: &config, now: neoteletext_core::types::Instant(0) };
+    let mut press = |state: &mut super::ViewState, code, modifiers| {
+        let _ = state.key(KeyEvent::new(code, modifiers), &mut source, &session, &shown, 0);
+        let action = state.action;
+        state.act(&mut neoteletext_app::session::Session::new(config, 8), &mut source);
+        action
+    };
+    assert_eq!(press(&mut state, KeyCode::Backspace, KeyModifiers::NONE), Action::Request(page(0x301), SubCode::ANY));
+    let first = HistoryEntry { service: 0, address: page(0x200), subcode: SubCode::ANY };
+    assert_eq!(press(&mut state, KeyCode::Backspace, KeyModifiers::NONE), Action::ReturnTo(first));
+    assert_eq!(state.prompt, None, "no question");
+    let again = HistoryEntry { service: 1, address: page(0x301), subcode: SubCode::ANY };
+    assert_eq!(press(&mut state, KeyCode::Right, KeyModifiers::ALT), Action::ReturnTo(again));
+    assert_eq!(source.reopened, [(0, 0x200), (1, 0x301)]);
+    assert_eq!((state.viewer.service(), state.viewer.requested().0), (1, page(0x301)));
+}
+
+/// Pushes the header of page `mpp` of magazine 1, at `subcode`.
+fn push_header(session: &mut neoteletext_app::session::Session, mpp: u16, subcode: u16) {
+    use neoteletext_core::packet::{PacketMeta, encode};
+    use neoteletext_core::types::{ControlBits, PageAddress, SubCode};
+    let address = PageAddress::from_mpp(mpp).unwrap();
+    let display = [b' '; neoteletext_core::consts::HEADER_DISPLAY_BYTES];
+    let header = encode::header(address.magazine, address.page, SubCode::new(subcode), ControlBits(0), &display);
+    session.push(&header.unwrap(), &PacketMeta::default());
+}
+
+/// REQ-511 (REQ-WEB-022), decision E.63 item 5: a page shown at Level 2.5
+/// asks its service once for its magazine's Organization Table, then once
+/// for the object pages the table names for it; a page already stored is
+/// not asked for, and nothing is asked at Level 1.5.
+#[test]
+fn a_level_2_5_page_asks_for_its_table_then_its_object_pages_once() {
+    use neoteletext_core::config::{Config, PresentationLevel};
+    use neoteletext_core::packet::{MotObjectLink, MotPageEntry, PacketMeta, encode, mot_position};
+    use neoteletext_core::types::{FallbackFields, Magazine, PageAddress, PageNumber, SubCode};
+    let config = Config { level: PresentationLevel::Level25, ..Config::default() };
+    let mut session = neoteletext_app::session::Session::new(config, 8);
+    push_header(&mut session, 0x100, 0);
+    push_header(&mut session, 0x101, 0);
+    let page = PageAddress::from_mpp(0x100).unwrap();
+    let mut state = view_state(&session);
+    let mut source = Travelling::default();
+    let ask = |state: &mut super::ViewState, session: &neoteletext_app::session::Session, source: &mut Travelling| {
+        state.ask_enhancements(session, source, session.page(page, SubCode::ANY), &config);
+    };
+    ask(&mut state, &session, &mut source);
+    ask(&mut state, &session, &mut source);
+    assert_eq!(source.prefetched, [0x1FE], "the table, once");
+    // The table: GPOP 1A0, POP link 1 to 1A1, and page 00 using POP link 1.
+    let magazine = Magazine::new(1).unwrap();
+    let link = |target: u8| MotObjectLink {
+        magazine,
+        x27_flag: false,
+        page: PageNumber(target),
+        subpage_count: 0,
+        fallback: FallbackFields::default(),
+        default_objects: [None; 2],
+    };
+    let mut links = [0u8; neoteletext_core::consts::DATA_BYTES];
+    let (gpop, pop) = links.split_at_mut(neoteletext_core::consts::MOT_OBJECT_LINK_BYTES);
+    gpop.copy_from_slice(&encode::mot_object_link(&link(0xA0)));
+    pop[..neoteletext_core::consts::MOT_OBJECT_LINK_BYTES].copy_from_slice(&encode::mot_object_link(&link(0xA1)));
+    let position = mot_position(PageNumber(0x00));
+    let mut entries = [0u8; neoteletext_core::consts::DATA_BYTES];
+    entries[position.index..position.index + 2]
+        .copy_from_slice(&encode::mot_page_entry(MotPageEntry { global_objects: true, pop_link: 1 }));
+    // S4 S3 name the table's last packet, X/19 (clause 10.6).
+    push_header(&mut session, 0x1FE, 19 << 8);
+    session.push(&encode::nibble_packet(magazine, position.packet, &entries), &PacketMeta::default());
+    session.push(&encode::nibble_packet(magazine, 19, &links), &PacketMeta::default());
+    push_header(&mut session, 0x101, 0);
+    assert!(session.decoder().enhancement_lookup().magazine_organization_table(magazine).is_some());
+    ask(&mut state, &session, &mut source);
+    ask(&mut state, &session, &mut source);
+    assert_eq!(source.prefetched, [0x1FE, 0x1A0, 0x1A1], "then its object pages, once");
+    // A viewer that has asked nothing asks only for what is not stored.
+    let mut fresh = view_state(&session);
+    let mut other = Travelling::default();
+    ask(&mut fresh, &session, &mut other);
+    assert_eq!(other.prefetched, [0x1A0, 0x1A1]);
+    // Level 1.5 uses no enhancement page.
+    let mut plain = view_state(&session);
+    plain.ask_enhancements(
+        &session,
+        &mut other,
+        session.page(page, SubCode::ANY),
+        &Config { level: PresentationLevel::Level15, ..Config::default() },
+    );
+    assert_eq!(other.prefetched, [0x1A0, 0x1A1]);
+}

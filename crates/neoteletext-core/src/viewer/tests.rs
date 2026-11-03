@@ -560,3 +560,40 @@ fn a_viewer_keeps_the_history_its_port_gives_it() {
     assert_eq!(viewer.key(Key::Back, &keys), Action::Request(page(0x200), SubCode::ANY));
     assert_eq!(viewer.key(Key::Back, &keys), Action::None, "100, the oldest, was dropped");
 }
+
+/// REQ-295 (REQ-NAV-010): each history entry records its service. A link
+/// followed to the port's service 1 keeps the pages before it; Back to a
+/// page of service 0 asks the port to return to that service, and Back and
+/// Forward within one service request pages as before; Forward across the
+/// link returns to service 1, and a page selected there is recorded in it.
+#[test]
+fn back_and_forward_return_across_a_link_to_another_service() {
+    let mut slots = std::vec![StoredPage::EMPTY; 2];
+    let decoder = Decoder::new(&mut slots, Config::default());
+    let config = Config::default();
+    let links = PageLinks::default();
+    let no = |_| false;
+    let keys = context(&links, decoder.store(), &config, &no);
+    let mut viewer = displaying();
+    for digit in [2, 0, 0] {
+        viewer.key(Key::Digit(digit), &keys);
+    }
+    viewer.followed(1, page(0x301), SubCode::ANY);
+    assert_eq!((viewer.service(), viewer.requested().0), (1, page(0x301)));
+    for digit in [3, 0, 2] {
+        viewer.key(Key::Digit(digit), &keys);
+    }
+    assert_eq!(viewer.key(Key::Back, &keys), Action::Request(page(0x301), SubCode::ANY), "within service 1");
+    let back = HistoryEntry { service: 0, address: page(0x200), subcode: SubCode::ANY };
+    assert_eq!(viewer.key(Key::Back, &keys), Action::ReturnTo(back));
+    assert_eq!((viewer.service(), viewer.requested().0), (0, page(0x200)));
+    assert_eq!(viewer.key(Key::Back, &keys), Action::Request(page(0x100), SubCode::ANY), "within service 0");
+    assert_eq!(viewer.key(Key::Forward, &keys), Action::Request(page(0x200), SubCode::ANY));
+    let forward = HistoryEntry { service: 1, address: page(0x301), subcode: SubCode::ANY };
+    assert_eq!(viewer.key(Key::Forward, &keys), Action::ReturnTo(forward));
+    assert_eq!(viewer.service(), 1);
+    for digit in [4, 0, 0] {
+        viewer.key(Key::Digit(digit), &keys);
+    }
+    assert_eq!(viewer.history().current().map(|entry| entry.service), Some(1));
+}

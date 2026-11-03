@@ -37,6 +37,10 @@ pub struct Live {
     services: Vec<pipe::ServiceEntry>,
     /// The linked services' short names, as a page's links name them.
     service_names: Vec<String>,
+    /// How many services this session has opened, the first and one for
+    /// each link followed: the next one's number, as the fetcher counts
+    /// them (REQ-295).
+    session_services: usize,
     ended: bool,
     /// The bytes each page last arrived as, to take in again when the
     /// server confirms them current (REQ-WEB-009).
@@ -100,6 +104,7 @@ impl Live {
             extras: HashMap::new(),
             services: Vec::new(),
             service_names: Vec::new(),
+            session_services: 1,
             ended: false,
             last_bytes: HashMap::new(),
             requested: None,
@@ -119,6 +124,21 @@ impl Live {
         }
     }
 
+    /// A new service opened, with these linked services: nothing of the
+    /// service before is kept, its pages, their extras or its lists.
+    fn take_service(&mut self, session: &mut Session, services: Vec<pipe::ServiceEntry>) {
+        session.restart();
+        self.extras.clear();
+        self.last_bytes.clear();
+        self.plain.clear();
+        self.list = None;
+        self.channel_lists = list::LiveLists::default();
+        self.index.clear();
+        self.index_sending = None;
+        self.service_names = services.iter().map(|service| service.short_name.clone()).collect();
+        self.services = services;
+    }
+
     /// Takes a new service's default region (REQ-WEB-002): the group of a
     /// page that designates none, above the receiver's own and below the
     /// user's `--region` (decision E.4).
@@ -134,14 +154,15 @@ impl Live {
 
     /// Decodes page bytes into the session, keeping each page's extension
     /// data; with no `format`, the bytes say which it is (REQ-INP-005).
-    /// Returns the first page the bytes held, and every page they held.
+    /// Returns the first page the bytes held, and every page they held,
+    /// `0xMPP`, with its sub-code.
     fn feed_page(
         &mut self,
         session: &mut Session,
         format: Option<Format>,
         page: &PageData,
         now: Instant,
-    ) -> (Option<PageAddress>, Vec<u16>) {
+    ) -> (Option<PageAddress>, Vec<(u16, Option<SubCode>)>) {
         let mut reader = Box::new(AutoReader::new(AutoConfig { format, encode_pages: true, ..AutoConfig::default() }));
         let mut packets: Vec<(Packet, PacketMeta)> = Vec::new();
         let mut held = Vec::new();
@@ -187,7 +208,7 @@ impl Live {
                     *state = taken.is_some();
                 }
                 if let Some(page) = taken {
-                    held.push(page.mpp());
+                    held.push((page.mpp(), header.subcode));
                 }
             }
             let magazine_wide = address.number >= PACKET_MAGAZINE_ENHANCEMENT;
@@ -241,8 +262,18 @@ impl Live {
         self.offline_since = None;
         let (first, held) = self.feed_page(session, format, page, now);
         if page.origin != Origin::Push {
-            for mpp in held {
+            for &(mpp, _) in &held {
                 self.plain.insert(mpp, !page.secure);
+            }
+        }
+        // REQ-523: a sub-page fetched while its page's list names it is
+        // current for as long as its row keeps the validator it has now.
+        if page.origin == Origin::Page
+            && let Some(list) = self.list.as_mut()
+        {
+            let page = list.page;
+            for subcode in held.iter().filter(|(mpp, _)| *mpp == page).filter_map(|(_, subcode)| *subcode) {
+                list.arrived(subcode.value());
             }
         }
         if let Some(address) = first
@@ -281,18 +312,7 @@ impl Source for Live {
                 Frame::T42(page) => self.receive(session, Some(Format::T42(T42Variant::Plain)), &page, now),
                 Frame::Undeclared(page) => self.receive(session, None, &page, now),
                 Frame::Notice(Notice::Region(region)) => self.take_region(session, region),
-                Frame::Notice(Notice::Service(services)) => {
-                    session.restart();
-                    self.extras.clear();
-                    self.last_bytes.clear();
-                    self.plain.clear();
-                    self.list = None;
-                    self.channel_lists = list::LiveLists::default();
-                    self.index.clear();
-                    self.index_sending = None;
-                    self.service_names = services.iter().map(|service| service.short_name.clone()).collect();
-                    self.services = services;
-                }
+                Frame::Notice(Notice::Service(services)) => self.take_service(session, services),
                 Frame::Notice(Notice::Refresh(seconds)) => {
                     // The descriptor bounds it; the pipe could carry any value.
                     let bounded = seconds.clamp(MIN_REFRESH_SECONDS, MAX_REFRESH_SECONDS);
@@ -344,7 +364,12 @@ impl Source for Live {
                 // than trust.
                 // Only a font's fetcher sends a font, and it is read by
                 // `fetch_font`, never by live mode.
-                Frame::Request(..) | Frame::Follow(..) | Frame::Input(_) | Frame::SubPages(..) | Frame::Font(_) => {}
+                Frame::Request(..)
+                | Frame::Follow(..)
+                | Frame::Reopen(..)
+                | Frame::Input(_)
+                | Frame::SubPages(..)
+                | Frame::Font(_) => {}
             }
         }
         // The decoder is ticked when it says it has work due (decision
@@ -386,8 +411,21 @@ impl Source for Live {
         self.asked.insert(page.mpp());
         self.requested = Some((page, subcode));
         self.last_retry = self.last_poll;
-        let sub = if subcode.is_any() { u16::MAX } else { subcode.value() };
-        self.send(&Frame::Request(page.mpp(), sub));
+        self.send(&Frame::Request(page.mpp(), wire_subcode(subcode)));
+    }
+
+    fn request_held(&mut self, page: PageAddress, subcode: SubCode) {
+        let current = !subcode.is_any()
+            && self.list.as_ref().is_some_and(|list| list.page == page.mpp() && list.is_current(subcode.value()));
+        if !current {
+            self.request(page, subcode);
+            return;
+        }
+        // REQ-523: the copy held is current by the list, so its file is not
+        // asked for; the page is still the one kept fresh from now on.
+        self.asked.insert(page.mpp());
+        self.requested = Some((page, subcode));
+        self.last_retry = self.last_poll;
     }
 
     fn prefetch(&mut self, page: PageAddress) {
@@ -440,16 +478,28 @@ impl Source for Live {
         self.send(&Frame::Input(message.to_vec()));
     }
 
-    fn follow(&mut self, service: u8, page: PageAddress, subcode: SubCode) {
-        if let Some(name) = self.service_names.get(usize::from(service)).cloned() {
-            let sub = if subcode.is_any() { u16::MAX } else { subcode.value() };
-            self.send(&Frame::Follow(name, page.mpp(), sub));
-        }
+    fn follow(&mut self, service: u8, page: PageAddress, subcode: SubCode) -> Option<u8> {
+        let name = self.service_names.get(usize::from(service)).cloned()?;
+        // The fetcher numbers the services by the same count and stops at
+        // the same bound (`pipe::Frame::Follow`).
+        let number = u8::try_from(self.session_services).ok()?;
+        self.session_services = self.session_services.saturating_add(1);
+        self.send(&Frame::Follow(name, page.mpp(), wire_subcode(subcode)));
+        Some(number)
+    }
+
+    fn reopen(&mut self, number: u8, page: PageAddress, subcode: SubCode) {
+        self.send(&Frame::Reopen(number, page.mpp(), wire_subcode(subcode)));
     }
 
     fn linked_service(&self, service: u8) -> Option<pipe::ServiceEntry> {
         self.services.get(usize::from(service)).cloned()
     }
+}
+
+/// A sub-code as a request frame carries it: 0xFFFF for any.
+fn wire_subcode(subcode: SubCode) -> u16 {
+    if subcode.is_any() { u16::MAX } else { subcode.value() }
 }
 
 impl Drop for Live {

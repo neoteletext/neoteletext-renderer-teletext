@@ -327,7 +327,10 @@ impl SubPageEntry {
 /// A history entry (REQ-NAV-010).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HistoryEntry {
-    /// The service: 0 for the current or broadcast service.
+    /// The service: the port's number for it, its place in the port's
+    /// table of the services opened this session (REQ-NAV-010), which
+    /// stays the same when other services open; 0 for a broadcast and the
+    /// service opened first.
     pub service: u8,
     /// The page.
     pub address: PageAddress,

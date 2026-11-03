@@ -74,7 +74,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         // A channel's push connection may be anywhere on its origin, and
         // carries the channel's cookies, whose paths are its folder
         // (REQ-WEB-026).
-        let folder = self.channel;
+        let folder = self.identity().copied();
         let mut writer = Writer::new(self.buffers.push_request);
         self.push.key = ws::new_key(&mut self.random);
         let written = (|| -> Result<bool, Overflow> {
@@ -196,11 +196,13 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         let Some(url) = self.push.url else { return false };
         let (seconds, calendar) = self.seconds(now);
         let head_len = self.push.head.len();
-        let Self { buffers, jar, port_cookies, channel, .. } = self;
+        let Self { buffers, jar, port_cookies, channel, service_folder, .. } = self;
+        // The open channel's or service's identity (REQ-507).
+        let channel = channel.as_ref().or(service_folder.as_ref());
         let head_bytes = buffers.push_head.get(..head_len).unwrap_or(&[]);
         // A channel's cookies stay in its folder, those its push handshake
         // sets as much as a page's (REQ-WEB-026, finding F-15).
-        let scope = channel.as_ref().map(Url::path);
+        let scope = channel.map(Url::path);
         let store = cookie_store(jar, port_cookies);
         let parsed = store_response_cookies(
             store,

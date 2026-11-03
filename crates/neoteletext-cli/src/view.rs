@@ -35,6 +35,7 @@ use std::time::Instant as StdInstant;
 use terminal_io::{RawGuard, Wakened};
 use typing::Typing;
 
+mod dependencies;
 mod input;
 mod keys;
 mod notices;
@@ -67,8 +68,13 @@ struct ViewState {
     repaint_whole: bool,
     action: Action,
     prompt: Option<[u8; COLUMNS]>,
+    // Row 24 for after the next page request, which clears `prompt`.
+    prompt_after_request: Option<[u8; COLUMNS]>,
     // The origins confirmed this session (REQ-288), kept across services.
     confirmed_origins: HashSet<String>,
+    // The enhancement pages asked for in this service, `0xMPP`, each once
+    // (REQ-511).
+    enhancements_asked: HashSet<u16>,
     typing: Typing,
     // The reception of the page whose walk was last traced (REQ-FSM-010).
     traced: Option<(neoteletext_core::fsm::PageKey, Instant)>,
@@ -133,7 +139,9 @@ impl ViewState {
             repaint_whole: true,
             action,
             prompt: None,
+            prompt_after_request: None,
             confirmed_origins: HashSet::new(),
+            enhancements_asked: HashSet::new(),
             typing,
             traced: None,
             walk_trace: Vec::new(),

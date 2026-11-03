@@ -15,7 +15,7 @@ use neoteletext_app::source::Source;
 use neoteletext_core::config::Config;
 use neoteletext_core::level1::Grid;
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
-use neoteletext_core::viewer::{Action, Viewer, ViewerEvent};
+use neoteletext_core::viewer::Action;
 use neoteletext_input::event::Stamp;
 use std::io::IsTerminal;
 use std::sync::mpsc;
@@ -78,6 +78,7 @@ impl ViewState {
                 self.step_subpage(forward, source, session, &shown);
             }
             self.compose(session, requested, &shown);
+            self.ask_enhancements(session, source, shown.page, &config);
             let reveal = self.viewer.reveal(now);
             let frame = Frame { zoom: self.viewer.zoom(), ..Frame::at(&config, reveal, now) };
             let state = drawn_state(&self.grid, display, frame, reveal);
@@ -106,18 +107,41 @@ impl ViewState {
         match self.action {
             Action::Request(address, subcode) => {
                 session.decoder_mut().set_requested(Some(address));
-                source.request(address, subcode);
-                self.prompt = None;
+                // REQ-523: a sub-page held may be current by its page's
+                // list, which the source knows.
+                if !subcode.is_any() && session.page(address, subcode).is_some() {
+                    source.request_held(address, subcode);
+                } else {
+                    source.request(address, subcode);
+                }
+                self.prompt = self.prompt_after_request.take();
             }
             Action::FollowService(target) => {
+                self.prompt = None;
                 if let Some(service) = target.service {
                     if let Some(linked) = source.linked_service(service).filter(|linked| !linked.origin.is_empty()) {
                         self.confirmed_origins.insert(linked.origin);
                     }
-                    source.follow(service, target.address, target.subcode);
-                    self.viewer = Viewer::new(target.address).with_trace(self.viewer.traces());
-                    let _ = self.viewer.event(ViewerEvent::Started);
+                    // REQ-295: the viewer goes on in the service followed,
+                    // its history keeping the pages before the link.
+                    match source.follow(service, target.address, target.subcode) {
+                        Some(number) => {
+                            self.viewer.followed(number, target.address, target.subcode);
+                            // Its enhancement pages are its own (REQ-511).
+                            self.enhancements_asked.clear();
+                        }
+                        None => self.prompt = Some(message_row("This service cannot be opened")),
+                    }
                 }
+            }
+            // REQ-295: Back or Forward reached a page of another service of
+            // the session. Every one was opened by the user or by a link
+            // whose origin was confirmed, and an origin confirmed stays so
+            // for the session (REQ-288, DEC-2454), so it is opened again
+            // without asking.
+            Action::ReturnTo(entry) => {
+                source.reopen(entry.service, entry.address, entry.subcode);
+                self.enhancements_asked.clear();
                 self.prompt = None;
             }
             Action::ConfirmService(target) => {
@@ -134,7 +158,7 @@ impl ViewState {
     /// shown, a page it sends the viewer to, and the selection told to it.
     /// True when the channel sent the viewer to another page, which the
     /// next turn requests.
-    fn typing_turn(
+    pub(super) fn typing_turn(
         &mut self,
         session: &mut Session,
         source: &mut dyn Source,
@@ -153,11 +177,9 @@ impl ViewState {
             && let Some(address) = PageAddress::from_mpp(mpp)
             && (address, SubCode::new(sub)) != (requested, subcode)
         {
-            self.viewer = Viewer::new(address).with_trace(self.viewer.traces());
-            self.action = self.viewer.event(ViewerEvent::Started);
-            if SubCode::new(sub) != SubCode::ANY {
-                self.action = self.viewer.show_subpage(SubCode::new(sub));
-            }
+            // A page the channel's program sends the viewer to is a visit
+            // of the history, as a link is (REQ-295).
+            self.action = self.viewer.go_to(address, SubCode::new(sub));
             return true;
         }
         self.typing.tell_selection(source, requested.mpp(), subcode.value(), clock_ms);

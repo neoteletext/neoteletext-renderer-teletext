@@ -43,7 +43,10 @@ impl ViewState {
                 }
             }
             Some(Destination::Address(other)) => {
-                self.prompt = Some(message_row(&format!("Page {:03X} is another channel's", address.mpp())));
+                // Row 24 says so once the page's request has gone, which
+                // clears the row before it (DEC-2480).
+                self.prompt_after_request =
+                    Some(message_row(&format!("Page {:03X} is another channel's", address.mpp())));
                 self.messages.push(format!("page {:03X} is at {other}: open it with neottx view", address.mpp()));
             }
         }
