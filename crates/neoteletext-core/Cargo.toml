@@ -89,6 +89,11 @@ name = "behaviour"
 required-features = ["level15", "render", "viewer"]
 
 [[test]]
+name = "thread_safety"
+# The documented thread-safety of the main types (REQ-DOC-001).
+required-features = ["render", "viewer"]
+
+[[test]]
 name = "numbering"
 # Area NUM through the decoder, the store and the viewer.
 required-features = ["viewer"]

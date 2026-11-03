@@ -19,6 +19,15 @@
 //!
 //! Everything here is `no_std` and allocation-free, so a microcontroller
 //! can be a receiver or a channel.
+//!
+//! # Threads and shared state
+//!
+//! The crate holds no global or static mutable state, and no type in it
+//! uses interior mutability, so each of its types is `Send` and `Sync`
+//! whenever what it borrows from the caller is (REQ-DOC-001). Every
+//! function that changes state takes `&mut self` or a `&mut` argument, so
+//! a value shared between threads needs the caller's own lock; a value used
+//! by one thread at a time needs nothing. The crate starts no thread.
 #![no_std]
 // REQ-SEC-015: only the C interface crate may contain unsafe code.
 #![forbid(unsafe_code)]
