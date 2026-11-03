@@ -28,7 +28,7 @@ neoteletext-formats = { version = "...", default-features = false }  # T42 only
 
 | Crate | Features |
 |---|---|
-| `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); and the profile `modern-classic` |
+| `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); and the profiles `classic` (Level 1.5 alone, DEC-1757) and `modern-classic` |
 | `neoteletext-formats` | `transport`, `sliced`, `pages`, `tti`, `ep1`, `edittf`, `dump`, `check`, and `std` |
 | `neoteletext-web` | `push`, `cookies` |
 
@@ -43,7 +43,7 @@ Measured flash on Cortex-M0 on 1 November 2026 (`cargo xtask size`, `opt-level =
 | Build | Flash |
 |---|---|
 | Core with no optional area: acquisition, the Level 1 grid, composing | 25,870 bytes |
-| Level 1.5 receiver with the renderer and the viewer, without the font | 58,570 bytes |
+| Level 1.5 receiver with the renderer and the viewer, without the font: the `classic` profile | 58,570 bytes |
 | The same with the compiled font's standard sets | 98,450 bytes |
 | The same at Level 3.5, every capability, without the font | 74,770 bytes |
 | The same with the `modern-classic` profile's capabilities, without the font | 74,606 bytes |

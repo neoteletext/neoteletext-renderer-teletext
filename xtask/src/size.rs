@@ -41,7 +41,9 @@ const BUILDS: &[Build] = &[
     // optional area.
     Build { name: "level1", features: "", budget: None },
     // A Level 1.5 receiver with the renderer and the viewer: the core's
-    // code and character tables, which the budget covers.
+    // code and character tables, which the budget covers. These are the
+    // features of the core's `classic` profile (DEC-1757), so this build
+    // is that profile's measurement.
     Build { name: "level15", features: "level15 render viewer", budget: Some(FLASH_BUDGET) },
     // The same with the compiled font's standard sets, as a port that
     // draws links it (REQ-FNT-001).
