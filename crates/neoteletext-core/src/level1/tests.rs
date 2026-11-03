@@ -168,6 +168,31 @@ fn the_designation_report() {
     assert_eq!(report.designation, charset::designation(1).unwrap());
 }
 
+/// REQ-348 (REQ-OBJ-041): an enhancement page takes no national option
+/// from C12 to C14 of its header, whatever they hold, since there C12 and
+/// C13 mean a continued fragment and a partial page (Annex B.6): neither
+/// an object page named by its X/28/0 nor the Magazine Organization
+/// Table. A display page with the same bits takes them.
+#[test]
+fn an_enhancement_page_takes_no_national_option_from_its_header() {
+    use crate::consts::{C12, C13, C14, PAGE_FUNCTION_POP, PAGE_MOT};
+    use crate::packet::{PageEnhancement, PageFormat};
+    use crate::types::{ControlBits, PageNumber, PresentationFields};
+    let config = Config::default();
+    let mut page = StoredPage::EMPTY;
+    page.control = ControlBits(C12 | C13 | C14);
+    let display = designation_report(Some(&page), &MagazineData::default(), &config);
+    assert_eq!(display.header_national, 7, "a display page reads C12 to C14");
+    let pop = Some(PageFormat { function: PAGE_FUNCTION_POP, coding: 0 });
+    page.page_data = Some(PageEnhancement { format: pop, fields: PresentationFields::default() });
+    let object_page = designation_report(Some(&page), &MagazineData::default(), &config);
+    assert_eq!((object_page.header_national, object_page.national), (0, 0), "an object page");
+    page.page_data = None;
+    page.key.address.page = PageNumber(PAGE_MOT);
+    let table = designation_report(Some(&page), &MagazineData::default(), &config);
+    assert_eq!((table.header_national, table.national), (0, 0), "the Magazine Organization Table");
+}
+
 /// A page with C12 to C14 set to `national` and an X/28/0 Format 1
 /// designating `group`, and a magazine whose M/29/0 designates it too.
 fn page_designating(national: u8, group: u8) -> (StoredPage, MagazineData) {

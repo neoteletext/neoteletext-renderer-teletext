@@ -4,7 +4,9 @@
 use crate::acq::{MagazineData, StoredPage};
 use crate::charset::{Designation, G0, default_second_g0, designation_with_fallback, second_g0};
 use crate::config::Config;
-use crate::consts::{CODE_MASK_7BIT, DESIGNATION_GROUP_SHIFT, ESC, NATIONAL_INDEX_MASK, PAGE_FUNCTION_BASIC, ROWS};
+use crate::consts::{
+    CODE_MASK_7BIT, DESIGNATION_GROUP_SHIFT, ESC, NATIONAL_INDEX_MASK, PAGE_FUNCTION_BASIC, PAGE_MOT, ROWS,
+};
 
 /// Where a page's designation group came from (REQ-CHR-003): the
 /// highest-priority packet present, in the order of Annex C.4 rule 1, or
@@ -85,7 +87,14 @@ pub struct DesignationReport {
 /// maps C12 to C14 to its own sets (REQ-PRF-003).
 #[must_use]
 pub fn designation_report(page: Option<&StoredPage>, magazine: &MagazineData, config: &Config) -> DesignationReport {
-    let header_national = page.map_or(0, |page| page.control.national_index()) & NATIONAL_INDEX_MASK;
+    // An enhancement page (the Magazine Organization Table, or a page
+    // whose X/28 names another function) never takes a national option
+    // from its header: there C12 means a continued fragment and C13 a
+    // partial page (Annex B.6, Table B.1; REQ-OBJ-041).
+    let header_national = page
+        .filter(|page| page.is_text_page() && page.key.address.page.0 != PAGE_MOT)
+        .map_or(0, |page| page.control.national_index())
+        & NATIONAL_INDEX_MASK;
     // A receiver with its sets fixed in ROM reads no designation packet
     // (REQ-PRF-002, REQ-PRF-003).
     if let Some(value) = config.fixed_designation {

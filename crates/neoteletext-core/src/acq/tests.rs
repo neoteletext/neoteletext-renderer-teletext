@@ -988,6 +988,28 @@ fn the_page_function_follows_the_stores_there_are() {
     assert_eq!((page.format(), page.row(1)), (Some(pop), Some(&object_bytes(9))));
 }
 
+/// REQ-348 (REQ-OBJ-041, Annex B.6): on an enhancement page C12 reads as a
+/// continued fragment and C13 as a partial page, each from the latest
+/// header, and neither is a national option.
+#[test]
+fn an_enhancement_page_reads_c12_and_c13_as_fragment_and_partial_page() {
+    use crate::consts::{C12, C13, PAGE_FUNCTION_POP};
+    let pop = PageFormat { function: PAGE_FUNCTION_POP, coding: 0 };
+    let page_data = |m: u8| encode::page_enhancement(mag(m), 0, pop, &PresentationFields::default());
+    let read = |control: u16| {
+        let mut memory = EnhancementMemory::new(4, 50);
+        let mut decoder = Decoder::with_enhancement_store(&mut [], memory.store(), Config::default());
+        let mut events = Vec::new();
+        feed(&mut decoder, &[header(2, 0xC0, 0, control), page_data(2), header(2, 0x00, 0, 0)], &mut events);
+        let page = decoder.enhancement_lookup().sub_page(mag(2), PageNumber(0xC0), 0).unwrap();
+        (page.is_continued_fragment(), page.is_partial_page())
+    };
+    assert_eq!(read(0), (false, false));
+    assert_eq!(read(C12), (true, false));
+    assert_eq!(read(C13), (false, true));
+    assert_eq!(read(C12 | C13), (true, true));
+}
+
 /// REQ-ACQ-014, REQ-OBJ-041 (decision E.117): without an enhancement
 /// store, a page whose only page-function signal is an X/28/3 naming a
 /// DRCS page stays in the page store, flagged as no text page; an X/28/3
