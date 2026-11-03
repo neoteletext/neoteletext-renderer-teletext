@@ -8,11 +8,6 @@
 //! From the reference decoder. Copyright (c) 2006-2011, Skype Limited, BSD-3-Clause (the licence
 //! beside the crate).
 
-#![allow(
-    clippy::unreadable_literal,
-    reason = "the tables are transcribed from the C, whose literals have no separators"
-)]
-
 use super::layout::LpcOrder;
 use super::nlsf::NlsfCodebook;
 

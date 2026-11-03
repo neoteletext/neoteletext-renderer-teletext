@@ -6,7 +6,6 @@
 //! round trip on this computer's own network is well under a millisecond
 //! or two. Only a build with live feeds has the fetcher (decision E.61).
 #![cfg(feature = "live")]
-#![allow(missing_docs)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};

@@ -79,7 +79,10 @@ pub fn encode(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic, reason = "a test")]
+    #![allow(
+        clippy::unwrap_used,
+        reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+    )]
 
     use super::*;
     use crate::records::{ChannelRecord, Read, RecordReader};

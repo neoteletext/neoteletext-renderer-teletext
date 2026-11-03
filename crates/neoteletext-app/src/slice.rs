@@ -118,7 +118,10 @@ pub fn slice(options: &Options, output: &Path, preset: &str, choice: &GeometryCh
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "a test")]
+#[allow(
+    clippy::expect_used,
+    reason = "a test reports a failure by panicking, so it uses `expect` naming what it expected"
+)]
 mod tests {
     use super::slicer_config;
     use neoteletext_core::config::Config;

@@ -1,9 +1,8 @@
 #![allow(
     clippy::unwrap_used,
-    clippy::arithmetic_side_effects,
     clippy::panic,
     clippy::indexing_slicing,
-    reason = "a test"
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, `panic!` on outcomes it rules out and indexing into data it built to a known size"
 )]
 
 use super::*;

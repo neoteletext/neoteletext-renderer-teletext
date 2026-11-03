@@ -56,9 +56,10 @@ impl Reader for NotCompiledReader {
 /// Any of the readers compiled in. The variants depend on the features, so
 /// the enumeration is not exhaustive (decision E.61).
 #[derive(Clone, Debug)]
-// The variants differ greatly in size by design: each holds its own fixed
-// buffers, and boxing is not available without allocation.
-#[allow(clippy::large_enum_variant)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the variants differ greatly in size by design: each holds its own fixed buffers, and boxing them is not available without allocation"
+)]
 #[non_exhaustive]
 pub enum AnyReader {
     /// Headerless packets.

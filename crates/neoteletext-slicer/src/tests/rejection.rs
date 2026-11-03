@@ -1,17 +1,10 @@
 //! Tests of REQ-SLC-010: other signals are rejected, and untrusted input never panics.
 #![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
     clippy::indexing_slicing,
-    clippy::panic,
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_wrap,
-    clippy::float_cmp,
-    clippy::too_many_lines,
-    clippy::similar_names
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it; casts of counts and positions the test keeps in range; counts and rates made floating point for measurements, all below 2^24 or within the measurement's tolerance"
 )]
 
 use super::*;
@@ -98,6 +91,7 @@ pub(super) fn biphase_false_packets(element_rate: f32, lines: u32, config: Confi
     (accepted, lines)
 }
 
+/// REQ-440 (REQ-SLC-001): a line that holds no teletext gives no packet.
 #[test]
 fn noise_lines_give_no_packets() {
     let len = samples_per_line(RATE);

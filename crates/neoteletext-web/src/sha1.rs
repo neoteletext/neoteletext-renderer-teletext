@@ -80,9 +80,10 @@ impl Sha1 {
         self.total_bytes = total;
     }
 
-    // The working variables keep the single-letter names of RFC 3174
-    // section 6.1, so the code can be checked against it line by line.
-    #[allow(clippy::many_single_char_names)]
+    #[allow(
+        clippy::many_single_char_names,
+        reason = "the working variables keep the single-letter names of RFC 3174 section 6.1, so the code can be checked against it line by line"
+    )]
     fn compress(&mut self, block: &[u8; SHA1_BLOCK_BYTES]) {
         let mut schedule = [0u32; SCHEDULE_WORDS];
         for (word, bytes) in schedule.iter_mut().zip(block.as_chunks::<4>().0) {
@@ -128,7 +129,11 @@ pub fn digest(parts: &[&[u8]]) -> [u8; SHA1_DIGEST_BYTES] {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 mod tests {
     use super::*;
 

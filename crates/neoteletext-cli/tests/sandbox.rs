@@ -1,7 +1,10 @@
 //! The sandbox of `neottx` (REQ-430, REQ-SEC-017), run as a user runs it:
 //! every command that reads a file reaches the sandbox, and on Linux each
 //! still does its work under it, having opened what it needs first.
-#![allow(clippy::unwrap_used, missing_docs, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 mod common;
 use common::{folder, neottx};

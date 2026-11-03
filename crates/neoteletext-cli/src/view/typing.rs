@@ -70,9 +70,10 @@ pub(super) fn input_of(key: KeyEvent, on: Stamp, buffer: &mut [u8; 4]) -> Option
 
 /// Typing into a channel that takes input (area INT): the viewer's keys
 /// go to it as a terminal's go to its host, in one input session.
-// Each flag is a separate fact: the socket, the viewer's choice, the
-// terminal's focus and the session's start.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a separate fact: the socket, the viewer's choice, the terminal's focus and the session's start"
+)]
 pub(super) struct Typing {
     /// The channel's WebSocket is open and its descriptor declares input.
     open: bool,

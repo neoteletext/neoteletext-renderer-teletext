@@ -188,9 +188,10 @@ const NO_TRANSITION: Transition =
 /// The viewer, with a history of `HISTORY` entries, 32 unless the port
 /// says otherwise (REQ-NAV-010): held inside the viewer, whose memory the
 /// port provides, as it does every other part of the viewer.
-// Reveal, mix, boxed display and staleness are separate settings and facts
-// of the viewer (REQ-NAV-007, REQ-L1-020), each set and read alone.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "reveal, mix, boxed display and staleness are separate settings and facts of the viewer (REQ-NAV-007, REQ-L1-020), each set and read alone"
+)]
 #[derive(Clone, Copy, Debug)]
 pub struct Viewer<const HISTORY: usize = HISTORY_ENTRIES> {
     machine: ViewerMachine,

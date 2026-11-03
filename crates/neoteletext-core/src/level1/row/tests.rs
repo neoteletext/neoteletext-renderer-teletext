@@ -1,6 +1,10 @@
 //! Tests of the row attribute machine (REQ-FSM-006): the Table 26 timing
 //! of every spacing attribute, and the Annex G examples.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `panic!` on outcomes it rules out"
+)]
 
 // The module is compiled for tests only (see `row.rs`); the attribute also
 // marks this file as test code for `cargo xtask check-layers`.

@@ -2,7 +2,10 @@
 //! data is ignored as the decision says, never an error. Each test runs
 //! only in the builds that leave its capability out; the builds with it
 //! test what it does in `level25.rs` and `objects.rs`.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 // The helpers serve only the tests of capabilities compiled out, so in a
 // build with every capability they are unused.
 #![cfg_attr(

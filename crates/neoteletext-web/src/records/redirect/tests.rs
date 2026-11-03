@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `panic!` on outcomes it rules out"
+)]
 
 use neoteletext_core::packet::Packet;
 use neoteletext_core::types::{PageAddress, SubCode};

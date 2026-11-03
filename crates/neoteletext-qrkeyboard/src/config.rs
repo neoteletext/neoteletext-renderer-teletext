@@ -189,7 +189,6 @@ pub fn hash(config: &Value) -> [u8; CONFIG_HASH_BYTES] {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -1,7 +1,6 @@
 //! `neottx font convert` (REQ-FNT-010): an exact conversion is written in the
 //! form of REQ-FNT-002, a refusal names the character and writes nothing
 //! usable, and a font outside ISO10646 needs the map.
-#![allow(missing_docs)]
 
 mod common;
 

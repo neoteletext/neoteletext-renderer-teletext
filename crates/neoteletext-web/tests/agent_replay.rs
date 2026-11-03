@@ -2,7 +2,13 @@
 //! (REQ-WEB-001, REQ-WEB-013's exact replay), including channels
 //! (REQ-WEB-018, REQ-WEB-019, REQ-WEB-024, REQ-WEB-026, REQ-WEB-027) and
 //! redirects within a channel (REQ-WEB-021).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size, arithmetic on small values it chose, where an overflow would also fail it and `panic!` on outcomes it rules out"
+)]
 
 mod common;
 

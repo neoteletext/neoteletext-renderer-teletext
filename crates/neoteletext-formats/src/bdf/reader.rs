@@ -12,12 +12,11 @@ use super::{
     Font, FontError, FontErrorKind, insert, keep, misplaced_or_unknown, numbers, once, property_value, split_keyword,
 };
 
-// The cell's 12, 10 and 20 fit an `i32` with room to spare.
-#[allow(clippy::cast_possible_wrap)]
+#[allow(clippy::cast_possible_wrap, reason = "the cell's 12, 10 and 20 fit an `i32` with room to spare")]
 const WIDTH: i32 = CELL_WIDTH as i32;
-#[allow(clippy::cast_possible_wrap)]
+#[allow(clippy::cast_possible_wrap, reason = "the cell's 12, 10 and 20 fit an `i32` with room to spare")]
 const HEIGHT: i32 = CELL_FIELD_LINES as i32;
-#[allow(clippy::cast_possible_wrap)]
+#[allow(clippy::cast_possible_wrap, reason = "the cell's 12, 10 and 20 fit an `i32` with room to spare")]
 const TALL_HEIGHT: i32 = CELL_HEIGHT as i32;
 /// The 12 by 10 cell, as `FONTBOUNDINGBOX` and every `BBX` give it.
 const CELL_BOX: [i32; 4] = [WIDTH, HEIGHT, 0, 0];
@@ -72,8 +71,7 @@ struct Character {
 }
 
 /// The global parts seen so far.
-// One flag for each keyword or property that REQ-FNT-002 allows once.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "one flag for each keyword or property that REQ-FNT-002 allows once")]
 #[derive(Default)]
 struct Header<'a> {
     font: bool,
@@ -93,7 +91,8 @@ struct Header<'a> {
 }
 
 /// Reads a font into `glyphs`, which must have room for every character
-/// (1,024 is always enough). On success the first [`Font::characters`]
+/// ([`FONT_MAX_CHARACTERS`](neoteletext_core::consts::FONT_MAX_CHARACTERS),
+/// 1,024, is always enough, since a longer font is refused). On success the first [`Font::characters`]
 /// entries hold the glyphs, sorted by code point; on failure the table's
 /// contents are meaningless.
 ///

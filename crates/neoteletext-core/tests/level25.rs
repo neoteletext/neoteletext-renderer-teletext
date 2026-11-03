@@ -1,7 +1,11 @@
 //! The enhancement processor of Levels 2.5 and 3.5 (area L25, REQ-FSM-011,
 //! REQ-FSM-012; REQ-TST-015 and REQ-TST-016): pages built with the encoder,
 //! fed through the decoder, and checked cell by cell.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
+)]
 
 mod common;
 

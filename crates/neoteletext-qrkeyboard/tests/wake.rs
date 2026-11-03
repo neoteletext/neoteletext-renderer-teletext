@@ -8,7 +8,10 @@
 //! to its limit. How soon the wait ends is measured by the ignored tests,
 //! run alone on an idle machine, since at load averages of 9 to 28 a gate
 //! measured waits of 166 to 437 ms that took under a millisecond alone.
-#![allow(missing_docs, clippy::unwrap_used, clippy::expect_used, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};

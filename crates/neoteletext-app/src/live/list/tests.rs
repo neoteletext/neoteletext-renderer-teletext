@@ -3,7 +3,7 @@
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
     clippy::panic,
-    reason = "a test"
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size, arithmetic on small values it chose, where an overflow would also fail it and `panic!` on outcomes it rules out"
 )]
 use super::*;
 

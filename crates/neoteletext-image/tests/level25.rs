@@ -9,7 +9,12 @@
 //! the file in the same change, with `NEOTELETEXT_UPDATE_GOLDEN=1`
 //! (REQ-TST-030). With `NEOTELETEXT_SAMPLES` naming a directory, the test also
 //! writes each demonstration as a PNG there, for inspection by eye.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 use neoteletext_core::charset::{CharRef, CharSet, G0, G0Set, NationalOption};
 use neoteletext_core::colour::colour_index;

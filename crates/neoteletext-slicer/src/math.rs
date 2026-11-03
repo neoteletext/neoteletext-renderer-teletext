@@ -27,9 +27,11 @@ const F32_EXPONENT_MASK: u32 = 0xFF;
 /// Rounds towards negative infinity and converts, saturating at the `i32`
 /// range; NaN gives 0.
 #[must_use]
-// The cast saturates by definition (Rust reference, "numeric cast"); the
-// correction below only moves negative non-integers down by one.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "the float-to-integer cast saturates by definition (Rust reference, numeric cast), and an integer truncated from an f32 converts back to f32 exactly"
+)]
 pub fn floor_i32(x: f32) -> i32 {
     let truncated = x as i32;
     if (truncated as f32) > x { truncated.saturating_sub(1) } else { truncated }
@@ -44,7 +46,10 @@ pub fn round_i32(x: f32) -> i32 {
 /// Converts an `i32` to `f32`. Values used here are sample positions and
 /// counts below 2^24, which `f32` holds exactly.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "the values converted are sample positions and counts below 2^24, which f32 holds exactly"
+)]
 pub const fn f32_from_i32(value: i32) -> f32 {
     value as f32
 }
@@ -52,7 +57,10 @@ pub const fn f32_from_i32(value: i32) -> f32 {
 /// Converts a `usize` to `f32`. Values used here are sample positions and
 /// counts below 2^24, which `f32` holds exactly.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "the values converted are sample positions and counts below 2^24, which f32 holds exactly"
+)]
 pub const fn f32_from_usize(value: usize) -> f32 {
     value as f32
 }
@@ -60,7 +68,10 @@ pub const fn f32_from_usize(value: usize) -> f32 {
 /// Converts a `u32` to `f32`, rounding to the nearest representable value
 /// (sample rates such as 35,468,950 Hz lose under one part in 10^7).
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "sample rates such as 35,468,950 Hz round to the nearest f32, losing under one part in 10^7, far inside the slicer's tolerances"
+)]
 pub const fn f32_from_u32(value: u32) -> f32 {
     value as f32
 }
@@ -68,7 +79,7 @@ pub const fn f32_from_u32(value: u32) -> f32 {
 /// The floor of a non-negative position as an index; negative values and
 /// NaN give 0.
 #[must_use]
-#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_sign_loss, reason = "the value is clamped to zero or more before the cast, so no sign is lost")]
 pub fn floor_index(x: f32) -> usize {
     floor_i32(x).max(0) as usize
 }
@@ -83,7 +94,7 @@ pub fn ceil_index(x: f32) -> usize {
 
 /// Clamps a value to 0 to `u16::MAX` and rounds it.
 #[must_use]
-#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_sign_loss, reason = "the value is clamped to 0 to `u16::MAX` before the cast, so no sign is lost")]
 pub fn to_u16_saturating(x: f32) -> u16 {
     let rounded = round_i32(x).clamp(0, i32::from(u16::MAX));
     rounded as u16
@@ -91,7 +102,7 @@ pub fn to_u16_saturating(x: f32) -> u16 {
 
 /// Clamps a value to 0 to `u8::MAX` and rounds it.
 #[must_use]
-#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_sign_loss, reason = "the value is clamped to 0 to `u8::MAX` before the cast, so no sign is lost")]
 pub fn to_u8_saturating(x: f32) -> u8 {
     let rounded = round_i32(x).clamp(0, i32::from(u8::MAX));
     rounded as u8
@@ -225,7 +236,6 @@ pub fn sqrt(x: f32) -> f32 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic, clippy::arithmetic_side_effects)]
 mod tests {
     use super::*;
 

@@ -3,8 +3,10 @@
 
 use super::{Policy, SandboxError};
 
-// The same signature as the Linux implementation, which can fail.
-#[allow(clippy::unnecessary_wraps)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "it keeps the signature of the Linux implementation, which can fail, so the caller is the same on every platform"
+)]
 pub(super) fn apply(policy: Policy<'_>) -> Result<(), SandboxError> {
     let files =
         policy.writable_directory.map_or_else(|| "files".to_string(), |dir| format!("files outside {}", dir.display()));

@@ -52,7 +52,8 @@ pub struct CellLine {
 }
 
 impl CellLine {
-    /// The index of dot `dot` (0 the leftmost).
+    /// The index of dot `dot`, 0 (the leftmost) to [`CELL_WIDTH`](crate::consts::CELL_WIDTH) − 1; a
+    /// dot past the cell reads as a gap, the background index.
     #[must_use]
     pub fn index(&self, dot: usize) -> u8 {
         let on = self.mask.checked_shr(CELL_LAST_HALF_DOT.wrapping_sub(dot) as u32).is_some_and(|bits| bits & 1 == 1);

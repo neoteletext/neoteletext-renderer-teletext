@@ -4,7 +4,6 @@
 //! over zxnet on 10 October 2026 has pages that write G3 smooth mosaics.
 //! The files are read from `$NEOTELETEXT_CORPUS` and never copied into the
 //! repository, so these tests are ignored, and asked for without them they fail.
-#![allow(missing_docs)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

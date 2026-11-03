@@ -150,6 +150,8 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+# DEVELOPMENT.md section 6: every suppression says why in its `reason`.
+allow_attributes_without_reason = "warn"
 
 [[bin]]
 name = "bdf"

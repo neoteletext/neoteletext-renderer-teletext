@@ -1,6 +1,10 @@
 //! Tests of the error-protection codes (area ECC): parity, Hamming 8/4 and
 //! 24/18, bit reversal and the page checksum.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::unwrap_used)]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

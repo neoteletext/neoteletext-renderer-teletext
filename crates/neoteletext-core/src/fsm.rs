@@ -93,9 +93,10 @@ pub enum MagazineAction {
 
 /// The transition function of the magazine acquisition machine
 /// (REQ-FSM-003). One arm per row of the table.
-// Arms with equal bodies are kept apart so each matches one table row
-// (REQ-FSM-001 traceability).
-#[allow(clippy::match_same_arms)]
+#[allow(
+    clippy::match_same_arms,
+    reason = "arms with equal bodies are kept apart so each matches one row of the table (REQ-FSM-001 traceability)"
+)]
 #[must_use]
 pub const fn magazine_transition(state: MagazineState, event: MagazineEvent) -> (MagazineState, MagazineAction) {
     use MagazineAction as A;
@@ -237,7 +238,6 @@ pub enum PageAction {
 
 /// The transition function of the page lifecycle machine (REQ-FSM-004).
 // One arm per table row (REQ-FSM-001 traceability).
-#[allow(clippy::match_same_arms)]
 #[must_use]
 pub const fn page_transition(state: PageState, event: PageEvent) -> (PageState, PageAction) {
     use PageAction as A;
