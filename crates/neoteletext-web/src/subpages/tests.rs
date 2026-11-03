@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::string_slice, clippy::panic)]
-//! The tests of the reader and writer of a part of a page's list,
+//! Tests of the reader and writer of a part of a page's list,
 //! `NNN/P.sub` (REQ-1888, REQ-523 (REQ-WEB-034), DOC-2038).
 
 use super::*;
