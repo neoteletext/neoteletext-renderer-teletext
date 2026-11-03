@@ -2779,3 +2779,78 @@ fn a_fonts_accept_header_names_the_font_media_types() {
         [std::str::from_utf8(media::FONT_BDF).unwrap(), std::str::from_utf8(media::OCTET_STREAM).unwrap()]
     );
 }
+
+/// The `Cookie` header the agent sends for page 100 of the service whose
+/// descriptor is `asked`, after page 100 of the service whose descriptor is
+/// `setter` answered with `Set-Cookie: set_cookie`. Each descriptor keeps
+/// its pages in its own folder.
+#[cfg(feature = "cookies")]
+fn cookie_sent_across_descriptors(setter: &str, set_cookie: &str, asked: &str) -> Option<String> {
+    let folder = |address: &str| {
+        let path = address.strip_prefix("http://site.example").unwrap();
+        path[..=path.rfind('/').unwrap()].to_owned()
+    };
+    let descriptor = |address: &str| {
+        let template = std::format!("{}{{mpp}}.tti", folder(address));
+        json_response(std::format!(r#"{{"name":"Test","initial_page":"100","page_template":"{template}"}}"#).as_bytes())
+    };
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", descriptor(setter));
+    harness.open(setter);
+    let header = std::format!("Set-Cookie: {set_cookie}");
+    harness.replay().reply("site.example:80", tti_response(&[header.as_str()]));
+    harness.fetch(0x100);
+    assert_eq!(harness.agent.cookies().len(), 1, "the setting service kept its cookie");
+    harness.replay().reply("site.example:80", descriptor(asked));
+    harness.open(asked);
+    harness.replay().reply("site.example:80", tti_response(&[]));
+    harness.fetch(0x100);
+    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
+    assert_eq!(request_path(&last), std::format!("{}100.tti", folder(asked)), "the asked service's page");
+    header_value(&last, "Cookie")
+}
+
+/// REQ-507: a service opened by its descriptor is identified by its origin
+/// and the folder that holds the descriptor, so two descriptors in two
+/// folders of one origin share no cookie, whatever `Path` either sets, and
+/// one in a folder inside the other's is a service of its own; a service's
+/// cookie still reaches its own pages.
+#[test]
+#[cfg(feature = "cookies")]
+fn services_opened_by_descriptors_in_two_folders_share_no_cookie() {
+    let one = "http://site.example/one/service.json";
+    let two = "http://site.example/two/service.json";
+    let inner = "http://site.example/one/sub/service.json";
+    assert_eq!(cookie_sent_across_descriptors(one, "s=1", one).as_deref(), Some("s=1"), "its own pages");
+    for set_cookie in ["s=1", "s=1; Path=/", "s=1; Path=/two/"] {
+        assert_eq!(cookie_sent_across_descriptors(one, set_cookie, two), None, "{set_cookie} from one to two");
+        assert_eq!(cookie_sent_across_descriptors(two, set_cookie, one), None, "{set_cookie} from two to one");
+    }
+    assert_eq!(cookie_sent_across_descriptors(one, "s=1", inner), None, "a folder inside is another service");
+}
+
+/// REQ-507, REQ-WEB-021: once a service's descriptor is asked for, a
+/// redirect out of the folder that holds it leaves the service, and is
+/// reported, not followed; one inside the folder is followed.
+#[test]
+fn a_redirect_out_of_a_descriptors_folder_leaves_the_service() {
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply(
+        "site.example:80",
+        Reply::Bytes(response("302 Found", &["Location: http://site.example/two/service.json"], b"")),
+    );
+    let records = harness.open("http://site.example/one/service.json");
+    assert!(has_event(&records, "RedirectToOtherChannel"), "{records:?}");
+    assert!(!has_event(&records, "ServiceReady"), "{records:?}");
+    let mut inside = site_harness(Config::default());
+    inside.replay().reply(
+        "site.example:80",
+        Reply::Bytes(response("302 Found", &["Location: http://site.example/one/v2/service.json"], b"")),
+    );
+    inside.replay().reply(
+        "site.example:80",
+        json_response(br#"{"name":"Moved","initial_page":"100","page_template":"/one/{mpp}.tti"}"#),
+    );
+    let records = inside.open("http://site.example/one/service.json");
+    assert!(has_event(&records, "ServiceReady { name: \"Moved\""), "{records:?}");
+}

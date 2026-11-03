@@ -422,8 +422,10 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
             return false;
         }
         let (seconds, _) = self.seconds(now);
-        let Self { bound, device_keys, jar, port_cookies, buffers, channel, .. } = self;
-        let scope = channel.as_ref().map(Url::path);
+        let Self { bound, device_keys, jar, port_cookies, buffers, channel, service_folder, .. } = self;
+        // The open channel's or service's identity (REQ-507).
+        let channel = channel.as_ref().or(service_folder.as_ref());
+        let scope = channel.map(Url::path);
         bound.sessions.expire(seconds, |session| {
             if let Some(keys) = device_keys.as_deref_mut() {
                 keys.delete(session.key);

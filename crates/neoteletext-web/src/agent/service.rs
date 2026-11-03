@@ -45,6 +45,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     /// descriptor.
     pub(super) fn leave_channel(&mut self) {
         self.channel = None;
+        self.service_folder = None;
         self.front_door = None;
         self.contents = None;
         self.second_try = None;
@@ -72,6 +73,25 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             self.pending_descriptor = Some((settings, via_link, true));
         }
         self.channel = Some(*folder);
+    }
+
+    /// The open service's identity, with its origin (REQ-507): a channel's
+    /// folder, or the folder holding a service's descriptor, from the moment
+    /// the descriptor is asked for. Cookies are kept to it and a redirect out
+    /// of it leaves the service.
+    pub(super) const fn identity(&self) -> Option<&Url> {
+        match &self.channel {
+            Some(folder) => Some(folder),
+            None => self.service_folder.as_ref(),
+        }
+    }
+
+    /// A service is opened by the descriptor at `url`: its identity is the
+    /// folder that holds the descriptor (REQ-507).
+    pub(super) fn open_by_descriptor(&mut self, url: &Url, via_link: bool) {
+        self.leave_channel();
+        self.service_folder = url.join(".").ok();
+        self.pending_descriptor = Some((*url, via_link, false));
     }
 
     /// The open service's folder: its channel's, or the folder holding its
@@ -104,8 +124,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 if to_channel {
                     self.open_channel(&url, true);
                 } else {
-                    self.leave_channel();
-                    self.pending_descriptor = Some((url, true, false));
+                    self.open_by_descriptor(&url, true);
                 }
                 self.queue = [None; PAGE_QUEUE];
                 if let Some(slot) = self.queue.first_mut() {

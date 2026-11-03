@@ -209,7 +209,9 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 return false;
             }
         };
-        let Self { buffers, jar, port_cookies, channel, .. } = self;
+        let Self { buffers, jar, port_cookies, channel, service_folder, .. } = self;
+        // The open channel's or service's identity (REQ-507).
+        let channel = channel.as_ref().or(service_folder.as_ref());
         let head_bytes = buffers.fetch_head.get(..head_len).unwrap_or(&[]);
         let host = exchange.url.host_text();
         let path = exchange.url.path();
@@ -223,7 +225,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         let resource = matches!(exchange.purpose, Purpose::Resource(_));
         let inside = !resource
             && channel.as_ref().is_none_or(|folder| crate::channel::redirect_keeps_channel(folder, &exchange.url));
-        let scope = channel.as_ref().map(Url::path);
+        let scope = channel.map(Url::path);
         if inside {
             let store = cookie_store(jar, port_cookies);
             // The head parsed above, so this reading of it cannot fail.

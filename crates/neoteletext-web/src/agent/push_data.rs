@@ -178,7 +178,8 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 let Some(url) = self.push.url else { return 0 };
                 // As the push handshake's own cookies: host-only, in the
                 // channel's folder (REQ-WEB-026, DOC-1957).
-                let scope = self.channel.as_ref().map(Url::path);
+                let identity = self.channel.as_ref().or(self.service_folder.as_ref());
+                let scope = identity.map(Url::path);
                 let store = cookie_store(&mut self.jar, &mut self.port_cookies);
                 if let Err(rejected) =
                     store.store_within(line, url.host_text(), url.path(), scope, url.is_secure(), seconds, calendar)

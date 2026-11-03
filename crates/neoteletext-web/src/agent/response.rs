@@ -174,12 +174,13 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         self.start_exchange(now, sink);
     }
 
-    /// A redirect from `from` to `next` keeps the channel (REQ-WEB-021): for
-    /// a channel, inside its folder; for a service opened by its descriptor,
-    /// on the same origin. Either way, an upgrade from `http` to `https` on
-    /// the same host between the default ports keeps it.
+    /// A redirect from `from` to `next` keeps the channel (REQ-WEB-021,
+    /// REQ-507): inside the folder of the open channel, or of the open
+    /// service's descriptor; with neither, on the same origin. Each way, an
+    /// upgrade from `http` to `https` on the same host between the default
+    /// ports keeps it.
     fn redirect_keeps_channel(&self, from: &Url, next: &Url) -> bool {
-        if let Some(folder) = &self.channel {
+        if let Some(folder) = self.identity() {
             return channel::redirect_keeps_channel(folder, next);
         }
         let upgrade = !from.is_secure()
