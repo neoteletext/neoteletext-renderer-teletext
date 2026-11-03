@@ -1,6 +1,7 @@
 //! Plain text (REQ-RND-008) and ANSI terminal output (REQ-RND-009), at
 //! every level (REQ-RND-041): G3 characters convert as REQ-CHR-011 says,
-//! and colours come from the page's Colour Map.
+//! and colours come from the page's Colour Map, except in the cells the
+//! receiver draws, which keep Table 30's colours (DEC-2464).
 //!
 //! Every character written passes the allow-list of REQ-SEC-010, and the
 //! only escape sequences are the fixed ones built here.
@@ -8,7 +9,7 @@
 use neoteletext_app::present::cell_text;
 pub use neoteletext_app::present::{MosaicStyle, plain};
 use neoteletext_core::colour::{ColourIndex, ColourMap};
-use neoteletext_core::consts::PRIMARY_FULL;
+use neoteletext_core::consts::{COLOURS, PRIMARY_FULL};
 use neoteletext_core::glyphs::{CharClass, class};
 use neoteletext_core::level1::{Cell, Glyph, Grid};
 use std::fmt::Write as _;
@@ -38,6 +39,16 @@ fn colour_of(map: &ColourMap, index: ColourIndex, screen: ColourIndex) -> Option
     (!ColourMap::is_transparent(index)).then(|| map.rgb888(index))
 }
 
+/// The colour of a cell the receiver draws (`Grid::is_receiver_cell`):
+/// Table 30's CLUT 0, which no page can redefine (REQ-SEC-005,
+/// REQ-SEC-024, DEC-2464), as the row renderer's receiver colours are.
+/// A transparent one shows the terminal's default, as the row renderer
+/// shows the picture there.
+fn receiver_colour_of(index: ColourIndex) -> Option<[u8; 3]> {
+    const CLUT0_LAST: u8 = (COLOURS - 1) as u8;
+    (!ColourMap::is_transparent(index)).then(|| ColourMap::DEFAULT.rgb888(index & CLUT0_LAST))
+}
+
 /// What a cell's escape sequence depends on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Style {
@@ -48,8 +59,9 @@ struct Style {
 }
 
 impl Style {
-    /// The style of a cell. Invert swaps the colours (decision E.47).
-    fn of(cell: &Cell, grid: &Grid) -> Self {
+    /// The style of the cell at `row` and `column`. Invert swaps the
+    /// colours (decision E.47).
+    fn of(cell: &Cell, grid: &Grid, row: usize, column: usize) -> Self {
         let screen = grid.screen_colour;
         let (foreground, background) = if cell.attributes.invert() {
             (cell.background, cell.foreground)
@@ -58,9 +70,16 @@ impl Style {
         };
         let picture = grid.mix || (grid.boxed_mode && !cell.boxed);
         let text = matches!(cell.glyph, Glyph::Char(character) if class(character) == CharClass::Text);
+        let colour = |index| {
+            if grid.is_receiver_cell(row, column) {
+                receiver_colour_of(index)
+            } else {
+                colour_of(&grid.colour_map, index, screen)
+            }
+        };
         Self {
-            foreground: colour_of(&grid.colour_map, foreground, screen),
-            background: if picture { None } else { colour_of(&grid.colour_map, background, screen) },
+            foreground: colour(foreground),
+            background: if picture { None } else { colour(background) },
             flash: cell.flash,
             underline: text && cell.attributes.underline(),
         }
@@ -103,10 +122,10 @@ impl Style {
 #[must_use]
 pub fn ansi(grid: &Grid, reveal: bool, mosaics: MosaicStyle, depth: ColourDepth) -> String {
     let mut out = String::new();
-    for cells in &grid.cells {
+    for (row, cells) in grid.cells.iter().enumerate() {
         let mut previous: Option<Style> = None;
-        for cell in cells {
-            let style = Style::of(cell, grid);
+        for (column, cell) in cells.iter().enumerate() {
+            let style = Style::of(cell, grid, row, column);
             if previous != Some(style) {
                 style.write(depth, &mut out);
                 previous = Some(style);
@@ -223,6 +242,38 @@ mod tests {
         cell.attributes = CellAttributes::DEFAULT.with_invert(true).with_underline(true);
         let text = ansi(&grid, false, MosaicStyle::Unicode16, ColourDepth::Eight);
         assert!(text.lines().nth(1).unwrap().starts_with("\x1b[0;4;34;41mA"));
+    }
+
+    /// REQ-418 (REQ-SEC-005), REQ-437 (REQ-SEC-024), DEC-2464: a page that
+    /// redefines CLUT 0 (X/28/4, M/29/4) cannot recolour the receiver's
+    /// cells in a terminal: the status area and a receiver-drawn row 24 keep
+    /// the escape sequences of Table 30's colours, while the page's own
+    /// cells take its Colour Map.
+    #[test]
+    fn a_redefined_clut_0_leaves_the_receivers_cells_alone() {
+        let mut grid = grid_with("A");
+        let last = neoteletext_core::consts::ROWS - 1;
+        for (row, column) in [(0, 0), (0, 7), (0, 8), (1, 0), (last, 0)] {
+            grid.cells[row][column].glyph = grid.cells[1][0].glyph;
+            grid.cells[row][column].foreground = 2;
+            grid.cells[row][column].background = 0;
+        }
+        grid.receiver_row_24 = true;
+        let before = ansi(&grid, false, MosaicStyle::Unicode16, ColourDepth::TrueColour);
+        let mut hostile = grid;
+        // The page makes green and black the same colour.
+        hostile.colour_map.entries[2] = hostile.colour_map.entries[0];
+        let after = ansi(&hostile, false, MosaicStyle::Unicode16, ColourDepth::TrueColour);
+        let (before_lines, after_lines): (Vec<&str>, Vec<&str>) = (before.lines().collect(), after.lines().collect());
+        // Row 0 draws "A" at columns 0, 7 and 8: the text before the
+        // second "A" is the status area's, the text before the third
+        // column 8's.
+        let parts = |line: &str| line.split('A').map(str::to_owned).collect::<Vec<_>>();
+        let (status_before, status_after) = (parts(before_lines[0]), parts(after_lines[0]));
+        assert_eq!(status_before[..2], status_after[..2], "the status area keeps its colours");
+        assert!(status_after[2].ends_with("38;2;0;0;0;48;2;0;0;0m"), "column 8 is the page's: {:?}", status_after[2]);
+        assert_eq!(before_lines[last], after_lines[last], "a receiver-drawn row 24 keeps its colours");
+        assert_ne!(before_lines[1], after_lines[1], "the page's own cells follow its Colour Map");
     }
 
     /// The nearest Level 1 colour of every Table 30 entry of CLUT 0 is the
