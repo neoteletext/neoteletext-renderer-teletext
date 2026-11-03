@@ -154,6 +154,7 @@ fn every_frame_written_has_a_listed_kind() {
         Frame::Notice(Notice::SubPageListComplete(0x100, 0)),
         Frame::Notice(Notice::SubPageListRefused(0x100, 0)),
         Frame::Notice(Notice::Links(vec![])),
+        Frame::Font(vec![]),
     ];
     let mut kinds = Vec::new();
     for frame in &frames {
@@ -167,4 +168,21 @@ fn every_frame_written_has_a_listed_kind() {
     let mut listed = codec::KINDS.to_vec();
     listed.sort_unstable();
     assert_eq!(kinds, listed, "a kind in KINDS is written by no frame");
+}
+
+// REQ-123: a font file crosses the pipe whole; one longer than the core's
+// bound is refused on both sides.
+#[test]
+fn a_font_frame_round_trips_within_its_bound() {
+    let limit = neoteletext_core::consts::FONT_MAX_FILE_BYTES;
+    for frame in [Frame::Font(b"STARTFONT".to_vec()), Frame::Font(vec![7; limit])] {
+        let mut buffer = Vec::new();
+        write(&mut buffer, &frame).unwrap();
+        assert_eq!(read(&mut buffer.as_slice()).unwrap(), Some(frame));
+    }
+    let mut buffer = Vec::new();
+    assert!(write(&mut buffer, &Frame::Font(vec![0; limit + 1])).is_err());
+    let length = u32::try_from(limit + 1).unwrap().to_be_bytes();
+    let long = [&b"#"[..], &length, &vec![0; limit + 1]].concat();
+    assert!(read(&mut long.as_slice()).is_err());
 }

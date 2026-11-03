@@ -210,3 +210,103 @@ fn the_repository_libraries_are_well_formed() {
         assert_eq!(String::from_utf8(run.stdout).unwrap().lines().count(), fonts, "{library}");
     }
 }
+
+/// A server on this computer that answers every request on one connection
+/// with `status` and `media` and `body`, once for each of `answers`
+/// connections, and records each request's head.
+#[cfg(feature = "live")]
+fn serve(
+    answers: usize,
+    status: &'static str,
+    media: &'static str,
+    body: Vec<u8>,
+) -> (u16, std::sync::mpsc::Receiver<String>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (heads, received) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for _ in 0..answers {
+            let Ok((stream, _)) = listener.accept() else { return };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut head = String::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                head.push_str(&line);
+            }
+            let _ = heads.send(head);
+            let mut stream = stream;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: {media}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(&body);
+        }
+    });
+    (port, received)
+}
+
+// REQ-123: a font named by its address is fetched by the fetcher process
+// with no cookie, checked against the SHA-256 the user named, and drawn; a
+// wrong checksum, a font of another media type, an address on the local
+// network the user did not allow, and an address without a SHA-256 are each
+// refused, and nothing is drawn.
+#[cfg(feature = "live")]
+#[test]
+fn a_font_is_fetched_from_an_address() {
+    let folder = folder("font-address");
+    let bytes = english_font("English test");
+    let page = folder.join("page.tti");
+    std::fs::write(&page, "PN,10000\nOL,1,HELLO\n").unwrap();
+    let image = folder.join("page.png");
+    let render = |address: &str, hash: Option<&str>, allow: bool| {
+        let _ = std::fs::remove_file(&image);
+        let mut arguments =
+            vec!["render", page.to_str().unwrap(), "100", "--output", image.to_str().unwrap(), "--font", address];
+        if let Some(hash) = hash {
+            arguments.extend(["--font-sha256", hash]);
+        }
+        if allow {
+            arguments.extend(["--allow-local", "127.0.0.1"]);
+        }
+        neottx(&arguments)
+    };
+    let right = sha256_hex(&bytes);
+
+    let (port, heads) = serve(1, "200 OK", "application/x-font-bdf", bytes.clone());
+    let address = format!("http://127.0.0.1:{port}/fonts/english.bdf");
+    let fetched = render(&address, Some(&right), true);
+    let message = String::from_utf8_lossy(&fetched.stderr);
+    assert!(fetched.status.success() && image.exists(), "{message}");
+    assert!(message.contains("plain HTTP"), "{message}");
+    let head = heads.recv().unwrap();
+    assert!(head.starts_with("GET /fonts/english.bdf HTTP/1.1\r\n"), "{head}");
+    assert!(!head.to_ascii_lowercase().contains("\ncookie:"), "{head}");
+
+    let (port, _) = serve(1, "200 OK", "application/octet-stream", bytes.clone());
+    let wrong = render(&format!("http://127.0.0.1:{port}/a.bdf"), Some(&sha256_hex(b"another font")), true);
+    let message = String::from_utf8_lossy(&wrong.stderr);
+    assert!(!wrong.status.success() && !image.exists(), "{message}");
+    assert!(message.contains("is not the one named (REQ-FNT-003)"), "{message}");
+
+    let (port, _) = serve(1, "200 OK", "text/html", bytes.clone());
+    let html = render(&format!("http://127.0.0.1:{port}/a.bdf"), Some(&right), true);
+    let message = String::from_utf8_lossy(&html.stderr);
+    assert!(!html.status.success() && !image.exists(), "{message}");
+    assert!(message.contains("MediaType(Html)"), "{message}");
+
+    let (port, heads) = serve(1, "200 OK", "application/x-font-bdf", bytes.clone());
+    let local = render(&format!("http://127.0.0.1:{port}/a.bdf"), Some(&right), false);
+    let message = String::from_utf8_lossy(&local.stderr);
+    assert!(!local.status.success() && !image.exists(), "{message}");
+    assert!(message.contains("Blocked"), "{message}");
+    assert!(heads.try_recv().is_err(), "a request reached the local network");
+
+    let unnamed = render("https://fonts.example/a.bdf", None, true);
+    assert_eq!(unnamed.status.code(), Some(2), "{}", String::from_utf8_lossy(&unnamed.stderr));
+    assert!(!image.exists());
+}

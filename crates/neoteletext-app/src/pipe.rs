@@ -26,6 +26,9 @@ pub const MAX_INDEX_PAGES: usize = neoteletext_core::limits::PAGE_NUMBERS_PER_MA
 /// The most sub-codes of one record of a live list: a page's every sub-page.
 pub const MAX_LIVE_LIST: usize = neoteletext_core::limits::MAX_SUBPAGES;
 
+// A font file fits in one frame (REQ-123).
+const _: () = assert!(neoteletext_core::consts::FONT_MAX_FILE_BYTES <= MAX_FRAME);
+
 /// Where page bytes came from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Origin {
@@ -72,6 +75,12 @@ pub enum Frame {
     /// sub-pages (REQ-1888), answered by [`Notice::SubPages`] or
     /// [`Notice::SubPagesMissing`].
     SubPages(u16, u8),
+    /// Fetcher to decoder: the font file a font fetcher fetched from the
+    /// address the user named (REQ-123), at most the core's
+    /// `FONT_MAX_FILE_BYTES`, unchecked: the decoder computes its SHA-256
+    /// and reads it. A font that came over plain HTTP follows
+    /// [`Notice::Unencrypted`].
+    Font(Vec<u8>),
     /// Decoder to fetcher: one input message for the channel's push
     /// WebSocket (area INT, REQ-INT-101), at most [`MAX_INPUT_MESSAGE`]
     /// bytes.

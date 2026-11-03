@@ -177,7 +177,9 @@ pub struct RasterArgs {
     #[arg(long)]
     pub reveal: bool,
     /// Draw text in this loaded font, a 12 x 10 or 12 x 20 BDF file
-    /// (REQ-FNT-002, REQ-FNT-008), instead of the compiled font.
+    /// (REQ-FNT-002, REQ-FNT-008), instead of the compiled font: a file, or
+    /// an `http` or `https` address, which needs `--font-sha256` and is
+    /// fetched by the confined fetcher process (REQ-FNT-003).
     #[arg(long)]
     pub font: Option<PathBuf>,
     /// The SHA-256 the `--font` file must have, as a font library's index
@@ -326,6 +328,10 @@ pub(crate) enum Command {
         /// Walk a live feed's whole service (REQ-186).
         #[arg(long)]
         walk: bool,
+        /// Fetch the font file at the address, send it and end (REQ-123);
+        /// started by `render --font ADDRESS`.
+        #[arg(long, conflicts_with = "walk")]
+        font: bool,
     },
     /// Write a channel's contents.txt, to standard output, from a folder
     /// of page files (REQ-CLI-008).

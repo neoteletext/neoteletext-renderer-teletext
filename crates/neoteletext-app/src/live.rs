@@ -23,7 +23,7 @@ mod fill;
 mod list;
 mod spawn;
 
-pub use spawn::open;
+pub use spawn::{fetch_font, open};
 
 /// A live source: the fetcher and the frames it sends.
 pub struct Live {
@@ -342,7 +342,9 @@ impl Source for Live {
                 Frame::Notice(notice) => self.notices.push(notice),
                 // The fetcher never sends these to a decoder; ignore rather
                 // than trust.
-                Frame::Request(..) | Frame::Follow(..) | Frame::Input(_) | Frame::SubPages(..) => {}
+                // Only a font's fetcher sends a font, and it is read by
+                // `fetch_font`, never by live mode.
+                Frame::Request(..) | Frame::Follow(..) | Frame::Input(_) | Frame::SubPages(..) | Frame::Font(_) => {}
             }
         }
         // The decoder is ticked when it says it has work due (decision
