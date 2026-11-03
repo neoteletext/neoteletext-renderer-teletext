@@ -38,6 +38,10 @@ fn alphabet(index: u32) -> u8 {
 
 /// Encodes `input` into `output`, returning the number of characters
 /// written.
+///
+/// # Errors
+/// [`Base64Error::Overflow`] when `output` is shorter than
+/// [`encoded_len`] of the input; nothing is written then.
 pub fn encode(input: &[u8], output: &mut [u8]) -> Result<usize, Base64Error> {
     let needed = encoded_len(input.len());
     let target = output.get_mut(..needed).ok_or(Base64Error::Overflow)?;
@@ -107,6 +111,18 @@ fn decode_group(chars: [u8; 4], last: bool) -> Result<([u8; 3], usize), Base64Er
 }
 
 /// Decodes `input` into `output`, returning the number of bytes written.
+///
+/// # Errors
+/// - [`Base64Error::Length`] when the input's length is not a multiple of
+///   four characters.
+/// - [`Base64Error::Character`] when a character is outside the alphabet,
+///   or padding stands anywhere but at the end of the last group.
+/// - [`Base64Error::NonCanonical`] when the unused bits of the last group
+///   are not zero (RFC 4648 section 3.5).
+/// - [`Base64Error::Overflow`] when the decoded bytes do not fit in
+///   `output`.
+///
+/// The groups before the faulty one may already have been written.
 pub fn decode(input: &[u8], output: &mut [u8]) -> Result<usize, Base64Error> {
     let (groups, rest) = input.as_chunks::<BASE64_GROUP_CHARS>();
     if !rest.is_empty() {

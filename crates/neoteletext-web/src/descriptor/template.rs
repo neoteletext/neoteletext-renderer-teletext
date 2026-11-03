@@ -47,6 +47,13 @@ pub(super) fn check_template(template: &[u8]) -> Result<(), DescriptorError> {
 
 /// Expands a template for a page and optional sub-code (REQ-WEB-003). With
 /// no sub-code, `{sub}` becomes `0000`.
+///
+/// # Errors
+/// - [`UrlError::TooLong`] when the expansion does not fit in `out`; what
+///   fitted stays written.
+/// - [`UrlError::Path`] for an opening brace without its closing one, or a
+///   placeholder other than `{m}`, `{pp}`, `{mpp}` and `{sub}`. A template
+///   a descriptor has accepted has neither.
 pub fn expand_template(
     template: &[u8],
     page: PageAddress,
@@ -76,6 +83,14 @@ pub fn expand_template(
 impl Descriptor {
     /// The address of a page (REQ-WEB-003): the template expanded and
     /// resolved against the descriptor's address.
+    ///
+    /// # Errors
+    /// [`UrlError::TooLong`] when the expanded address is longer than
+    /// [`MAX_URL_LENGTH`], or any other error of [`Url::join`] for the
+    /// resolved address. In practice neither arises: the descriptor's
+    /// parser resolved one expansion, and every placeholder becomes the same
+    /// number of hexadecimal digits for any page and sub-code, so every
+    /// expansion has that one's length and kinds of character.
     pub fn page_url(&self, page: PageAddress, subcode: Option<SubCode>) -> Result<Url, UrlError> {
         let mut buffer = [0u8; MAX_URL_LENGTH];
         let mut writer = Writer::new(&mut buffer);

@@ -20,12 +20,23 @@ readonly RUST="1.99.0"
 # release builds (esp-rs/rust#277), so 1.93 is used, below the workspace's
 # rust-version (IMPLEMENTATION-LOG.md decision 38).
 readonly ESP="esp"
+# The fork espup installed, pinned (REQ-SEC-014, REQ-GEN-001): its version
+# names the source commit, and its compiler driver's SHA-256 the build. A
+# different one fails every Xtensa row, before anything is built with it.
+readonly ESP_VERSION="rustc 1.93.0-nightly (2b43689c5 2026-01-27) (1.93.0.0)"
+readonly ESP_DRIVER_SHA256="e3445e15d6ab391bb6e257fa7fc4523c423e17ef72190f323779601bfffb15d0"
+# REQ-GEN-001: the stated minimum version, which scripts/tools.sh pins and
+# installs. Read, not sourced: that file stops at the first failure, and this
+# script counts failures and goes on.
+MSRV_TOOLCHAIN="$(sed -n 's/^readonly MSRV_TOOLCHAIN="\(.*\)"$/\1/p' scripts/tools.sh)"
+readonly MSRV_TOOLCHAIN
 
-# The crates that run on bare metal (REQ-GEN-017), the pair built for
+# The crates that run on bare metal (REQ-GEN-017; every no_std crate, as
+# the full gate's x86_64-unknown-none build names them), the pair built for
 # WebAssembly, and the std crates for operating systems without a terminal.
 # The audio profile's PCM16 and IMA ADPCM are named, though in its default,
 # because microcontroller ports keep them (decision E.131).
-readonly BARE="-p neoteletext-core -p neoteletext-formats -p neoteletext-slicer -p neoteletext-web -p neoteletext-image -p neoteletext-audio --features neoteletext-audio/pcm16,neoteletext-audio/ima"
+readonly BARE="-p neoteletext-core -p neoteletext-formats -p neoteletext-slicer -p neoteletext-web -p neoteletext-image -p neoteletext-audio -p neoteletext-audio-mix -p neoteletext-opus -p neoteletext-input --features neoteletext-audio/pcm16,neoteletext-audio/ima"
 # The audio profile as the desktops build it: Opus alone, PCM16 and IMA
 # ADPCM compiled out (decision E.131).
 readonly AUDIO_DESKTOP="-p neoteletext-audio --no-default-features --features idl,opus"
@@ -63,7 +74,28 @@ aarch64-apple-darwin|$LIBRARIES_STD|check|$RUST|
 x86_64-apple-darwin|$LIBRARIES_STD|check|$RUST|
 wasm32-unknown-unknown|$WASM|build|$RUST|
 wasm32-wasip1|$WASM|build|$RUST|
+x86_64-unknown-linux-gnu|$ALL --all-features|build|$MSRV_TOOLCHAIN|
 "
+
+# Two places name the minimum version; they must agree.
+stated="$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)"
+if [[ "$MSRV_TOOLCHAIN" != "$stated" && "$MSRV_TOOLCHAIN" != "$stated.0" ]]; then
+    echo "scripts/tools.sh's MSRV_TOOLCHAIN $MSRV_TOOLCHAIN is not Cargo.toml's rust-version $stated" >&2
+    exit 1
+fi
+
+# The Xtensa fork, checked before it builds anything.
+esp_problem=""
+if rustup toolchain list | grep -q "^$ESP"; then
+    esp_found="$(rustc "+$ESP" --version 2>/dev/null)"
+    esp_driver="$(ls "$(rustup run "$ESP" rustc --print sysroot)"/lib/librustc_driver-*.so 2>/dev/null | head -n1)"
+    esp_sha256="$( [ -n "$esp_driver" ] && sha256sum "$esp_driver" | cut -d' ' -f1)"
+    if [ "$esp_found" != "$ESP_VERSION" ]; then
+        esp_problem="toolchain $ESP is \"$esp_found\", not the pinned \"$ESP_VERSION\""
+    elif [ "$esp_sha256" != "$ESP_DRIVER_SHA256" ]; then
+        esp_problem="toolchain $ESP's compiler driver has SHA-256 $esp_sha256, not the pinned $ESP_DRIVER_SHA256"
+    fi
+fi
 
 # qemu runs the cross-compiled tests, with each target's C library.
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu"
@@ -85,6 +117,11 @@ while IFS='|' read -r target crates mode toolchain extra; do
     # A row that cannot run fails, as DEVELOPMENT.md section 9.2 says of any step.
     if ! rustup toolchain list | grep -q "^$toolchain"; then
         printf '%-32s %-6s %s\n' "$target" "$mode" "FAILED: toolchain $toolchain is not installed; rustup or espup installs it"
+        failures=$((failures + 1))
+        continue
+    fi
+    if [ "$toolchain" = "$ESP" ] && [ -n "$esp_problem" ]; then
+        printf '%-32s %-6s %s\n' "$target" "$mode" "FAILED: $esp_problem"
         failures=$((failures + 1))
         continue
     fi

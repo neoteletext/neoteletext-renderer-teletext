@@ -5,6 +5,13 @@
 
 /// How the page's set is named, and the level it is written for.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    not(feature = "write-text"),
+    allow(
+        dead_code,
+        reason = "the arguments are parsed in every build; a build without the writer refuses them unread"
+    )
+)]
 pub struct TextChoice<'a> {
     /// A set of the writer's table.
     pub set: Option<&'a str>,

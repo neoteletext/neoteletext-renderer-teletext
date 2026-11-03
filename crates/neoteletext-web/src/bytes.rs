@@ -68,6 +68,10 @@ impl<'a> Writer<'a> {
     }
 
     /// Appends bytes, or changes nothing when they do not fit.
+    ///
+    /// # Errors
+    /// [`Overflow`] when the bytes would run past the buffer's end less the
+    /// reserve set by [`Writer::set_reserve`].
     pub fn put(&mut self, bytes: &[u8]) -> Result<(), Overflow> {
         let end = self.len.checked_add(bytes.len()).ok_or(Overflow)?;
         if end > self.capacity() {
@@ -79,11 +83,19 @@ impl<'a> Writer<'a> {
     }
 
     /// Appends one byte.
+    ///
+    /// # Errors
+    /// [`Overflow`] when no room is left before the reserve; nothing is
+    /// written then.
     pub fn byte(&mut self, byte: u8) -> Result<(), Overflow> {
         self.put(&[byte])
     }
 
     /// Appends a number in decimal.
+    ///
+    /// # Errors
+    /// [`Overflow`] when its digits do not all fit before the reserve; no
+    /// digit is written then.
     pub fn decimal(&mut self, value: u64) -> Result<(), Overflow> {
         let mut digits = [0u8; MAX_U64_DIGITS];
         let text = decimal_digits(value, &mut digits);
@@ -93,6 +105,13 @@ impl<'a> Writer<'a> {
     /// Appends `value` as `width` uppercase hexadecimal digits. A width
     /// beyond [`U32_HEX_DIGITS`] fails, rather than shift past the value's
     /// bits (finding F-92).
+    ///
+    /// # Errors
+    /// [`Overflow`] when `width` exceeds [`U32_HEX_DIGITS`], before anything
+    /// is written, or when the digits run out of room before the reserve.
+    /// In the second case the digits that fitted stay written, so a caller
+    /// that must not leave a partial number truncates back to
+    /// [`Writer::len`] taken before the call.
     pub fn hex(&mut self, value: u32, width: u32) -> Result<(), Overflow> {
         if width > U32_HEX_DIGITS {
             return Err(Overflow);
@@ -166,6 +185,9 @@ impl<const N: usize> TextBuf<N> {
     }
 
     /// Replaces the contents, or changes nothing when `bytes` do not fit.
+    ///
+    /// # Errors
+    /// [`Overflow`] when `bytes` is longer than the capacity `N`.
     pub fn set(&mut self, bytes: &[u8]) -> Result<(), Overflow> {
         copy_prefix(self.bytes.get_mut(..bytes.len()).ok_or(Overflow)?, bytes);
         self.len = bytes.len();
@@ -173,6 +195,9 @@ impl<const N: usize> TextBuf<N> {
     }
 
     /// Appends, or changes nothing when `bytes` do not fit.
+    ///
+    /// # Errors
+    /// [`Overflow`] when the string would grow past the capacity `N`.
     pub fn push(&mut self, bytes: &[u8]) -> Result<(), Overflow> {
         let end = self.len.checked_add(bytes.len()).ok_or(Overflow)?;
         copy_prefix(self.bytes.get_mut(self.len..end).ok_or(Overflow)?, bytes);

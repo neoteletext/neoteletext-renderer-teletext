@@ -150,6 +150,11 @@ fn index_at(indices: &[u8], start: usize, x: usize, format: IndexFormat) -> u8 {
 /// in `index_format`) into `out` (`out_stride` bytes per output row),
 /// rotated. `palette` is the 144 colours of the palette mode or the 32 of a
 /// Colour Map (REQ-RND-030); an index beyond it is transparent.
+///
+/// # Errors
+/// [`ConvertError::BufferTooSmall`] when `out` is too short for the
+/// geometry and `out_stride` given. An index beyond the end of `indices`
+/// reads as 0, as an index beyond `palette` is transparent.
 #[allow(clippy::too_many_arguments)] // Each argument is a separate geometry or format parameter of REQ-RND-018.
 pub fn convert(
     indices: &[u8],

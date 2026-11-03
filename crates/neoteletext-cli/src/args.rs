@@ -161,6 +161,11 @@ pub struct RasterArgs {
     /// (REQ-FNT-002, REQ-FNT-008), instead of the compiled font.
     #[arg(long)]
     pub font: Option<PathBuf>,
+    /// The SHA-256 the `--font` file must have, as a font library's index
+    /// gives it (REQ-FNT-003, REQ-FNT-004): a file with any other is
+    /// refused.
+    #[arg(long, value_name = "HEX", requires = "font")]
+    pub font_sha256: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -332,6 +337,9 @@ pub(crate) enum Command {
         /// link targets against.
         #[arg(long)]
         descriptor: Option<PathBuf>,
+        /// Run without the operating-system sandbox (REQ-SEC-017).
+        #[arg(long)]
+        no_sandbox: bool,
     },
     /// Write a TTI page from a UTF-8 text file in one of neoteletext's own
     /// character sets (REQ-CLI-010, REQ-CHR-012).
@@ -490,6 +498,16 @@ pub(crate) enum FontCommand {
         /// font under this file name.
         #[arg(long, value_name = "NAME")]
         library_line: Option<String>,
+        /// Run without the operating-system sandbox (REQ-SEC-017).
+        #[arg(long)]
+        no_sandbox: bool,
+    },
+    /// List a font library's fonts by title, with their SHA-256 and the
+    /// sets their `c` lines state, from its index (REQ-FNT-004); no font
+    /// is read or fetched.
+    Library {
+        /// The library's folder, or its `fonts.txt`.
+        library: PathBuf,
         /// Run without the operating-system sandbox (REQ-SEC-017).
         #[arg(long)]
         no_sandbox: bool,

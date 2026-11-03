@@ -34,6 +34,20 @@ pub struct Channel {
 impl Channel {
     /// Decodes a channel identifier: base64 of a JSON array of the service
     /// name, the host and the path.
+    ///
+    /// # Errors
+    /// - [`ChannelError::Base64`] when the identifier is not canonical
+    ///   base64, or decodes to more than the 512 bytes kept of one
+    ///   (`MAX_IDENTIFIER`).
+    /// - [`ChannelError::Json`] when the decoded text is not a JSON array of
+    ///   exactly three non-empty strings of printable ASCII without commas.
+    /// - [`ChannelError::TooLong`] when the identifier is longer than
+    ///   `MAX_IDENTIFIER`, the service name longer than its 64 bytes
+    ///   (`MAX_SERVICE`), or the address longer than
+    ///   [`crate::consts::MAX_URL_LENGTH`].
+    /// - [`ChannelError::Address`] when the host holds `/` or `?`, the path
+    ///   does not start with `/`, or the `wss` address they make fails the
+    ///   strict parser.
     pub fn from_identifier(identifier: &str) -> Result<Self, ChannelError> {
         let mut decoded = [0u8; MAX_IDENTIFIER];
         let len = base64::decode(identifier.as_bytes(), &mut decoded).map_err(|_| ChannelError::Base64)?;
@@ -77,6 +91,11 @@ impl Channel {
     /// A known feed by its short name (REQ-INP-022's table). The short
     /// name is only a label: the `ch4` feed's service name is
     /// `channel4-capture`.
+    ///
+    /// # Errors
+    /// [`ChannelError::UnknownName`] when no known feed has this short name.
+    /// The known feeds' identifiers are valid, so the errors of
+    /// [`Channel::from_identifier`] do not arise.
     pub fn from_short_name(name: &str) -> Result<Self, ChannelError> {
         let (_, identifier) =
             KNOWN_CHANNELS.iter().find(|(short, _)| *short == name).ok_or(ChannelError::UnknownName)?;
@@ -85,6 +104,16 @@ impl Channel {
 
     /// A feed given by its `wss` address and service name; the identifier
     /// is built from them.
+    ///
+    /// # Errors
+    /// - [`ChannelError::Address`] when the address fails the strict parser,
+    ///   is not `wss`, or has a query.
+    /// - [`ChannelError::Json`] when the service name is empty, or holds a
+    ///   byte outside printable ASCII, a quotation mark, a backslash or a
+    ///   comma.
+    /// - [`ChannelError::TooLong`] when the identifier built would be longer
+    ///   than `MAX_IDENTIFIER`, or the service name longer than
+    ///   `MAX_SERVICE`.
     pub fn from_address(address: &str, service: &str) -> Result<Self, ChannelError> {
         let url = Url::parse(address).map_err(|_| ChannelError::Address)?;
         if url.scheme() != crate::url::Scheme::Wss || url.query().is_some() {

@@ -28,7 +28,8 @@ impl Stream {
         let host = url.host_text();
         let mut socket = if let Some(proxy) = proxy {
             // Through the proxy the port's setting names (REQ-WEB-032).
-            let (socket, first) = open_tunnel(proxy, host, url.port()).map_err(Error::Network)?;
+            let (socket, first) =
+                open_tunnel(proxy, host, url.port()).map_err(|error| Error::Network(error.to_string()))?;
             // The relay speaks only when spoken to, over HTTP and TLS
             // alike: bytes of its before this side's first are a broken
             // protocol, not data to keep.
@@ -37,8 +38,8 @@ impl Stream {
             }
             socket
         } else {
-            let target = first_address(host, url.port()).map_err(Error::Network)?;
-            connect_within_limit(&target, host).map_err(Error::Network)?
+            let target = first_address(host, url.port()).map_err(|error| Error::Network(error.to_string()))?;
+            connect_within_limit(&target, host).map_err(|error| Error::Network(error.to_string()))?
         };
         socket.set_nodelay(true).map_err(|error| Error::Network(error.to_string()))?;
         if !url.is_secure() {

@@ -120,6 +120,11 @@ impl ChannelState {
 
     /// `silk_decode_frame`: decodes a 20 ms frame from `range`, or conceals a frame when there
     /// is none, into `out[..frame_length]`.
+    ///
+    /// Kept whole, past the source conventions' 80 lines a function: it follows one
+    /// routine of the reference decoder step for step, so that it can be read against
+    /// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+    /// comparison would be harder and the parts would have no meaning of their own.
     fn decode_frame(
         &mut self,
         layout: Layout,

@@ -1,0 +1,23 @@
+[package]
+name = "neoteletext-picture"
+description = "Pictures to teletext pages of mosaic graphics: decoding, fitting and the page encoder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The page geometry, the spacing attributes and the enhancement triplets
+# are the core's constants (REQ-GEN-014).
+neoteletext-core = { workspace = true, features = ["default"] }
+# The page written as TTI is read back and encoded as T42 packets by the
+# formats crate's own reader and writer.
+neoteletext-formats = { workspace = true, features = ["tti", "std"] }
+# MIT OR Apache-2.0. The picture decoders of the five formats DEC-2114
+# names, approved by the owner in DEC-2142; default features off, so no
+# other format and no threads.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+
+[lints]
+workspace = true

@@ -25,32 +25,53 @@ impl Proxy {
     /// Reads `http://host:port` or `socks5://host:port` ([`parse_proxy`]).
     ///
     /// # Errors
-    /// Any other form, said for the user.
-    pub fn parse(text: &str) -> Result<Self, std::string::String> {
+    /// [`ProxyParseError::NotAProxy`] for any other form.
+    pub fn parse(text: &str) -> Result<Self, ProxyParseError> {
         use std::borrow::ToOwned;
         parse_proxy(text)
             .map(|proxy| Self { kind: proxy.kind, host: proxy.host.to_owned(), port: proxy.port })
-            .ok_or_else(|| std::format!("{text}: a proxy is http://host:port or socks5://host:port"))
+            .ok_or_else(|| ProxyParseError::NotAProxy(text.to_owned()))
     }
 
     /// Asks the proxy at the other end of `stream` for a tunnel to `host`
-    /// and `port` ([`tunnel`]), with the error said for the user. The port
-    /// opens the stream: this crate reaches no network (REQ-SEC-016). The
-    /// bytes it returns are the first of the tunnel's, read with the
-    /// proxy's answer: they come before anything read from `stream` next.
+    /// and `port` ([`tunnel`]). The port opens the stream: this crate
+    /// reaches no network (REQ-SEC-016). The bytes it returns are the first
+    /// of the tunnel's, read with the proxy's answer: they come before
+    /// anything read from `stream` next.
     ///
     /// # Errors
-    /// The proxy refuses, breaks its protocol, or the stream fails.
+    /// [`TunnelError::Proxy`] when the proxy refuses or breaks its
+    /// protocol, [`TunnelError::Io`] when the stream fails or times out.
     pub fn open_tunnel<S: std::io::Read + std::io::Write>(
         &self,
         stream: &mut S,
         host: &str,
         port: u16,
-    ) -> Result<std::vec::Vec<u8>, std::string::String> {
+    ) -> Result<std::vec::Vec<u8>, TunnelError> {
         tunnel(stream, self.kind, host, port)
-            .map_err(|error| std::format!("the proxy refused the connection to {host}: {error:?}"))
     }
 }
+
+/// Why [`Proxy::parse`] refused its text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProxyParseError {
+    /// The text is not a proxy's address as [`parse_proxy`] reads one:
+    /// `http://host:port` or `socks5://host:port`, with no path and no
+    /// user name. Holds the text refused, which the message repeats.
+    NotAProxy(std::string::String),
+}
+
+impl core::fmt::Display for ProxyParseError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NotAProxy(text) => write!(formatter, "{text}: a proxy is http://host:port or socks5://host:port"),
+        }
+    }
+}
+
+// REQ-GEN-011: with the standard library, `core::fmt` is there anyway, so
+// these need no feature.
+impl core::error::Error for ProxyParseError {}
 
 /// Why a blocking handshake failed.
 #[derive(Debug)]
@@ -59,6 +80,24 @@ pub enum TunnelError {
     Proxy(ProxyError),
     /// The connection failed or timed out.
     Io(std::io::Error),
+}
+
+impl core::fmt::Display for TunnelError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Proxy(error) => write!(formatter, "the proxy refused or broke its protocol: {error:?}"),
+            Self::Io(error) => write!(formatter, "the connection to the proxy failed: {error}"),
+        }
+    }
+}
+
+impl core::error::Error for TunnelError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Proxy(_) => None,
+            Self::Io(error) => Some(error),
+        }
+    }
 }
 
 /// The longest answer to `CONNECT` read: the engine's default head limit.

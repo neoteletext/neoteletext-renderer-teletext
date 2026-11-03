@@ -133,6 +133,10 @@ fn swatches(page: &mut DisplayPage, first_row: u8) -> Result<()> {
 }
 
 /// The stream.
+///
+/// # Errors
+/// Any [`AuthorError`] of the pages it builds: the stream is fixed, so one
+/// means the authoring code is wrong, and its tests fail.
 pub fn stream() -> Result<Stream> {
     let mut stream = Stream::new();
     magazine_1(&mut stream)?;
@@ -144,6 +148,9 @@ pub fn stream() -> Result<Stream> {
 }
 
 /// The addresses of the display pages of the stream, in page order.
+///
+/// # Errors
+/// As [`stream`].
 pub fn display_pages() -> Result<Vec<PageAddress>> {
     let stream = stream()?;
     let mut pages: Vec<PageAddress> = stream

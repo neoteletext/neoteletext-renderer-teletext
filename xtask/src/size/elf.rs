@@ -6,7 +6,7 @@ pub(super) struct Image {
     /// Code and constant data: allocated sections with contents.
     flash: u64,
     /// Static memory: writable allocated sections, with or without
-    /// contents.
+    /// contents, except the linker's padding (`RELRO_PADDING`).
     ram: u64,
     /// Every symbol name.
     symbols: Vec<String>,
@@ -32,6 +32,12 @@ impl Image {
 /// Reads the section sizes and symbol names of a little-endian ELF image,
 /// 32 or 64-bit (the ELF specification's section header and symbol table
 /// layouts).
+/// The section lld adds after the region that is read-only after
+/// relocation, padding it to a page so that it can be protected: it holds no
+/// variable, and grows by every byte of code saved, so it is not static
+/// memory (TODO-1143).
+const RELRO_PADDING: &[u8] = b".relro_padding";
+
 pub(super) fn read_elf(bytes: &[u8]) -> Option<Image> {
     const MAGIC: &[u8] = b"\x7fELF";
     const CLASS_32: u8 = 1;
@@ -54,11 +60,11 @@ pub(super) fn read_elf(bytes: &[u8]) -> Option<Image> {
         Some(field.iter().rev().fold(0u64, |value, &byte| (value << 8) | u64::from(byte)))
     };
     let word = if wide { 8 } else { 4 };
-    // e_shoff, e_shentsize and e_shnum.
-    let (shoff, shentsize, shnum) = if wide {
-        (read(0x28, 8)?, read(0x3A, 2)?, read(0x3C, 2)?)
+    // e_shoff, e_shentsize, e_shnum and e_shstrndx.
+    let (shoff, shentsize, shnum, shstrndx) = if wide {
+        (read(0x28, 8)?, read(0x3A, 2)?, read(0x3C, 2)?, read(0x3E, 2)?)
     } else {
-        (read(0x20, 4)?, read(0x2E, 2)?, read(0x30, 2)?)
+        (read(0x20, 4)?, read(0x2E, 2)?, read(0x30, 2)?, read(0x32, 2)?)
     };
     let header = |index: u64| usize::try_from(shoff + index * shentsize).ok();
     // Fields of a section header: sh_type, sh_flags, sh_offset, sh_size,
@@ -73,6 +79,13 @@ pub(super) fn read_elf(bytes: &[u8]) -> Option<Image> {
         let entsize = read(base + 16 + 5 * word, word)?;
         Some((kind, flags, offset, size, link, entsize))
     };
+    // sh_name, an offset into the section names' strings.
+    let (_, _, names, _, _, _) = section(shstrndx)?;
+    let name = |index: u64| -> Option<&[u8]> {
+        let start = usize::try_from(names.checked_add(read(header(index)?, 4)?)?).ok()?;
+        let text = bytes.get(start..)?;
+        text.get(..text.iter().position(|&byte| byte == 0)?)
+    };
     let mut image = Image { flash: 0, ram: 0, symbols: Vec::new() };
     for index in 0..shnum {
         let (kind, flags, offset, size, link, entsize) = section(index)?;
@@ -80,7 +93,7 @@ pub(super) fn read_elf(bytes: &[u8]) -> Option<Image> {
             if kind != SHT_NOBITS {
                 image.flash += size;
             }
-            if flags & SHF_WRITE != 0 {
+            if flags & SHF_WRITE != 0 && name(index)? != RELRO_PADDING {
                 image.ram += size;
             }
         }

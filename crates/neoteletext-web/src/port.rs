@@ -79,6 +79,13 @@ pub trait Transport: embedded_io::ErrorType {
     /// Starts connecting `connection` to `host` and `port`. Returns at once;
     /// progress is read with [`Transport::state`]. A port that cannot offer
     /// TLS returns an error for [`Security::Tls`].
+    ///
+    /// # Errors
+    /// The port's own error when the attempt cannot even start: TLS asked
+    /// of a port without it, a name that cannot be looked up at once, or no
+    /// resource for another connection. [`Pump`] reports it as
+    /// [`NetInput::ConnectFailed`]. A failure found later is reported by
+    /// [`Transport::state`] instead.
     fn connect(
         &mut self,
         connection: ConnectionId,
@@ -95,6 +102,12 @@ pub trait Transport: embedded_io::ErrorType {
     /// write where the transport allows, one TLS record up to its size
     /// (REQ-RCH-010): the agent gives the messages waiting at one moment
     /// together.
+    ///
+    /// # Errors
+    /// The port's own error when the bytes cannot all be queued, because
+    /// the connection is not open or the port's buffer is full. Nothing may
+    /// be sent in part: [`Pump`] closes the connection and reports it
+    /// closed.
     fn send(&mut self, connection: ConnectionId, bytes: &[u8]) -> Result<(), Self::Error>;
 
     /// The bytes given to [`Transport::send`] on `connection` that have not
@@ -106,6 +119,11 @@ pub trait Transport: embedded_io::ErrorType {
     fn unsent(&mut self, connection: ConnectionId) -> usize;
 
     /// Reads whatever has arrived, without blocking.
+    ///
+    /// # Errors
+    /// The port's own error when the connection failed, for example when it
+    /// was reset or its TLS record could not be authenticated. [`Pump`]
+    /// treats it as the connection closing.
     fn receive(&mut self, connection: ConnectionId, buffer: &mut [u8]) -> Result<Received, Self::Error>;
 
     /// Closes the connection. Closing a closed connection does nothing.
@@ -127,10 +145,19 @@ pub trait CookieStorage {
     type Error;
 
     /// Replaces the saved data.
+    ///
+    /// # Errors
+    /// The storage's own error when the data cannot be written; the port
+    /// should then leave the earlier saved data in place, not part of the
+    /// new.
     fn save(&mut self, data: &[u8]) -> Result<(), Self::Error>;
 
     /// Reads the saved data into `buffer`, returning its length (0 when
     /// nothing is saved).
+    ///
+    /// # Errors
+    /// The storage's own error when the saved data cannot be read, or does
+    /// not fit in `buffer`. Nothing saved is not an error.
     fn load(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
 }
 

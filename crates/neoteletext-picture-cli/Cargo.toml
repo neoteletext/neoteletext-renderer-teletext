@@ -1,0 +1,20 @@
+[package]
+name = "neoteletext-picture-cli"
+description = "neottx-picture: a picture file to a teletext page file"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "neottx-picture"
+path = "src/main.rs"
+
+[dependencies]
+# The converter itself; this program only reads the picture and writes the
+# page (REQ-SEC-016: the library touches no file).
+neoteletext-picture.workspace = true
+
+[lints]
+workspace = true

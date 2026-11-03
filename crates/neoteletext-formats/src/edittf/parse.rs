@@ -19,6 +19,12 @@ use super::base64::{base64_value, hex_value, unpack_codes};
 use super::{FILLER, METADATA_SET_MASK, NO_ROW_24_FLAG};
 
 /// Reads one address into `page`.
+///
+/// # Errors
+/// The [`DiagnosticKind`] of the first fault: an address that is not an
+/// edit.tf or zxnet page address, a hash that does not decode, or metadata
+/// out of range. `page` is cleared first, so it holds only what was read
+/// before the fault.
 pub fn parse(text: &[u8], page: &mut PageFile) -> Result<(), DiagnosticKind> {
     page.clear();
     let text = text.trim_ascii();

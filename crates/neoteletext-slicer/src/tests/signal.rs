@@ -1,4 +1,4 @@
-//! REQ-SLC-002, REQ-SLC-007, REQ-SLC-009, REQ-SLC-013: rates and noise; REQ-SLC-004 and REQ-SLC-006: timing, run-in, bit rate.
+//! Tests of REQ-SLC-002, REQ-SLC-007, REQ-SLC-009, REQ-SLC-013: rates and noise; REQ-SLC-004 and REQ-SLC-006: timing, run-in, bit rate.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

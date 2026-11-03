@@ -187,11 +187,47 @@ pub struct Alias {
 impl Descriptor {
     /// Parses a descriptor fetched from `base` (its final address, after
     /// redirects).
+    ///
+    /// # Errors
+    /// The first fault found, which refuses the whole descriptor:
+    /// - [`DescriptorError::Json`] when the text is not valid JSON or breaks
+    ///   the JSON reader's bounds;
+    /// - [`DescriptorError::Invalid`] when the document is not an object, or
+    ///   a member has the wrong type or form, such as a page number that is
+    ///   not one, a region or refresh interval out of range, a push address
+    ///   that is not a WebSocket, or keys sent to another origin;
+    /// - [`DescriptorError::Missing`] when `name`, `initial_page`,
+    ///   `page_template`, or a linked service's or push object's required
+    ///   member is missing;
+    /// - [`DescriptorError::Duplicate`] when a member appears twice;
+    /// - [`DescriptorError::Unknown`] for a member this version does not
+    ///   know;
+    /// - [`DescriptorError::Placeholder`] when the page template has an
+    ///   unknown placeholder, a stray brace, or a placeholder before its
+    ///   path;
+    /// - [`DescriptorError::Address`] when an address, resolved against
+    ///   `base`, fails the strict parser, carrying the member and the
+    ///   [`UrlError`];
+    /// - [`DescriptorError::Downgrade`] for a plain `http` or `ws` address
+    ///   when `base` is secure;
+    /// - [`DescriptorError::TooMany`] for more than
+    ///   [`MAX_LINKED_SERVICES`] linked services or [`MAX_ALIASES`] aliases.
     pub fn parse(json: &[u8], base: &Url) -> Result<Self, DescriptorError> {
         Self::parse_with(json, base, false)
     }
 
     /// Parses a channel's `channel.ttx`, fetched from `base` (REQ-WEB-024).
+    ///
+    /// # Errors
+    /// The errors of [`Descriptor::parse`], except that no member is
+    /// required, with one more:
+    /// [`DescriptorError::NotForChannels`] for a `page_template`, which a
+    /// channel's files do not use. A push object's `address` is
+    /// [`DescriptorError::Unknown`] here, since a channel's live connection
+    /// is always at its folder's [`crate::channel::PUSH_NAME`];
+    /// [`DescriptorError::Address`] also arises when that address, or the
+    /// channel's folder taken from `base`, is longer than
+    /// [`MAX_URL_LENGTH`].
     pub fn parse_channel(json: &[u8], base: &Url) -> Result<Self, DescriptorError> {
         Self::parse_with(json, base, true)
     }

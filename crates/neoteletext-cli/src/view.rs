@@ -15,7 +15,7 @@ use neoteletext_app::extras::PageExtras;
 use neoteletext_app::input::Opening;
 use neoteletext_app::session::Session;
 use neoteletext_app::source::Source;
-use neoteletext_core::acq::{EnhancementReport, StoredPage};
+use neoteletext_core::acq::{EnhancementReport, PageBuild, StoredPage};
 use neoteletext_core::config::Config;
 use neoteletext_core::consts::COLUMNS;
 use neoteletext_core::level1::{Grid, Zoom};
@@ -73,6 +73,9 @@ struct ViewState {
     // until the key is handled, so it is recorded at the start of the next
     // pass, when nothing borrows the decoder.
     unrecorded: Option<EnhancementReport>,
+    // The build of the last grid built and whether its designation fell
+    // back (REQ-72), recorded with the report above.
+    unrecorded_designation: Option<(PageBuild, bool)>,
 }
 
 /// What a turn knows about the page it shows, for the steps after the
@@ -113,6 +116,7 @@ impl ViewState {
             walk_trace: Vec::new(),
             trace_withheld: false,
             unrecorded: None,
+            unrecorded_designation: None,
         }
     }
 

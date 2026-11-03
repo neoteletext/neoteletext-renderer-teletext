@@ -141,6 +141,8 @@ fn relative_resolution() {
     assert_eq!(base.join("//user@evil.example/").map(|_| ()), Err(UrlError::UserInfo));
 }
 
+/// REQ-504 (REQ-WEB-015): an origin is the normalised scheme, host and
+/// port, with the scheme's default port when none is written.
 #[test]
 fn origins() {
     let origin = |text: &str| Url::parse(text).unwrap().origin();

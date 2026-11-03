@@ -13,6 +13,9 @@ impl<W: Write> T42Writer<W> {
     /// magazine packets, the Magazine Organization Tables, the object pages,
     /// other data pages and then the Level 1 pages, each class in the order
     /// given. The filter does not apply.
+    ///
+    /// # Errors
+    /// The writer's error, when it fails; the pages before it are written.
     pub fn write_pages(&mut self, pages: &[&PageFile]) -> io::Result<()> {
         for page in in_transmission_order(pages) {
             self.write_page(page)?;
@@ -22,6 +25,9 @@ impl<W: Write> T42Writer<W> {
 
     /// Encodes a page and writes its packets in the order of Annex B.2. The
     /// filter does not apply.
+    ///
+    /// # Errors
+    /// The writer's error, when it fails.
     pub fn write_page(&mut self, page: &PageFile) -> io::Result<()> {
         let mut result = Ok(());
         let inner = &mut self.inner;

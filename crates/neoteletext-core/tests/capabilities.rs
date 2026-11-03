@@ -1,4 +1,4 @@
-//! Each capability of decisions E.71 and E.105 compiled out (REQ-GEN-020): its page
+//! Tests of each capability of decisions E.71 and E.105 compiled out (REQ-GEN-020): its page
 //! data is ignored as the decision says, never an error. Each test runs
 //! only in the builds that leave its capability out; the builds with it
 //! test what it does in `level25.rs` and `objects.rs`.

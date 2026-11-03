@@ -84,6 +84,8 @@ pub struct Decoder<'a> {
     pending: Route,
     // The build whose enhancement faults were recorded last.
     last_recorded: Option<PageBuild>,
+    // The build whose designation fallback was recorded last.
+    last_designation_recorded: Option<PageBuild>,
 }
 
 /// Bytes of header display data before the clock: columns 8 to 31.
@@ -146,6 +148,7 @@ impl<'a> Decoder<'a> {
             named: FixedVec::new(PageAddress { magazine: Magazine::from_bits(1), page: PageNumber(0) }),
             pending: Route::default(),
             last_recorded: None,
+            last_designation_recorded: None,
         }
     }
 
@@ -233,6 +236,27 @@ impl<'a> Decoder<'a> {
         }
         self.last_recorded = Some(build);
         self.stats.enhancement.add(faults);
+        true
+    }
+
+    /// Counts a build of a page whose designation fell back (REQ-72,
+    /// REQ-CHR-003: "the fallback shall be counted as a diagnostic") in
+    /// [`Statistics::designation_fallbacks`], and returns whether it was
+    /// counted. Call it with the build of the page shown and the grid's
+    /// [`designation_fallback`](crate::level1::Grid::designation_fallback),
+    /// after the grid is built, at every presentation level.
+    ///
+    /// A build is counted once, as in [`Decoder::record_enhancement`]: a
+    /// report for the build recorded last is ignored, so that redrawing a
+    /// page does not count it again. It keeps its own record of the last
+    /// build because a port may record the two reports in either order, or
+    /// only this one at Levels 1 and 1.5, which build no enhancement report.
+    pub fn record_designation(&mut self, build: PageBuild, fell_back: bool) -> bool {
+        if !fell_back || self.last_designation_recorded == Some(build) {
+            return false;
+        }
+        self.last_designation_recorded = Some(build);
+        self.stats.designation_fallbacks = self.stats.designation_fallbacks.saturating_add(1);
         true
     }
 

@@ -29,6 +29,11 @@ pub fn scaled_size(width: usize, height: usize, x_factor: usize, y_factor: usize
 /// Scales an image of single-byte pixels (palette indices) by nearest
 /// pixel. `out` is `out_width` by `out_height` as given by
 /// [`scaled_size`], tightly packed.
+///
+/// # Errors
+/// [`ScaleError::ZeroFactor`] for a factor of zero, and
+/// [`ScaleError::BufferTooSmall`] when `input` or `out` is shorter than its
+/// image.
 pub fn scale_indices(
     input: &[u8],
     width: usize,
@@ -62,6 +67,11 @@ pub fn scale_indices(
 
 /// Scales an RGB888 image by whole numbers with a 2 by 2 box filter
 /// applied after nearest scaling, the "smoothed" option of REQ-RND-024.
+///
+/// # Errors
+/// [`ScaleError::ZeroFactor`] for a factor of zero, and
+/// [`ScaleError::BufferTooSmall`] when `input` or `out` is shorter than its
+/// image.
 #[allow(clippy::too_many_arguments)] // Geometry of input and output; grouping them adds nothing.
 pub fn scale_rgb_smoothed(
     input: &[u8],

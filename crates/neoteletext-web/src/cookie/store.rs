@@ -108,6 +108,33 @@ impl<const SLOTS: usize, const BYTES: usize> CookieJar<SLOTS, BYTES> {
     /// `now` is in seconds; `wall_clock` says whether `now` is calendar
     /// time, without which an `Expires` date cannot be compared and the
     /// attribute is ignored.
+    ///
+    /// # Errors
+    /// The cookie is not stored, and the jar is unchanged unless noted,
+    /// when:
+    /// - the header breaks a rule of [`SetCookie::parse`]:
+    ///   [`CookieRejected::ControlCharacter`], [`CookieRejected::Empty`], or
+    ///   [`CookieRejected::TooLarge`] for a name and value together over
+    ///   [`MAX_COOKIE_NAME_VALUE`] bytes;
+    /// - [`CookieRejected::NotAHeader`] when the parsed fields are ones no
+    ///   `Set-Cookie` header could give;
+    /// - [`CookieRejected::SecureOverPlain`] when a `Secure` cookie arrives
+    ///   over plain HTTP;
+    /// - [`CookieRejected::Prefix`] when the name breaks the rules of its
+    ///   `__Secure-`, `__Host-` or `__Http-` prefix, or a nameless cookie's
+    ///   value starts with one;
+    /// - [`CookieRejected::SameSiteNoneNotSecure`] for `SameSite=None`
+    ///   without `Secure`;
+    /// - [`CookieRejected::WouldReplaceSecure`] when plain HTTP would
+    ///   replace or delete a `Secure` cookie of the same name whose path
+    ///   covers this one;
+    /// - [`CookieRejected::Expired`] when the cookie has already expired;
+    ///   any stored cookie it would have replaced is deleted, which is how a
+    ///   server deletes one;
+    /// - [`CookieRejected::NoRoom`] when the cookie is larger than the
+    ///   jar's whole arena, or no room is left even after evicting every
+    ///   cookie that may be evicted; the cookies evicted on the way stay
+    ///   evicted.
     pub fn store(
         &mut self,
         header: &[u8],
@@ -125,6 +152,9 @@ impl<const SLOTS: usize, const BYTES: usize> CookieJar<SLOTS, BYTES> {
     /// `scope` itself. A channel's cookies are scoped to its folder, and
     /// belong to that channel alone: [`Self::header_for`] sends them only
     /// with a request given the same scope (REQ-515, REQ-1883).
+    ///
+    /// # Errors
+    /// The errors of [`Self::store`], under the same conditions.
     #[allow(clippy::too_many_arguments, reason = "the arguments of `store`, and the scope")]
     pub fn store_within(
         &mut self,
