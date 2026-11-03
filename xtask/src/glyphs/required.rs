@@ -53,7 +53,7 @@ fn sets() -> Vec<Set> {
         G0Set::Arabic,
         G0Set::Hebrew,
         G0Set::Vietnamese,
-        G0Set::YorubaIgbo,
+        G0Set::Igbo,
         G0Set::Ukrainian,
         G0Set::Belarusian,
         G0Set::Macedonian,

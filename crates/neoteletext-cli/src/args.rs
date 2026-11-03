@@ -338,7 +338,7 @@ pub(crate) enum Command {
         /// lettish-lithuanian, cyrillic-serbian-croatian, russian-bulgarian,
         /// cyrillic-ukrainian, greek, hebrew, arabic-table44, hausa-fula,
         /// west-african, ewe, kabyle-tamazight, azerbaijani, kanuri-mossi,
-        /// yoruba-igbo, vietnamese, ukrainian, belarusian, macedonian,
+        /// igbo, vietnamese, ukrainian, belarusian, macedonian,
         /// serbian, kyrgyz-mongolian, tatar, tajik, georgian, armenian,
         /// tifinagh, persian, urdu, pashto, sindhi, sorani, uyghur, balochi,
         /// arabic, japanese-romaji, hiragana or katakana.

@@ -96,7 +96,7 @@ const HEBREW: u8 = value(0b1010, 0b101);
 
 /// Every language NeoTeletext writes (DEC-602 item 1, DEC-2184,
 /// DEC-2187): the standard's sets, then NeoTeletext's own.
-pub const LANGUAGES: [LanguageSet; 74] = [
+pub const LANGUAGES: [LanguageSet; 73] = [
     entry("en", "Latn", "English", ENGLISH, Some(ENGLISH)),
     entry("id", "Latn", "Indonesian", ENGLISH, Some(ENGLISH)),
     entry("sw", "Latn", "Swahili", ENGLISH, Some(ENGLISH)),
@@ -148,7 +148,6 @@ pub const LANGUAGES: [LanguageSet; 74] = [
     entry("az", "Latn", "Azerbaijani", value(0b0101, 0b100), None),
     entry("kr", "Latn", "Kanuri", value(0b0101, 0b101), None),
     entry("mos", "Latn", "Mossi", value(0b0101, 0b101), None),
-    entry("yo", "Latn", "Yoruba", value(0b0101, 0b110), None),
     entry("ig", "Latn", "Igbo", value(0b0101, 0b110), None),
     entry("vi", "Latn", "Vietnamese", value(0b0101, 0b111), None),
     entry("be", "Cyrl", "Belarusian", value(0b0111, 0b001), None),

@@ -40,7 +40,7 @@ pub const SETS: [(&str, u8, u8); 48] = [
     ("kabyle-tamazight", 0b0101, 0b011),
     ("azerbaijani", 0b0101, 0b100),
     ("kanuri-mossi", 0b0101, 0b101),
-    ("yoruba-igbo", 0b0101, 0b110),
+    ("igbo", 0b0101, 0b110),
     ("vietnamese", 0b0101, 0b111),
     ("ukrainian", 0b0111, 0b000),
     ("belarusian", 0b0111, 0b001),

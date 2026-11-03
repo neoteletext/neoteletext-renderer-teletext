@@ -21,7 +21,7 @@ pub(super) const EXTENDED_TABLE_32: [Table32Entry; 29] = {
         (0b0101, 0b100, latin(N::Azerbaijani), Latin),
         (0b0101, 0b101, latin(N::KanuriMossi), Latin),
         // Whole sets, so that X/26 marks find their bases (REQ-CHR-002).
-        (0b0101, 0b110, whole(S::YorubaIgbo), Latin),
+        (0b0101, 0b110, whole(S::Igbo), Latin),
         (0b0101, 0b111, whole(S::Vietnamese), Vietnamese),
         // Group 0111: Cyrillic languages.
         (0b0111, 0b000, whole(S::Ukrainian), Cyrillic),

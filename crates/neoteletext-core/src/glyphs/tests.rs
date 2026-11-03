@@ -33,7 +33,7 @@ fn set_size_and_empty_set() {
     assert_eq!(empty.glyph(CharRef::new(latin, b'A')), PLACEHOLDER, "REQ-CHR-004: a missing glyph is visible");
 }
 
-/// REQ-RND-014, TODO-1988: Yoruba writes a tone on a letter with a dot below,
+/// REQ-RND-014, TODO-1988: Igbo writes a tone on a letter with a dot below,
 /// a pair Unicode gives no single character. The tone is drawn as the font
 /// draws it on the plain letter, whose capital makes room for it, and the dot
 /// is kept; overlaid, a tone merged into the capital's top lines.
@@ -44,12 +44,12 @@ fn a_tone_on_a_dotted_letter_keeps_the_tone_and_the_dot() {
     const ACUTE: u8 = 2;
     const TONE_LINES: usize = 4;
     let set = GlyphSet::noto_teletext();
-    let yoruba = CharSet::G0(G0 { set: G0Set::YorubaIgbo, national: None });
+    let igbo = CharSet::G0(G0 { set: G0Set::Igbo, national: None });
     for (code, dotted, plain) in
-        [(0x40, '\u{1EB8}', 'E'), (0x5B, '\u{1ECC}', 'O'), (0x60, '\u{1EB9}', 'e'), (0x7B, '\u{1ECD}', 'o')]
+        [(0x5B, '\u{1ECC}', 'O'), (0x5D, '\u{1ECA}', 'I'), (0x7B, '\u{1ECD}', 'o'), (0x7D, '\u{1ECB}', 'i')]
     {
         for (diacritic, tone) in [(GRAVE, '\u{0300}'), (ACUTE, '\u{0301}')] {
-            let drawn = set.glyph(CharRef { diacritic, ..CharRef::new(yoruba, code) });
+            let drawn = set.glyph(CharRef { diacritic, ..CharRef::new(igbo, code) });
             let toned = set.lookup(compose(plain, tone).unwrap()).unwrap();
             let dotted = set.lookup(dotted).unwrap();
             let plain = set.lookup(plain).unwrap();

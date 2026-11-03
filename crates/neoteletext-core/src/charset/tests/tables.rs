@@ -172,7 +172,7 @@ fn extended_defined() -> Vec<(u8, u8, G0, G2Set)> {
         l(3, N::KabyleTamazight),
         l(4, N::Azerbaijani),
         l(5, N::KanuriMossi),
-        (0b0101, 6, whole_g0(G0Set::YorubaIgbo), G2Set::Latin),
+        (0b0101, 6, whole_g0(G0Set::Igbo), G2Set::Latin),
         (0b0101, 7, whole_g0(G0Set::Vietnamese), G2Set::Vietnamese),
         (0b0111, 0, whole_g0(G0Set::Ukrainian), G2Set::Cyrillic),
         (0b0111, 1, whole_g0(G0Set::Belarusian), G2Set::Cyrillic),

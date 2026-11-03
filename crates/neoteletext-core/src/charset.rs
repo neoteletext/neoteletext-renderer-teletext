@@ -54,9 +54,10 @@ pub enum G0Set {
     /// Vietnamese: Latin G0 with the 13 national positions holding the
     /// vowels with a circumflex, breve or horn, and đ (decision E.81).
     Vietnamese,
-    /// Yoruba and Igbo: Latin G0 with the 13 national positions holding
-    /// the letters with a dot below and ṅ (decision E.81).
-    YorubaIgbo,
+    /// Igbo: Latin G0 with the national positions holding ị ọ ụ and ṅ,
+    /// the letters with a dot below and the dot above that Igbo writes
+    /// (decision E.81, DEC-2240).
+    Igbo,
     /// Ukrainian: Table 40 with Ґ ґ (decision E.78).
     Ukrainian,
     /// Belarusian, built from Table 39.

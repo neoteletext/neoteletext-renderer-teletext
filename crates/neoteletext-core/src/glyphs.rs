@@ -291,7 +291,7 @@ impl<'a> GlyphSet<'a> {
 }
 
 impl GlyphSet<'_> {
-    /// A mark on a letter with a dot below, such as Yoruba's `Ẹ̀`, which
+    /// A mark on a letter with a dot below, such as Igbo's `Ọ̀`, which
     /// Unicode gives no single character (TODO-1988). A spacing mark sits at
     /// the height of a small letter, so overlaid on a capital it merges into
     /// the capital's top lines. The font's letter with that mark makes room

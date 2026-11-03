@@ -118,7 +118,7 @@ fn table_34_modified_designation() {
             expected.push((value(0b0101, low), (S::Latin, Latin)));
         }
         expected.extend([
-            (value(0b0101, 6), (S::YorubaIgbo, Latin)),
+            (value(0b0101, 6), (S::Igbo, Latin)),
             (value(0b0101, 7), (S::Vietnamese, Vietnamese)),
             (value(0b0111, 0), (S::Ukrainian, Cyrillic)),
             (value(0b0111, 1), (S::Belarusian, Cyrillic)),
@@ -310,7 +310,9 @@ fn the_language_table() {
     // English and kana are refused; other languages keep their sets.
     assert_eq!(language_value("ja-Latn", false), Some(0));
     assert_eq!((language_value("ja", false), language_value("ja-Kana", false)), (None, None));
-    assert_eq!(language_value("yo", false), Some(value(0b0101, 0b110)));
+    assert_eq!(language_value("ig", false), Some(value(0b0101, 0b110)));
+    // DEC-2240: Yoruba is not in the table; Igbo keeps the set it shared.
+    assert_eq!(value_of("yo"), None);
     // REQ-2181 item 5: the subtitle region of every code the input knew
     // before is unchanged.
     let before: [(&[u8; 3], u8); 21] = [
@@ -339,4 +341,16 @@ fn the_language_table() {
     for (code, region) in before {
         assert_eq!(region_for_iso_639_2(*code), region, "{}", core::str::from_utf8(code).unwrap_or("?"));
     }
+}
+
+/// DEC-2240, DEC-2244: the Igbo set keeps ị ọ ụ and ṅ, and the four
+/// positions that held Yoruba's Ẹ ẹ Ṣ ṣ are unassigned.
+#[test]
+fn the_igbo_set_holds_no_yoruba_only_letters() {
+    let igbo = |code| to_unicode(CharRef::new(CharSet::G0(G0 { set: G0Set::Igbo, national: None }), code)).base;
+    assert_eq!([igbo(0x40), igbo(0x5C), igbo(0x60), igbo(0x7C)], [' '; 4]);
+    assert_eq!(
+        [igbo(0x5B), igbo(0x5D), igbo(0x5E), igbo(0x7B), igbo(0x7D), igbo(0x7E)],
+        ['Ọ', 'Ị', 'Ụ', 'ọ', 'ị', 'ụ']
+    );
 }

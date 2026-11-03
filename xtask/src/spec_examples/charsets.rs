@@ -37,7 +37,7 @@ const LEFT_TO_RIGHT_MARK: char = '\u{200E}';
 
 /// NeoTeletext's whole G0 sets, each with its example's name and caption.
 const G0_SETS: [(G0Set, &str, &str); 22] = [
-    (G0Set::YorubaIgbo, "charset-g0-yoruba-igbo", "Yoruba and Igbo G0, designation 0101 110"),
+    (G0Set::Igbo, "charset-g0-igbo", "Igbo G0, designation 0101 110"),
     (G0Set::Vietnamese, "charset-g0-vietnamese", "Vietnamese G0, designation 0101 111"),
     (G0Set::Ukrainian, "charset-g0-ukrainian", "Ukrainian G0, designation 0111 000"),
     (G0Set::Belarusian, "charset-g0-belarusian", "Belarusian G0, designation 0111 001"),

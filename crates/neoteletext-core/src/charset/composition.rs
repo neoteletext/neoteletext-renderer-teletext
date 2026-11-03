@@ -301,10 +301,10 @@ pub(super) const COMPOSITIONS: [(char, char, char); 289] = [
 
 /// The precompositions neoteletext's own sets add (REQ-CHR-014): the hook
 /// above on the Latin vowels, the marks on the letters of the Vietnamese
-/// and Yoruba and Igbo sets, and Cyrillic ё, which the Cyrillic sets
+/// and Igbo sets, and Cyrillic ё, which the Cyrillic sets
 /// without it reach as е with a diaeresis by X/26 (Russian, Kyrgyz and
 /// Mongolian, Tatar). Generated and sorted as [`COMPOSITIONS`] is.
-pub(super) const EXTENDED_COMPOSITIONS: [(char, char, char); 78] = [
+pub(super) const EXTENDED_COMPOSITIONS: [(char, char, char); 76] = [
     ('\u{0041}', '\u{0309}', '\u{1EA2}'), // Ả
     ('\u{0045}', '\u{0309}', '\u{1EBA}'), // Ẻ
     ('\u{0049}', '\u{0309}', '\u{1EC8}'), // Ỉ
@@ -379,8 +379,6 @@ pub(super) const EXTENDED_COMPOSITIONS: [(char, char, char); 78] = [
     ('\u{01B0}', '\u{0323}', '\u{1EF1}'), // ự
     ('\u{0415}', '\u{0308}', '\u{0401}'), // Ё
     ('\u{0435}', '\u{0308}', '\u{0451}'), // ё
-    ('\u{1EB8}', '\u{0302}', '\u{1EC6}'), // Ệ
-    ('\u{1EB9}', '\u{0302}', '\u{1EC7}'), // ệ
     ('\u{1ECC}', '\u{0302}', '\u{1ED8}'), // Ộ
     ('\u{1ECD}', '\u{0302}', '\u{1ED9}'), // ộ
 ];

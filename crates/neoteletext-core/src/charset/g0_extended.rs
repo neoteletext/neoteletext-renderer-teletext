@@ -3,7 +3,7 @@
 
 use super::code_table::CodeTable;
 
-// Vietnamese and Yoruba-Igbo are Latin G0 with the 13 national positions
+// Vietnamese and Igbo are Latin G0 with the 13 national positions
 // holding their letters, as whole sets: an X/26 diacritical mark refers to a
 // G0 set's own characters, never a national option's (REQ-CHR-002), so the
 // letters a tone is added to must belong to the set itself. The Cyrillic
@@ -20,13 +20,15 @@ pub(super) const VIETNAMESE_G0: CodeTable = [
     'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'â', 'ê', 'ô', 'ơ', '■', //
 ];
 
-pub(super) const YORUBA_IGBO_G0: CodeTable = [
+/// Igbo (DEC-2240, DEC-2244): the four positions that held Yoruba's Ẹ ẹ Ṣ ṣ (4/0,
+/// 5/C, 6/0 and 7/C) are unassigned, drawn as spaces.
+pub(super) const IGBO_G0: CodeTable = [
     ' ', '!', '"', 'ṅ', '¤', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/', //
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?', //
-    'Ẹ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', //
-    'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'Ọ', 'Ṣ', 'Ị', 'Ụ', 'Ṅ', //
-    'ẹ', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', //
-    'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ọ', 'ṣ', 'ị', 'ụ', '■', //
+    ' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', //
+    'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'Ọ', ' ', 'Ị', 'Ụ', 'Ṅ', //
+    ' ', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', //
+    'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ọ', ' ', 'ị', 'ụ', '■', //
 ];
 
 pub(super) const UKRAINIAN_G0: CodeTable = [

@@ -82,7 +82,7 @@ fn every_set_name_designates_its_set() {
 fn samples_round_trip() {
     let samples = [
         ("vietnamese", "Tiếng Việt có dấu, Hà Nội và Đà Nẵng."),
-        ("yoruba-igbo", "Ẹ kú àárọ, ọmọ Ṣàngó"),
+        ("igbo", "Ndị Igbo na-asụ Igbo, ọ dị mma"),
         ("hausa-fula", "Ɓarna ƙasa ɗaya Ƴan"),
         ("ewe", "Eʋegbe ɖe Ŋkɔ"),
         ("azerbaijani", "Azərbaycan dili Ğ İ ı"),
@@ -123,15 +123,15 @@ fn latin_text_is_switched_with_esc() {
 }
 
 /// A combining mark after a letter is written as that letter with the
-/// mark by X/26: Yoruba ọ̀ is ọ in the row and a grave. A letter with
+/// mark by X/26: Igbo ọ̀ is ọ in the row and a grave. A letter with
 /// two marks needs two in one cell, which X/26 cannot place: the
 /// second is refused.
 #[test]
 fn a_combining_mark_marks_the_letter_before_it() {
-    let written = cells("yoruba-igbo", "ọ\u{0300}");
+    let written = cells("igbo", "ọ\u{0300}");
     let [Cell::Marked { code, mark: 1 }] = written[..] else { panic!("{written:?}") };
-    assert_eq!(to_unicode(CharRef::new(named("yoruba-igbo").1.base, code)).base, 'ọ');
-    let error = write("yoruba-igbo", 0x100, "ọ\u{0300}\u{0301}").unwrap_err();
+    assert_eq!(to_unicode(CharRef::new(named("igbo").1.base, code)).base, 'ọ');
+    let error = write("igbo", 0x100, "ọ\u{0300}\u{0301}").unwrap_err();
     assert_eq!(error, WriteError::Missing { character: '\u{0301}', line: 1 });
 }
 
