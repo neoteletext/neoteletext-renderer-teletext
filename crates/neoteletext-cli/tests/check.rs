@@ -89,3 +89,51 @@ fn a_descriptor_over_its_limit_is_refused_before_it_is_read() {
     let message = String::from_utf8_lossy(&output.stderr);
     assert!(message.contains(&format!("larger than {limit} bytes")), "{message}");
 }
+
+/// REQ-190: a log line refused before the file's first `PN` line is reported
+/// as an error on its line, as it is within a page, and fails the check.
+#[test]
+fn a_refused_log_line_before_the_first_page_is_an_error() {
+    let folder = folder_of("check-log-before", &[("page.tti", "LG,X,text\nPN,10000\nOL,1,hello\n")]);
+    let refused = check(&folder.join("page.tti"));
+    assert_eq!(refused.status.code(), Some(i32::from(CHECK_ERRORS)), "{refused:?}");
+    let stdout = String::from_utf8_lossy(&refused.stdout);
+    assert!(stdout.contains("page.tti:1: before the first page: error: BadLogLine("), "{refused:?}");
+}
+
+/// REQ-190: a seventeenth log line before the first `PN` line is surplus,
+/// and an accepted one is silent.
+#[test]
+fn a_surplus_log_line_before_the_first_page_is_an_error_and_an_accepted_one_is_silent() {
+    let lines = "LG,I,fine\n".repeat(neoteletext_formats::log::MAX_LOG_LINES_PER_PAGE + 1);
+    let accepted = "LG,I,fine\nPN,10000\nOL,1,hello\n";
+    let folder =
+        folder_of("check-log-surplus", &[("surplus.tti", &format!("{lines}PN,10000\n")), ("fine.tti", accepted)]);
+    let surplus = check(&folder.join("surplus.tti"));
+    assert_eq!(surplus.status.code(), Some(i32::from(CHECK_ERRORS)), "{surplus:?}");
+    let line = neoteletext_formats::log::MAX_LOG_LINES_PER_PAGE + 1;
+    let expected = format!("surplus.tti:{line}: before the first page: error: TooManyLogLines");
+    assert!(String::from_utf8_lossy(&surplus.stdout).contains(&expected), "{surplus:?}");
+    let fine = check(&folder.join("fine.tti"));
+    assert!(fine.status.success(), "{fine:?}");
+    assert!(fine.stdout.is_empty(), "{fine:?}");
+}
+
+/// REQ-91: every row too long is reported, though a page records at most
+/// `PAGE_ISSUES` of its issues.
+#[test]
+fn every_row_too_long_is_reported_past_the_pages_issue_capacity() {
+    use neoteletext_formats::page::PAGE_ISSUES;
+    let rows = PAGE_ISSUES + 7;
+    let long_row = "x".repeat(COLUMNS + 1);
+    let long_rows = (1..=rows).map(|row| format!("OL,{row},{long_row}")).collect::<Vec<_>>().join("\n");
+    let text = format!("PN,10000\n{long_rows}\n");
+    let folder = folder_of("check-many-rows", &[("rows.tti", &text)]);
+    let output = check(&folder.join("rows.tti"));
+    assert_eq!(output.status.code(), Some(i32::from(CHECK_ERRORS)), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let reported: Vec<usize> = (1..=rows)
+        .filter(|row| stdout.contains(&format!("rows.tti:{}: page 100 sub-page 0: error: RowTooLong", row + 1)))
+        .collect();
+    assert_eq!(reported, (1..=rows).collect::<Vec<_>>(), "{stdout}");
+}

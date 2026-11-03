@@ -60,6 +60,23 @@ pub enum Problem {
     Warning(Warning),
 }
 
+impl Problem {
+    /// The finding a problem the reader recorded on a page is reported as.
+    /// Every such problem is an error.
+    #[must_use]
+    pub const fn of_issue(kind: IssueKind) -> Self {
+        match kind {
+            IssueKind::TooManyLinks | IssueKind::RepeatedKey => Self::TooManyLinks,
+            IssueKind::BadLinkTarget => Self::BadLinkTarget,
+            IssueKind::WithdrawnCommand => Self::WithdrawnCommand,
+            IssueKind::BadCursorLine => Self::BadCursorLine,
+            IssueKind::BadLogLine(why) => Self::BadLogLine(why),
+            IssueKind::TooManyLogLines => Self::TooManyLogLines,
+            IssueKind::RowTooLong => Self::RowTooLong,
+        }
+    }
+}
+
 /// One problem found.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct Finding {
@@ -167,16 +184,7 @@ pub fn check_page(page: &PageFile, options: &CheckOptions<'_>, out: &mut dyn FnM
         out(Finding { severity, problem, page: page.address, subpage: page.subpage, line });
     };
     for issue in page.issues.as_slice() {
-        let problem = match issue.kind {
-            IssueKind::TooManyLinks | IssueKind::RepeatedKey => Problem::TooManyLinks,
-            IssueKind::BadLinkTarget => Problem::BadLinkTarget,
-            IssueKind::WithdrawnCommand => Problem::WithdrawnCommand,
-            IssueKind::BadCursorLine => Problem::BadCursorLine,
-            IssueKind::BadLogLine(why) => Problem::BadLogLine(why),
-            IssueKind::TooManyLogLines => Problem::TooManyLogLines,
-            IssueKind::RowTooLong => Problem::RowTooLong,
-        };
-        report(Severity::Error, problem, issue.line);
+        report(Severity::Error, Problem::of_issue(issue.kind), issue.line);
     }
     check_links(page, options, &mut report);
 }
