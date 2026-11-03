@@ -4,7 +4,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use neoteletext_core::colour::ColourMap;
 use neoteletext_core::config::RomVariant;
-use neoteletext_core::consts::COLOUR_TRANSPARENT;
+use neoteletext_core::consts::{COLOUR_MAP_ENTRIES, COLOUR_TRANSPARENT};
 use neoteletext_core::types::Rgb12;
 use std::path::PathBuf;
 
@@ -75,7 +75,7 @@ pub struct Common {
     /// from entry 0; the first eight are the Level 1 colours, and entry 8
     /// stays transparent. For example `000,F00,0F0,FF0,00F,F0F,0FF,CCC`.
     #[arg(long, value_name = "COLOURS", value_parser = parse_colours)]
-    pub colours: Option<&'static ColourMap>,
+    pub colours: Option<&'static [Rgb12; COLOUR_MAP_ENTRIES]>,
     /// In a screen dump, leave out a row that repeats the double-height row
     /// above it, as the BBC Microcomputer's dumps hold it (REQ-INP-017).
     #[arg(long)]
@@ -552,11 +552,11 @@ pub(crate) enum FontCommand {
 mod tests;
 
 /// A ROM variant named by its datasheet letter (REQ-PRF-003).
-/// The user's colours of `--colours` (REQ-RND-005): Table 30's Colour Map
-/// with its first entries replaced by the list's. The map is made once for
-/// the run and lives as long as it, as the configuration's reference to it
-/// must (DEC-2482).
-fn parse_colours(text: &str) -> Result<&'static ColourMap, String> {
+/// The user's colours of `--colours` (REQ-RND-005): the entries of Table
+/// 30's Colour Map with the first replaced by the list's. They are made once
+/// for the run and live as long as it, as the configuration's reference to
+/// them must (DEC-2482).
+fn parse_colours(text: &str) -> Result<&'static [Rgb12; COLOUR_MAP_ENTRIES], String> {
     let mut map = ColourMap::DEFAULT;
     let mut given = 0usize;
     for (entry, colour) in map.entries.iter_mut().zip(text.split(',')) {
@@ -571,7 +571,7 @@ fn parse_colours(text: &str) -> Result<&'static ColourMap, String> {
     if let Some(entry) = map.entries.get_mut(usize::from(COLOUR_TRANSPARENT)) {
         *entry = ColourMap::DEFAULT.entry(COLOUR_TRANSPARENT);
     }
-    Ok(Box::leak(Box::new(map)))
+    Ok(Box::leak(Box::new(map.entries)))
 }
 
 /// A 12-bit colour written as three hexadecimal digits, red first.

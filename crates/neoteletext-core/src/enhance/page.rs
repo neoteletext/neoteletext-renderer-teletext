@@ -102,7 +102,7 @@ fn process(
     grid.designation = designation;
     grid.designation_fallback = fallback;
 
-    let presentation = presentation(page, magazine, &links, level, config.base_colours());
+    let presentation = presentation(page, magazine, &links, level, &ColourMap::with_user(config.user_colours));
     let default_sets = (designation.g0.set, designation.g2);
     let inputs = Inputs {
         page,

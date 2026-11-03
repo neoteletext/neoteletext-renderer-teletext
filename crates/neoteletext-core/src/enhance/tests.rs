@@ -1057,7 +1057,7 @@ fn the_users_colours_replace_table_30_and_a_page_still_wins() {
     let mut map = crate::colour::ColourMap::DEFAULT;
     map.entries[red] = user_red;
     map.entries[clut_2] = user_clut_2;
-    let user: &'static crate::colour::ColourMap = Box::leak(Box::new(map));
+    let user: &'static [crate::types::Rgb12; crate::consts::COLOUR_MAP_ENTRIES] = Box::leak(Box::new(map.entries));
     let plain = page(0, &[(1, b"ROW 1")], Vec::new());
     for presentation in
         [PresentationLevel::Level1, PresentationLevel::Level15, PresentationLevel::Level25, PresentationLevel::Level35]
@@ -1093,7 +1093,7 @@ fn the_users_colours_replace_table_30_and_a_page_still_wins() {
         assert_eq!(grid.colour_map.entries[clut_2], words[0], "the page's redefinition wins");
     }
     assert_eq!(grid.colour_map.entries[red], user_red);
-    assert_eq!(grid.receiver_colours, user.clut0());
+    assert_eq!(grid.receiver_colours, map.clut0());
 }
 
 /// True when no two names are the same.

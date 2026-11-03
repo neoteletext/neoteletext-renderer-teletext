@@ -60,7 +60,7 @@ Notes on the builds:
 
 ## Colours
 
-A port that lets its user choose the colours (REQ-RND-005) gives the decoder a Colour Map in `Config::user_colours`, a reference to a value the port keeps for as long as the configuration (a `static`, or one map made once for the run): its entries replace Table 30's before any page redefines them, at every level, and its CLUT 0 becomes the receiver's own colours, `Grid::receiver_colours`, in which the status area and a receiver-drawn row 24 are drawn and which no page can change (DEC-2464, DEC-2482). Without it the decoder uses Table 30. The palettes take the grid's colours: `neoteletext_image::palette::palette(&clut0_of(&grid.colour_map), ...)` in the palette mode and `colour_map_palette(&grid.colour_map, &grid.receiver_colours, ...)` in the resolved mode.
+A port that lets its user choose the colours (REQ-RND-005) gives the decoder the 32 entries of a Colour Map in `Config::user_colours`, a reference to a value the port keeps for as long as the configuration (a `static`, or one array made once for the run): its entries replace Table 30's before any page redefines them, at every level, and its CLUT 0 becomes the receiver's own colours, `Grid::receiver_colours`, in which the status area and a receiver-drawn row 24 are drawn and which no page can change (DEC-2464, DEC-2482). Without it the decoder uses Table 30. The palettes take the grid's colours: `neoteletext_image::palette::palette(&clut0_of(&grid.colour_map), ...)` in the palette mode and `colour_map_palette(&grid.colour_map, &grid.receiver_colours, ...)` in the resolved mode.
 
 ## Memory
 

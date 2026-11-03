@@ -51,6 +51,17 @@ impl ColourMap {
         Self { entries }
     };
 
+    /// The colours pages start from (REQ-RND-005, DEC-2482): the user's
+    /// entries when there are any (`Config::user_colours`), otherwise
+    /// Table 30's.
+    #[must_use]
+    pub const fn with_user(user: Option<&[Rgb12; COLOUR_MAP_ENTRIES]>) -> Self {
+        match user {
+            Some(entries) => Self { entries: *entries },
+            None => Self::DEFAULT,
+        }
+    }
+
     /// The eight colours of CLUT 0: the Level 1 colours, which the
     /// receiver's own cells take (DEC-2464).
     #[must_use]

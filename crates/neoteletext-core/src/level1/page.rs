@@ -6,6 +6,7 @@ use super::row::{NoTrace, RowContext, RowTracer, decode_row};
 use super::{Cell, DisplayOptions, Glyph, Grid, Size, resolve_designation};
 use crate::acq::{MagazineData, StoredPage};
 use crate::charset::{self, CharRef, CharSet, G0};
+use crate::colour::ColourMap;
 use crate::config::{Config, ParityPolicy, Row24Policy};
 use crate::consts::{
     C5_NEWSFLASH, C6_SUBTITLE, C7_SUPPRESS_HEADER, C10_INHIBIT_DISPLAY, CLOCK_COLUMN, CODE_MASK_7BIT, COLOUR_GREEN,
@@ -85,8 +86,8 @@ fn build(
     out.clear();
     // REQ-RND-005, REQ-RND-030: the user's colours replace Table 30's
     // before any page data redefines them.
-    let base = config.base_colours();
-    out.colour_map = *base;
+    let base = ColourMap::with_user(config.user_colours);
+    out.colour_map = base;
     out.receiver_colours = base.clut0();
     let (designation, second, fallback) = resolve_designation(page, magazine, config);
     out.designation = designation;

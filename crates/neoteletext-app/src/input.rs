@@ -3,9 +3,12 @@
 
 use crate::session::Session;
 use crate::{Failure, exit};
+#[cfg(test)]
 use neoteletext_core::colour::ColourMap;
 use neoteletext_core::config::{Config, ParityPolicy, PresentationLevel, RomVariant};
+use neoteletext_core::consts::COLOUR_MAP_ENTRIES;
 use neoteletext_core::types::PageAddress;
+use neoteletext_core::types::Rgb12;
 use neoteletext_formats::Item;
 use neoteletext_formats::detect::{AutoConfig, AutoReader, Format};
 use neoteletext_formats::item::Reader;
@@ -57,7 +60,7 @@ pub struct Options {
     pub rom_variant: Option<RomVariant>,
     /// The user's colours, replacing Table 30's before any page data
     /// redefines them (REQ-RND-005, DEC-2482).
-    pub colours: Option<&'static ColourMap>,
+    pub colours: Option<&'static [Rgb12; COLOUR_MAP_ENTRIES]>,
     /// Leave out a screen dump's row that repeats the double-height row
     /// above it (REQ-181).
     pub dump_repeated_rows: bool,
@@ -351,7 +354,7 @@ mod tests {
             no_rounding: true,
             single_start_box: true,
             rom_variant: Some(RomVariant::GreekTurkish),
-            colours: Some(&ColourMap::DEFAULT),
+            colours: Some(&ColourMap::DEFAULT.entries),
             ..options("saa5050")
         };
         let changed = Config {
@@ -361,7 +364,7 @@ mod tests {
             rounding: false,
             double_start_box: false,
             rom_variant: Some(RomVariant::GreekTurkish),
-            user_colours: Some(&ColourMap::DEFAULT),
+            user_colours: Some(&ColourMap::DEFAULT.entries),
             ..profile
         };
         assert_eq!(config(&given).unwrap(), changed);

@@ -67,13 +67,13 @@ fn the_colours_option_replaces_table_30_from_entry_0() {
     };
     assert_eq!(colours(&["list", "in.t42"]), None);
     let map = colours(&["list", "in.t42", "--colours", "111,f80, 0F0"]).unwrap();
-    assert_eq!(map.entries[0], Rgb12::new(1, 1, 1));
-    assert_eq!(map.entries[1], Rgb12::new(15, 8, 0));
-    assert_eq!(map.entries[2], Rgb12::new(0, 15, 0));
-    assert_eq!(map.entries[3..], ColourMap::DEFAULT.entries[3..], "the rest stay Table 30's");
+    assert_eq!(map[0], Rgb12::new(1, 1, 1));
+    assert_eq!(map[1], Rgb12::new(15, 8, 0));
+    assert_eq!(map[2], Rgb12::new(0, 15, 0));
+    assert_eq!(map[3..], ColourMap::DEFAULT.entries[3..], "the rest stay Table 30's");
     let nine = "000,111,222,333,444,555,666,777,888";
     let map = colours(&["list", "in.t42", "--colours", nine]).unwrap();
-    assert_eq!(map.entries[usize::from(COLOUR_TRANSPARENT)], ColourMap::DEFAULT.entry(COLOUR_TRANSPARENT));
+    assert_eq!(map[usize::from(COLOUR_TRANSPARENT)], ColourMap::DEFAULT.entry(COLOUR_TRANSPARENT));
     for refused in ["12", "1234", "GGG", &["000"; 33].join(",")] {
         assert!(parse(&["list", "in.t42", "--colours", refused]).is_err(), "{refused}");
     }
