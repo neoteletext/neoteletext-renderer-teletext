@@ -226,6 +226,9 @@ fn is_panic(symbol: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// REQ-162 (REQ-GEN-019): the symbol check of the linked image finds
+    /// software floating point, compare-and-swap and panic paths, and not the
+    /// image's own panic handler.
     #[test]
     fn symbols_are_classified() {
         let symbols: Vec<String> = [
@@ -246,6 +249,8 @@ mod tests {
         assert!(found.iter().all(|f| !f.contains("fail_exchange") && !f.contains("test_image")));
     }
 
+    /// REQ-162 (REQ-GEN-019): floating point is allowed only in the slicer's
+    /// build.
     /// REQ-GEN-016 allows the slicer floating point, and nothing else: its
     /// build still fails on compare-and-swap and panic paths.
     #[test]
