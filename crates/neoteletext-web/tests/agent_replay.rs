@@ -258,10 +258,17 @@ fn assert_profile_headers(replay: &Replay) {
     }
 }
 
+/// The configuration of a port that follows redirects out of the service,
+/// as `neottx` does for a service opened by its descriptor: the default
+/// keeps them inside (REQ-SEC-020).
+fn following() -> Config {
+    Config { redirects_within_channel: false, ..Config::default() }
+}
+
 fn plain_service() -> Harness {
     let mut replay = Replay::new(&[("tt.example", PUBLIC), ("evil.example", PRIVATE)]);
     replay.reply("tt.example:80", json_response(&descriptor("")));
-    let mut harness = Harness::new(Config::default(), replay);
+    let mut harness = Harness::new(following(), replay);
     let records = harness.open("http://tt.example/service.json");
     assert!(has_event(&records, "ServiceReady { name: \"Test\""), "{records:?}");
     harness
@@ -1529,7 +1536,7 @@ fn redirects_inside_the_channel_and_upgrades_are_followed() {
 
 #[test]
 fn neottx_still_follows_redirects_to_other_hosts() {
-    let mut harness = site_harness(Config::default());
+    let mut harness = site_harness(following());
     harness
         .replay()
         .reply("site.example:80", Reply::Bytes(response("302 Found", &["Location: http://other.example/d.json"], b"")));
@@ -1999,7 +2006,7 @@ fn the_push_connection_carries_no_query_and_no_page() {
 #[test]
 #[cfg(feature = "cookies")]
 fn a_response_from_outside_the_channel_stores_no_cookies() {
-    let mut harness = site_harness(Config::default());
+    let mut harness = site_harness(following());
     harness.replay().reply("site.example:80", not_found());
     harness.replay().reply("site.example:80", not_found());
     harness.open_channel("http://site.example/one/");
@@ -2290,4 +2297,19 @@ fn a_ragged_message_leaves_the_connection_open() {
     assert!(has_event(&records, "InvalidPackets { total: 2 }"), "{records:?}");
     assert_eq!(pages(&records).len(), 1, "{records:?}");
     assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+// Verifies REQ-433 (REQ-SEC-020): every security setting of the web
+// agent's configuration defaults to the safer choice: no local-network
+// address allowed, no cookies saved between runs, redirects kept inside the
+// channel, the connection direct rather than through a proxy, and TLS
+// offered, so that HTTPS is used where an address asks for it.
+#[test]
+fn the_default_configuration_is_the_safer_choice() {
+    let config = Config::default();
+    assert!(config.allowed_local.iter().all(Option::is_none), "no local address is allowed");
+    assert!(!config.persist_cookies, "cookies are not saved");
+    assert!(config.redirects_within_channel, "redirects stay inside the channel");
+    assert!(!config.proxied, "no proxy");
+    assert!(config.tls_available, "TLS is offered");
 }
