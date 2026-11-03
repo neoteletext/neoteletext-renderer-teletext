@@ -37,7 +37,7 @@ impl Decoder<'_> {
         self.serial_active = if self.serial { Some(own) } else { None };
         self.header_store(header, now, events);
         self.roll(header);
-        events(Event::HeaderReceived { magazine: own, page: header.page });
+        events(Event::HeaderReceived { magazine: own, page: header.page, subcode: header.subcode });
     }
 
     fn own_header_event(&self, header: &Header) -> MagazineEvent {

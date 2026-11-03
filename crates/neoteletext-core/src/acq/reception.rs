@@ -2,21 +2,23 @@
 //! the store, and the row-like packets' path to the page their magazine is
 //! receiving.
 
-use super::{Decoder, Discard, Event, StoredPage, enhancement_index, row_index};
+use super::{Damage, Decoder, Discard, Event, StoredPage, enhancement_index, row_index};
 use crate::config::ParityPolicy;
 use crate::consts::{
     DATA_BYTES, DESIGNATION_LINKS_LEVEL_25, LINK_FUNCTION_GPOP, LINK_FUNCTION_POP, SERVICE_FORMAT_2_BIT,
 };
-use crate::fsm::{MagazineAction, MagazineEvent, PageEvent};
+use crate::fsm::{MagazineAction, MagazineEvent, MagazineState, PageEvent};
 use crate::packet::{
-    CompositionalLink, Decoded, Enhancement, MagazinePacket, Packet, PacketError, PacketMeta, PagePacket, Row,
-    ServicePacket, decode,
+    CompositionalLink, Decoded, Enhancement, MagazinePacket, Packet, PacketError, PacketMeta, PagePacket, Protection,
+    Row, ServicePacket, decode, protection,
 };
 use crate::types::{Instant, Magazine, PageAddress};
 
 impl Decoder<'_> {
     /// Processes one packet.
     pub fn push(&mut self, packet: &Packet, _meta: &PacketMeta, now: Instant, events: &mut dyn FnMut(Event)) {
+        let protection = protection(packet);
+        self.count_protection(protection);
         let decoded = match decode(packet) {
             Ok(decoded) => decoded,
             Err(error) => {
@@ -25,6 +27,14 @@ impl Decoder<'_> {
                 return;
             }
         };
+        if protection.hamming84_failures > 0 || protection.hamming2418_failures > 0 {
+            let damage = Damage {
+                hamming84_failures: protection.hamming84_failures,
+                hamming2418_failures: protection.hamming2418_failures,
+                parity_failures: 0,
+            };
+            self.raise_damage(decoded_magazine(&decoded), damage, events);
+        }
         match decoded {
             Decoded::Header(header) => {
                 self.count(header.magazine, 0);
@@ -62,6 +72,28 @@ impl Decoder<'_> {
     }
 
     /// Counts a packet whose address or designation failed to decode.
+    /// Adds a packet's corrections and failures to the statistics
+    /// (REQ-ARCH-007).
+    fn count_protection(&mut self, counts: Protection) {
+        let stats = &mut self.stats;
+        stats.hamming84_corrected = stats.hamming84_corrected.saturating_add(u32::from(counts.hamming84_corrected));
+        stats.hamming84_failures = stats.hamming84_failures.saturating_add(u32::from(counts.hamming84_failures));
+        stats.hamming2418_corrected =
+            stats.hamming2418_corrected.saturating_add(u32::from(counts.hamming2418_corrected));
+        stats.hamming2418_failures = stats.hamming2418_failures.saturating_add(u32::from(counts.hamming2418_failures));
+    }
+
+    /// Raises the damage of a packet that was kept, naming the page its
+    /// magazine is receiving (REQ-ARCH-005).
+    fn raise_damage(&self, magazine: Option<Magazine>, damage: Damage, events: &mut dyn FnMut(Event)) {
+        let Some(magazine) = magazine else { return };
+        let page = match self.magazines.get(magazine.index()) {
+            Some(MagazineState::Receiving(key)) => Some(*key),
+            _ => None,
+        };
+        events(Event::Damaged { magazine, page, damage });
+    }
+
     fn count_failure(&mut self, error: PacketError) {
         match error {
             PacketError::BadAddress => {
@@ -93,8 +125,6 @@ impl Decoder<'_> {
         events: &mut dyn FnMut(Event),
     ) {
         self.count(enhancement.magazine, crate::consts::PACKET_ENHANCEMENT);
-        let failures = enhancement.triplets.iter().filter(|t| t.is_none()).count() as u32;
-        self.stats.triplet_failures = self.stats.triplet_failures.saturating_add(failures);
         let data = packet.data();
         let as_received = enhancement_index(enhancement.designation).map(|index| (index, &data));
         self.row_like(enhancement.magazine, now, events, as_received, |page, _| {
@@ -225,6 +255,10 @@ impl Decoder<'_> {
                 }
                 if let Some((row, failures)) = stored {
                     self.stats.parity_failures = self.stats.parity_failures.saturating_add(failures);
+                    if failures > 0 {
+                        let parity_failures = u16::try_from(failures).unwrap_or(u16::MAX);
+                        self.raise_damage(Some(magazine), Damage { parity_failures, ..Damage::default() }, events);
+                    }
                     self.page_event(slot, PageEvent::RowStored(row), now, events);
                 }
             }
@@ -239,5 +273,21 @@ impl Decoder<'_> {
             return Some(index);
         }
         None
+    }
+}
+
+/// The magazine a decoded packet belongs to, for a damage event: none for
+/// packet 8/30, which belongs to no magazine's page.
+fn decoded_magazine(decoded: &Decoded) -> Option<Magazine> {
+    match decoded {
+        Decoded::Header(header) => Some(header.magazine),
+        Decoded::Row(row) => Some(row.magazine),
+        Decoded::Enhancement(enhancement) => Some(enhancement.magazine),
+        Decoded::Links(links) => Some(links.magazine),
+        Decoded::LinksRaw { magazine, .. }
+        | Decoded::CompositionalLinks { magazine, .. }
+        | Decoded::PageData { magazine, .. }
+        | Decoded::Magazine { magazine, .. } => Some(*magazine),
+        _ => None,
     }
 }

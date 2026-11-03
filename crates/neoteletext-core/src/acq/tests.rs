@@ -1172,3 +1172,62 @@ fn the_decoder_says_when_it_next_needs_a_tick() {
     assert!(events.contains(&Event::PageStale(key(0x100, 0))));
     assert_eq!(decoder.next_tick(), None, "a stale page waits for nothing");
 }
+
+/// REQ-27, REQ-29 (REQ-ARCH-005, REQ-ARCH-007): one flipped bit in a
+/// Hamming 8/4 byte and in a Hamming 24/18 triplet counts one correction
+/// each and raises nothing; two flipped bits count one failure each and
+/// raise a damage event naming the page in reception; a row with bad
+/// parity raises one with its count; the header event carries the
+/// sub-code.
+#[test]
+fn corrections_failures_and_damage_are_reported() {
+    use crate::consts::DATA_START;
+    let mut slots = std::vec![StoredPage::EMPTY; 4];
+    let mut decoder = Decoder::new(&mut slots, Config::default());
+    let mut events = Vec::new();
+    let mut corrected_header = header(1, 0x23, 0x0005, 0);
+    corrected_header.bytes[DATA_START] ^= 0b0000_0001;
+    let format = PageFormat { function: 0, coding: 0 };
+    let mut corrected_triplet = encode::page_enhancement(mag(1), 0, format, &PresentationFields::default());
+    corrected_triplet.bytes[DATA_START + 1] ^= 0b0000_0100;
+    feed(&mut decoder, &[corrected_header, corrected_triplet], &mut events);
+    let stats = *decoder.statistics();
+    assert_eq!(
+        (stats.hamming84_corrected, stats.hamming84_failures, stats.hamming2418_corrected, stats.hamming2418_failures),
+        (1, 0, 1, 0)
+    );
+    assert!(!events.iter().any(|event| matches!(event, Event::Damaged { .. })));
+    assert!(events.contains(&Event::HeaderReceived {
+        magazine: mag(1),
+        page: Some(PageNumber(0x23)),
+        subcode: Some(SubCode::new(0x0005)),
+    }));
+    decoder.reset_statistics();
+    events.clear();
+    let mut failed_triplet = encode::page_enhancement(mag(1), 0, format, &PresentationFields::default());
+    failed_triplet.bytes[DATA_START + 1] ^= 0b0000_0110;
+    let mut bad_parity = encode::row(mag(1), 1, &text(b"ROW"));
+    bad_parity.bytes[DATA_START] ^= 0x80;
+    feed(&mut decoder, &[failed_triplet, bad_parity], &mut events);
+    let stats = *decoder.statistics();
+    assert_eq!((stats.hamming2418_corrected, stats.hamming2418_failures, stats.parity_failures), (0, 1, 1));
+    let damaged: Vec<Event> = events.iter().copied().filter(|event| matches!(event, Event::Damaged { .. })).collect();
+    let page = Some(key(0x123, 0x0005));
+    assert_eq!(
+        damaged,
+        [
+            Event::Damaged { magazine: mag(1), page, damage: Damage { hamming2418_failures: 1, ..Damage::default() } },
+            Event::Damaged { magazine: mag(1), page, damage: Damage { parity_failures: 1, ..Damage::default() } },
+        ]
+    );
+    // A double error in a header's sub-code byte is a Hamming 8/4 failure.
+    decoder.reset_statistics();
+    events.clear();
+    let mut failed_header = header(2, 0x00, 0, 0);
+    failed_header.bytes[DATA_START + 2] ^= 0b0000_0011;
+    feed(&mut decoder, &[failed_header], &mut events);
+    assert_eq!(decoder.statistics().hamming84_failures, 1);
+    assert!(
+        events.iter().any(|event| matches!(event, Event::Damaged { damage: Damage { hamming84_failures: 1, .. }, .. }))
+    );
+}

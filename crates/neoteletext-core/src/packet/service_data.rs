@@ -29,7 +29,7 @@ pub struct ServicePacket {
 /// Indices within 8/30 (clause 9.8.1, Table 18): initial page bytes 7 to
 /// 12, network identification 13 and 14, time offset 15, date and time 16 to
 /// 21, Programme Delivery Control 13 to 25, status 26 to 45.
-const SERVICE_INITIAL_PAGE: usize = 3;
+pub(super) const SERVICE_INITIAL_PAGE: usize = 3;
 const SERVICE_NETWORK_ID: usize = 9;
 const SERVICE_TIME_OFFSET: usize = 11;
 const SERVICE_DATE_TIME: usize = 12;

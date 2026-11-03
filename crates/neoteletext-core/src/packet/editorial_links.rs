@@ -50,10 +50,10 @@ pub(super) fn page_reference(packet: &Packet, start: usize) -> Option<(PageNumbe
 }
 
 /// Index of link 0 (packet byte 7) and the bytes per link.
-const LINK_START: usize = 3;
-const LINK_BYTES: usize = 6;
+pub(super) const LINK_START: usize = 3;
+pub(super) const LINK_BYTES: usize = 6;
 /// Index of the link control byte (packet byte 43).
-const LINK_CONTROL: usize = 39;
+pub(super) const LINK_CONTROL: usize = 39;
 /// Data bit 4 of the link control byte: display row 24 (Table 14). Only
 /// this bit is read; the reserved bits beside it are ignored (REQ-PKT-009).
 const LINK_CONTROL_ROW_24: u8 = 0x8;

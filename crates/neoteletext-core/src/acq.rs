@@ -32,7 +32,7 @@ pub use enhancement::{
     enhancement_index, row_index,
 };
 
-pub use events::{Discard, Event, MagazineData};
+pub use events::{Damage, Discard, Event, MagazineData};
 pub use page::{Numbering, StoredPage};
 pub use statistics::{EnhancementFaults, EnhancementReport, PageBuild, Statistics};
 pub use store::{PageStore, SubCodes};
