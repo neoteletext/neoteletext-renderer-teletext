@@ -1,6 +1,6 @@
 # neoteletext — software teletext receiver
 
-A software receiver for World System Teletext (ETSI EN 300 706), Presentation Levels 1.0 and 1.5. The behaviour baselines are the Philips SAA5050 (rendering) and SAA5246A (receiver).
+A software receiver for World System Teletext (ETSI EN 300 706), Presentation Levels 1.0, 1.5, 2.5 and 3.5. The behaviour baselines are the Philips SAA5050 (rendering) and SAA5246A (receiver).
 
 The library and `neottx` are implemented; work continues feature by feature. This repository is the core teletext rendering engine only (decision E.76). The windowed browser built on it is maintained in its own repository, `~/devel/neoteletext-browser`; it was removed from this one on 18 October 2026. Do not add browser code to this repository.
 
@@ -16,13 +16,13 @@ That is the one document of how we work, for every NeoTeletext repository, with 
 ## Key documents
 
 - **Requirements and decisions are in rdm:** the requirements (Part F, area SEC overriding every other), the decisions (Part E), the phase plan and milestones (decisions `F.0.1`, `F.0.2`), what is out of scope (decisions `G.n`), the owner's open questions (decisions waiting for confirmation) and the work owed (to-dos).
-- **`docs/spec/`** holds how things work: `design/*.md` (Levels 1.0 and 1.5, the SAA5050 and SAA5246A, the TTI Link and Form Extensions; character sets and languages, including those beyond the standard's sets, are in rdm only: decisions DEC-599 and DEC-601 to DEC-606 with their evidence, the requirements they decide, and the protocol document's items under DOC-1845), `glossary.md`, `source-documents.md` and `module-sources.md`; `docs/spec/README.md` is the map.
+- **`docs/spec/`** holds how things work: `design/*.md` (Levels 1.0 and 1.5, the SAA5050 and SAA5246A, the TTI Link Extension, and the TTI Form Extension kept only as history since its withdrawal by decision E.126 (DEC-650); character sets and languages, including those beyond the standard's sets, are in rdm only: decisions DEC-599 and DEC-601 to DEC-606 with their evidence, the requirements they decide, and the protocol document's items under DOC-1845), `glossary.md`, `source-documents.md` and `module-sources.md`; `docs/spec/README.md` is the map.
 
   **Each fact has one home.** A requirement states behaviour; a decision states the choice and its reason and links to the design; a design document explains; `ARCHITECTURE.md` says where code lives; `research/` holds the evidence. Link rather than restate.
 
 - `ARCHITECTURE.md` describes the code's layers (Foundation, then L0 Ingress to L9 Applications), their boundary types, trust boundaries and the allowed-dependency table. REQ-ARCH-011 makes it mandatory, and it is enforced by an `xtask` check. Keep it in step with `docs/spec/`.
 - `research/notes-*.md` are the cited research notes behind Parts A to E. `research/answers-*.md` are the reports that answered the open questions: SAA5050 behaviour from emulators, the historic specifications, and Rust targets. Check a claim here before changing it.
-- `research/jellytext-tti-form-system-spec-v2.md` is the original forms specification from the earlier jellytext project, kept for history. The corrected version 3 is `docs/spec/design/tti-form-extension.md` (formerly Appendix C); decision E.31 explains the changes.
+- `research/jellytext-tti-form-system-spec-v2.md` is the original forms specification from the earlier jellytext project, kept for history. Its corrected version 3, `docs/spec/design/tti-form-extension.md` (formerly Appendix C, changes explained by decision E.31), is history too: the owner withdrew the TTI Form Extension on 27 October 2026 (decision E.126, DEC-650), and a channel that wants a form draws it and takes the viewer's keys over the input protocol.
 - The source standards and datasheets are in `~/devel/teletext-reference/`. All folder paths cited in `docs/spec/` (`teletext-standards/`, `teletext-fonts/manufacturers/philips/datasheets/saa5050/` and so on) are relative to that directory.
 
 ## Rules that must not be broken
@@ -93,7 +93,7 @@ The implementation follows the requirements in rdm:
 - **Optional modules:**
   - input format readers and writers;
   - the software data slicer;
-  - the web-native module (area WEB, section F.19). It is written sans-IO. It reads pages from web servers over HTTP or HTTPS and WebSockets, keeps cookie sessions, runs forms, and includes the zxnet live feed (REQ-INP-022). Web pages arrive as TTI or T42 and go through the same decoder. The port supplies the network transport through `embedded-io`-style traits.
+  - the web-native module (area WEB, section F.19). It is written sans-IO. It reads pages from web servers over HTTP or HTTPS and WebSockets, keeps cookie sessions, and includes the zxnet live feed (REQ-INP-022). Web pages arrive as TTI or T42 and go through the same decoder. The port supplies the network transport through `embedded-io`-style traits.
   - the pixel-format helpers;
   - the image writers;
   - the command-line program `neottx`.
