@@ -434,3 +434,21 @@ pub(super) fn packets_of(page: &PageFile) -> Vec<neoteletext_core::packet::Packe
     encode_page(page, &mut |packet| packets.push(packet));
     packets
 }
+
+/// REQ-303, DEC-2329: an `SC` value with bits outside the thirteen of a
+/// sub-code is masked to the sub-code and reported, so the author learns
+/// that the page joined another sub-page.
+#[test]
+fn sc_with_control_bits_is_masked_and_reported() {
+    for (value, masked) in [(0x0080_u16, 0x0000_u16), (0x8000, 0x0000), (0x8081, 0x0001)] {
+        let text = std::format!("PN,10000\nSC,{value:04X}\nOL,1,x\n");
+        let items = crate::testing::run(&mut TtiReader::new(), text.as_bytes(), text.len());
+        let kinds: Vec<DiagnosticKind> = diagnostics(&items).iter().map(|diagnostic| diagnostic.kind).collect();
+        assert_eq!(kinds, [DiagnosticKind::SubCodeMasked { value }], "{value:04X}");
+        let page = items.iter().find_map(|item| match item {
+            crate::testing::Owned::Page(page) => Some(page),
+            _ => None,
+        });
+        assert_eq!(page.map(|page| page.subcode.value()), Some(masked), "{value:04X}");
+    }
+}

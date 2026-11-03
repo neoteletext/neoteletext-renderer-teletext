@@ -178,6 +178,15 @@ pub enum DiagnosticKind {
         /// The two command letters.
         command: [u8; 2],
     },
+    /// An `SC` value with bits set outside the thirteen of a sub-code
+    /// (EN 300 706 clause 9.3.1.2: S1 to S4 are thirteen bits; the others
+    /// are the header's control bits, REQ-NUM-005). The page keeps the value
+    /// masked to the sub-code, so the author is told the page may have
+    /// joined another sub-page (DEC-2329).
+    SubCodeMasked {
+        /// The value as written.
+        value: u16,
+    },
     /// An output line with more than 40 characters; the rest was ignored.
     RowTooLong {
         /// The row number.

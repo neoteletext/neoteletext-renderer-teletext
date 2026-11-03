@@ -82,7 +82,12 @@ impl TtiReader {
         let bad = DiagnosticKind::BadArgument { command: name };
         match &name {
             b"SC" => match hex(args).and_then(|value| u16::try_from(value).ok()) {
-                Some(value) => self.page.subcode = SubCode::new(value),
+                Some(value) => {
+                    self.page.subcode = SubCode::new(value);
+                    if self.page.subcode.value() != value {
+                        self.diagnostic(DiagnosticKind::SubCodeMasked { value }, out);
+                    }
+                }
                 None => self.diagnostic(bad, out),
             },
             b"PS" => match hex(args).and_then(|value| u16::try_from(value).ok()) {
