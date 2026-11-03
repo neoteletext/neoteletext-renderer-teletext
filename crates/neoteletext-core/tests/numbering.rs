@@ -646,11 +646,17 @@ fn every_kind_of_editorial_link_has_the_same_meanings() {
         Some((magazine, PageNumber(0x45), SubCode::ANY)),
         Some((magazine, PageNumber(0xFF), SubCode::new(0x0001))),
         None,
-        Some((other, PageNumber(0x67), SubCode::new(0x3F7E))),
+        Some((other, PageNumber(0x67), SubCode::new(LAST_SUBPAGE_CODE))),
         Some((magazine, PageNumber(0xFF), SubCode::ANY)),
     ];
-    let expected =
-        [Some((0x123, 0x0004)), Some((0x145, SubCode::ANY.value())), None, None, Some((0x367, 0x3F7E)), None];
+    let expected = [
+        Some((0x123, 0x0004)),
+        Some((0x145, SubCode::ANY.value())),
+        None,
+        None,
+        Some((0x367, LAST_SUBPAGE_CODE)),
+        None,
+    ];
     for designation in 0..=3u8 {
         let mut packet = encode::links(magazine, &links, true, 0);
         packet.bytes[neoteletext_core::consts::DATA_START] = hamming84_encode(designation);

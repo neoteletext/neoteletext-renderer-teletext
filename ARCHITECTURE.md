@@ -640,7 +640,7 @@ A module may use the modules listed for it, and nothing else. The cross-cutting 
 | `glyphs` | L4 | Foundation, `charset` (character references) |
 | `render` | L4 | Foundation, `glyphs`, `level1` (grid types), `colour` (Colour Map) |
 | `viewer` | L6 | Foundation, `acq`, `level1`, `compose` (the grid of the page on screen), `colour`, `render` (change tracking), `service`, `nav`, `charset` (the receiver's own text) |
-| `nav` | L6 | Foundation, `acq` (the stored pages it steps through) |
+| `nav` | L6 | Foundation, `acq` (the stored pages it steps through), `packet` (the editorial link type whose meaning `link_target` gives, DEC-2344) |
 | `controls` | L6 | Foundation, `acq` (read-only stored page types), `objects` (the local enhancement data's triplets and row addresses), `packet` (triplet functions), `level1` (grid types, for the looks; decision E.127) |
 | `port` | L8 | Foundation |
 
