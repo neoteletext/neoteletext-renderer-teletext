@@ -53,53 +53,65 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         if self.complete_channel(now, &exchange, &head, sink) {
             return;
         }
-        let body = self.buffers.body.get(..self.fetch.body_len).unwrap_or(&[]);
         match exchange.purpose {
             // complete_channel handled every one of these, and
             // bound_complete the bound sessions'.
             Purpose::FrontDoor | Purpose::Contents | Purpose::Register | Purpose::Refresh { .. } => {}
             Purpose::Descriptor { via_link, channel } => {
-                // REQ-WEB-027 (DEC-1726): no type table lists a channel's
-                // entry file's extension, so a host gives it what it gives
-                // anything unknown, which may be no type at all. The strict
-                // reader decides what the file is, and only an HTML page, a
-                // host's answer for a missing file, is refused by its type.
-                // A service's descriptor comes only as JSON.
-                let media_accepted =
-                    if channel { head.media != MediaType::Html } else { head.media == MediaType::Json };
-                if status != STATUS_OK {
-                    event(sink, Event::DescriptorFailed(Failure::Status(status)));
-                } else if !media_accepted {
-                    event(sink, Event::DescriptorFailed(Failure::MediaType));
-                } else {
-                    let parsed = if channel {
-                        Descriptor::parse_channel(body, &exchange.url)
-                    } else {
-                        Descriptor::parse(body, &exchange.url)
-                    };
-                    match parsed {
-                        Ok(descriptor) => {
-                            self.open_descriptor(now, descriptor, via_link, sink);
-                            if channel && self.push.url.is_some() {
-                                // REQ-WEB-018 (DEC-1467): a live channel's
-                                // connection brings its pages and contents.
-                                self.live = true;
-                                self.connecting = true;
-                                event(sink, Event::ChannelConnecting);
-                            } else if channel {
-                                self.front_door = self
-                                    .channel
-                                    .and_then(|folder| channel::file_url(&folder, ChannelFile::Bundle).ok());
-                            }
-                        }
-                        Err(error) => event(sink, Event::DescriptorRejected(error)),
-                    }
-                }
+                self.complete_descriptor(now, &exchange, &head, (via_link, channel), sink);
             }
             Purpose::Page { page, subcode, file } => {
                 self.complete_page(now, &exchange, &head, (page, subcode, file), sink);
             }
             Purpose::SubPages { page, part } => self.complete_subpages(now, &head, page, part, sink),
+        }
+    }
+
+    /// A service's descriptor or a channel's entry file has come: read it
+    /// strictly and open the service, or report why not.
+    fn complete_descriptor(
+        &mut self,
+        now: Instant,
+        exchange: &Exchange,
+        head: &ResponseHead,
+        (via_link, channel): (bool, bool),
+        sink: &mut Sink<'_>,
+    ) {
+        let status = head.status;
+        let body = self.buffers.body.get(..self.fetch.body_len).unwrap_or(&[]);
+        // REQ-WEB-027 (DEC-1726): no type table lists a channel's
+        // entry file's extension, so a host gives it what it gives
+        // anything unknown, which may be no type at all. The strict
+        // reader decides what the file is, and only an HTML page, a
+        // host's answer for a missing file, is refused by its type.
+        // A service's descriptor comes only as JSON.
+        let media_accepted = if channel { head.media != MediaType::Html } else { head.media == MediaType::Json };
+        if status != STATUS_OK {
+            event(sink, Event::DescriptorFailed(Failure::Status(status)));
+        } else if !media_accepted {
+            event(sink, Event::DescriptorFailed(Failure::MediaType));
+        } else {
+            let parsed = if channel {
+                Descriptor::parse_channel(body, &exchange.url)
+            } else {
+                Descriptor::parse(body, &exchange.url)
+            };
+            match parsed {
+                Ok(descriptor) => {
+                    self.open_descriptor(now, descriptor, via_link, sink);
+                    if channel && self.push.url.is_some() {
+                        // REQ-WEB-018 (DEC-1467): a live channel's
+                        // connection brings its pages and contents.
+                        self.live = true;
+                        self.connecting = true;
+                        event(sink, Event::ChannelConnecting);
+                    } else if channel {
+                        self.front_door =
+                            self.channel.and_then(|folder| channel::file_url(&folder, ChannelFile::Bundle).ok());
+                    }
+                }
+                Err(error) => event(sink, Event::DescriptorRejected(error)),
+            }
         }
     }
 
