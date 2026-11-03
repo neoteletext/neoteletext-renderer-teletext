@@ -705,3 +705,102 @@ fn a_held_index_is_back_and_a_pressed_index_is_index() {
     press(&mut plain, 'i', KeyEventKind::Press);
     assert_eq!(plain.viewer.requested().0, page(0x150));
 }
+
+/// Types `digits` into the viewer as key presses, with `extras` the page
+/// shown's links.
+fn type_number(
+    state: &mut super::ViewState,
+    source: &mut dyn neoteletext_app::source::Source,
+    session: &neoteletext_app::session::Session,
+    extras: Option<&neoteletext_app::extras::PageExtras>,
+    keys: &[KeyCode],
+) {
+    let config = neoteletext_core::config::Config::default();
+    let shown = super::Shown { page: None, extras, config: &config, now: neoteletext_core::types::Instant(0) };
+    for &code in keys {
+        let _ = state.key(KeyEvent::new(code, KeyModifiers::NONE), source, session, &shown, 0);
+    }
+}
+
+/// REQ-509 (REQ-WEB-020), DEC-2480: a typed number with an alias to a
+/// linked service asks, naming the service and its origin, and Enter goes
+/// there; once its origin is confirmed it goes at once; an alias to
+/// another channel's address is said; a number with no alias is a page of
+/// this service.
+#[test]
+fn a_typed_number_follows_its_alias() {
+    use neoteletext_core::nav::LinkTarget;
+    use neoteletext_core::types::{PageAddress, SubCode};
+    use neoteletext_core::viewer::Action;
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let digits = |text: &str| text.chars().map(KeyCode::Char).collect::<Vec<_>>();
+    let session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut source = Linking(vec![linked("weather", "Weather", "https://weather.example")]);
+    let mut state = view_state(&session);
+    state.take_notice(
+        neoteletext_app::pipe::Notice::Aliases(vec![
+            (0x300, "weather:301".to_owned()),
+            (0x400, "https://sport.example/400.t42".to_owned()),
+        ]),
+        &mut source,
+    );
+    type_number(&mut state, &mut source, &session, None, &digits("300"));
+    let target = LinkTarget { address: page(0x301), subcode: SubCode::ANY, service: Some(0) };
+    assert_eq!(state.pending_link, Some(target));
+    assert_eq!(
+        state.prompt,
+        Some(neoteletext_app::interact::prompt_with("Enter: ", "Weather", "https://weather.example"))
+    );
+    type_number(&mut state, &mut source, &session, None, &[KeyCode::Enter]);
+    assert_eq!(state.action, Action::FollowService(target));
+    state.act(&mut neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8), &mut source);
+    // The origin is now confirmed: the alias goes at once.
+    type_number(&mut state, &mut source, &session, None, &digits("300"));
+    assert_eq!(state.action, Action::FollowService(target));
+    // Another key lets a question go.
+    let mut asked = view_state(&session);
+    asked.aliases = state.aliases.clone();
+    type_number(&mut asked, &mut source, &session, None, &digits("3001"));
+    assert_eq!((asked.pending_link, asked.prompt), (None, None));
+    // Another channel's address is said.
+    type_number(&mut state, &mut source, &session, None, &digits("400"));
+    assert!(
+        state.messages.iter().any(|message| message.contains("https://sport.example/400.t42")),
+        "{:?}",
+        state.messages
+    );
+    // No alias: the page of this service.
+    type_number(&mut state, &mut source, &session, None, &digits("500"));
+    assert_eq!(state.viewer.requested().0, page(0x500));
+}
+
+/// REQ-509 (REQ-WEB-020): a page's own `LK` link for a typed number wins
+/// over the service's alias for it, and leads to a page of this service as
+/// one visit, so Back returns to the page before.
+#[test]
+fn a_pages_own_number_link_wins_over_the_alias() {
+    use neoteletext_app::extras::{Destination, PageExtras};
+    use neoteletext_core::nav::LinkTarget;
+    use neoteletext_core::types::{PageAddress, SubCode};
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut source = Linking(vec![linked("weather", "Weather", "https://weather.example")]);
+    let mut state = view_state(&session);
+    state.aliases = vec![(0x300, "weather:300".to_owned())];
+    let extras = PageExtras {
+        links: None,
+        row24: None,
+        key_addresses: Default::default(),
+        number_links: vec![(
+            page(0x300),
+            Destination::Page(LinkTarget { address: page(0x350), subcode: SubCode::ANY, service: None }),
+        )],
+        text_links: Vec::new(),
+    };
+    let keys: Vec<KeyCode> = "300".chars().map(KeyCode::Char).collect();
+    type_number(&mut state, &mut source, &session, Some(&extras), &keys);
+    assert_eq!(state.viewer.requested().0, page(0x350));
+    assert_eq!(state.pending_link, None);
+    type_number(&mut state, &mut source, &session, Some(&extras), &[KeyCode::Backspace]);
+    assert_eq!(state.viewer.requested().0, page(0x100), "one visit: Back goes to the page before");
+}

@@ -147,7 +147,7 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 
 | Key | Action |
 |---|---|
-| `0` to `9` | Enter a page number. |
+| `0` to `9` | Enter a page number. Where the page shown has its own link for the number (an `LK` line), or else the channel's `channel.ttx` has an alias for it, the number goes there (REQ-509, DEC-2480). |
 | `r` `g` `y` `c`, or F1 to F4 | Follow the red, green, yellow and cyan links. They work only while row 24 is shown in full (REQ-SEC-024). |
 | `i` | Index link. Held, where the terminal reports key releases (the Kitty keyboard protocol): back through the history (DEC-2477). |
 | `h` or Home | Initial page. |
@@ -162,6 +162,8 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 | `q`, Esc or Ctrl+C | Quit. |
 
 Where the terminal reports key releases, `i` acts when it is let go: let go at once it is Index; held until the keyboard repeats it, or for half a second, it goes back, once a hold. On a terminal that reports no releases a hold cannot be told from a press, so `i` is Index at once and Back is Backspace, Alt+Left or the `--back-key`.
+
+A typed number whose link or alias leads to another service asks in row 24, `Enter: Weather at weather.example`, unless that origin was confirmed already; Enter goes there and any other key stays. An alias to another channel's address is not opened: row 24 says the page is another channel's, and the address is printed when the viewer ends.
 
 A link to another service asks for confirmation: the status area shows `LEAVE?`, and row 24 the service's name and its origin, as in `Same key: Weather at weather.example` (the scheme is shown when it is not `https`), and pressing the same key again goes there; any other key stays. Once an origin is confirmed it is not asked about again for as long as the viewer runs, in any service (REQ-288, DEC-2454).
 

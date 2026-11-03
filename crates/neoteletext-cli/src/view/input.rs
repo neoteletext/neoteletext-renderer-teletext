@@ -68,6 +68,18 @@ impl ViewState {
             }
             return ControlFlow::Continue(());
         }
+        // DEC-2480: a typed number's link to another service waits for
+        // Enter; any other key lets it go, and is a key as usual.
+        if let Some(target) = self.pending_link.take()
+            && key.kind != KeyEventKind::Release
+        {
+            if key.code == KeyCode::Enter {
+                self.last_drawn = None;
+                self.action = Action::FollowService(target);
+                return ControlFlow::Continue(());
+            }
+            self.prompt = None;
+        }
         // REQ-NAV-010, DEC-2477: where the terminal reports releases,
         // Index acts when it is let go: held, it is Back.
         if self.releases_reported && is_index(key) {
@@ -214,6 +226,12 @@ impl ViewState {
         self.action = self.viewer.key(key, &key_context);
         if !matches!(self.action, Action::ConfirmService(_)) {
             self.prompt = None;
+        }
+        // A digit that completes a page number selects it: the page's own
+        // number link for it, else the service's alias, leads elsewhere
+        // (REQ-509).
+        if let (Key::Digit(_), Action::Request(address, _)) = (key, self.action) {
+            self.typed_number(address, source, shown.extras);
         }
     }
 }

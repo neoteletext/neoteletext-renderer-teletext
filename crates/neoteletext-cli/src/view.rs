@@ -38,6 +38,7 @@ use typing::Typing;
 mod input;
 mod keys;
 mod notices;
+mod number_links;
 mod page;
 mod terminal_io;
 mod turn;
@@ -75,6 +76,11 @@ struct ViewState {
     walk_trace: Vec<neoteletext_core::acq::Event>,
     // The trace could not be written, as standard error is the terminal.
     trace_withheld: bool,
+    // The service's aliases: page numbers, `0xMPP`, and their targets,
+    // `name:mpp` or an address (REQ-509).
+    aliases: Vec<(u16, String)>,
+    // A typed number's link to another service, waiting for Enter (DEC-2480).
+    pending_link: Option<neoteletext_core::nav::LinkTarget>,
     // The keys the user gave for Back and Forward (DEC-2477).
     remote_keys: RemoteKeys,
     // The terminal reports key releases (the Kitty keyboard protocol), so
@@ -133,6 +139,8 @@ impl ViewState {
             walk_trace: Vec::new(),
             trace_withheld: false,
             unrecorded: None,
+            aliases: Vec::new(),
+            pending_link: None,
             remote_keys: RemoteKeys::default(),
             releases_reported: false,
             index_held: None,
