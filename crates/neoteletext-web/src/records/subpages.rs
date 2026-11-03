@@ -242,5 +242,116 @@ pub fn encode(
     Ok(Sent { records: parts, packets, next_record_id: record_id })
 }
 
+/// What one SUBPAGES record meant for its page's sending (DOC-1959).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Step {
+    /// Its entries are shown; more parts are to come, and a partial
+    /// sending removes nothing.
+    Partial,
+    /// Every part has arrived, its entries number `count` and ascend over
+    /// the whole list: it is the page's whole list.
+    Complete,
+    /// It breaks its sending: a part out of turn, a `parts` or `count`
+    /// that differs from part 0's, a sub-code not above the last of the
+    /// part before, more entries than `count`, or a last part leaving
+    /// fewer. The sending is discarded whole, the page keeps the list it
+    /// had, and this many packets, the sending's records so far and this
+    /// one, are invalid (REQ-1462).
+    Refused {
+        /// The packets of the sending's records, this one included.
+        packets: usize,
+    },
+}
+
+/// The sending in progress for one page.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Current {
+    page: PageAddress,
+    version: u16,
+    parts: u16,
+    count: u16,
+    /// The part expected next.
+    next: u16,
+    /// The entries so far.
+    entries: u16,
+    /// The last sub-code so far.
+    last: u16,
+    /// The packets of the sending's records so far.
+    packets: usize,
+}
+
+/// A receiver's SUBPAGES sending in progress (DOC-1959): the one
+/// reassembly of a page's list of sub-pages, which every receiver uses in
+/// place of its own. A record of another `version` of the page begins a
+/// new sending; the records of one sending arrive in order on one
+/// connection, part 0 first, as [`encode`] writes them, so a part out of
+/// turn breaks its sending, and sub-codes are checked to ascend across
+/// the parts as [`read`] checks them within one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Sending {
+    current: Option<Current>,
+}
+
+impl Sending {
+    /// Nothing in progress.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { current: None }
+    }
+
+    /// Notes a record the reader accepted, which took `packets` packets.
+    pub fn note(&mut self, record: &SubPagesRecord<'_>, packets: usize) -> Step {
+        let held = if record.part == 0 {
+            Current {
+                page: record.page,
+                version: record.version,
+                parts: record.parts,
+                count: record.count,
+                next: 0,
+                entries: 0,
+                last: 0,
+                packets: 0,
+            }
+        } else {
+            match self.current.take() {
+                Some(current)
+                    if current.page == record.page
+                        && current.version == record.version
+                        && current.parts == record.parts
+                        && current.count == record.count
+                        && current.next == record.part =>
+                {
+                    current
+                }
+                Some(current) if current.page == record.page && current.version == record.version => {
+                    return Step::Refused { packets: current.packets.saturating_add(packets) };
+                }
+                _ => return Step::Refused { packets },
+            }
+        };
+        let mut held = held;
+        held.packets = held.packets.saturating_add(packets);
+        for entry in record.entries() {
+            let subcode = entry.subcode.value();
+            // Within a record `read` holds them ascending; across parts,
+            // the first of a part must pass the last of the part before.
+            if held.entries > 0 && subcode <= held.last {
+                return Step::Refused { packets: held.packets };
+            }
+            held.last = subcode;
+            held.entries = held.entries.saturating_add(1);
+        }
+        if held.entries > held.count {
+            return Step::Refused { packets: held.packets };
+        }
+        held.next = held.next.saturating_add(1);
+        if held.next < held.parts {
+            self.current = Some(held);
+            return Step::Partial;
+        }
+        if held.entries == held.count { Step::Complete } else { Step::Refused { packets: held.packets } }
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -365,6 +365,17 @@ pub enum Event<'a> {
     /// the links held for that page and sub-code; later parts add to
     /// them. A sub-page sent again without one has no such links.
     Links(LinksRecord<'a>),
+    /// A LINKS record broke its sending (DOC-1958): a part out of turn, or
+    /// links past a total over the sending's parts. The port drops every
+    /// Link Extension link it held for the sub-page, as for any LINKS
+    /// record refused (DOC-1952); the packets are counted in
+    /// [`Event::InvalidPackets`].
+    LinksRefused {
+        /// The sub-page's page.
+        page: PageAddress,
+        /// Its sub-code.
+        subcode: SubCode,
+    },
     /// A part of a page's list of sub-pages from a SUBPAGES record on the
     /// push connection (DOC-1959, REQ-1503), for the
     /// sub-page list, its count, the view's place and stepping; never the
@@ -372,6 +383,25 @@ pub enum Event<'a> {
     /// begins a new list; a list is whole when every part has arrived,
     /// and a partial one removes nothing.
     SubPageList(SubPagesRecord<'a>),
+    /// Every part of a SUBPAGES sending has arrived, its entries number
+    /// its count and ascend over the whole list (DOC-1959): the parts
+    /// given as [`Event::SubPageList`] since its part 0 are the page's
+    /// whole list, and replace the list held.
+    SubPageListComplete {
+        /// The page.
+        page: PageAddress,
+        /// The list's version.
+        version: u16,
+    },
+    /// A SUBPAGES record broke its sending (DOC-1959): the parts of that
+    /// version given so far are discarded, and the page keeps the list it
+    /// had; the packets are counted in [`Event::InvalidPackets`].
+    SubPageListRefused {
+        /// The page.
+        page: PageAddress,
+        /// The version refused.
+        version: u16,
+    },
     /// The channel's program sent the viewer elsewhere with a REDIRECT
     /// record (DOC-1960, REQ-1688), to a page of the channel
     /// or to an address. The application moves the viewer: it alone can

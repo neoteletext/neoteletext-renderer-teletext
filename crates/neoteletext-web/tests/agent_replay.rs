@@ -2291,3 +2291,100 @@ fn a_ragged_message_leaves_the_connection_open() {
     assert_eq!(pages(&records).len(), 1, "{records:?}");
     assert!(!has_event(&records, "PushLost"), "{records:?}");
 }
+
+/// The packets `write` gives, joined as one message's bytes.
+#[cfg(feature = "push")]
+fn packets_of(write: impl FnOnce(&mut dyn FnMut(neoteletext_core::packet::Packet))) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write(&mut |packet| bytes.extend_from_slice(&packet.bytes));
+    bytes
+}
+
+/// A LINKS record's body for sub-page 100/0000: part `part` of `parts`,
+/// with one red key link to page 150.
+#[cfg(feature = "push")]
+fn links_body(part: u8, parts: u8, key: u8) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&0x100_u16.to_be_bytes());
+    body.extend_from_slice(&0_u16.to_be_bytes());
+    body.extend_from_slice(&[part, parts, 1, key, 0, 3]);
+    body.extend_from_slice(b"150");
+    body.extend_from_slice(&[0, 0, 0]);
+    body
+}
+
+// Verifies DOC-1958's bounds across the parts (REQ-1494) and REQ-1462: a
+// LINKS sending whose second part repeats the first part's key is refused
+// in the agent; the port is told to drop the sub-page's links, and both
+// records' packets are counted invalid.
+#[test]
+#[cfg(feature = "push")]
+fn a_links_sending_that_breaks_its_totals_is_refused() {
+    use neoteletext_web::records::{TYPE_LINKS, fragments};
+    let mut harness = push_service("ws://tt.example/push");
+    let (first, second) = (links_body(0, 2, b'R'), links_body(1, 2, b'R'));
+    let message = packets_of(|out| {
+        write_packets(TYPE_LINKS, &first, 3, 1, out).unwrap();
+        write_packets(TYPE_LINKS, &second, 3, 2, out).unwrap();
+    });
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    assert_eq!(events(&records).iter().filter(|event| event.starts_with("Links(")).count(), 1, "{records:?}");
+    assert!(has_event(&records, "LinksRefused { page: PageAddress"), "{records:?}");
+    let total = fragments(first.len()) + fragments(second.len());
+    assert!(has_event(&records, &format!("InvalidPackets {{ total: {total} }}")), "{records:?}");
+    assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+/// A SUBPAGES record's body for page 100, version 1.
+#[cfg(feature = "push")]
+fn subpages_body(part: u16, parts: u16, count: u16, codes: &[u16]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for field in [0x100_u16, 1, part, parts, count] {
+        body.extend_from_slice(&field.to_be_bytes());
+    }
+    for code in codes {
+        body.extend_from_slice(&code.to_be_bytes());
+        body.push(0);
+    }
+    body
+}
+
+// Verifies REQ-1503 and DOC-1959 through the agent: a whole sending's parts
+// reach the port and then its completion; a sending whose sub-codes repeat
+// across parts is refused, the port told, and its packets counted.
+#[test]
+#[cfg(feature = "push")]
+fn the_agent_reassembles_a_list_of_sub_pages() {
+    use neoteletext_web::records::{TYPE_SUBPAGES, fragments};
+    let mut harness = push_service("ws://tt.example/push");
+    let whole = [subpages_body(0, 2, 4, &[1, 2]), subpages_body(1, 2, 4, &[3, 4])];
+    let broken = [subpages_body(0, 2, 4, &[1, 2]), subpages_body(1, 2, 4, &[2, 3])];
+    let message = packets_of(|out| {
+        for (id, body) in whole.iter().enumerate() {
+            write_packets(TYPE_SUBPAGES, body, 3, id as u8, out).unwrap();
+        }
+    });
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    let names: Vec<&str> = events(&records)
+        .into_iter()
+        .filter(|event| event.starts_with("SubPageList"))
+        .map(|event| event.split([' ', '(']).next().unwrap())
+        .collect();
+    assert_eq!(names, ["SubPageList", "SubPageList", "SubPageListComplete"], "{records:?}");
+    assert!(!has_event(&records, "InvalidPackets"), "{records:?}");
+
+    let mut harness = push_service("ws://tt.example/push");
+    let message = packets_of(|out| {
+        for (id, body) in broken.iter().enumerate() {
+            write_packets(TYPE_SUBPAGES, body, 3, id as u8, out).unwrap();
+        }
+    });
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    assert!(has_event(&records, "SubPageListRefused { page: PageAddress"), "{records:?}");
+    assert!(!has_event(&records, "SubPageListComplete"), "{records:?}");
+    let total = fragments(broken[0].len()) + fragments(broken[1].len());
+    assert!(has_event(&records, &format!("InvalidPackets {{ total: {total} }}")), "{records:?}");
+}

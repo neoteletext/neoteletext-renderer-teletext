@@ -15,7 +15,9 @@ use crate::cookie::CookieRejected;
 use crate::http::MediaType;
 use crate::port::RandomSource;
 use crate::records::index::Step;
+use crate::records::links::Step as LinksStep;
 use crate::records::log::MAX_LOG_LINES_PER_PAGE;
+use crate::records::subpages::Step as SubPagesStep;
 use crate::records::{ChannelRecord, Read};
 use crate::url::Url;
 use crate::ws::WsMessage;
@@ -128,10 +130,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     /// invalid.
     fn read_record(&mut self, now: Instant, packet: &Packet, sink: &mut Sink<'_>) -> usize {
         let (seconds, calendar) = self.seconds(now);
-        let record = match self.records.push(packet) {
-            Read::Nothing => return 0,
-            Read::Invalid(packets) => return packets,
-            Read::Record(record) => record,
+        let (record, packets) = match self.records.push_counted(packet) {
+            (Read::Nothing, _) => return 0,
+            (Read::Invalid(packets), _) => return packets,
+            (Read::Record(record), packets) => (record, packets),
         };
         match record {
             ChannelRecord::Log(log) => {
@@ -148,8 +150,24 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                     event(sink, Event::IndexComplete { generation: index.generation });
                 }
             },
-            ChannelRecord::Links(links) => event(sink, Event::Links(links)),
-            ChannelRecord::SubPages(list) => event(sink, Event::SubPageList(list)),
+            ChannelRecord::Links(links) => match self.links.note(&links, packets) {
+                LinksStep::Partial | LinksStep::Complete => event(sink, Event::Links(links)),
+                LinksStep::Refused { packets } => {
+                    event(sink, Event::LinksRefused { page: links.page, subcode: links.subcode });
+                    return packets;
+                }
+            },
+            ChannelRecord::SubPages(list) => match self.subpage_list.note(&list, packets) {
+                SubPagesStep::Partial => event(sink, Event::SubPageList(list)),
+                SubPagesStep::Complete => {
+                    event(sink, Event::SubPageList(list));
+                    event(sink, Event::SubPageListComplete { page: list.page, version: list.version });
+                }
+                SubPagesStep::Refused { packets } => {
+                    event(sink, Event::SubPageListRefused { page: list.page, version: list.version });
+                    return packets;
+                }
+            },
             ChannelRecord::Redirect(redirect) => event(sink, Event::Redirect(redirect)),
             ChannelRecord::Denied(denied) => event(sink, Event::Denied(denied)),
             ChannelRecord::SetCookie(line) => {

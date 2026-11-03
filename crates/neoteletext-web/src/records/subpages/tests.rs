@@ -1,7 +1,13 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::panic
+)]
 //! The SUBPAGES record at its bounds, through packets and a reader.
 
-use super::{MAX_TITLE_CHARACTERS, SubPageEntry, encode, read};
+use super::{MAX_TITLE_CHARACTERS, Sending, Step, SubPageEntry, encode, read};
 use crate::records::{ChannelRecord, Read, RecordFault, RecordReader, TYPE_SUBPAGES, write_packets};
 use neoteletext_core::limits::{LAST_SUBPAGE_CODE, MAX_SUBPAGES, SUBCODE_ANY, SUBCODE_MASK};
 use neoteletext_core::packet::Packet;
@@ -146,4 +152,144 @@ fn a_malformed_record_is_discarded_and_counted() {
         })
         .sum();
     assert_eq!(invalid, packets.len());
+}
+
+/// A SUBPAGES body of any part of any sending.
+fn part_body(version: u16, part: u16, parts: u16, count: u16, codes: &[u16]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for field in [PAGE, version, part, parts, count] {
+        bytes.extend_from_slice(&field.to_be_bytes());
+    }
+    for code in codes {
+        bytes.extend_from_slice(&code.to_be_bytes());
+        bytes.push(0);
+    }
+    bytes
+}
+
+/// What the one reassembly makes of each body in turn, each taking one
+/// packet more than the one before so that the counts tell them apart.
+fn steps(bodies: &[Vec<u8>]) -> Vec<Step> {
+    let mut sending = Sending::new();
+    bodies
+        .iter()
+        .enumerate()
+        .map(|(index, body)| sending.note(&read(body).expect("each part is valid alone"), index + 1))
+        .collect()
+}
+
+/// REQ-1503, DOC-1959: a list of 8,190 sub-pages written by `encode` is put
+/// together by the one reassembly, partial until its last part and then
+/// complete, with every sub-code in order.
+#[test]
+fn the_reassembly_takes_a_whole_sending() {
+    let codes = codes(MAX_SUBPAGES);
+    let packets = write(&entries(&codes)).unwrap();
+    let mut reader = RecordReader::new();
+    let mut sending = Sending::new();
+    let mut results = Vec::new();
+    let mut listed = Vec::new();
+    for packet in &packets {
+        let (read, packets) = reader.push_counted(packet);
+        if let Read::Record(ChannelRecord::SubPages(record)) = read {
+            listed.extend(record.entries().map(|entry| entry.subcode.value()));
+            results.push(sending.note(&record, packets));
+        }
+    }
+    let (last, earlier) = results.split_last().unwrap();
+    assert_eq!(*last, Step::Complete);
+    assert!(earlier.iter().all(|step| *step == Step::Partial), "{earlier:?}");
+    assert_eq!(listed, codes);
+}
+
+/// REQ-1503, REQ-1462: a sending that breaks a total over its parts is
+/// refused, every packet of it counted: a `count` that differs from part
+/// 0's, a sub-code repeated or out of order across parts, more entries than
+/// the count, and a last part leaving fewer.
+#[test]
+fn a_sending_that_breaks_its_totals_is_refused() {
+    for (what, first, second) in [
+        ("count differs", part_body(1, 0, 2, 4, &[1, 2]), part_body(1, 1, 2, 5, &[3, 4])),
+        ("repeated across parts", part_body(1, 0, 2, 4, &[1, 2]), part_body(1, 1, 2, 4, &[2, 3])),
+        ("out of order across parts", part_body(1, 0, 2, 4, &[5, 6]), part_body(1, 1, 2, 4, &[3, 4])),
+        ("more than the count", part_body(1, 0, 2, 3, &[1, 2]), part_body(1, 1, 2, 3, &[3, 4])),
+        ("fewer than the count", part_body(1, 0, 2, 5, &[1, 2]), part_body(1, 1, 2, 5, &[3, 4])),
+    ] {
+        assert_eq!(steps(&[first, second]), [Step::Partial, Step::Refused { packets: 3 }], "{what}");
+    }
+}
+
+/// DOC-1959: a record of another version begins a new sending, so the
+/// partial one is discarded and a later part of it refused alone; a part
+/// out of turn breaks its sending; and a partial sending is never complete.
+#[test]
+fn a_new_version_begins_again() {
+    let old_first = part_body(1, 0, 2, 4, &[1, 2]);
+    let new_first = part_body(2, 0, 2, 4, &[1, 3]);
+    let old_second = part_body(1, 1, 2, 4, &[3, 4]);
+    let new_second = part_body(2, 1, 2, 4, &[5, 6]);
+    assert_eq!(
+        steps(&[old_first.clone(), new_first.clone(), old_second, new_second.clone()]),
+        [Step::Partial, Step::Partial, Step::Refused { packets: 3 }, Step::Refused { packets: 4 }],
+        "the old part breaks the new sending in progress, which ends it"
+    );
+    assert_eq!(steps(&[old_first.clone(), new_first, new_second]), [Step::Partial, Step::Partial, Step::Complete]);
+    assert_eq!(steps(&[part_body(1, 1, 2, 4, &[3, 4])]), [Step::Refused { packets: 1 }], "no part 0");
+    assert_eq!(steps(&[old_first]), [Step::Partial], "a partial sending is not complete");
+}
+
+/// REQ-1503: a title of 40 characters of four-byte UTF-8, 160 bytes,
+/// travels; one more character is refused by `encode` and by `read`; a
+/// title with a control character is refused by both.
+#[test]
+fn a_titles_bytes_and_characters_keep_their_bounds() {
+    let longest: String = core::iter::repeat_n('\u{1F600}', MAX_TITLE_CHARACTERS).collect();
+    assert_eq!(longest.len(), super::MAX_TITLE_BYTES);
+    let over = [longest.as_str(), "a"].concat();
+    assert_eq!(
+        read_back(&write(&[SubPageEntry { subcode: SubCode::new(1), title: &longest }]).unwrap())[0].3,
+        [(1, longest.clone())]
+    );
+    assert!(write(&[SubPageEntry { subcode: SubCode::new(1), title: &over }]).is_err(), "161 bytes and 41 characters");
+    assert!(write(&[SubPageEntry { subcode: SubCode::new(1), title: "line\nbreak" }]).is_err(), "a control character");
+    for title in [over.as_bytes(), b"line\nbreak".as_slice()] {
+        let mut raw = part_body(1, 0, 1, 1, &[]);
+        raw.extend_from_slice(&1_u16.to_be_bytes());
+        raw.push(u8::try_from(title.len()).unwrap());
+        raw.extend_from_slice(title);
+        assert!(read(&raw).is_err(), "read refuses {title:?}");
+    }
+}
+
+/// REQ-1503: `read` refuses a part equal to its parts, and a sub-code with a
+/// bit outside the thirteen a sub-code has.
+#[test]
+fn a_part_or_sub_code_past_its_field_is_refused() {
+    assert!(read(&part_body(1, 0, 1, 1, &[1])).is_ok());
+    assert!(read(&part_body(1, 1, 1, 1, &[1])).is_err(), "part equal to parts");
+    // The lowest bit no sub-code has: below 0x3F7E, so only the mask
+    // refuses it.
+    let bit = 1_u16 << (!SUBCODE_MASK).trailing_zeros();
+    assert!(bit < LAST_SUBPAGE_CODE);
+    assert!(read(&part_body(1, 0, 1, 1, &[bit])).is_err(), "sub-code {bit:#06x}");
+    // `encode` takes a `SubCode`, which holds the thirteen bits alone, so
+    // only a record from outside can carry such a sub-code.
+    assert_eq!(SubCode::new(bit).value() & bit, 0);
+}
+
+/// REQ-1503, DOC-1959 (splitting): 8,190 entries with the longest titles
+/// are split with at least six entries in every record but the last, and
+/// none cut: every entry reads back whole.
+#[test]
+fn a_split_puts_six_entries_in_a_record_and_cuts_none() {
+    let title: String = core::iter::repeat_n('\u{1F600}', MAX_TITLE_CHARACTERS).collect();
+    let codes = codes(MAX_SUBPAGES);
+    let list: Vec<SubPageEntry<'_>> =
+        codes.iter().map(|&code| SubPageEntry { subcode: SubCode::new(code), title: &title }).collect();
+    let found = read_back(&write(&list).unwrap());
+    let (_, earlier) = found.split_last().unwrap();
+    assert!(earlier.iter().all(|record| record.3.len() >= 6), "six or more in each record");
+    let all: Vec<(u16, String)> = found.into_iter().flat_map(|record| record.3).collect();
+    assert_eq!(all.len(), MAX_SUBPAGES);
+    assert!(all.iter().zip(&codes).all(|(entry, &code)| entry.0 == code && entry.1 == title));
 }
