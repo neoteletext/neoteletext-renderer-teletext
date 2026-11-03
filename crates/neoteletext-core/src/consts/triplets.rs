@@ -98,6 +98,17 @@ pub const MODE_DRCS_CHARACTER: u8 = 0x0D;
 /// Column mode 01110: Font Style, Level 3.5 only (Table 29), recognised
 /// only to move the active position (decision E.96).
 pub const MODE_FONT_STYLE: u8 = 0x0E;
+/// Font Style data bit D0: proportional spacing (Table 29, mode 01110).
+pub const FONT_STYLE_PROPORTIONAL: u8 = 0x01;
+/// Font Style data bit D1: bold (Table 29, mode 01110).
+pub const FONT_STYLE_BOLD: u8 = 0x02;
+/// Font Style data bit D2: italics (Table 29, mode 01110).
+pub const FONT_STYLE_ITALICS: u8 = 0x04;
+/// The shift of Font Style's row count R2 to R0, data bits D6 to D4: the
+/// style also applies to that many following rows (Table 29, mode 01110).
+pub const FONT_STYLE_ROWS_SHIFT: u8 = 4;
+/// The most following rows a Font Style triplet can extend to: three bits.
+pub const FONT_STYLE_MAX_ROWS: u8 = 7;
 /// The colour index of a colour field: D4 to D0, CLUT in D4 D3 and entry
 /// in D2 to D0 (Tables 28 and 29, decision E.43).
 pub const TRIPLET_COLOUR_INDEX_MASK: u8 = 0x1F;

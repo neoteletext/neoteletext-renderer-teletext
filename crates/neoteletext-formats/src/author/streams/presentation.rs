@@ -5,16 +5,15 @@
 use std::vec::Vec;
 
 use neoteletext_core::consts::{
-    CONCEAL, DOUBLE_HEIGHT, END_BOX, FLASH, MODE_DRCS_CHARACTER, MODE_FONT_STYLE, MODE_TERMINATION, MOSAIC_WHITE,
-    ROW_ADDRESS_LAST, ROW_ADDRESS_RESERVED_DEFAULT, START_BOX,
+    CONCEAL, DOUBLE_HEIGHT, END_BOX, FLASH, MODE_DRCS_CHARACTER, MODE_TERMINATION, MOSAIC_WHITE, ROW_ADDRESS_LAST,
+    ROW_ADDRESS_RESERVED_DEFAULT, START_BOX,
 };
 use neoteletext_core::packet::{ColourData, DisplayAttributes, ObjectKind, Triplet, TripletFunction};
 
-use crate::author::{DisplayPage, FlashMode, FlashRate, Result, RowScope, colour, row_address};
+use crate::author::{DisplayPage, FlashMode, FlashRate, FontStyle, Result, RowScope, colour, row_address};
 
 use super::{
-    BLUE, BOTH, DRCS_INVALID_CHARACTER, DRCS_MODE, DRCS_MODE_DATA, DRCS_NORMAL, FONT_STYLE_BOLD, GERMAN, GREEN, RED,
-    page, text_body,
+    BLUE, BOTH, DRCS_INVALID_CHARACTER, DRCS_MODE, DRCS_MODE_DATA, DRCS_NORMAL, GERMAN, GREEN, RED, page, text_body,
 };
 
 /// 109: double height, width and size, underline, invert, conceal and
@@ -155,7 +154,7 @@ pub(super) fn every_mode() -> Result<DisplayPage> {
     local.raw(Triplet { address: 13, mode: MODE_DRCS_CHARACTER, data: DRCS_NORMAL });
     // Font Style, bold, sent as a service would and not acted on (decision
     // E.96): it moves the column only.
-    local.raw(Triplet { address: 14, mode: MODE_FONT_STYLE, data: FONT_STYLE_BOLD });
+    local.font_style(14, FontStyle { bold: true, ..FontStyle::default() }, 0)?;
     local.g2(15, 0x41);
     // Column modes 10000 to 11111: G0 with each diacritical mark.
     for (column, mark) in (16u8..).zip(0u8..16) {

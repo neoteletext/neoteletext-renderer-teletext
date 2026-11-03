@@ -54,8 +54,6 @@ const DRCS_MODE_DATA: u8 = 0x70;
 const DRCS_NORMAL: u8 = 0x40;
 /// A DRCS character number above 47, which Table 29 makes invalid.
 const DRCS_INVALID_CHARACTER: u8 = 50;
-/// Data bit D1 of Font Style: bold (Table 29), as page 113 sends it.
-const FONT_STYLE_BOLD: u8 = 0x02;
 /// Level 1 colours as Colour Map indices (decision E.43).
 const RED: u8 = colour(0, 1);
 const GREEN: u8 = colour(0, 2);
