@@ -454,10 +454,14 @@ impl<'a> EnhancementStore<'a> {
     /// packets ([`Self::victim`]) until one is free.
     fn free_slot(&mut self, busy: &[Option<usize>], for_provisional: bool) -> Option<usize> {
         loop {
+            // From the slot after the last one taken to the end, then from
+            // the start: a running search with no division, which the
+            // Cortex-M0 lacks (REQ-GEN-016).
             let length = self.packets.len();
+            let start = self.next_free.min(length);
             self.visit(length);
-            let found = (0..length)
-                .map(|offset| self.next_free.saturating_add(offset).checked_rem(length).unwrap_or(0))
+            let found = (start..length)
+                .chain(0..start)
                 .find(|&slot| self.packets.get(slot).is_some_and(|packet| packet.owner == FREE));
             if let Some(slot) = found {
                 self.next_free = slot.saturating_add(1);
