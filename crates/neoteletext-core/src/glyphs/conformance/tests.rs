@@ -141,3 +141,19 @@ fn masks_and_names() {
     }
     assert_eq!(font_set_index("G0-Latin-Klingon"), None);
 }
+
+/// REQ-131: the report names every position that fails the first rule,
+/// not only the first: a font lacking three letters of a set lists all
+/// three, and a conforming font lists none.
+#[test]
+fn every_position_failing_the_first_rule_is_reported() {
+    let set = FONT_SETS[font_set_index("G0-Latin-German").unwrap()].1;
+    let complete_font = complete(set);
+    assert_eq!(check(&complete_font, set).failing_codes().count(), 0);
+    // Ä at 5/B, Ö at 5/C and ü at 7/D removed.
+    let without: Vec<FontGlyph> =
+        complete_font.iter().copied().filter(|g| ![0xC4, 0xD6, 0xFC].contains(&g.code_point)).collect();
+    let result = check(&without, set);
+    assert_eq!(result.failure, Some(Failure::Missing(0x5B)));
+    assert_eq!(result.failing_codes().collect::<Vec<_>>(), [0x5B, 0x5C, 0x7D]);
+}

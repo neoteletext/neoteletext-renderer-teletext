@@ -109,6 +109,8 @@ fn font_sets_reports_conformance() {
     let line = |set: &str| report.lines().find(|line| line.split_whitespace().next() == Some(set)).unwrap().to_string();
     assert!(line("G0-Latin-English").ends_with("96/96  conforms, SAA5050 cell"), "{report}");
     assert!(line("G0-Latin-German").contains("rule 2: no glyph at 4/0"), "German § is missing: {report}");
+    // REQ-131: every position the font lacks is named, Ä at 5/B among them.
+    assert!(line("G0-Latin-German").contains("4/0, 5/B, "), "every missing position: {report}");
     assert_eq!(report.lines().count(), neoteletext_core::glyphs::conformance::FONT_SET_COUNT);
     let run = neottx(&["font", "sets", "--library-line", "english.bdf", font.to_str().unwrap()]);
     assert_eq!(String::from_utf8(run.stdout).unwrap(), "c\tenglish.bdf\tG0-Latin-English*\n");
