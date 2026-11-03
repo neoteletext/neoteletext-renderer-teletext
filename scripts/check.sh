@@ -210,14 +210,16 @@ linux_steps() {
         grep -E "^TOTAL" coverage.log'
 
     # REQ-TST-040: every target for a fixed time on each change, after
-    # replaying every input that has ever found a fault.
+    # replaying every input that has ever found a fault, with debug
+    # assertions and overflow checks (-a), since REQ-GEN-008 forbids an
+    # overflow and a release build hides one (DEC-2384).
     seconds="${NEOTELETEXT_FUZZ_SECONDS:-20}"
-    step "fuzzing on $linux_host, $seconds seconds per target (REQ-TST-040)"
+    step "fuzzing on $linux_host, $seconds seconds per target, with overflow checks (REQ-TST-040, DEC-2384)"
     ssh "$linux_host" "cd neoteletext-check && . ~/.cargo/env && . scripts/tools.sh && cd fuzz && \
         cargo +$FUZZ_NIGHTLY clippy --quiet -- -D warnings && \
         for target in \$(cargo +$FUZZ_NIGHTLY fuzz list); do \
             mkdir -p corpus/\$target regressions/\$target && \
-            cargo +$FUZZ_NIGHTLY fuzz run \$target corpus/\$target regressions/\$target -- \
+            cargo +$FUZZ_NIGHTLY fuzz run -a \$target corpus/\$target regressions/\$target -- \
                 -max_total_time=$seconds -timeout=10 -rss_limit_mb=2048 > fuzz.log 2>&1 \
                 || { tail -40 fuzz.log; exit 1; }; \
             echo \"\$target: \$(tail -1 fuzz.log)\"; \
