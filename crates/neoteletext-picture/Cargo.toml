@@ -9,8 +9,9 @@ publish.workspace = true
 
 [dependencies]
 # The page geometry, the spacing attributes and the enhancement triplets
-# are the core's constants (REQ-GEN-014).
-neoteletext-core = { workspace = true, features = ["default"] }
+# are the core's constants (REQ-GEN-014), which every build of the core
+# has, so no feature is named (REQ-1642 rule 5).
+neoteletext-core.workspace = true
 # The page written as TTI is read back and encoded as T42 packets by the
 # formats crate's own reader and writer.
 neoteletext-formats = { workspace = true, features = ["tti", "std"] }

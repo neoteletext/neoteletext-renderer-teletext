@@ -86,6 +86,11 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-input", features: "error-trait" },
     Build { package: "neoteletext-transport", features: "" },
     Build { package: "neoteletext-qrkeyboard", features: "" },
+    // The picture converter and its program (DEC-2325), which have no
+    // optional area: each alone, so the core's features they name are
+    // checked to be enough (REQ-1642 rule 5).
+    Build { package: "neoteletext-picture", features: "" },
+    Build { package: "neoteletext-picture-cli", features: "" },
     Build { package: "neoteletext-app", features: "" },
     Build { package: "neoteletext-app", features: "live" },
     Build { package: "neoteletext-app", features: "slice" },
