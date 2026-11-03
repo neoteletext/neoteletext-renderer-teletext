@@ -142,16 +142,29 @@ impl Live {
         let services = self.service_names.clone();
         let allowed = if page.origin == Origin::Page { Fill::Asked(&self.asked) } else { Fill::Any };
         let extras = &mut self.extras;
+        let mut refused = std::collections::BTreeSet::new();
         let mut collect = |item: Item<'_>| match item {
             Item::Packet { packet, meta } => packets.push((packet, meta)),
             Item::Page(file) if allowed.allows(file.address) => {
                 first.get_or_insert(file.address);
                 extras.insert(extras::key(file), extras::from_page(file, &services));
             }
+            Item::Page(file) => {
+                refused.insert(file.address.mpp());
+            }
             _ => {}
         };
         reader.feed(&page.bytes, &mut collect);
         reader.finish(&mut collect);
+        // REQ-508: a page's file fills only the pages asked for; what else
+        // it holds is left out, and said.
+        if !refused.is_empty() {
+            let pages: Vec<String> = refused.iter().map(|mpp| format!("{mpp:03X}")).collect();
+            self.notices.push(Notice::Message(format!(
+                "a page's file also held pages not asked for, left out: {}",
+                pages.join(" ")
+            )));
+        }
         // Each magazine's packets belong to the page its last header
         // named; magazine-wide packets (M/29, 8/30) always pass.
         let mut filling = [true; neoteletext_core::consts::MAGAZINES];

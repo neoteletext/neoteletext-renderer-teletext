@@ -471,3 +471,27 @@ fn a_confirmed_origin_lasts_the_session_and_another_is_asked() {
     let other = Linking(vec![linked("weather", "Other weather", "https://other.example")]);
     assert!(!state.origin_confirmed(&other, 0), "the same short name at another origin");
 }
+
+// Verifies REQ-508: a bundle's first page is shown while the viewer still
+// searches for the page it started on, and not once the address opened
+// named a page or the page asked for is shown.
+#[test]
+fn a_bundles_first_page_is_shown_while_the_viewer_has_not_moved() {
+    use neoteletext_app::pipe::Notice;
+    use neoteletext_core::types::PageAddress;
+    use neoteletext_core::viewer::ViewerEvent;
+    let page = |mpp| PageAddress::from_mpp(mpp).unwrap();
+    let session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut recorded = Recorded::default();
+    let mut state = view_state(&session);
+    state.take_notice(Notice::Bundle(0x199), &mut recorded);
+    assert_eq!(state.viewer.requested().0, page(0x199));
+    let mut state = view_state(&session);
+    state.named = true;
+    state.take_notice(Notice::Bundle(0x199), &mut recorded);
+    assert_eq!(state.viewer.requested().0, page(0x100), "the address named its page");
+    let mut state = view_state(&session);
+    let _ = state.viewer.event(ViewerEvent::PagePresent);
+    state.take_notice(Notice::Bundle(0x199), &mut recorded);
+    assert_eq!(state.viewer.requested().0, page(0x100), "the page asked for is shown");
+}

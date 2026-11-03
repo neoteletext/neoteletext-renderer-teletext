@@ -263,3 +263,19 @@ fn a_sub_page_step_asks_for_the_list_and_takes_its_rows() {
     assert_eq!(live.subpage_step(page, SubCode::new(1), true), SubPageStep::To(SubCode::new(2)));
     assert_eq!(live.subpage_step(page, SubCode::new(1), false), SubPageStep::To(SubCode::new(3)));
 }
+
+// Verifies REQ-508: a page's file fills only the pages asked for, and the
+// pages it held beyond them are named in a message.
+#[test]
+fn a_page_files_other_pages_are_left_out_and_said() {
+    let (sender, frames) = mpsc::channel();
+    let mut live = routed(frames, Box::new(std::io::sink()));
+    let mut session = Session::new(neoteletext_core::config::Config::default(), 8);
+    live.request(PageAddress::from_mpp(0x100).unwrap(), SubCode::ANY);
+    let bytes = b"PN,10000\r\nSC,0000\r\nOL,1,Asked\r\nPN,20000\r\nSC,0000\r\nOL,1,Not asked\r\n".to_vec();
+    sender.send(Frame::Tti(PageData { secure: true, origin: Origin::Page, bytes })).unwrap();
+    live.poll(&mut session, Instant(0));
+    assert!(session.page(PageAddress::from_mpp(0x200).unwrap(), SubCode::ANY).is_none());
+    let said: Vec<Notice> = live.notices();
+    assert!(said.iter().any(|notice| matches!(notice, Notice::Message(text) if text.ends_with(": 200"))), "{said:?}");
+}

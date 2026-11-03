@@ -25,6 +25,21 @@ impl ViewState {
         }
     }
 
+    /// A bundle of pages arrived whose first page is `mpp`: it is shown
+    /// while the viewer still searches for the page it started on, has no
+    /// history, and the address opened named no page (REQ-508).
+    fn show_bundle(&mut self, mpp: u16) {
+        let Some(address) = PageAddress::from_mpp(mpp) else { return };
+        let untouched = self.viewer.requested().0 == self.initial
+            && !self.viewer.history().can_go_back()
+            && !self.named
+            && self.viewer.state() == neoteletext_core::viewer::ViewerState::Searching;
+        if untouched && address != self.viewer.requested().0 {
+            self.viewer = Viewer::new(address);
+            self.action = self.viewer.event(ViewerEvent::Started);
+        }
+    }
+
     /// Takes the initial page of packet 8/30 when a live source's service
     /// data gains or changes one (REQ-SVC-004, EN 300 706 clause 9.8.1),
     /// as a channel's own initial page is taken; a channel's descriptor,
@@ -59,12 +74,14 @@ impl ViewState {
             Notice::Offline(mpp) if PageAddress::from_mpp(mpp) == Some(self.viewer.requested().0) => {
                 self.prompt = Some(message_row("Page not available offline"));
             }
+            // REQ-508: a bundle's first page is shown when the page asked
+            // for is not in it and the viewer has not moved.
+            Notice::Bundle(mpp) => self.show_bundle(mpp),
             // An origin confirmed stays confirmed for the session (REQ-288).
             Notice::Service(_)
             | Notice::Offline(_)
             | Notice::Current(_)
             | Notice::ServiceName(_)
-            | Notice::Bundle(_)
             | Notice::Aliases(_)
             | Notice::Region(_)
             | Notice::Refresh(_)
