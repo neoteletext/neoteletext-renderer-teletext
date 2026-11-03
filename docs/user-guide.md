@@ -158,7 +158,7 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 
 A link to another service asks for confirmation: press the same key again.
 
-With `-vv` the viewer writes the state machines' transitions, as the other commands do, to standard error; since the page is drawn on the terminal, standard error must be redirected for them to be written (`neottx view -vv INPUT 2>trace.txt`). The walk of a page's presentation level is traced once for each reception of the page shown. Without the redirection the trace is dropped, and the viewer says so when it ends.
+With `-vv` the viewer writes the state machines' transitions, as the other commands do, to standard error; since the page is drawn on the terminal, standard error must be redirected for them to be written (`neottx view -vv INPUT 2>trace.txt`). The walk of a page's presentation level is traced once for each reception of the page shown, and the viewer's own machine reports each key and decoder event that changes its state or does something. With `-vvv` each cell's step of the row attribute machine is traced as well: a thousand lines a page. Without the redirection the trace is dropped, and the viewer says so when it ends.
 
 On a channel that takes input (its descriptor's `push` says `"input": true`), the viewer greets the channel when its WebSocket opens, and once the channel answers, every key goes to it, as a terminal's keys go to its host: digits, Escape and Ctrl+C included. Printable keys go as text and the rest as key events, with Shift, Control and Alt. The channel decides what they mean; videotex channels take `*nnn#` for a page, `#` for the next and `*#` for the one before. A paste goes to the channel as one paste, and the terminal's focus as the channel's, where the terminal reports them; in a terminal with the Kitty keyboard protocol, releases and repeats go too, and in any other a key goes as a press alone. The channel is told the page or sub-page selected whenever it changes, whatever the focus, and every input event is stamped with the page and sub-code the viewer is drawing. Keys stop going when the terminal loses the focus or after Ctrl+], which leaves the keys to the viewer and gives them back: the channel is told the focus went, with a lost release of each key held where the terminal reports releases. A channel that does not answer within 10 seconds is said not to take input. See DOC-1781 of `neoteletext-common/PROTOCOL.html`.
 
@@ -192,7 +192,7 @@ Every command accepts these options. Each one changes a setting that a decision 
 | `--no-rounding` | Turns character rounding off (REQ-RND-012). | Rounding on |
 | `--single-start-box` | Accepts a single Start Box code (decision E.17). | Two required |
 | `--pages N` | Pages and sub-pages kept in memory. | 4096 |
-| `-v`, `-vv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds the state machine trace (REQ-FSM-010). | Off |
+| `-v`, `-vv`, `-vvv` | Diagnostics, and a channel's log lines (`LG`, REQ-INP-026); `-vv` adds the state machine trace (REQ-FSM-010); `-vvv` adds each cell's step of the row attribute machine (REQ-FSM-006). | Off |
 
 ### Profiles
 

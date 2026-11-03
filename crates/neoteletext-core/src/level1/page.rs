@@ -2,7 +2,7 @@
 //! presents them, row 0's receiver columns, row 24, the suppressed header
 //! and the row below double height (decisions E.10, E.15, E.23).
 
-use super::row::{RowContext, decode_row};
+use super::row::{NoTrace, RowContext, RowTracer, decode_row};
 use super::{Cell, DisplayOptions, Glyph, Grid, Size, resolve_designation};
 use crate::acq::{MagazineData, StoredPage};
 use crate::charset::{self, CharRef, CharSet, G0};
@@ -11,6 +11,7 @@ use crate::consts::{
     C5_NEWSFLASH, C6_SUBTITLE, C7_SUPPRESS_HEADER, C10_INHIBIT_DISPLAY, CLOCK_COLUMN, CODE_MASK_7BIT, COLOUR_GREEN,
     COLOUR_WHITE, COLUMNS, HEADER_DISPLAY_COLUMN, RECEIVER_COLUMNS, ROWS, SPACE, STATUS_ATTRIBUTE_COLUMN,
 };
+use crate::trace::TraceSink;
 
 /// The 7-bit codes and parity-failure mask of a stored row under the parity
 /// policy (decision E.8, REQ-L1-017, REQ-L1-018).
@@ -45,6 +46,42 @@ pub fn build_grid(
     config: &Config,
     options: &DisplayOptions,
 ) {
+    build(out, page, magazine, config, options, |_, codes, failed, context| {
+        decode_row(codes, failed, context, &mut NoTrace)
+    });
+}
+
+/// As [`build_grid`], and when `Config::trace` and `Config::trace_cells`
+/// are both on, reports each cell's step of the row attribute machine to
+/// `trace`, as `Machine::RowAttributes` of its row (REQ-FSM-006,
+/// REQ-FSM-010).
+pub fn build_grid_traced(
+    out: &mut Grid,
+    page: Option<&StoredPage>,
+    magazine: &MagazineData,
+    config: &Config,
+    options: &DisplayOptions,
+    trace: &mut TraceSink<'_>,
+) {
+    if !(config.trace && config.trace_cells) {
+        build_grid(out, page, magazine, config, options);
+        return;
+    }
+    build(out, page, magazine, config, options, |row, codes, failed, context| {
+        decode_row(codes, failed, context, &mut RowTracer { sink: trace, row })
+    });
+}
+
+/// The grid of [`build_grid`], each row decoded by `decode`, given the
+/// display row, its codes, its parity failures and its context.
+fn build(
+    out: &mut Grid,
+    page: Option<&StoredPage>,
+    magazine: &MagazineData,
+    config: &Config,
+    options: &DisplayOptions,
+    mut decode: impl FnMut(u8, &[u8; COLUMNS], u64, &RowContext<'_>) -> ([Cell; COLUMNS], bool),
+) {
     out.clear();
     let (designation, second, _) = resolve_designation(page, magazine, config);
     out.designation = designation;
@@ -63,7 +100,7 @@ pub fn build_grid(
         let (codes, failed) = row_codes(row, page, config, options, policy);
         // Decision E.15: rows 0, 23 and 24 are always normal height.
         let context = RowContext::new(config, designation.g0, second, (1..=22).contains(&row));
-        let (mut cells, has_double) = decode_row(&codes, failed, &context);
+        let (mut cells, has_double) = decode(u8::try_from(row).unwrap_or(u8::MAX), &codes, failed, &context);
         if row == 0 {
             draw_receiver_columns_in_receiver_set(&mut cells);
         }

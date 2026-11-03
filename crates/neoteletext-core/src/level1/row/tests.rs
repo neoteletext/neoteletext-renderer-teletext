@@ -30,7 +30,7 @@ fn row(bytes: &[u8]) -> [u8; COLUMNS] {
 
 fn decode(bytes: &[u8]) -> [Cell; COLUMNS] {
     let config = Config::default();
-    decode_row(&row(bytes), 0, &context(&config)).0
+    decode_row(&row(bytes), 0, &context(&config), &mut NoTrace).0
 }
 
 /// REQ-L1-003, REQ-TST-013.
@@ -99,7 +99,7 @@ fn blast_through_capitals_in_mosaic_mode() {
         default_g0: G0 { set: charset::G0Set::Latin, national: Some(charset::NationalOption::German) },
         ..context(&config)
     };
-    let cells = decode_row(&row(&[MOSAIC_RED, 0x5B]), 0, &german).0;
+    let cells = decode_row(&row(&[MOSAIC_RED, 0x5B]), 0, &german, &mut NoTrace).0;
     let Glyph::Char(character) = cells[1].glyph else { panic!("blast-through gave {:?}", cells[1].glyph) };
     assert_eq!(charset::to_unicode(character).base, '\u{C4}');
 }
@@ -142,7 +142,7 @@ fn black_codes_follow_the_profile() {
     let saa5050 = Config::saa5050();
     let cells = decode(&[ALPHA_RED, ALPHA_BLACK, b'A']);
     assert_eq!(cells[2].foreground, COLOUR_BLACK, "0/0 is alpha black by default");
-    let cells = decode_row(&row(&[ALPHA_RED, ALPHA_BLACK, b'A']), 0, &context(&saa5050)).0;
+    let cells = decode_row(&row(&[ALPHA_RED, ALPHA_BLACK, b'A']), 0, &context(&saa5050), &mut NoTrace).0;
     assert_eq!(cells[2].foreground, 1, "0/0 has no function on the SAA5050");
     // The RAI case: alpha black ends mosaic mode, so digits are text.
     let cells = decode(&[MOSAIC_RED, ALPHA_BLACK, b'2']);
@@ -151,14 +151,14 @@ fn black_codes_follow_the_profile() {
     let cells = decode(&[ALPHA_RED, MOSAIC_BLACK, 0x7F]);
     assert_eq!(cells[2].foreground, COLOUR_BLACK);
     assert_eq!(cells[2].glyph, Glyph::Mosaic { pattern: MOSAIC_FULL, separated: false });
-    let cells = decode_row(&row(&[MOSAIC_RED, MOSAIC_BLACK, 0x7F]), 0, &context(&saa5050)).0;
+    let cells = decode_row(&row(&[MOSAIC_RED, MOSAIC_BLACK, 0x7F]), 0, &context(&saa5050), &mut NoTrace).0;
     assert_eq!(cells[2].foreground, MOSAIC_RED & COLOUR_ATTRIBUTE_MASK);
     // 0/E and 0/F show a space and change no state in either profile:
     // the row matches one where a repeated colour code fills the cell.
     for config in [Config::default(), Config::saa5246a()] {
-        let plain = decode_row(&row(&[ALPHA_RED, ALPHA_RED, b'A']), 0, &context(&config)).0;
+        let plain = decode_row(&row(&[ALPHA_RED, ALPHA_RED, b'A']), 0, &context(&config), &mut NoTrace).0;
         for code in [DOUBLE_WIDTH, DOUBLE_SIZE] {
-            let cells = decode_row(&row(&[ALPHA_RED, code, b'A']), 0, &context(&config)).0;
+            let cells = decode_row(&row(&[ALPHA_RED, code, b'A']), 0, &context(&config), &mut NoTrace).0;
             assert_eq!(cells, plain, "code {code:#04x}");
         }
     }
@@ -189,7 +189,7 @@ fn every_spacing_attribute_has_its_table_26_timing() {
     let cells = decode(&[START_BOX, START_BOX, END_BOX, b'a']);
     assert_eq!(cells.map(|cell| cell.boxed)[..4], [false, true, true, false]);
     let single = Config { double_start_box: false, ..Config::default() };
-    let cells = decode_row(&row(&[START_BOX, b'a']), 0, &context(&single)).0;
+    let cells = decode_row(&row(&[START_BOX, b'a']), 0, &context(&single), &mut NoTrace).0;
     assert_eq!(cells.map(|cell| cell.boxed)[..2], [false, true]);
     // 0/C set-at, 0/D set-after.
     let cells = decode(&[DOUBLE_HEIGHT, b'A', NORMAL_SIZE, b'B']);
@@ -205,7 +205,7 @@ fn every_spacing_attribute_has_its_table_26_timing() {
     let config = Config::default();
     let second = G0 { set: charset::G0Set::Latin, national: Some(charset::NationalOption::German) };
     let with_second = RowContext { second_g0: Some(second), ..context(&config) };
-    let cells = decode_row(&row(&[ESC, b'A']), 0, &with_second).0;
+    let cells = decode_row(&row(&[ESC, b'A']), 0, &with_second, &mut NoTrace).0;
     assert_eq!(cells[0].glyph, Glyph::Space);
     assert_eq!(cells[1].glyph, Glyph::Char(CharRef::new(CharSet::G0(second), b'A')));
     // 1/C and 1/D set-at.

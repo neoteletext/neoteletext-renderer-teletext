@@ -14,7 +14,7 @@ use neoteletext_core::compose::compose_level_traced;
 use neoteletext_core::config::{Config, PresentationLevel};
 use neoteletext_core::consts::{HEADER_DISPLAY_BYTES, OBJECT_INVOCATIONS_PER_TYPE, SPACE};
 use neoteletext_core::fsm::PageKey;
-use neoteletext_core::level1::{DisplayOptions, Grid, build_grid};
+use neoteletext_core::level1::{DisplayOptions, Grid, build_grid, build_grid_traced};
 use neoteletext_core::packet::{ObjectKind, ObjectSource, Packet, TripletFunction};
 use neoteletext_core::trace::{Machine, TraceEntry, TraceSink};
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
@@ -301,4 +301,52 @@ fn tracing_off_reports_nothing() {
     }
     // Level 1 has no walk to trace even with tracing on.
     assert_eq!(trace_of(&enhanced_page(), traced(PresentationLevel::Level1)), []);
+}
+
+/// The row attribute machine's trace of `packets`' page 100 under `config`.
+fn row_trace_of(packets: &[Packet], config: Config) -> Vec<TraceEntry> {
+    Receiver::new().run(packets, config, |decoder| {
+        let page = decoder.store().get(address(), SubCode::ANY).unwrap();
+        let magazine = decoder.magazine_data(address().magazine);
+        let mut grid = Box::new(Grid::EMPTY);
+        let mut entries = Vec::new();
+        let mut keep = |entry| entries.push(entry);
+        let mut trace = TraceSink { time: BUILT_AT, entries: &mut keep };
+        build_grid_traced(&mut grid, Some(page), &magazine, &config, &DisplayOptions::default(), &mut trace);
+        entries
+    })
+}
+
+/// REQ-142 (REQ-FSM-010), REQ-138 (REQ-FSM-006): with the cells' trace
+/// asked for as well as the trace, the row attribute machine reports each
+/// cell of each row, naming the Table 26 attribute or a character, what the
+/// cell shows, and the mode and hold before and after; asked for alone, or
+/// not at all, it reports nothing.
+#[test]
+fn row_attribute_trace() {
+    // Mosaic Red, a solid mosaic, Hold Mosaics, Alpha White, "A".
+    let codes: &[u8] = &[0x11, 0x7F, 0x1E, 0x07, b'A'];
+    let packets = display_page(0, &[(1, codes)], vec![]);
+    let cells = Config { trace_cells: true, ..traced(PresentationLevel::Level1) };
+    let entries = row_trace_of(&packets, cells);
+    let row_1: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.machine == Machine::RowAttributes(1))
+        .map(|entry| [entry.from, entry.event, entry.action, entry.to])
+        .collect();
+    assert_eq!(
+        row_1[..5],
+        [
+            ["alphanumeric", "Mosaic Red", "show space", "mosaic"],
+            ["mosaic", "character", "show mosaic", "mosaic"],
+            ["mosaic", "Hold Mosaics", "show held mosaic", "mosaic, hold"],
+            ["mosaic, hold", "Alpha White", "show held mosaic", "alphanumeric, hold"],
+            ["alphanumeric, hold", "character", "show character", "alphanumeric, hold"],
+        ]
+    );
+    assert_eq!(row_1.len(), 40, "one entry for each cell");
+    assert!(entries.iter().all(|entry| entry.time == BUILT_AT));
+    for config in [traced(PresentationLevel::Level1), Config { trace_cells: true, ..Config::default() }] {
+        assert_eq!(row_trace_of(&packets, config), [], "{config:?}");
+    }
 }
