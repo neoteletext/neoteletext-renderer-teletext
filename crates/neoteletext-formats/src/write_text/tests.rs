@@ -10,7 +10,7 @@ use super::rtl::break_line_rtl;
 use super::sets::{Cell, encode, page_sets, set_value};
 use super::*;
 use neoteletext_core::charset::{CharRef, compose, default_second_g0, page_mark, to_unicode};
-use neoteletext_core::consts::{DESIGNATION_GROUP_SHIFT, ESC};
+use neoteletext_core::consts::{DESIGNATION_GROUP_SHIFT, ESC, SPACE};
 
 /// The value and sets of the set named `name`, for a page for
 /// NeoTeletext's own receivers.
@@ -114,6 +114,24 @@ fn a_tone_is_a_triplet_over_its_letter() {
     assert_eq!(mark, 0x9, "dot below");
     let [Cell::Marked { mark, .. }] = cells("vietnamese", "ả")[..] else { panic!() };
     assert_eq!(mark, 0xC, "the hook above is 4/C of the Vietnamese G2 set");
+}
+
+// REQ-95: a letter only a G2 set holds is written as an X/26 character
+// over a stand-in in the row, which a Level 1 receiver shows instead. The
+// stand-ins are the writer's own choice (EN 300 706 leaves the row's byte
+// to the broadcaster): the plain letter for the ten listed in REQ-95, and
+// a space for any other G2 character.
+#[test]
+fn a_g2_character_stands_on_its_plain_letter_or_a_space() {
+    let stand_in_of = |name: &str, text: &str| {
+        let written = cells(name, text);
+        let [Cell::G2 { stand_in, .. }] = written[..] else { panic!("{text}: {written:?}") };
+        stand_in
+    };
+    assert_eq!(stand_in_of("english", "Ø"), b'O');
+    assert_eq!(stand_in_of("english", "ł"), b'l');
+    assert_eq!(stand_in_of("english", "ß"), b's');
+    assert_eq!(stand_in_of("english", "©"), SPACE, "a G2 character with no plain letter stands on a space");
 }
 
 /// Latin text on a Cyrillic page is switched with ESC, and each ESC
