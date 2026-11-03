@@ -1,8 +1,8 @@
 # neottx user guide
 
-`neottx` is the command-line receiver of neoteletext (REQ-DOC-002). It decodes World System Teletext (ETSI EN 300 706, Levels 1.0 and 1.5) from recordings, live feeds and web services, and shows pages in the terminal, writes them as text or images, or converts them between formats.
+`neottx` is the command-line receiver of neoteletext (REQ-DOC-002). It decodes World System Teletext (ETSI EN 300 706, Presentation Levels 1.0, 1.5, 2.5 and 3.5) from recordings, live feeds and web services, and shows pages in the terminal, writes them as text or images, or converts them between formats.
 
-This build targets 64-bit Intel and AMD Linux and macOS. Graphics in the terminal use iTerm2 inline images; every other terminal gets coloured text.
+`neottx` is built for Linux on x86_64, aarch64, 32-bit Arm and 64-bit RISC-V, for macOS on Apple silicon and Intel, and for Windows with the MinGW toolchain (`scripts/build-targets.sh`, run by the full gate). It sandboxes itself on Linux (REQ-SEC-017). Graphics in the terminal use iTerm2 inline images; every other terminal gets coloured text.
 
 ## Building
 
@@ -18,6 +18,9 @@ Every part below is on by default. A smaller program leaves parts out (decision 
 | `view` | `neottx view`, the interactive viewer, and image sizing to fit the terminal in `show` |
 | `live` | Live feeds and web services (`zxnet:`, `wss://`, `http(s)://`), `check --descriptor`, and the TLS code they need |
 | `slice` | `neottx slice` |
+| `write-text` | `neottx write-text`, pages from text in any of the character sets ("Writing pages from text" below) |
+| `sound` | `neottx sound`, sounds as the audio profile's packets |
+| `keyboard` | `neottx qr` and `neottx keyboard`, a phone as the keyboard through qrkeyboard, with its TLS and cryptography |
 
 ```sh
 cargo build --release -p neoteletext-cli --no-default-features --features view
@@ -48,8 +51,9 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx services INPUT` | Lists the teletext streams, languages and subtitle pages of a transport stream. |
 | `neottx service-info INPUT` | Prints the broadcast service data of packet 8/30: network, time, programme label and status message. |
 | `neottx check FILES...` | Checks TTI page files for authoring problems, a row longer than the page among them. `--descriptor FILE` resolves link targets against a channel's `channel.ttx` or a service's descriptor. |
-| `neottx font convert INPUT OUTPUT` | Converts a BDF font of another cell size to the 12 × 10 form `neottx render --font` loads, only where the conversion is exact. See "Fonts" below. |
-| `neottx font sets FONT` | Reports, for each of the 24 teletext character sets, whether a 12 × 10 font conforms for it (REQ-FNT-011), how many of its 96 positions it draws, and the first rule it fails; `--library-line NAME` prints the font's `c` line for a library's `fonts.txt`. |
+| `neottx font convert INPUT OUTPUT` | Converts a BDF font of another cell size to a 12 × 10 or 12 × 20 font that `neottx render --font` loads, only where the conversion is exact. See "Fonts" below. |
+| `neottx font sets FONT` | Reports, for each of the 55 character sets fonts draw (the standard's 24 and NeoTeletext's own 31), whether a 12 × 10 or 12 × 20 font conforms for it (REQ-FNT-011), how many of its 96 positions it draws, and the first rule it fails; `--library-line NAME` prints the font's `c` line for a library's `fonts.txt`. |
+| `neottx write-text --set SET --page PAGE INPUT OUTPUT` | Writes a TTI page from a UTF-8 text file in the named character set, or with `--language TAG` in the set a language takes. See "Writing pages from text" below. |
 | `neottx sound --page PAGE IN.wav OUT.t42` | Writes a sound as the audio profile's packets, with the command that plays it on `PAGE`: IMA ADPCM by default, `--codec pcm` for 16-bit PCM. The WAVE file is 16-bit PCM at 8, 11.025, 16, 22.05, 24, 32, 44.1 or 48 kHz; stereo is mixed to mono. `--channel 0-3`, `--gain 0-100`, `--loop` and `--repeat N` set the rest. Append the output to a channel's T42 stream, and a receiver that plays sound plays it while that page is open. See `docs/spec/design/audio.md`. |
 | `neottx qr TEXT --page PAGE OUT.tti` | Writes `TEXT`, such as a qrkeyboard join address, as a QR code in a page's mosaics, from row 2 unless `--row` says otherwise, so a channel can show a code a phone scans. See DOC-2029. |
 | `neottx keyboard WS-ADDRESS` | Makes a phone the keyboard of a channel that takes input: it shows a qrkeyboard QR in the terminal (and with `--qr-page PAGE --qr-output FILE` writes it as a page), pairs with the phone that scans it, and sends what is typed on the phone to the channel's push WebSocket in the input protocol, once the channel has answered its HELLO; it stops if the channel does not answer within 10 seconds. `--pin` pairs with a PIN instead of a key in the QR; `--relay` names another relay. Anyone who can see the code can type. |
@@ -76,7 +80,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 - `-` for standard input;
 - `zxnet:NAME` for a live zxnet feed. The names are `teefax`, `nms-ceefax`, `chunkytext`, `spark`, `ch4` and `test`. `zxnet:` also takes a channel identifier, and a `wss://` address works too: a known feed's by itself, and for any other the last part of its path names the service;
 - an `https://` or `http://` address of a channel, its folder ending in `/`, or its `channel.ttx`, such as `https://app.neottx.com/demosite/`. Any address of the channel URL map opens (DOC-1779): `<channel>302` starts at page 302, `<channel>302/0002` at that sub-page, and `<channel>302?name=value` sends the channel's program those parameters with that page, and no other. `<channel>contents` and `<channel>wall` start at the channel's first page, as the viewer shows neither. `<channel>302.tti` and `<channel>302/` read as `<channel>302`. An address with a fragment, such as `<channel>#302`, is refused: on the web a page is part of the path;
-- any other `https://` or `http://` address, of a web teletext service descriptor (REQUIREMENTS.md area WEB);
+- any other `https://` or `http://` address, of a web teletext service descriptor (area WEB);
 - a `neottx://` link, which opens the `https://` or `http://` address it wraps, as in `neottx://https://app.neottx.com/demosite/`. `neottx` registers nothing with the operating system: the browser does that. A fragment after the address, which names a page in the browser, is refused here.
 
 The format of a file is detected from its content. `--format` overrides detection:
@@ -157,6 +161,8 @@ On a channel that takes input (its descriptor's `push` says `"input": true`), th
 
 Row 0 columns 0 to 7 always belong to the receiver: they show the page number being searched for and the security indicators, which a page cannot forge (REQ-SEC-005).
 
+When a particular sub-page is shown, the status area gives its place among the page's stored sub-pages, counted from 1 (REQ-NAV-005, decision E.130): `P100/12` for a place up to 99; `100/123`, without the `P`, for a place of three digits; and `100/+++` for a place of four digits, which the seven columns cannot hold beside the page number. A page may have up to 3,199 sub-pages (area NUM). Right and Left step through them; sub-page numbers cannot yet be typed.
+
 ## Checking a channel
 
 `neottx probe CHANNEL` opens a channel the way a receiver does and says what happened at each step: the entry file, the push connection's handshake and subprotocol, the input protocol, and each sample selection and how it ended, with a page or with DENIED and its status. It selects the place the address names, or the initial page; then each `--select PLACE`; and then a page few channels have, to see a selection refused. A local server needs `--allow-local 127.0.0.1`.
@@ -165,7 +171,7 @@ The exit status is 0 when nothing was wrong. It is not 0 when the entry file can
 
 ## Options for the decoder
 
-Every command accepts these options. Each one changes a setting of REQUIREMENTS.md Part E.
+Every command accepts these options. Each one changes a setting that a decision of Part E (in rdm) defines.
 
 | Option | Setting | Default |
 |---|---|---|
@@ -219,6 +225,7 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `cell_mode` | REQ-RND-002, REQ-RND-003 | 12 by 20 |
 | `trace` | REQ-FSM-010 | Off |
 | `status_on_suppressed_header` | REQ-L1-014 | Off |
+| `row_set_triplets` | REQ-2180, DEC-2179: NeoTeletext's row set triplet, column mode 01010, read; off, the mode is reserved as Table 29 has it | On |
 
 ## Examples
 
@@ -247,7 +254,7 @@ A font library is a folder with a `fonts.txt` index listing fonts by title, each
 
 ### Character sets and conformance
 
-A teletext decoder held a glyph at every one of the 96 code positions, 2/0 to 7/F, of each character set it supported. A font *conforms* for a character set when, by the rules of REQ-FNT-011: it is a valid 12 × 10 font; it has a glyph for every character the standard assigns to the set's positions; its space is blank, which also draws the positions the standard leaves empty; and none of its characters is blank. The rules look only at the glyphs, never at the font's name. The 24 sets are G0 Latin and its 13 national options, the three G0 Cyrillic options, G0 Greek, Arabic and Hebrew, and G2 Latin, Cyrillic, Greek and Arabic. A font conforming for a set may also meet the *SAA5050 cell* profile: every glyph leaves the top line and the leftmost dot column blank, as the chip did. `neottx font sets FONT` reports all of this:
+A teletext decoder held a glyph at every one of the 96 code positions, 2/0 to 7/F, of each character set it supported. A font *conforms* for a character set when, by the rules of REQ-FNT-011: it is a valid 12 × 10 or 12 × 20 font; it has a glyph for every character the standard assigns to the set's positions; its space is blank, which also draws the positions the standard leaves empty; and none of its characters is blank. The rules look only at the glyphs, never at the font's name. There are 55 sets: the standard's 24 (G0 Latin and its 13 national options, the three G0 Cyrillic options, G0 Greek, Arabic and Hebrew, and G2 Latin, Cyrillic, Greek and Arabic) and NeoTeletext's own 31 ("Languages" below). A font conforming for a set may also meet the *SAA5050 cell* profile: every glyph leaves the top line and the leftmost dot column blank, as the chip did. `neottx font sets FONT` reports all of this:
 
 ```text
 G0-Cyrillic-2                      96/96  conforms, SAA5050 cell
@@ -256,15 +263,15 @@ G0-Cyrillic-3                      90/96  rule 2: no glyph at 2/6
 
 A library's `fonts.txt` may state each font's conformance on a `c` line: `c`, the font's file name or address as its `f` line gives it, and the sets separated by spaces, each followed by `*` for the SAA5050 cell profile. `neottx font sets --library-line NAME FONT` writes that line. A program can use it to list fonts before loading them, and recomputes conformance from the glyphs once a font has loaded.
 
-`neottx font convert INPUT OUTPUT` makes that form from fonts of other sizes, only where nothing is lost:
+`neottx font convert INPUT OUTPUT` makes a loadable font from fonts of other sizes, only where nothing is lost (REQ-FNT-010, decision E.77):
 
 | Source cell | What the converter does |
 |---|---|
 | 6 × 10, 5 × 10 | Makes every pixel two pixels wide; a 5-pixel font sits at the right of the 12-pixel cell, leaving the blank column at the left, as the SAA5050 does. |
 | 6 × 9, 5 × 9 | The same, below one blank line at the top, where the SAA5050 leaves it. |
-| 12 × 20 | Keeps every second line, only when each pair of lines is identical. |
+| 12 × 20 | Keeps every second line, making a 12 × 10 font, when every pair of lines of every glyph (lines 1 and 2, 3 and 4, and so on) is identical; otherwise writes the font unchanged as a 12 × 20 font, such as one drawn with character rounding, since 12 × 20 fonts load as they are. |
 
-Any other cell, a glyph larger than its cell, or a 12 × 20 glyph whose pair of lines differs (a font drawn with character rounding, for instance) is refused, naming the first character that fails. A font whose `CHARSET_REGISTRY` is not ISO10646 needs `--map FILE`: one line for each character, its code as the font's `ENCODING` writes it, a tab, and its Unicode code point:
+Any other cell, or a glyph larger than its cell, is refused, naming the first character that fails. A font whose `CHARSET_REGISTRY` is not ISO10646 needs `--map FILE`: one line for each character, its code as the font's `ENCODING` writes it, a tab, and its Unicode code point:
 
 ```
 65	U+0041
@@ -273,3 +280,64 @@ Any other cell, a glyph larger than its cell, or a 12 × 20 glyph whose pair of 
 
 `FAMILY_NAME`, `COPYRIGHT` and `NOTICE` are carried over. The converter reads only its two files and never the network, and runs under the sandbox on Linux.
 
+
+## Writing pages from text
+
+`neottx write-text --set SET --page PAGE INPUT OUTPUT` writes a TTI page from a UTF-8 text file in one character set (REQ-95, decision E.82). The build needs the feature `write-text`, on by default; without it the command says writing pages from text is not in this build.
+
+- `--set SET` names the set: `english`, `german`, `swedish-finnish-hungarian`, `italian`, `french`, `portuguese-spanish`, `czech-slovak`, `polish`, `turkish`, `serbian-croatian-slovenian`, `romanian`, `estonian`, `lettish-lithuanian`, `cyrillic-serbian-croatian`, `russian-bulgarian`, `cyrillic-ukrainian`, `greek`, `hebrew` and `arabic-table44` (the standard's), and the sets of NeoTeletext's own listed under "Languages" below. `neottx write-text --help` prints the list the build has.
+- `--language TAG` names a language instead, as a BCP 47 tag such as `ru`, `sr-Latn` or `ja-Latn`, and the engine's table of languages gives its set (REQ-2181).
+- `--level neoteletext`, the default, writes for NeoTeletext's own receivers, which also read row set triplets; `--level 3.5` uses only the means of the standard, for Level 3.5 and below (REQ-2151).
+- `--page` is the page number, 100 to 8FF. The text file may be at most 16 KB.
+
+The page designates its set, in packet X/28/0 Format 1 and the header's control bits C12 to C14. Each line of the text starts a row, from row 1, and a line longer than 40 cells is broken into rows, at spaces where it can. Each character is written by the first of these means that can write it:
+1. a code of the page's set in the row;
+2. after an ESC, a code of the page's second set;
+3. a letter in the row with its accent or tone as an X/26 diacritical mark over it, as Vietnamese and Igbo need;
+4. a letter found only in a G2 set as an X/26 character, over a stand-in that a Level 1 receiver, which ignores X/26, shows instead: D for Đ, d for đ, N for Ŋ, n for ŋ, O for Ø, o for ø, L for Ł, l for ł, i for ı and s for ß, and a space for any other;
+5. at `--level neoteletext`, a row set triplet that starts a run of the row in another set (REQ-2180).
+
+A character none of these can write is refused, naming the character and its line. Text in the Arabic-script sets is broken into rows and then put in visual order, right to left, with runs of digits and Latin left to right and brackets mirrored; the receiver joins the letters (REQ-84). Kana written as half-width characters, or with combining voicing marks, is taken as the full-width voiced kana. A page whose X/26 triplets would need more than the sixteen packets X/26 carries, or whose text needs more rows than the page has, is refused. On success `neottx` reports the rows used and the X/26 triplets written.
+
+```sh
+neottx write-text --set vietnamese --page 100 tin-tuc.txt 100.tti
+neottx write-text --language uk --page 120 novyny.txt 120.tti
+```
+
+## Languages
+
+Beyond the standard's character sets, NeoTeletext defines sets of its own, so that languages the standard never served can be written on a teletext page and shown (decisions E.77 and E.78, REQ-81). A page selects one by its designation, a group and a national option of Table 32 of EN 300 706: in packet X/28/0 Format 1 or M/29/0, or, for the national option alone, with the group from `--region` or the channel. The code tables, position by position, are DOC-2028 of `neoteletext-common/PROTOCOL.html`, and DOC-2182 and DOC-2183 there explain how a page's G0 and G2 sets, glyphs and stand-ins work together.
+
+| Set (`--set`) | Group and option | Languages |
+|---|---|---|
+| `hausa-fula` | 0101 000 | Hausa, Fula |
+| `west-african` | 0101 001 | Akan, Bambara, Dyula, Dinka, Fon, Krio, Lingala, Mandinka, Mende, Nuer |
+| `ewe` | 0101 010 | Ewe |
+| `kabyle-tamazight` | 0101 011 | Kabyle, Central Atlas Tamazight (Latin script) |
+| `azerbaijani` | 0101 100 | Azerbaijani |
+| `kanuri-mossi` | 0101 101 | Kanuri, Mossi |
+| `igbo` | 0101 110 | Igbo |
+| `vietnamese` | 0101 111 | Vietnamese |
+| `ukrainian` | 0111 000 | Ukrainian |
+| `belarusian` | 0111 001 | Belarusian |
+| `macedonian` | 0111 010 | Macedonian |
+| `serbian` | 0111 011 | Serbian (Cyrillic script) |
+| `kyrgyz-mongolian` | 0111 101 | Kyrgyz, Mongolian |
+| `tatar` | 0111 110 | Tatar |
+| `tajik` | 0111 111 | Tajik |
+| `persian` | 1001 000 | Persian, Dari |
+| `urdu` | 1001 001 | Urdu |
+| `pashto` | 1001 010 | Pashto |
+| `sindhi` | 1001 011 | Sindhi |
+| `sorani` | 1001 100 | Central Kurdish |
+| `uyghur` | 1001 101 | Uyghur |
+| `balochi` | 1001 110 | Balochi |
+| `arabic` | 1001 111 | Arabic, with letters joined by the receiver |
+| `georgian` | 1011 000 | Georgian |
+| `armenian` | 1011 001 | Armenian |
+| `tifinagh` | 1011 010 | Standard Moroccan Tamazight, Central Atlas Tamazight (Tifinagh script) |
+| `japanese-romaji` | 1101 000 | Japanese in rōmaji |
+| `hiragana` | 1101 001 | Japanese in hiragana |
+| `katakana` | 1101 010 | Japanese in katakana |
+
+The engine's table of languages (REQ-2181), which `--language` reads, also maps the languages the standard's own sets serve, such as Indonesian, Swahili and Kazakh. Thai, Lao and Yoruba are not served (decisions DEC-2239 and DEC-2240).

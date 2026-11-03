@@ -55,11 +55,12 @@ level35-32colors = ["level25-32colors"]
 # modes and the flash rates and phases beyond Level 1's flash (decision
 # E.105, which names it as the standard does).
 additional-flash-functions = ["nonspacing-attributes"]
-# The classic profile: teletext as nearly every service sent it and nearly
-# every receiver showed it, Level 1.5 and nothing of Levels 2.5 and 3.5.
-# A page using a later level shows as a Level 1.5 receiver showed it. Pair
-# it with `Config::saa5246a()`, or `Config::saa5050()` for Level 1.0. Used
-# with the default features off.
+# The classic profile (DEC-1757): Level 1.5, with the renderer and the
+# viewer, and nothing of Levels 2.5 and 3.5, as a Level 1.5 receiver such as
+# the SAA5246A showed teletext. A page using a later level shows as such a
+# receiver showed it. Pair it with `Config::saa5246a()`, or
+# `Config::saa5050()` for Level 1.0. Used with the default features off.
+# `cargo xtask size` measures it as its `level15` build.
 classic = ["level15", "render", "viewer"]
 # The modern-classic profile (decision E.71): Level 1.5, and of Levels 2.5
 # and 3.5 only the non-spacing attributes and objects. Used with the
@@ -86,6 +87,11 @@ workspace = true
 [[test]]
 name = "behaviour"
 required-features = ["level15", "render", "viewer"]
+
+[[test]]
+name = "thread_safety"
+# The documented thread-safety of the main types (REQ-DOC-001).
+required-features = ["render", "viewer"]
 
 [[test]]
 name = "numbering"

@@ -32,7 +32,7 @@
 - Philips SAA5246A product specification, January 1993 (`teletext-fonts/manufacturers/philips/datasheets/saa5246a/`).
 - Philips SAA5243, SAA5281, SAA5231; Siemens SDA 5231; ITT TPU 2735, for the slicer and for lineage.
 
-**Corrections to `catalog/indexes/DATASHEET-INDEX.md`**, found during this work. The page numbers are PDF page numbers in the 1979 databook:
+**Pages of the 1979 databook**, checked during this work against the font collection's former datasheet index (deleted on 14 October 2026), which had some of them wrong. The page numbers are PDF page numbers in the databook:
 
 | Part | Index says | Correct |
 |---|---|---|

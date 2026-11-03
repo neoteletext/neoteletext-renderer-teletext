@@ -69,6 +69,7 @@ Each capability is a Cargo feature of `neoteletext-core`:
 | `objects` | `level25` | Active, Adaptive and Passive objects, and default objects |
 | `additional-flash-functions` | `nonspacing-attributes` | The Additional Flash Functions of Table 29, column mode 00111 |
 | `modern-classic` | — | The profile: `level15`, `level25`, `nonspacing-attributes`, `render`, `viewer` and `objects` |
+| `classic` | — | The classic profile (DEC-1757): `level15`, `render` and `viewer`, and nothing of Levels 2.5 and 3.5 |
 
 **The default build** (decision E.105, the owner's instruction of 22 October 2026, amending decision E.61's rule that every feature is on): Levels 1.0 and 1.5, and of Levels 2.5 and 3.5 the non-spacing attributes and the Colour Map of both levels: `level15`, `level25`, `nonspacing-attributes`, `level25-32colors`, `level35-32colors`, with `render`, `viewer` and `extended-sets`. Objects and the Additional Flash Functions are not default: a build names them, as the conformance tests do (the gate runs them with every feature). `neottx` uses the default. A port chooses the profile by turning the defaults off:
 
@@ -77,6 +78,12 @@ neoteletext-core = { version = "...", default-features = false, features = ["mod
 ```
 
 A port can also name capabilities one by one, for example the profile plus `level35-32colors`.
+
+**The classic profile** (`classic`, kept by the owner's decision DEC-1757 of 1 November 2026) is for a port that wants teletext exactly as a Level 1.5 receiver showed it: Level 1.5 with the renderer and the viewer, and none of the capabilities of Levels 2.5 and 3.5. A page that uses a later level shows as such a receiver showed it. Pair it with `Config::saa5246a()`, or with `Config::saa5050()` for Level 1.0. `neottx` is not built with it: it is a desktop program and uses the default build (DEC-2359).
+
+```toml
+neoteletext-core = { version = "...", default-features = false, features = ["classic"] }
+```
 
 ### What a feature switches
 
@@ -104,15 +111,15 @@ None of these is an error. Fault statistics count only what they always did, suc
 
 ### Size
 
-Measured on 12 October 2026 with `cargo xtask size`, on the linked Cortex-M0 image (`opt-level = "z"`, link-time optimisation) of a receiver with Level 1.5, the renderer and the viewer:
+Measured on 1 November 2026 with `cargo xtask size`, on the linked Cortex-M0 image (`opt-level = "z"`, link-time optimisation) of a receiver with the renderer and the viewer, without the font (the porting guide gives the other builds):
 
 | Build | Flash |
 |---|---|
-| Level 1.5 | 43,002 bytes |
-| Level 3.5 with the modern-classic profile's capabilities | 62,894 bytes |
-| Level 3.5 with every capability | 65,758 bytes |
+| The `classic` profile: Level 1.5 (`cargo xtask size`'s `level15` build, which the 64 KB budget of REQ-GEN-009 covers) | 58,570 bytes |
+| Level 3.5 with the `modern-classic` profile's capabilities | 74,606 bytes |
+| Level 3.5 with every capability | 74,770 bytes |
 
-The profile saves 2,864 bytes, about 4 percent. The profile is chosen for how pages look, not for size: most of the enhancement processor is the non-spacing attributes and the walk over the page's data, which the profile keeps.
+On 12 October 2026, before the character tables of neoteletext's own sets and the Noto change, the same three builds were 43,002, 62,894 and 65,758 bytes. The modern-classic profile saves 164 bytes against every capability; the classic profile saves 16,036 bytes against it, the whole enhancement processor. The profile is chosen for how pages look, not for size: most of the enhancement processor is the non-spacing attributes and the walk over the page's data, which the profile keeps.
 
 ## 4. Testing
 

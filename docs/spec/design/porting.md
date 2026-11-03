@@ -28,7 +28,7 @@ neoteletext-formats = { version = "...", default-features = false }  # T42 only
 
 | Crate | Features |
 |---|---|
-| `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); and the profile `modern-classic` |
+| `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); and the profiles `classic` (Level 1.5 alone, DEC-1757) and `modern-classic` |
 | `neoteletext-formats` | `transport`, `sliced`, `pages`, `tti`, `ep1`, `edittf`, `dump`, `check`, and `std` |
 | `neoteletext-web` | `push`, `cookies` |
 
@@ -43,7 +43,7 @@ Measured flash on Cortex-M0 on 1 November 2026 (`cargo xtask size`, `opt-level =
 | Build | Flash |
 |---|---|
 | Core with no optional area: acquisition, the Level 1 grid, composing | 25,870 bytes |
-| Level 1.5 receiver with the renderer and the viewer, without the font | 58,570 bytes |
+| Level 1.5 receiver with the renderer and the viewer, without the font: the `classic` profile | 58,570 bytes |
 | The same with the compiled font's standard sets | 98,450 bytes |
 | The same at Level 3.5, every capability, without the font | 74,770 bytes |
 | The same with the `modern-classic` profile's capabilities, without the font | 74,606 bytes |
@@ -64,6 +64,10 @@ All state lives in memory you provide (REQ-GEN-003):
 - For Levels 2.5 and 3.5, the enhancement store is two more slices: `EnhancementSubPage::EMPTY` entries of 160 bytes, and `EnhancementPacket::EMPTY` slots of 42 bytes, one per packet. Annex E.8 bounds a service at 500 packets at Level 2.5 and 1200 at Level 3.5, about 21 and 50 kilobytes, plus 24 packets for each magazine's Magazine Organization Table. Pass them to `Decoder::with_enhancement_store`; `Decoder::new` keeps no enhancement pages.
 - A `Grid` is 1000 cells of 16 bytes and the page-wide state: 16,100 bytes, measured on 31 October 2026. Build it in place with `build_grid(&mut grid, ...)`.
 - A rendered text row at 480 by 20 needs 9.6 kilobytes at 8 bits per pixel or 4.8 kilobytes at 4 bits.
+
+## Sub-pages
+
+A page may have up to 3,199 sub-pages (area NUM, decision E.130), each in its own slot of the page store. `PageStore` lists and steps them without any memory of its own: `subcodes` iterates a page's stored sub-codes in order, and `subpage_count`, `first_subpage`, `last_subpage`, `next_subpage`, `previous_subpage` and `subpage_place` (a sub-page's place, counted from 1, as the status area shows it) each make one bounded pass over the slots you gave it. A port that shows a list of sub-pages calls them per frame or keeps its own copy; the store never allocates.
 
 ## Pixels and colour
 
