@@ -6,7 +6,7 @@
 
 use neoteletext_core::charset::{CharRef, CharSet, compositions, glyph_key, to_unicode};
 #[cfg(feature = "extended-sets")]
-use neoteletext_core::charset::{extended_compositions, joined_forms, mark_sequences};
+use neoteletext_core::charset::{extended_compositions, joined_forms};
 use neoteletext_core::glyphs::conformance::FONT_SETS;
 use neoteletext_core::glyphs::{GlyphSet, PLACEHOLDER, SPACING_MARKS};
 
@@ -63,18 +63,16 @@ fn every_mark_and_composed_letter_is_in_the_font() {
     assert_eq!(composed, []);
 }
 
-/// REQ-CHR-014, REQ-CHR-015, REQ-CHR-016: the composed letters of
-/// neoteletext's own sets, every joined form and every Thai and Lao glyph of
-/// two marks.
-/// REQ-383: the joined forms and mark glyphs of the extended sets.
+/// REQ-CHR-014, REQ-CHR-015: the composed letters of neoteletext's own sets
+/// and every joined form.
+/// REQ-383: the joined forms of the extended sets.
 #[cfg(feature = "extended-sets")]
 #[test]
 fn every_form_of_the_extended_sets_is_in_the_font() {
     let font = GlyphSet::noto_teletext();
     let forms = joined_forms().iter().map(|&(_, _, point)| point);
-    let sequences = mark_sequences().iter().map(|&(key, _, _)| key);
     let composed = extended_compositions().iter().map(|&(_, _, c)| c);
-    let lacks: Vec<char> = forms.chain(sequences).chain(composed).filter(|&c| font.lookup(c).is_none()).collect();
+    let lacks: Vec<char> = forms.chain(composed).filter(|&c| font.lookup(c).is_none()).collect();
     assert_eq!(lacks, []);
 }
 

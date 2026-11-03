@@ -21,16 +21,13 @@
 //!    designation back to the page's sets after it, as in 2.
 //!
 //! Right-to-left runs are put in visual order and Arabic letters of Table
-//! 44 take their joined forms, as the page writer does; a Thai or Lao run
-//! writes its marks in the same columns of the rows above and below
-//! (DEC-604), which runs of the same set may share where no column needs
-//! two marks.
+//! 44 take their joined forms, as the page writer does.
 
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use neoteletext_core::charset::language::{LANGUAGES, language, language_value};
+use neoteletext_core::charset::language::{LANGUAGES, language_value};
 use neoteletext_core::charset::{CharSet, G0, G0Set, default_second_value, modified_designation};
 use neoteletext_core::consts::{
     COLUMNS, ESC, LOCAL_TRIPLETS, MODE_ADDRESS_ROW_0, MODE_DRCS_CHARACTER, MODE_FULL_ROW_COLOUR,
@@ -43,7 +40,6 @@ use neoteletext_core::packet::{Triplet, TripletFunction};
 use neoteletext_core::types::Designations;
 
 use super::sets::{Cell, State, encode_from, page_sets};
-use super::thai_lao::{LOWER_MARKS, clusters, mark_cell};
 use super::{Level, Sets, WriteError, kana, rtl, table44};
 use crate::consts::TERMINATION_LOCAL_DATA_END;
 
@@ -95,8 +91,6 @@ pub struct Report {
     /// The triplets it added to the page's local enhancement data, its
     /// share of row addresses and of the Termination Marker included.
     pub triplets: usize,
-    /// 1 when its marks take the rows above and below it, else 0.
-    pub mark_rows: u8,
 }
 
 /// The page with its runs written.
@@ -135,8 +129,6 @@ pub enum RunFault {
     OutOfRows,
     /// The run's text does not end by column 39: its last column.
     OutOfColumns(usize),
-    /// Its marks would be on row 0 or row 25.
-    MarkRowsOutOfRange,
     /// It takes a cell another run takes: that run's index.
     Overlap(usize),
     /// No means the level allows shows this character in the language.
@@ -171,9 +163,6 @@ impl core::fmt::Display for RunFault {
             Self::UnknownLanguage(tag) => write!(formatter, "no set writes the language {tag:?} at this level"),
             Self::OutOfRows => formatter.write_str("a run is on rows 1 to 24 and starts by column 39"),
             Self::OutOfColumns(last) => write!(formatter, "the run ends at column {last}, after column 39"),
-            Self::MarkRowsOutOfRange => {
-                formatter.write_str("its marks need the rows above and below it, within rows 1 to 24")
-            }
             Self::Overlap(other) => write!(formatter, "it takes a cell run {other} takes"),
             Self::Unshown(character) => {
                 write!(
@@ -216,8 +205,6 @@ pub struct Language {
     pub name: &'static str,
     /// Which way it is written.
     pub direction: Direction,
-    /// 1 when its marks take the rows above and below its letters.
-    pub mark_rows: u8,
 }
 
 /// Every language of the core's table (REQ-2181), in its order, as a page
@@ -234,7 +221,7 @@ pub fn languages() -> Vec<Language> {
                 tag.push_str(script);
             }
             let direction = if entry.right_to_left() { Direction::Rtl } else { Direction::Ltr };
-            Language { tag, name: entry.name, direction, mark_rows: entry.mark_rows() }
+            Language { tag, name: entry.name, direction }
         })
         .collect()
 }
@@ -274,11 +261,10 @@ pub fn write_runs(
     let mut reports = Vec::with_capacity(placed.len());
     let mut before = program_count;
     let mut merged: Option<Vec<Triplet>> = None;
-    let mut marked = [[false; COLUMNS]; ROWS];
     for count in 1..=placed.len() {
         let index = count.saturating_sub(1);
         if let Some(run) = placed.get(index) {
-            write_cells(grid, &mut marked, run, own);
+            write_cells(grid, run, own);
         }
         let prefix = placed.get(..count).unwrap_or_default();
         let rows = encoder_rows(grid, prefix, page_value, own, parsed.as_ref().ok());
@@ -297,9 +283,8 @@ pub fn write_runs(
         if now > usize::from(LOCAL_TRIPLETS) {
             return Err(RunError { run: Some(index), fault: RunFault::OverBudget(now) });
         }
-        let mark_rows = placed.get(index).map_or(0, |run| run.mark_rows);
         let cells = placed.get(index).map_or(0, |run| u8::try_from(run.letters.len()).unwrap_or(u8::MAX));
-        reports.push(Report { cells, triplets: now.saturating_sub(before), mark_rows });
+        reports.push(Report { cells, triplets: now.saturating_sub(before) });
         before = now;
     }
     let (triplets, changed, count) = match merged {
@@ -334,22 +319,12 @@ struct Placed {
     other: bool,
     /// Its cells on its row.
     letters: Vec<Cell>,
-    /// Its marks above and below, by their place in the run.
-    upper: Vec<(usize, Cell)>,
-    lower: Vec<(usize, Cell)>,
-    /// 1 when its marks take the rows above and below.
-    mark_rows: u8,
 }
 
 impl Placed {
     /// One past its last column.
     fn end(&self) -> usize {
         usize::from(self.column).saturating_add(self.letters.len())
-    }
-
-    /// The rows its mark spans are on.
-    fn mark_spans(&self) -> [u8; 2] {
-        [self.row.saturating_sub(1), self.row.saturating_add(1)]
     }
 }
 
@@ -387,7 +362,6 @@ fn encode_run(run: &TextRun<'_>, page_language: Option<&str>, page_value: u8, ow
     let tag = run.language.or(page_language).unwrap_or(LATIN_ENGLISH_TAG);
     let unknown = || RunFault::UnknownLanguage(tag.to_string());
     let value = language_value(tag, own).ok_or_else(unknown)?;
-    let entry = language(tag).ok_or_else(unknown)?;
     let other = value != page_value;
     let sets = run_sets(value, other, own).ok_or_else(unknown)?;
     let set = match sets.base {
@@ -400,56 +374,18 @@ fn encode_run(run: &TextRun<'_>, page_language: Option<&str>, page_value: u8, ow
     } else {
         text
     };
-    let mark_rows = entry.mark_rows();
-    let mut placed = Placed {
-        row: run.row,
-        column: run.column,
-        value,
-        other,
-        letters: Vec::new(),
-        upper: Vec::new(),
-        lower: Vec::new(),
-        mark_rows,
-    };
-    if matches!(set, Some(G0Set::Thai | G0Set::Lao)) {
-        for (letter, marks) in clusters(&text, LINE).map_err(unshown)? {
-            let (cells, _) = encode_from(&sets, &[letter], State::default(), false, LINE).map_err(unshown)?;
-            placed.letters.extend(cells);
-            let place = placed.letters.len().saturating_sub(1);
-            let (lower, upper): (Vec<char>, Vec<char>) = marks.iter().partition(|mark| LOWER_MARKS.contains(mark));
-            if !upper.is_empty() {
-                placed.upper.push((place, mark_cell(&sets, &upper, LINE).map_err(unshown)?));
-            }
-            if !lower.is_empty() {
-                placed.lower.push((place, mark_cell(&sets, &lower, LINE).map_err(unshown)?));
-            }
-        }
-    } else {
-        let right_to_left = set.is_some_and(|set| set.is_joined() || set == G0Set::Hebrew || set == G0Set::Arabic);
-        let characters: Vec<char> = if right_to_left { rtl::visual_line(&text) } else { text.chars().collect() };
-        placed.letters = encode_from(&sets, &characters, State::default(), false, LINE).map_err(unshown)?.0;
-    }
+    let right_to_left = set.is_some_and(|set| set.is_joined() || set == G0Set::Hebrew || set == G0Set::Arabic);
+    let characters: Vec<char> = if right_to_left { rtl::visual_line(&text) } else { text.chars().collect() };
+    let letters = encode_from(&sets, &characters, State::default(), false, LINE).map_err(unshown)?.0;
+    let placed = Placed { row: run.row, column: run.column, value, other, letters };
     let end = placed.end();
     if end > COLUMNS {
         return Err(RunFault::OutOfColumns(end.saturating_sub(1)));
-    }
-    if mark_rows > 0 && (run.row <= FIRST_TEXT_ROW || run.row >= LAST_TEXT_ROW) {
-        return Err(RunFault::MarkRowsOutOfRange);
     }
     Ok(placed)
 }
 
 // ------------------------------------------------------- where runs go
-
-/// Who holds a cell.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Holder {
-    run: usize,
-    /// For a mark span, its set's value; none for a run's own cells.
-    marks: Option<u8>,
-    /// A mark is written here.
-    mark: bool,
-}
 
 fn grid_cell<T: Copy>(grid: &[[T; COLUMNS]; ROWS], row: u8, column: usize) -> Option<T> {
     grid.get(usize::from(row)).and_then(|cells| cells.get(column)).copied()
@@ -463,71 +399,27 @@ fn check_place(
     program: Option<&ProgramData>,
     original: &[[u8; COLUMNS]; ROWS],
 ) -> Result<(), RunFault> {
-    let mut holders = vec![[None::<Holder>; COLUMNS]; ROWS];
-    let hold = |holders: &mut Vec<[Option<Holder>; COLUMNS]>, row: u8, column: usize, holder: Holder| {
-        if let Some(slot) = holders.get_mut(usize::from(row)).and_then(|cells| cells.get_mut(column)) {
-            *slot = Some(holder);
-        }
-    };
-    for (index, other) in earlier.iter().enumerate() {
-        for column in usize::from(other.column)..other.end() {
-            hold(&mut holders, other.row, column, Holder { run: index, marks: None, mark: false });
-        }
-        if other.mark_rows > 0 {
-            let [above, below] = other.mark_spans();
-            for column in usize::from(other.column)..other.end() {
-                let marked = |marks: &[(usize, Cell)]| {
-                    marks.iter().any(|(place, _)| usize::from(other.column).saturating_add(*place) == column)
-                };
-                for (row, marks) in [(above, &other.upper), (below, &other.lower)] {
-                    let before = holders.get(usize::from(row)).and_then(|cells| cells.get(column)).copied().flatten();
-                    let mark = marked(marks) || before.is_some_and(|holder| holder.mark);
-                    hold(&mut holders, row, column, Holder { run: index, marks: Some(other.value), mark });
-                }
-            }
-        }
+    let columns = usize::from(run.column)..run.end();
+    let overlaps =
+        |other: &Placed| other.row == run.row && usize::from(other.column) < columns.end && columns.start < other.end();
+    if let Some(index) = earlier.iter().position(overlaps) {
+        return Err(RunFault::Overlap(index));
     }
-    for column in usize::from(run.column)..run.end() {
-        if let Some(holder) = holders.get(usize::from(run.row)).and_then(|cells| cells.get(column)).copied().flatten() {
-            return Err(RunFault::Overlap(holder.run));
-        }
+    let row = run.row;
+    // An ESC before the run would leave its codes in the second set.
+    if let Some(column) = (0..usize::from(run.column)).find(|&column| grid_cell(original, row, column) == Some(ESC)) {
+        return Err(RunFault::SetChanged { row, column: u8::try_from(column).unwrap_or(u8::MAX) });
     }
-    if run.mark_rows > 0 {
-        let [above, below] = run.mark_spans();
-        for (row, marks) in [(above, &run.upper), (below, &run.lower)] {
-            for column in usize::from(run.column)..run.end() {
-                let Some(holder) = holders.get(usize::from(row)).and_then(|cells| cells.get(column)).copied().flatten()
-                else {
-                    continue;
-                };
-                let mark = marks.iter().any(|(place, _)| usize::from(run.column).saturating_add(*place) == column);
-                if holder.marks != Some(run.value) || (mark && holder.mark) {
-                    return Err(RunFault::Overlap(holder.run));
-                }
-            }
+    let Some(program) = program else { return Ok(()) };
+    for &(column, triplet) in
+        program.rows.get(usize::from(row)).map(|section| section.columns.as_slice()).unwrap_or_default()
+    {
+        let at = usize::from(column);
+        if at < run.end() && is_set_change(triplet.mode) {
+            return Err(RunFault::SetChanged { row, column });
         }
-    }
-    let mut rows = vec![run.row];
-    if run.mark_rows > 0 {
-        rows.extend(run.mark_spans());
-    }
-    for row in rows {
-        // An ESC before the run would leave its codes in the second set.
-        if let Some(column) = (0..usize::from(run.column)).find(|&column| grid_cell(original, row, column) == Some(ESC))
-        {
-            return Err(RunFault::SetChanged { row, column: u8::try_from(column).unwrap_or(u8::MAX) });
-        }
-        let Some(program) = program else { continue };
-        for &(column, triplet) in
-            program.rows.get(usize::from(row)).map(|section| section.columns.as_slice()).unwrap_or_default()
-        {
-            let at = usize::from(column);
-            if at < run.end() && is_set_change(triplet.mode) {
-                return Err(RunFault::SetChanged { row, column });
-            }
-            if (usize::from(run.column)..run.end()).contains(&at) && is_character(triplet.mode) {
-                return Err(RunFault::CellTaken { row, column });
-            }
+        if columns.contains(&at) && is_character(triplet.mode) {
+            return Err(RunFault::CellTaken { row, column });
         }
     }
     Ok(())
@@ -566,20 +458,8 @@ fn cell_parts(cell: Cell, by_triplets: bool) -> (u8, Option<(u8, u8)>) {
     (if by_triplets { SPACE } else { code }, triplet)
 }
 
-/// The cells of `run`'s mark rows, by row and column.
-fn mark_cells(run: &Placed) -> Vec<(u8, usize, Cell)> {
-    let [above, below] = run.mark_spans();
-    let at = |place: usize| usize::from(run.column).saturating_add(place);
-    run.upper
-        .iter()
-        .map(|&(place, cell)| (above, at(place), cell))
-        .chain(run.lower.iter().map(|&(place, cell)| (below, at(place), cell)))
-        .collect()
-}
-
-/// Writes `run`'s cells into the grid: its own, its mark spans as spaces
-/// where no earlier run of its set wrote a mark (`marked`), then its marks.
-fn write_cells(grid: &mut [[u8; COLUMNS]; ROWS], marked: &mut [[bool; COLUMNS]; ROWS], run: &Placed, own: bool) {
+/// Writes `run`'s cells into the grid.
+fn write_cells(grid: &mut [[u8; COLUMNS]; ROWS], run: &Placed, own: bool) {
     let triplets = by_triplets(run, own);
     let mut put = |row: u8, column: usize, code: u8| {
         if let Some(slot) = grid.get_mut(usize::from(row)).and_then(|cells| cells.get_mut(column)) {
@@ -588,22 +468,6 @@ fn write_cells(grid: &mut [[u8; COLUMNS]; ROWS], marked: &mut [[bool; COLUMNS]; 
     };
     for (column, &cell) in (usize::from(run.column)..).zip(&run.letters) {
         put(run.row, column, cell_parts(cell, triplets).0);
-    }
-    if run.mark_rows == 0 {
-        return;
-    }
-    for row in run.mark_spans() {
-        for column in usize::from(run.column)..run.end() {
-            if grid_cell(marked, row, column) == Some(false) {
-                put(row, column, SPACE);
-            }
-        }
-    }
-    for (row, column, cell) in mark_cells(run) {
-        put(row, column, cell_parts(cell, triplets).0);
-        if let Some(slot) = marked.get_mut(usize::from(row)).and_then(|cells| cells.get_mut(column)) {
-            *slot = true;
-        }
     }
 }
 
@@ -632,24 +496,16 @@ fn encoder_rows(
     let mut characters: Vec<(u8, u8, (u8, u8))> = Vec::new();
     for run in placed {
         let triplets = by_triplets(run, own);
-        let mut spans = vec![run.row];
-        if run.mark_rows > 0 {
-            spans.extend(run.mark_spans());
-        }
         if run.other {
-            for &row in &spans {
-                for column in usize::from(run.column)..run.end() {
-                    if let Some(slot) = need.get_mut(usize::from(row)).and_then(|cells| cells.get_mut(column)) {
-                        *slot = Some(run.value);
-                    }
+            for column in usize::from(run.column)..run.end() {
+                if let Some(slot) = need.get_mut(usize::from(run.row)).and_then(|cells| cells.get_mut(column)) {
+                    *slot = Some(run.value);
                 }
             }
         }
-        let own_cells =
-            (usize::from(run.column)..).zip(run.letters.iter().copied()).map(|(column, cell)| (run.row, column, cell));
-        for (row, column, cell) in own_cells.chain(mark_cells(run)) {
+        for (column, &cell) in (usize::from(run.column)..).zip(&run.letters) {
             if let (Some(triplet), Ok(column)) = (cell_parts(cell, triplets).1, u8::try_from(column)) {
-                characters.push((row, column, triplet));
+                characters.push((run.row, column, triplet));
             }
         }
     }

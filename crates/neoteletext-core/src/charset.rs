@@ -31,8 +31,6 @@ pub mod language;
 mod latin;
 #[rustfmt::skip]
 mod mosaics;
-#[rustfmt::skip]
-mod thai_lao;
 
 use crate::consts::{CODE_MASK_7BIT, DIACRITIC_HOOK_ABOVE, DIACRITIC_LOW_LINE, DIACRITIC_NONE, LATIN_AT_SIGN};
 
@@ -96,10 +94,6 @@ pub enum G0Set {
     Balochi,
     /// Arabic in plain letters, joined by the receiver.
     ArabicPlain,
-    /// Thai: the Philips SAA5246AP/S Thai page (decision E.80).
-    Thai,
-    /// Lao: the 1990 World System Teletext specification's Figure 33.
-    Lao,
     /// Japanese hiragana, with katakana as its second set (DEC-2187).
     Hiragana,
     /// Japanese katakana, with hiragana as its second set (DEC-2187).
@@ -111,8 +105,6 @@ impl G0Set {
     /// (REQ-CHR-015).
     #[must_use]
     pub const fn is_joined(self) -> bool {
-        // Thai and Lao marks are ordinary characters in their own cells;
-        // only group 1001 is joined.
         matches!(
             self,
             Self::Persian
@@ -207,13 +199,6 @@ pub enum G2Set {
     /// Armenian G2: Latin G2 with և and the rarer Armenian punctuation in
     /// its unused positions (decision E.78).
     Armenian,
-    /// Thai G2: Latin G2 with columns 5 and 6 holding the SAA5246AP/S's
-    /// columns 8 and 9, the rarer marks and the vowel-and-tone pairs
-    /// (decision E.80).
-    Thai,
-    /// Lao G2: Latin G2 with columns 5 and 6 holding the vowel-and-tone
-    /// pairs and the rarer marks.
-    Lao,
 }
 
 /// A Latin national option sub-set (EN 300 706 Table 36).
@@ -395,8 +380,8 @@ pub fn page_mark(g2: G2Set, diacritic: u8) -> u8 {
 
 /// The second G0 set a designation value implies when no Table 33
 /// designation is received: Latin English for neoteletext's own values
-/// but group 1100 option 000, whose is Thai (REQ-CHR-012, REQ-CHR-016);
-/// none for the standard's.
+/// but the Japanese kana sets, each of which has the other (REQ-CHR-012,
+/// DEC-2187); none for the standard's.
 #[must_use]
 pub fn default_second_g0(value: u8) -> Option<G0> {
     designation::default_second_g0(value & CODE_MASK_7BIT)
@@ -433,29 +418,17 @@ pub const fn at_sign() -> CharRef {
 #[must_use]
 pub fn to_unicode(character: CharRef) -> Unicode {
     let base = code_table::base_unicode(character.set, character.code);
-    // REQ-CHR-016: a Thai or Lao G2 glyph of two marks gives both.
-    if let Some((first, second)) = thai_lao::mark_sequence(base) {
-        return Unicode { base: first, combining: Some(second) };
-    }
     let combining =
         if character.diacritic == DIACRITIC_NONE { None } else { diacritics::diacritic_combining(character.diacritic) };
     Unicode { base, combining }
 }
 
 /// The code point a font draws a character by: the table's character, in
-/// its joined form for a joined letter (REQ-CHR-015), or the private-use
-/// key of a two-mark glyph (REQ-CHR-016). Without a diacritical mark it is
+/// its joined form for a joined letter (REQ-CHR-015). Without a diacritical mark it is
 /// what glyph lookup uses; [`to_unicode`] is for text.
 #[must_use]
 pub fn glyph_key(character: CharRef) -> char {
     joined_form(code_table::base_unicode(character.set, character.code), character.form)
-}
-
-/// Every two-mark glyph of the Thai and Lao G2 sets: private-use key, first
-/// mark, second mark.
-#[must_use]
-pub fn mark_sequences() -> &'static [(char, char, char)] {
-    thai_lao::mark_sequences()
 }
 
 /// Converts a block mosaic pattern to Unicode (REQ-CHR-005). `pattern` is

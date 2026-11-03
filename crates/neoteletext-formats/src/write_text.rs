@@ -23,14 +23,6 @@
 //! runs of digits and Latin left to right and brackets mirrored. لا is
 //! written as the lam-alef code. The receiver joins the letters
 //! (REQ-CHR-015).
-//!
-//! Thai and Lao follow the Philips SAA5246AP/S scheme (decision E.80,
-//! rdm DEC-604): each line takes a row of
-//! letters, with the marks above them on the row before and the lower
-//! vowels on the row after, each in its letter's column; a line's lower
-//! vowels share a row with the next line's upper marks unless a column
-//! needs both. A vowel with a tone is one G2 glyph placed by X/26 over the
-//! vowel alone; ำ is written as ํ over the consonant and า beside it.
 
 use alloc::string::String;
 #[cfg(all(feature = "std", feature = "tti"))]
@@ -48,7 +40,6 @@ use {
     neoteletext_core::types::{Designations, SubCode},
     rtl::break_line_rtl,
     sets::{Cell, break_line, page_sets, set_value},
-    thai_lao::{marked_lines, marked_rows},
 };
 
 mod kana;
@@ -56,7 +47,6 @@ mod rtl;
 mod runs;
 mod sets;
 mod table44;
-mod thai_lao;
 
 pub use runs::{
     Direction, Encoded, FIRST_TEXT_ROW, LAST_TEXT_ROW, LATIN_ENGLISH_TAG, Language, PageText, Report, RunError,
@@ -132,8 +122,6 @@ pub enum WriteError {
     },
     /// The text needs more rows than rows 1 to 23.
     TooManyRows(usize),
-    /// A Thai or Lao word on this line is wider than a row.
-    WordTooLong(usize),
     /// The page builder refused the page; for diacritical marks this is
     /// more triplets than the sixteen packets X/26 carry.
     #[cfg(all(feature = "std", feature = "tti"))]
@@ -151,7 +139,6 @@ impl core::fmt::Display for WriteError {
                 write!(formatter, "line {line}: the set has no {character:?} (U+{:04X})", u32::from(*character))
             }
             Self::TooManyRows(rows) => write!(formatter, "the text needs {rows} rows; a page has rows 1 to 23"),
-            Self::WordTooLong(line) => write!(formatter, "line {line}: a word is wider than a row"),
             #[cfg(all(feature = "std", feature = "tti"))]
             Self::Author(AuthorError::LocalDataFull) => {
                 formatter.write_str("the marks need more triplets than the sixteen packets X/26 carry")
@@ -215,15 +202,7 @@ pub fn write_text(choice: Choice<'_>, level: Level, mpp: u16, text: &str) -> Res
         sets.default,
         CharSet::G0(G0 { set, .. }) if set.is_joined() || set == G0Set::Hebrew || set == G0Set::Arabic
     );
-    let marked = matches!(sets.default, CharSet::G0(G0 { set: G0Set::Thai | G0Set::Lao, .. }));
-    if marked {
-        let mut lines = Vec::new();
-        for (index, line) in text.lines().enumerate() {
-            lines.extend(marked_lines(&sets, line, index.saturating_add(1))?);
-        }
-        rows = marked_rows(lines);
-    }
-    for (index, line) in text.lines().enumerate().filter(|_| !marked) {
+    for (index, line) in text.lines().enumerate() {
         let number = index.saturating_add(1);
         rows.extend(if right_to_left {
             break_line_rtl(&sets, line, number)?

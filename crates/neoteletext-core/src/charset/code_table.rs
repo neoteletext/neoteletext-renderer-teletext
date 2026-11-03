@@ -16,7 +16,6 @@ use super::g0_standard::{ARABIC_G0, CYRILLIC_1_G0, CYRILLIC_2_G0, CYRILLIC_3_G0,
 use super::g2::{ARABIC_G2, ARMENIAN_G2, CYRILLIC_G2, GREEK_G2, LATIN_G2, VIETNAMESE_G2};
 use super::g3::G3;
 use super::latin::{LATIN_G0, national_char};
-use super::thai_lao::{LAO_G0, LAO_G2, THAI_G0, THAI_G2};
 use super::{CharSet, Designation, G0, G0Set, G2Set, NationalOption};
 use crate::consts::{NATIONAL_INDEX_MASK, SPACE};
 
@@ -81,8 +80,6 @@ fn g0_unicode(g0: G0, code: u8) -> char {
         G0Set::Uyghur => &UYGHUR_G0,
         G0Set::Balochi => &BALOCHI_G0,
         G0Set::ArabicPlain => &ARABICPLAIN_G0,
-        G0Set::Thai => &THAI_G0,
-        G0Set::Lao => &LAO_G0,
         G0Set::Hiragana => &HIRAGANA_G0,
         G0Set::Katakana => &KATAKANA_G0,
     };
@@ -97,8 +94,6 @@ const fn g2_table(set: G2Set) -> &'static CodeTable {
         G2Set::Arabic => &ARABIC_G2,
         G2Set::Vietnamese => &VIETNAMESE_G2,
         G2Set::Armenian => &ARMENIAN_G2,
-        G2Set::Thai => &THAI_G2,
-        G2Set::Lao => &LAO_G2,
     }
 }
 

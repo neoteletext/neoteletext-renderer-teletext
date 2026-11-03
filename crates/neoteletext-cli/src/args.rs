@@ -341,7 +341,7 @@ pub(crate) enum Command {
         /// yoruba-igbo, vietnamese, ukrainian, belarusian, macedonian,
         /// serbian, kyrgyz-mongolian, tatar, tajik, georgian, armenian,
         /// tifinagh, persian, urdu, pashto, sindhi, sorani, uyghur, balochi,
-        /// arabic, thai, lao, japanese-romaji, hiragana or katakana.
+        /// arabic, japanese-romaji, hiragana or katakana.
         #[arg(long, required_unless_present = "language", conflicts_with = "language")]
         set: Option<String>,
         /// The language instead of a set, as a BCP 47 tag such as ru,

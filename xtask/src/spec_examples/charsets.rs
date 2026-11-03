@@ -36,7 +36,7 @@ const RIGHT_TO_LEFT: [core::ops::RangeInclusive<char>; 2] = ['\u{0590}'..='\u{07
 const LEFT_TO_RIGHT_MARK: char = '\u{200E}';
 
 /// NeoTeletext's whole G0 sets, each with its example's name and caption.
-const G0_SETS: [(G0Set, &str, &str); 24] = [
+const G0_SETS: [(G0Set, &str, &str); 22] = [
     (G0Set::YorubaIgbo, "charset-g0-yoruba-igbo", "Yoruba and Igbo G0, designation 0101 110"),
     (G0Set::Vietnamese, "charset-g0-vietnamese", "Vietnamese G0, designation 0101 111"),
     (G0Set::Ukrainian, "charset-g0-ukrainian", "Ukrainian G0, designation 0111 000"),
@@ -57,17 +57,13 @@ const G0_SETS: [(G0Set, &str, &str); 24] = [
     (G0Set::Georgian, "charset-g0-georgian", "Georgian G0, designation 1011 000"),
     (G0Set::Armenian, "charset-g0-armenian", "Armenian G0, designation 1011 001"),
     (G0Set::Tifinagh, "charset-g0-tifinagh", "Tifinagh G0, designation 1011 010"),
-    (G0Set::Thai, "charset-g0-thai", "Thai G0, designation 1100 010"),
-    (G0Set::Lao, "charset-g0-lao", "Lao G0, designation 1100 100"),
     (G0Set::Hiragana, "charset-g0-hiragana", "Japanese hiragana G0, designation 1101 001"),
     (G0Set::Katakana, "charset-g0-katakana", "Japanese katakana G0, designation 1101 010"),
 ];
 /// NeoTeletext's own G2 sets.
-const G2_SETS: [(G2Set, &str, &str); 4] = [
+const G2_SETS: [(G2Set, &str, &str); 2] = [
     (G2Set::Vietnamese, "charset-g2-vietnamese", "Vietnamese G2"),
     (G2Set::Armenian, "charset-g2-armenian", "Armenian G2"),
-    (G2Set::Thai, "charset-g2-thai", "Thai G2"),
-    (G2Set::Lao, "charset-g2-lao", "Lao G2"),
 ];
 /// NeoTeletext's own Latin national options, in `NationalOption::EXTENDED`'s
 /// order.

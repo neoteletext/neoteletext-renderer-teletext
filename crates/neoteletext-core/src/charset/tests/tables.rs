@@ -192,9 +192,6 @@ fn extended_defined() -> Vec<(u8, u8, G0, G2Set)> {
         (0b1011, 0, whole_g0(G0Set::Georgian), G2Set::Latin),
         (0b1011, 1, whole_g0(G0Set::Armenian), G2Set::Armenian),
         (0b1011, 2, whole_g0(G0Set::Tifinagh), G2Set::Latin),
-        (0b1100, 0, latin_g0(N::English), G2Set::Thai),
-        (0b1100, 2, whole_g0(G0Set::Thai), G2Set::Thai),
-        (0b1100, 4, whole_g0(G0Set::Lao), G2Set::Lao),
         (0b1101, 0, latin_g0(N::JapaneseRomaji), G2Set::Latin),
         (0b1101, 1, whole_g0(G0Set::Hiragana), G2Set::Latin),
         (0b1101, 2, whole_g0(G0Set::Katakana), G2Set::Latin),
@@ -208,7 +205,6 @@ fn extended_values_in_tables_33_and_34() {
     for (group, index, g0, g2) in extended_defined() {
         assert_eq!(modified_designation(value(group, index)), Some((g0.set, g2)));
         let second = match (group, index) {
-            (0b1100, 0) => whole_g0(G0Set::Thai),
             (0b1101, 1) => whole_g0(G0Set::Katakana),
             (0b1101, 2) => whole_g0(G0Set::Hiragana),
             _ => ENGLISH_DESIGNATION.g0,
@@ -220,6 +216,12 @@ fn extended_values_in_tables_33_and_34() {
     }
     let reserved = value(0b0111, 0b100);
     assert_eq!((designation(reserved), modified_designation(reserved), default_second_g0(reserved)), (None, None, None));
+    // DEC-2239: group 1100's sets were withdrawn, so all of its values are
+    // reserved again and fall back as any reserved value does (REQ-70).
+    for index in 0..8 {
+        let withdrawn = value(0b1100, index);
+        assert_eq!((designation(withdrawn), modified_designation(withdrawn), default_second_g0(withdrawn)), (None, None, None));
+    }
 }
 
 #[test]

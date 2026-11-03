@@ -56,22 +56,12 @@ const fn other_script(
 /// Arabic-script sets and Hebrew, which the page writer puts in visual
 /// order (REQ-CHR-015, DEC-606).
 const RIGHT_TO_LEFT_SCRIPTS: [&str; 2] = ["Arab", "Hebr"];
-/// The scripts whose marks take the row above and the row below their
-/// letters: Thai and Lao (DEC-604).
-const MARK_ROW_SCRIPTS: [&str; 2] = ["Thai", "Laoo"];
 
 impl LanguageSet {
     /// True when the language is written right to left.
     #[must_use]
     pub fn right_to_left(&self) -> bool {
         RIGHT_TO_LEFT_SCRIPTS.contains(&self.script)
-    }
-
-    /// The rows above and below its letters the language's marks take: 1
-    /// for Thai and Lao (DEC-604), 0 for every other.
-    #[must_use]
-    pub fn mark_rows(&self) -> u8 {
-        u8::from(MARK_ROW_SCRIPTS.contains(&self.script))
     }
 
     /// The BCP 47 tag that names this entry exactly: its language subtag,
@@ -106,7 +96,7 @@ const HEBREW: u8 = value(0b1010, 0b101);
 
 /// Every language NeoTeletext writes (DEC-602 item 1, DEC-2184,
 /// DEC-2187): the standard's sets, then NeoTeletext's own.
-pub const LANGUAGES: [LanguageSet; 76] = [
+pub const LANGUAGES: [LanguageSet; 74] = [
     entry("en", "Latn", "English", ENGLISH, Some(ENGLISH)),
     entry("id", "Latn", "Indonesian", ENGLISH, Some(ENGLISH)),
     entry("sw", "Latn", "Swahili", ENGLISH, Some(ENGLISH)),
@@ -179,8 +169,6 @@ pub const LANGUAGES: [LanguageSet; 76] = [
     entry("hy", "Armn", "Armenian", value(0b1011, 0b001), None),
     entry("zgh", "Tfng", "Standard Moroccan Tamazight", value(0b1011, 0b010), None),
     other_script("tzm", "Tfng", "Central Atlas Tamazight (Tifinagh script)", value(0b1011, 0b010), None),
-    entry("th", "Thai", "Thai", value(0b1100, 0b010), None),
-    entry("lo", "Laoo", "Lao", value(0b1100, 0b100), None),
     // Japanese (DEC-2184, DEC-2187): kana by default; rōmaji is the
     // standard's Latin English with marks on pages for Level 3.5 and below.
     entry("ja", "Jpan", "Japanese", value(0b1101, 0b001), None),

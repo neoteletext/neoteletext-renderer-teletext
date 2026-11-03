@@ -8,9 +8,9 @@ use crate::consts::DESIGNATION_GROUP_SHIFT as GROUP_SHIFT;
 /// neoteletext's own sets at values Table 32 reserves (REQ-CHR-012,
 /// decision E.78). Tables 33 and 34 read the same entries.
 #[cfg(feature = "extended-sets")]
-pub(super) const EXTENDED_TABLE_32: [Table32Entry; 32] = {
+pub(super) const EXTENDED_TABLE_32: [Table32Entry; 29] = {
     use G0Set as S;
-    use G2Set::{Arabic, Armenian, Cyrillic, Lao, Latin, Thai, Vietnamese};
+    use G2Set::{Arabic, Armenian, Cyrillic, Latin, Vietnamese};
     use NationalOption as N;
     [
         // Group 0101: African Latin and Vietnamese.
@@ -45,10 +45,6 @@ pub(super) const EXTENDED_TABLE_32: [Table32Entry; 32] = {
         (0b1011, 0b000, whole(S::Georgian), Latin),
         (0b1011, 0b001, whole(S::Armenian), Armenian),
         (0b1011, 0b010, whole(S::Tifinagh), Latin),
-        // Group 1100: Thai and Lao, the SAA5246AP/S scheme (REQ-CHR-016).
-        (0b1100, 0b000, latin(N::English), Thai),
-        (0b1100, 0b010, whole(S::Thai), Thai),
-        (0b1100, 0b100, whole(S::Lao), Lao),
         // Group 1101: Japanese, in rōmaji (DEC-2184) and in kana (DEC-2187).
         (0b1101, 0b000, latin(N::JapaneseRomaji), Latin),
         (0b1101, 0b001, whole(S::Hiragana), Latin),
@@ -57,12 +53,10 @@ pub(super) const EXTENDED_TABLE_32: [Table32Entry; 32] = {
 };
 
 /// The second G0 sets of neoteletext's own designations that are not
-/// Latin English, as a designation and its second set's Table 33 value: an
-/// English page (group 1100, option 000) with Thai second (option 010)
-/// (REQ-CHR-016), and each Japanese kana set with the other (DEC-2187).
+/// Latin English, as a designation and its second set's Table 33 value:
+/// each Japanese kana set with the other (DEC-2187).
 #[cfg(feature = "extended-sets")]
-pub(super) const EXTENDED_SECOND: [(u8, u8); 3] = [
-    (0b1100 << GROUP_SHIFT, (0b1100 << GROUP_SHIFT) | 0b010),
+pub(super) const EXTENDED_SECOND: [(u8, u8); 2] = [
     (HIRAGANA, KATAKANA),
     (KATAKANA, HIRAGANA),
 ];

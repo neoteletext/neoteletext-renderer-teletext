@@ -83,9 +83,9 @@ fn every_diacritic_overlays_its_spacing_form() {
         let combining = to_unicode(character).combining.unwrap();
         assert_eq!(spacing_mark(combining), Some(spacing), "mark {mark}");
         assert_eq!(compose('q', combining), None);
-        let mark_rows = set.lookup(spacing).unwrap();
-        assert_ne!(*mark_rows, [0; CELL_HEIGHT], "mark {mark} draws something");
-        let overlay: GlyphRows = core::array::from_fn(|row| base[row] | mark_rows[row]);
+        let mark_glyph = set.lookup(spacing).unwrap();
+        assert_ne!(*mark_glyph, [0; CELL_HEIGHT], "mark {mark} draws something");
+        let overlay: GlyphRows = core::array::from_fn(|row| base[row] | mark_glyph[row]);
         assert_eq!(set.glyph(character), overlay, "mark {mark}");
     }
     // A combining character outside the fifteen has no spacing form.
@@ -162,7 +162,7 @@ fn g3_glyphs_can_be_replaced() {
 fn the_extended_table_follows_the_feature() {
     let set = GlyphSet::noto_teletext();
     assert_eq!(set.extended.is_empty(), cfg!(not(feature = "extended-sets")));
-    assert!(set.lookup('\u{0E01}').is_some() == cfg!(feature = "extended-sets"), "Thai ko kai");
+    assert!(set.lookup('\u{10D0}').is_some() == cfg!(feature = "extended-sets"), "Georgian an");
     assert!(set.lookup('A').is_some() && set.lookup('\u{00C0}').is_some(), "Latin, with the composed letters");
 }
 

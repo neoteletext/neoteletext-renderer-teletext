@@ -11,8 +11,7 @@ the 12 x 20 cell: its baseline on the script's baseline line, its ink centred
 across the cell. A glyph that would leave the cell is drawn smaller, first
 shorter and then narrower, never clipped. Arabic letters in a joining form
 have their joining stroke carried to the cell's edge, so that letters in
-adjacent cells meet. Marks set to sit in a row of their own (Thai and Lao,
-decision E.80) are drawn at the bottom or top of the cell.
+adjacent cells meet.
 
 The sources are the Noto fonts of `sources.txt`, pinned to a commit of the
 google/fonts repository and checked by SHA-256. They are downloaded to a
@@ -154,7 +153,6 @@ class Script:
         self.baseline = section.getint("baseline")
         self.rtl = section.getboolean("rtl", fallback=False)
         self.join = section.getboolean("join", fallback=False)
-        self.mark_row = section.getboolean("mark_row", fallback=False)
         # The starts of the Unicode names this script draws: its own name,
         # and those `names` adds (REQ-2189).
         extra = [part.strip().upper() for part in section.get("names", "").split(",") if part.strip()]
@@ -204,18 +202,6 @@ def joining(character):
     return False, False
 
 
-def mark_position(character):
-    """'above', 'below' or None: where a non-spacing mark sits (Thai and
-    Lao), by its Unicode category and name."""
-    if not all(unicodedata.category(c) == "Mn" for c in character):
-        return None
-    names = " ".join(unicodedata.name(c, "") for c in character)
-    if "SARA U" in names or "SARA UU" in names or "PHINTHU" in names or "VOWEL SIGN U" in names \
-            or "VOWEL SIGN UU" in names or "SIGN PALI VIRAMA" in names or "SEMIVOWEL SIGN LO" in names:
-        return "below"
-    return "above"
-
-
 def place(canvas, baseline, centre=True):
     """The canvas's ink in the 12 x 20 cell, baseline on line `baseline`,
     centred across; None when the ink does not fit."""
@@ -242,15 +228,14 @@ def read_forms(path):
         return found
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.startswith("U+"):
-            point, letters, form = line.split()[:3]
-            text = "".join(chr(int(part.strip("+"), 16)) for part in letters.split("U+") if part.strip("+"))
-            found[chr(int(point[2:], 16))] = (text, form)
+            point, letter, form = line.split()[:3]
+            found[chr(int(point[2:], 16))] = (chr(int(letter[2:], 16)), form)
     return found
 
 
 # The shaping context of each joined form: zero-width joiners on the sides
 # that join, in logical order (the next letter follows).
-FORM_TEXT = {"initial": "{}" + ZWJ, "medial": ZWJ + "{}" + ZWJ, "final": ZWJ + "{}", "sequence": "{}"}
+FORM_TEXT = {"initial": "{}" + ZWJ, "medial": ZWJ + "{}" + ZWJ, "final": ZWJ + "{}"}
 # (joins on the right, joins on the left) of each form, right to left.
 FORM_JOINS = {"initial": (False, True), "medial": (True, True), "final": (True, False)}
 
@@ -265,9 +250,6 @@ def draw_glyph(script, character, forms=None):
     if face is None:
         return None
     text = FORM_TEXT[form[1]].format(form[0]) if form else character
-    position = mark_position(text) if script.mark_row else None
-    if position:
-        return mark_glyph(script, face, text, position)
     lines, across = script.lines, script.across
     for _ in range(80):
         canvas = face.draw(text, across, lines, script.rtl)
@@ -286,43 +268,6 @@ def draw_glyph(script, character, forms=None):
         right, left = FORM_JOINS.get(form[1], (False, False)) if form else joining(character)
         if right or left:
             cell = joined(cell, script, face, right, left)
-    return cell
-
-
-def mark_glyph(script, face, marks, position):
-    """A Thai or Lao mark, or two marks, as the Philips SAA5246AP/S draws
-    them (decision E.80): shaped on a consonant, the consonant taken away,
-    and the marks moved to the bottom of the cell (above a letter, for the
-    letter in the row below) or the top (below a letter, for the row
-    above), keeping their place across the consonant, which sits in the
-    middle of its own cell."""
-    consonant = "ก" if script.name == "thai" else "ກ"
-    lines, across = script.lines, script.across
-    for _ in range(80):
-        canvas = face.draw(consonant + marks, across, lines, script.rtl)
-        drawn = face.draw(consonant, across, lines, script.rtl)
-        # The consonant alone may have a different advance: compare the
-        # canvases over their common part.
-        base = np.zeros_like(canvas)
-        rows, columns = min(canvas.shape[0], drawn.shape[0]), min(canvas.shape[1], drawn.shape[1])
-        base[:rows, :columns] = drawn[:rows, :columns]
-        ink, letter = extent(canvas & ~base), extent(base)
-        if ink is None or letter is None:
-            return np.zeros((CELL_HEIGHT, CELL_WIDTH), dtype=bool)
-        top, bottom, left, right = ink
-        height, width = bottom - top, right - left
-        if height <= CELL_HEIGHT and width <= CELL_WIDTH:
-            break
-        across *= 0.94
-        lines *= 0.96
-    else:
-        return None
-    letter_width = letter[3] - letter[2]
-    x = (CELL_WIDTH - letter_width) // 2 + (left - letter[2])
-    x = min(max(x, 0), CELL_WIDTH - width)
-    y = CELL_HEIGHT - height if position == "above" else 0
-    cell = np.zeros((CELL_HEIGHT, CELL_WIDTH), dtype=bool)
-    cell[y:y + height, x:x + width] = (canvas & ~base)[top:bottom, left:right]
     return cell
 
 

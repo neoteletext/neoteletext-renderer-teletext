@@ -3,7 +3,7 @@
 # prototypes of October 2026.
 #
 # [script NAME]       a script; NAME matches the start of its characters'
-#                     Unicode names (HEBREW, ARABIC, THAI ...); "latin"
+#                     Unicode names (HEBREW, ARABIC, GEORGIAN ...); "latin"
 #                     draws everything no other script claims
 #   sources           source fonts of sources.txt, the first that has a
 #                     character draws it
@@ -17,8 +17,6 @@
 #   baseline          the cell line the baseline falls on, from 0 at the top
 #   rtl, join         right-to-left shaping; carry joining strokes to the
 #                     cell's edges (Arabic forms)
-#   mark_row          marks are drawn at the bottom or top of their own cell
-#                     (Thai and Lao, decision E.80)
 #   names             further starts of Unicode names the script draws,
 #                     separated by commas, for characters named without
 #                     the script's own name (REQ-2189)
@@ -87,28 +85,6 @@ reference = ⵏ
 reference_height = 14
 baseline = 16
 
-[script thai]
-# The Philips SAA5246AP/S convention (decision E.80): upper marks at the
-# bottom of their cell, lower vowels at the top, for rows of their own.
-sources = thai
-weight = 800
-hinting = auto
-reference = กคนมบ
-reference_height = 10
-reference_width = 10
-baseline = 15
-mark_row = yes
-
-[script lao]
-sources = lao
-weight = 800
-hinting = auto
-reference = ກຄນມບ
-reference_height = 10
-reference_width = 10
-baseline = 15
-mark_row = yes
-
 [script hiragana]
 # Japanese kana (DEC-2187, REQ-2189): sized as the Latin capitals are, and
 # at weight 900, where Noto Sans JP's strokes are two pixels wide like
@@ -137,7 +113,7 @@ family = Noto Teletext
 copyright = Copyright 2022 The Noto Project Authors
 # Required, and Vietnamese precomposed letters (REQ-CHR-014). The letters
 # that exist only as a base and a mark are in noto-teletext-composed.
-characters = required range:1EA0-1EF9 except:G0_Thai,G0_Lao,G2_Thai,G2_Lao,G0_Persian,G0_Urdu,G0_Pashto,G0_Sindhi,G0_Sorani,G0_Uyghur,G0_Balochi,G0_ArabicPlain,Composed,G0_Hiragana,G0_Katakana,G0_Latin_JapaneseRomaji
+characters = required range:1EA0-1EF9 except:G0_Persian,G0_Urdu,G0_Pashto,G0_Sindhi,G0_Sorani,G0_Uyghur,G0_Balochi,G0_ArabicPlain,Composed,G0_Hiragana,G0_Katakana,G0_Latin_JapaneseRomaji
 scripts = latin hebrew arabic georgian armenian tifinagh
 
 [font noto-teletext-arabic]
@@ -147,13 +123,6 @@ family = Noto Teletext Arabic
 copyright = Copyright 2022 The Noto Project Authors
 characters = uses:G0_Persian uses:G0_Urdu uses:G0_Pashto uses:G0_Sindhi uses:G0_Sorani uses:G0_Uyghur uses:G0_Balochi uses:G0_ArabicPlain forms:G0_Persian forms:G0_Urdu forms:G0_Pashto forms:G0_Sindhi forms:G0_Sorani forms:G0_Uyghur forms:G0_Balochi forms:G0_ArabicPlain
 scripts = latin arabic
-
-[font noto-teletext-thai]
-# Thai and Lao (REQ-CHR-016), with Latin English for the pages' second set.
-family = Noto Teletext Thai
-copyright = Copyright 2022 The Noto Project Authors
-characters = uses:G0_Thai uses:G0_Lao uses:G2_Thai uses:G2_Lao uses:G0_Latin_English
-scripts = latin thai lao
 
 [font noto-teletext-composed]
 # Every precomposed letter a base and a diacritical mark can make (decision

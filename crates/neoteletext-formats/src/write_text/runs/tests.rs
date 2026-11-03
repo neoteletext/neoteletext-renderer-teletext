@@ -134,8 +134,8 @@ fn russian_and_greek_runs_on_an_english_page_switch_by_row_set_triplets() {
     assert_eq!(encoded.triplets, [position(3), row_set(0, value("ru")), row_set(12, value("el")), end()]);
     assert_eq!(encoded.count, 4);
     assert!(encoded.changed);
-    assert_eq!(encoded.runs[0], Report { cells: 10, triplets: 3, mark_rows: 0 });
-    assert_eq!(encoded.runs[1], Report { cells: 8, triplets: 1, mark_rows: 0 });
+    assert_eq!(encoded.runs[0], Report { cells: 10, triplets: 3 });
+    assert_eq!(encoded.runs[1], Report { cells: 8, triplets: 1 });
     assert_eq!(encoded.designations, Designations { default: ENGLISH, second: NO_SECOND_G0 });
     assert_eq!(read(&grid, &encoded, true)[3], "Привет мир  Γειά σου");
 }
@@ -188,34 +188,6 @@ fn an_arabic_run_is_in_visual_order() {
 }
 
 #[test]
-fn a_thai_run_writes_its_marks_on_the_rows_above_and_below() {
-    // สวัสดี: ั over ว and ี over ด; ครู: ู under ร.
-    let runs = [run(5, 0, "สวัสดี ครู", Some("th"))];
-    let (grid, encoded) = written(Level::NeoTeletext, &runs);
-    assert_eq!(encoded.runs[0].mark_rows, 1);
-    let rows = read(&grid, &encoded, true);
-    assert_eq!(rows[5], "สวสด คร");
-    let above: Vec<char> = rows[4].chars().collect();
-    assert_eq!((above[1], above[3]), ('\u{0E31}', '\u{0E35}'));
-    let below: Vec<char> = rows[6].chars().collect();
-    assert_eq!(below[6], '\u{0E39}');
-    // Each of the three rows starts in the Thai set.
-    let thai = value("th");
-    for row in 4..=6 {
-        assert!(encoded.triplets.contains(&row_set(0, thai)), "row {row}");
-    }
-}
-
-#[test]
-fn thai_runs_share_a_mark_row_where_no_column_needs_two_marks() {
-    let runs = [run(3, 0, "ครู", Some("th")), run(5, 4, "สวัสดี", Some("th"))];
-    let (grid, encoded) = written(Level::NeoTeletext, &runs);
-    let rows = read(&grid, &encoded, true);
-    assert_eq!(rows[4].chars().nth(1), Some('\u{0E39}'));
-    assert_eq!(rows[4].chars().nth(5), Some('\u{0E31}'));
-}
-
-#[test]
 fn the_same_page_always_encodes_the_same() {
     let runs = [run(3, 0, "Привет", Some("ru")), run(8, 3, "Αθήνα", Some("el")), run(10, 0, "Tiếng Việt", Some("vi"))];
     assert_eq!(written(Level::NeoTeletext, &runs), written(Level::NeoTeletext, &runs));
@@ -256,11 +228,12 @@ fn faults_name_their_run() {
     };
     assert_eq!(fault(&[run(1, 0, "one", None), run(1, 2, "two", None)]), (Some(1), RunFault::Overlap(0)));
     assert_eq!(fault(&[run(1, 35, "too long", None)]), (Some(0), RunFault::OutOfColumns(42)));
-    assert_eq!(fault(&[run(1, 0, "สวัสดี", Some("th"))]), (Some(0), RunFault::MarkRowsOutOfRange));
     assert_eq!(fault(&[run(2, 0, "中", None)]), (Some(0), RunFault::Unshown('中')));
     assert_eq!(fault(&[run(2, 0, "x", Some("tlh"))]), (Some(0), RunFault::UnknownLanguage("tlh".into())));
-    // A Thai run's marks take the row of a run above it.
-    assert_eq!(fault(&[run(2, 0, "abc", None), run(3, 0, "สวัสดี", Some("th"))]), (Some(1), RunFault::Overlap(0)));
+    // DEC-2239: every run takes its own row only, so runs on neighbouring
+    // rows never overlap.
+    let neighbours = [run(2, 0, "abc", None), run(3, 0, "абв", Some("ru")), run(4, 0, "abc", None)];
+    assert_eq!(written(Level::NeoTeletext, &neighbours).1.runs.len(), 3);
     let page = PageText { language: Some("tlh"), designation: ENGLISH, level: Level::NeoTeletext, runs: &[] };
     assert_eq!(write_runs(&mut blank(), &page, &[]).unwrap_err().run, None);
 }
@@ -318,14 +291,16 @@ fn the_designation_is_written_into_x28_keeping_its_other_fields() {
 }
 
 #[test]
-fn every_language_is_listed_with_its_direction_and_mark_rows() {
+fn every_language_is_listed_with_its_direction() {
     let listed = languages();
     assert_eq!(listed.len(), LANGUAGES.len());
     let find = |tag: &str| listed.iter().find(|language| language.tag == tag).unwrap();
     assert_eq!(find("ar").direction, Direction::Rtl);
     assert_eq!(find("he").direction, Direction::Rtl);
     assert_eq!(find("ru").direction, Direction::Ltr);
-    assert_eq!((find("th").mark_rows, find("lo").mark_rows, find("en").mark_rows), (1, 1, 0));
+    assert_eq!(find("en").direction, Direction::Ltr);
+    // DEC-2239: the two languages it withdrew are not listed.
+    assert!(listed.iter().all(|language| language.tag != "th" && language.tag != "lo"));
     assert_eq!(find("sr-Latn").name, "Serbian (Latin script)");
     // Every tag names exactly its own entry.
     for language in &listed {

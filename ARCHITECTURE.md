@@ -381,18 +381,17 @@ Decisions E.77 to E.82 extend the receiver to about 55 more languages without ch
 | The new G0 and G2 code tables (REQ-CHR-013, REQ-CHR-016) | L3, `charset` | Constant tables like the standard's, one per set. `G0Set` and `G2Set` gain variants, and `NationalOption` gains the African Latin options (`NationalOption::EXTENDED`). Characters stay a set and a 7-bit code (REQ-CHR-001). |
 | Marks from the page's G2 set (REQ-CHR-014) | L3, `charset`, used by `level15` and `enhance` | Column 4 of each G2 set that holds marks; the Vietnamese set's 4/C is the hook above. |
 | Arabic-script joining (REQ-CHR-015) | L3, new module `joining` | One bounded pass per row after the presentation level's pass, called from `compose`. It records each letter's form in the cell, and `glyphs` maps the letter and form to a presentation-form or private-use code point. |
-| Thai and Lao (REQ-CHR-016) | L3, `charset` only | Tables, designations, ESC and X/26 G2 characters. No receiver rule; marks are ordinary characters in their own cells. |
 | Japanese in rōmaji and kana (REQ-2185, REQ-2188) | L3, `charset` only | A Latin national option and two whole G0 sets in group 1101, each kana set the other's second set. No receiver rule. |
 | The row set triplet (REQ-2180) | L3, `enhance` (`walk/placement.rs`, `row.rs`) | Column mode 01010 in the local enhancement data changes the set the row resolver reads the row's own codes in, from its column; `Config::row_set_triplets` turns it off. |
 | The table of languages (REQ-2181) | L3, `charset::language` | Each language and script with its set's Table 32 value, and the standard's own set where there is one; the subtitle input's region comes from it. |
 | 12 × 20 loaded glyphs (REQ-FNT-002, REQ-FNT-008) | Foundation `types::FontGlyph`, L4 `glyphs` and `render`, L0 `bdf` | A glyph holds ten or twenty 12-bit rows; `LoadedGlyph` records which, and the cell raster draws a 20-row glyph line for line. |
 | The Noto-derived fonts (REQ-FNT-012) | Data in `third_party/noto/`, not code | Loaded at run time like any font. `xtask check-noto` checks them; the converter is a Python tool beside them, outside the workspace. |
 | The X11 misc-fixed 6x10 font (REQ-2223) | Data in `third_party/misc-fixed/`, not code | The original and its 12 × 20 conversion, loaded at run time like any font and never compiled in. `xtask misc-fixed` writes the conversion and `xtask check-misc-fixed` checks it; both share `xtask/src/font_folders.rs` with `check-noto`. |
-| Writing pages from text (REQ-CLI-010, REQ-2148) | L0, `neoteletext-formats::write_text` | The one encoder of Unicode text, behind the feature `write-text`, which brings in the `unicode-bidi` crate (`no_std` with `alloc`). It turns text into a page in any set, named by its set or by a language tag through the core's `charset::language` table (REQ-2181): it encodes with the core's `charset` tables, reorders right-to-left text, joins the letters of the standard's Arabic set itself (REQ-2190), takes half-width katakana and voicing marks as the kana sets hold them (REQ-2188), lays out Thai and Lao rows, writes tones and rarer marks as X/26 triplets, and on pages for NeoTeletext's own receivers writes text in other sets as row set runs (REQ-2180). `write_runs` writes runs of text at their places over a program's page and merges their triplets with the program's in Annex A.4's order, for the server (REQ-2214); `write_text`, with `std` and `tti`, writes whole pages as TTI through the page builders and the TTI writer, for `neottx write-text`. It is in L0 because the server, which depends on no application crate, needs it; section 9 lets `neoteletext-formats` use `charset`. |
+| Writing pages from text (REQ-CLI-010, REQ-2148) | L0, `neoteletext-formats::write_text` | The one encoder of Unicode text, behind the feature `write-text`, which brings in the `unicode-bidi` crate (`no_std` with `alloc`). It turns text into a page in any set, named by its set or by a language tag through the core's `charset::language` table (REQ-2181): it encodes with the core's `charset` tables, reorders right-to-left text, joins the letters of the standard's Arabic set itself (REQ-2190), takes half-width katakana and voicing marks as the kana sets hold them (REQ-2188), writes tones and rarer marks as X/26 triplets, and on pages for NeoTeletext's own receivers writes text in other sets as row set runs (REQ-2180). `write_runs` writes runs of text at their places over a program's page and merges their triplets with the program's in Annex A.4's order, for the server (REQ-2214); `write_text`, with `std` and `tti`, writes whole pages as TTI through the page builders and the TTI writer, for `neottx write-text`. It is in L0 because the server, which depends on no application crate, needs it; section 9 lets `neoteletext-formats` use `charset`. |
 
 ```
 UTF-8 text ──► L0 write_text (encode with L3 charset tables; reorder with unicode-bidi;
-                                 Thai rows; X/26 tones and G2 marks)
+                                 X/26 tones and G2 marks)
                └─► L0 author::DisplayPage ──► TTI writer ──► page file
 page file ──► flow 4.1 ──► L3 compose (level pass, then joining) ──► L4 (Noto 12 × 20 glyphs)
 ```
@@ -460,7 +459,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `types/`: the shared types: addresses, the fixed-capacity collection, a loaded font's glyph and the X/28 and M/29 field groups.
 - `packet/`: one file per packet kind: the header, X/26 triplets and their fields and functions, editorial and compositional links, X/28 and M/29, the Magazine Organization Table, the Magazine Inventory Page, object pages, broadcast service data, and the encoders.
 - `acq/`: the decoder's parts: reception of packets, the stored page, the cache-mode store, the enhancement pages and their store, the events and the statistics.
-- `charset/`: one file per table of clause 15 (Latin and national options, the standard's other G0 sets, G2, G3, mosaics, diacritics, designation, composition) and neoteletext's own sets (the extended designations, the extended G0 sets, Arabic script, Thai and Lao, Japanese), with the code-table lookup and the table of languages (`language.rs`).
+- `charset/`: one file per table of clause 15 (Latin and national options, the standard's other G0 sets, G2, G3, mosaics, diacritics, designation, composition) and neoteletext's own sets (the extended designations, the extended G0 sets, Arabic script, Japanese), with the code-table lookup and the table of languages (`language.rs`).
 - `level1/`: the cell, the grid, page assembly, the choice of character sets and the row attribute machine.
 - `colour/`: the page-level presentation data beside the Colour Map.
 - `objects/`: an object's links, its definition and where its triplets come from.
@@ -481,7 +480,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `bdf/`: the BDF reader, the converter's source fonts and the font converter.
 - `write/`: the TTI writer, the T42 page writer and the font writer.
 - `author/`: the authored Level 2.5 and 3.5 stream: display pages, object pages, the MOT and triplets, with `author/streams/` holding one file per magazine of the stream.
-- `write_text/`: the writer's set table and encoding, right-to-left lines, Thai and Lao rows, and `runs`, text runs at their places with their triplets merged into a program's.
+- `write_text/`: the writer's set table and encoding, right-to-left lines, and `runs`, text runs at their places with their triplets merged into a program's.
 
 **`neoteletext-slicer`**
 - `slicer/`: the line slicer's parts: the line, its settings, black level, run-in, framing code, bits, the transition driver and the outcome.

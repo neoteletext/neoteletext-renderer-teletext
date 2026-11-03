@@ -135,9 +135,6 @@ fn table_34_modified_designation() {
             (value(0b1001, 5), (S::Uyghur, Arabic)),
             (value(0b1001, 6), (S::Balochi, Arabic)),
             (value(0b1001, 7), (S::ArabicPlain, Arabic)),
-            (value(0b1100, 0), (S::Latin, G2Set::Thai)),
-            (value(0b1100, 2), (S::Thai, G2Set::Thai)),
-            (value(0b1100, 4), (S::Lao, G2Set::Lao)),
             (value(0b1101, 0), (S::Latin, Latin)),
             (value(0b1101, 1), (S::Hiragana, Latin)),
             (value(0b1101, 2), (S::Katakana, Latin)),
@@ -226,30 +223,6 @@ fn latin_text_has_no_national_option() {
     assert_eq!(text, ['B', 'B', 'C', '1', ' ', '#', '\u{A4}', ' ']);
 }
 
-/// REQ-CHR-016: a Thai or Lao G2 glyph of two marks gives its marks as a
-/// combining sequence, vowel sign first, and a font draws it by its
-/// private-use key: the requirement's example is Thai G2 5/C, which gives
-/// U+0E35 U+0E48. Every sequence is reached from one of the two G2 sets,
-/// and only from columns 5 and 6.
-/// REQ-79: a character may convert to a short sequence of scalar values.
-#[test]
-fn thai_and_lao_mark_pairs_give_combining_sequences() {
-    let thai = |code| CharRef::new(CharSet::G2(G2Set::Thai), code);
-    assert_eq!(to_unicode(thai(0x5C)), Unicode { base: '\u{0E35}', combining: Some('\u{0E48}') });
-    let sequences = mark_sequences();
-    assert_eq!(sequences.len(), 53);
-    for &(key, first, second) in sequences {
-        let found: std::vec::Vec<CharRef> = [G2Set::Thai, G2Set::Lao]
-            .into_iter()
-            .flat_map(|set| (0x20u8..=0x7F).map(move |code| CharRef::new(CharSet::G2(set), code)))
-            .filter(|&character| glyph_key(character) == key)
-            .collect();
-        let [position] = found[..] else { panic!("{key:?} is at {found:?}, not one position") };
-        assert!((0x50..=0x6F).contains(&position.code), "{key:?} in columns 5 and 6");
-        assert_eq!(to_unicode(position), Unicode { base: first, combining: Some(second) }, "{key:?}");
-    }
-}
-
 // The table tests keep the layout of the tables they check.
 #[rustfmt::skip]
 mod tables;
@@ -322,13 +295,14 @@ fn the_language_table() {
     assert_eq!(value_of("ja-Kana"), Some(value(0b1101, 0b010)));
     assert_eq!(value_of("ja-Latn"), Some(value(0b1101, 0b000)));
     assert_eq!(value_of("xx"), None);
-    // REQ-2215: each entry's English name, direction and mark rows, for
-    // the server's list of languages.
+    // REQ-2215: each entry's English name and direction, for the server's
+    // list of languages.
     let entry = |tag: &str| language(tag).unwrap();
     assert_eq!((entry("ru").name, entry("sr-Latn").name), ("Russian", "Serbian (Latin script)"));
     assert!(entry("ar").right_to_left() && entry("ur").right_to_left() && entry("he").right_to_left());
-    assert!(!entry("en").right_to_left() && !entry("th").right_to_left());
-    assert_eq!((entry("th").mark_rows(), entry("lo").mark_rows(), entry("vi").mark_rows()), (1, 1, 0));
+    assert!(!entry("en").right_to_left() && !entry("vi").right_to_left());
+    // DEC-2239: no language of the table is written in a script it dropped.
+    assert_eq!((value_of("th"), value_of("lo")), (None, None));
     assert_eq!((entry("sr").tag_parts(), entry("sr-Latn").tag_parts()), (("sr", None), ("sr", Some("Latn"))));
     assert!(LANGUAGES.iter().all(|entry| !entry.name.is_empty()));
     assert_eq!(value_of("ru-Latn"), None, "no Latin Russian is written");

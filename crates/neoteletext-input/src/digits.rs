@@ -44,7 +44,6 @@ mod tests {
         assert_eq!(decimal_digit('٣'), Some(3), "Arabic-Indic");
         assert_eq!(decimal_digit('۵'), Some(5), "extended Arabic-Indic, Persian");
         assert_eq!(decimal_digit('३'), Some(3), "Devanagari");
-        assert_eq!(decimal_digit('๙'), Some(9), "Thai");
         assert_eq!(decimal_digit('９'), Some(9), "full width");
         assert_eq!(decimal_digit('\u{1FBF9}'), Some(9), "the last run");
         for not_a_digit in ['a', '/', ':', '½', 'Ⅳ', '²', '\u{065F}', '\u{0}', char::MAX] {

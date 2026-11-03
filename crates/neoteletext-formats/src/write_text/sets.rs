@@ -13,7 +13,7 @@ use neoteletext_core::consts::{DESIGNATION_GROUP_SHIFT, ESC, MODE_DIACRITIC_MASK
 
 /// The sets the writer names, with their Table 32 groups and options: the
 /// standard's, then neoteletext's own (REQ-CHR-012).
-pub const SETS: [(&str, u8, u8); 50] = [
+pub const SETS: [(&str, u8, u8); 48] = [
     ("english", 0b0000, 0b000),
     ("german", 0b0000, 0b001),
     ("swedish-finnish-hungarian", 0b0000, 0b010),
@@ -60,8 +60,6 @@ pub const SETS: [(&str, u8, u8); 50] = [
     ("uyghur", 0b1001, 0b101),
     ("balochi", 0b1001, 0b110),
     ("arabic", 0b1001, 0b111),
-    ("thai", 0b1100, 0b010),
-    ("lao", 0b1100, 0b100),
     ("japanese-romaji", 0b1101, 0b000),
     ("hiragana", 0b1101, 0b001),
     ("katakana", 0b1101, 0b010),

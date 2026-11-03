@@ -8,9 +8,8 @@
 
 use super::rtl::break_line_rtl;
 use super::sets::{Cell, encode, page_sets, set_value};
-use super::thai_lao::{marked_lines, marked_rows};
 use super::*;
-use neoteletext_core::charset::{CharRef, G2Set, compose, default_second_g0, page_mark, to_unicode};
+use neoteletext_core::charset::{CharRef, compose, default_second_g0, page_mark, to_unicode};
 use neoteletext_core::consts::{DESIGNATION_GROUP_SHIFT, ESC};
 
 /// The value and sets of the set named `name`, for a page for
@@ -185,59 +184,6 @@ fn right_to_left_rows_break_and_align_right() {
     let line = [word.as_str(); 4].join(" ");
     let written = write("persian", 0x100, &line).unwrap();
     assert_eq!(written.rows, 2, "three words of 12 and two spaces fit 40 cells");
-}
-
-/// The rows of a Thai page as codes, and its X/26 cells.
-fn thai_rows(text: &str) -> Vec<Vec<Cell>> {
-    let (_, sets) = named("thai");
-    let mut lines = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        lines.extend(marked_lines(&sets, line, index + 1).unwrap());
-    }
-    marked_rows(lines)
-}
-
-fn code(character: char) -> Cell {
-    let (_, sets) = named("thai");
-    Cell::Code(Sets::code_in(sets.default, character).unwrap())
-}
-
-/// Section 7.5: a mark goes on the row above its consonant, in its
-/// column, and a lower vowel on the row below.
-#[test]
-fn thai_marks_take_rows_of_their_own() {
-    let rows = thai_rows("กิ กุ");
-    assert_eq!(rows.len(), 3, "marks, letters, lower vowels");
-    assert_eq!(rows[0][0], code('\u{0E34}'), "sara i over ko kai");
-    assert_eq!(rows[1][..3], [code('ก'), Cell::Code(SPACE), code('ก')]);
-    assert_eq!(rows[2][2], code('\u{0E38}'), "sara u under the second ko kai");
-}
-
-/// A vowel with a tone is one G2 glyph over the vowel alone; ำ is ํ
-/// over its consonant and า beside it; with a tone, ํ and the tone are
-/// one G2 glyph.
-#[test]
-fn thai_two_marks_are_one_g2_glyph() {
-    let rows = thai_rows("นี้ น้ำ");
-    let Cell::G2 { stand_in, code: g2 } = rows[0][0] else { panic!("{:?}", rows[0][0]) };
-    assert_eq!(Cell::Code(stand_in), code('\u{0E35}'), "the vowel alone at Level 1");
-    let unicode = to_unicode(CharRef::new(CharSet::G2(G2Set::Thai), g2));
-    assert_eq!((unicode.base, unicode.combining), ('\u{0E35}', Some('\u{0E49}')));
-    assert_eq!(rows[1][2..4], [code('น'), code('\u{0E32}')], "sara am's aa beside its consonant");
-    let Cell::G2 { code: g2, .. } = rows[0][2] else { panic!("{:?}", rows[0][2]) };
-    let unicode = to_unicode(CharRef::new(CharSet::G2(G2Set::Thai), g2));
-    assert_eq!((unicode.base, unicode.combining), ('\u{0E4D}', Some('\u{0E49}')));
-}
-
-/// A line's lower vowels share the next line's mark row, unless a
-/// column needs both; then the pair of lines takes a third row.
-#[test]
-fn lower_vowels_share_a_row_unless_a_column_needs_both() {
-    assert_eq!(thai_rows("กุ\nขก").len(), 4, "u under ko kai shares the row above line 2");
-    let rows = thai_rows("กุ\nกิ");
-    assert_eq!(rows.len(), 5, "column 0 needs u and i: a row each");
-    assert_eq!(rows[2][0], code('\u{0E38}'));
-    assert_eq!(rows[3][0], code('\u{0E34}'));
 }
 
 /// REQ-CLI-010: a page whose marks exceed the sixteen packets X/26 is

@@ -92,7 +92,7 @@ const RECEIVER_SET: CharSet =
 
 /// Row 0 columns 0 to 7 are the receiver's (REQ-SEC-005, decision E.10):
 /// its status text is drawn in its own set, never in the set the page
-/// designates, so that a Cyrillic, Arabic-script or Thai page cannot turn
+/// designates, so that a Cyrillic, Arabic-script or Japanese page cannot turn
 /// "P100" into other letters, join it or draw it from a font without it.
 fn draw_receiver_columns_in_receiver_set(cells: &mut [Cell; COLUMNS]) {
     for cell in cells.iter_mut().take(RECEIVER_COLUMNS) {
