@@ -31,11 +31,12 @@ readonly ESP_DRIVER_SHA256="e3445e15d6ab391bb6e257fa7fc4523c423e17ef72190f323779
 MSRV_TOOLCHAIN="$(sed -n 's/^readonly MSRV_TOOLCHAIN="\(.*\)"$/\1/p' scripts/tools.sh)"
 readonly MSRV_TOOLCHAIN
 
-# The crates that run on bare metal (REQ-GEN-017), the pair built for
+# The crates that run on bare metal (REQ-GEN-017; every no_std crate, as
+# the full gate's x86_64-unknown-none build names them), the pair built for
 # WebAssembly, and the std crates for operating systems without a terminal.
 # The audio profile's PCM16 and IMA ADPCM are named, though in its default,
 # because microcontroller ports keep them (decision E.131).
-readonly BARE="-p neoteletext-core -p neoteletext-formats -p neoteletext-slicer -p neoteletext-web -p neoteletext-image -p neoteletext-audio --features neoteletext-audio/pcm16,neoteletext-audio/ima"
+readonly BARE="-p neoteletext-core -p neoteletext-formats -p neoteletext-slicer -p neoteletext-web -p neoteletext-image -p neoteletext-audio -p neoteletext-audio-mix -p neoteletext-opus -p neoteletext-input --features neoteletext-audio/pcm16,neoteletext-audio/ima"
 # The audio profile as the desktops build it: Opus alone, PCM16 and IMA
 # ADPCM compiled out (decision E.131).
 readonly AUDIO_DESKTOP="-p neoteletext-audio --no-default-features --features idl,opus"
