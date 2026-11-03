@@ -17,9 +17,10 @@ the language's digits at 3/0 to 3/9; the letters in alphabet order from
 4/0, then lam-alef (U+FEFB) and tatweel; spaces to 7/E; 7/F the block.
 
 Joining types come from Unicode's ArabicShaping.txt, downloaded once to a
-cache outside the repository and checked against its SHA-256. A joined form
-is drawn from its Arabic Presentation Form where Unicode has one, otherwise
-from a private-use code point from U+F0000 (REQ-2166).
+cache outside the repository and checked against its SHA-256; the tatweel is
+listed with them as join-causing, so a letter beside it joins it. A joined
+form is drawn from its Arabic Presentation Form where Unicode has one,
+otherwise from a private-use code point from U+F0000 (REQ-2166).
 
 The private-use allocation is append-only (REQ-2166 item 2). The committed
 `JOINED_FORMS` table is the record of it: every private-use code point it
@@ -193,6 +194,9 @@ def generated(committed):
             out.append("    " + ", ".join(literal(c) for c in cells[row * 16 : (row + 1) * 16]) + ", //")
         out.append("];")
         out.append("")
+    # The tatweel causes its neighbours to join (REQ-84); it has no forms.
+    types[TATWEEL] = shaping[TATWEEL]
+    assert types[TATWEEL] == "C", types[TATWEEL]
     wanted = [(letter, form) for letter in types for form in WANTED_FORMS[types[letter]]]
     points = allocate(wanted, forms, committed)
     form_rows = [(letter, form, point) for (letter, form), point in points.items()]

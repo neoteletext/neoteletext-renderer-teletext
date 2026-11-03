@@ -95,7 +95,7 @@ pub(super) const ARABICPLAIN_G0: CodeTable = [
 
 /// Each joining letter of group 1001 and its joining type (Unicode
 /// `ArabicShaping.txt`, 16.0), sorted by letter for binary search.
-const JOINING_TYPES: [(char, JoiningType); 95] = [
+const JOINING_TYPES: [(char, JoiningType); 96] = [
     ('\u{0621}', JoiningType::None), // ARABIC LETTER HAMZA
     ('\u{0622}', JoiningType::Right), // ARABIC LETTER ALEF WITH MADDA ABOVE
     ('\u{0623}', JoiningType::Right), // ARABIC LETTER ALEF WITH HAMZA ABOVE
@@ -122,6 +122,7 @@ const JOINING_TYPES: [(char, JoiningType); 95] = [
     ('\u{0638}', JoiningType::Dual), // ARABIC LETTER ZAH
     ('\u{0639}', JoiningType::Dual), // ARABIC LETTER AIN
     ('\u{063A}', JoiningType::Dual), // ARABIC LETTER GHAIN
+    ('\u{0640}', JoiningType::Causing), // ARABIC TATWEEL
     ('\u{0641}', JoiningType::Dual), // ARABIC LETTER FEH
     ('\u{0642}', JoiningType::Dual), // ARABIC LETTER QAF
     ('\u{0643}', JoiningType::Dual), // ARABIC LETTER KAF

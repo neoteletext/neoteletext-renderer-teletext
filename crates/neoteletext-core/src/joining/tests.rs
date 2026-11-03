@@ -65,3 +65,14 @@ fn breaks_ligature_and_private_forms() {
     assert!(('\u{F0000}'..='\u{F00FF}').contains(&joined_form('\u{067C}', JoinForm::Medial)));
     assert_eq!(joined_form('\u{067C}', JoinForm::Isolated), '\u{067C}');
 }
+
+/// REQ-84 (REQ-CHR-015): the tatweel is join-causing (Unicode
+/// `ArabicShaping.txt`), so the letters on either side of it join it and the
+/// tatweel itself joins both. Visual order: beh, tatweel, beh, read right to
+/// left as beh initial, tatweel medial, beh final.
+#[test]
+fn a_letter_beside_a_tatweel_joins_it() {
+    let mut cells = row("\u{0628}\u{0640}\u{0628}");
+    join_row(&mut cells);
+    assert_eq!(forms(&cells, 3), [JoinForm::Final, JoinForm::Medial, JoinForm::Initial]);
+}
