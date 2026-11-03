@@ -414,3 +414,31 @@ fn the_viewer_writes_the_trace_where_it_does_not_spoil_the_page() {
     state.write_trace(&mut session, &mut written, false);
     assert_eq!(written, b"");
 }
+
+/// REQ-382 (TODO-2070 item 5): with kitty, each frame of a page is sent
+/// once; flashing back and forth between two frames afterwards only hides
+/// one image and places the other, and a new page frees the old images.
+#[test]
+fn kitty_sends_each_flash_phase_once_and_switches_between_them() {
+    use super::{Frame, Grid, KittyImages};
+    let config = neoteletext_core::config::Config::default();
+    let on = Frame::still(&config, false);
+    let off = Frame { flash_visible: false, ..on };
+    let mut images = KittyImages::default();
+    let mut out = Vec::new();
+    let png = |frame: Frame| Ok(if frame.flash_visible { b"ON".to_vec() } else { b"OFF".to_vec() });
+    for frame in [on, off, on, off, on] {
+        images.show(&mut out, &Grid::EMPTY, frame, png).unwrap();
+    }
+    let text = String::from_utf8(out).unwrap();
+    assert_eq!(text.matches("a=t,").count(), 2, "two transmissions: {text:?}");
+    assert_eq!(text.matches("a=p,").count(), 5, "a placement each frame");
+    assert_eq!(text.matches("a=d,d=i,").count(), 4, "the other frame hidden each switch");
+    let mut out = Vec::new();
+    let mut other = Grid::EMPTY;
+    other.boxed_mode = true;
+    images.show(&mut out, &other, on, png).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert_eq!(text.matches("a=d,d=I,").count(), 2, "both old images freed: {text:?}");
+    assert_eq!(text.matches("a=t,").count(), 1);
+}

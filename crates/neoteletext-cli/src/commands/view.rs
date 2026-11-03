@@ -28,14 +28,21 @@ pub fn view(
     use neoteletext_core::consts::PAGE_WIDTH;
     let opening = input::opening(&options.input).map_err(|message| (exit::USAGE, message))?;
     let (mut session, mut source) = input::open_live(options)?;
-    let (display, _) = terminal::detect(display(graphics), std::io::stdout().is_terminal());
-    let area = if display == Display::Iterm2 { terminal::text_area() } else { None };
+    let (display, reason) = terminal::detect(display(graphics), std::io::stdout().is_terminal());
+    let area = if display == Display::Text { None } else { terminal::text_area() };
     let height = ROWS.saturating_mul(Frame::still(session.decoder().config(), false).options.row_height());
     let scale = scale_for(raster_args, area, (PAGE_WIDTH, height));
     sandbox_closed(options.no_sandbox)?;
     let depth = if colours8 { ColourDepth::Eight } else { ColourDepth::TrueColour };
-    crate::view::run(&mut session, source.as_mut(), opening, display, scale, depth, mosaic_style(legacy_mosaics))
-        .map_err(|error| (exit::INPUT, error.to_string()))
+    let ran =
+        crate::view::run(&mut session, source.as_mut(), opening, display, scale, depth, mosaic_style(legacy_mosaics))
+            .map_err(|error| (exit::INPUT, error.to_string()));
+    // REQ-RND-029: why characters were drawn, as `show` says it, once the
+    // terminal is the user's again.
+    if let (Some(reason), true) = (reason, options.verbose > 0) {
+        eprintln!("neottx: used text output: {reason}");
+    }
+    ran
 }
 
 /// `neottx view` in a build without the viewer.

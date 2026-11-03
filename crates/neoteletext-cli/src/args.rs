@@ -148,6 +148,10 @@ pub enum LevelChoice {
 pub enum GraphicsChoice {
     /// Detect.
     Auto,
+    /// The kitty graphics protocol.
+    Kitty,
+    /// Sixel graphics.
+    Sixel,
     /// iTerm2 inline images.
     Iterm2,
     /// Characters with ANSI colour.

@@ -158,6 +158,8 @@ fn mosaic_style(legacy: bool) -> MosaicStyle {
 fn display(choice: GraphicsChoice) -> Option<Display> {
     match choice {
         GraphicsChoice::Auto => None,
+        GraphicsChoice::Kitty => Some(Display::Kitty),
+        GraphicsChoice::Sixel => Some(Display::Sixel),
         GraphicsChoice::Iterm2 => Some(Display::Iterm2),
         GraphicsChoice::Text => Some(Display::Text),
     }

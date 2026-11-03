@@ -5,7 +5,7 @@
 
 use crate::ansi::{ColourDepth, MosaicStyle, ansi};
 use crate::frame::Frame;
-use crate::image::{Scale, iterm2_inline, png, raster};
+use crate::image::{Scale, iterm2_inline, kitty_free, kitty_hide, kitty_place, kitty_transmit, png, raster, sixel};
 use crate::terminal::Display;
 use crossterm::event::{
     self, EnableBracketedPaste, EnableFocusChange, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
@@ -192,9 +192,9 @@ pub fn run(
     source.set_wake(Arc::new(move || {
         let _ = woken.send(Wakened::Source);
     }));
-    state.run(session, source, &wakes, display, &mut |grid, frame| {
-        draw(&mut out, grid, display, scale, depth, mosaics, frame)
-    })?;
+    let mut drawer = Drawer { display, scale, depth, mosaics, kitty: KittyImages::default() };
+    state.run(session, source, &wakes, display, &mut |grid, frame| drawer.draw(&mut out, grid, frame))?;
+    drawer.kitty.free_all(&mut out)?;
     drop(guard);
     for message in state.into_messages() {
         eprintln!("neottx: {message}");
@@ -202,28 +202,104 @@ pub fn run(
     Ok(())
 }
 
-fn draw(
-    out: &mut std::io::Stdout,
-    grid: &Grid,
+/// How the viewer draws a page, and the kitty images it holds.
+struct Drawer {
     display: Display,
     scale: Scale,
     depth: ColourDepth,
     mosaics: MosaicStyle,
-    frame: Frame,
-) -> std::io::Result<()> {
-    queue!(out, cursor::MoveTo(0, 0))?;
-    match display {
-        Display::Iterm2 => {
-            let raster = raster(grid, frame, scale, Rgba::opaque(0, 0, 0));
-            let encoded = png(&raster)?;
-            out.write_all(iterm2_inline(&encoded, raster.width, raster.height).as_bytes())?;
+    kitty: KittyImages,
+}
+
+impl Drawer {
+    fn draw(&mut self, out: &mut std::io::Stdout, grid: &Grid, frame: Frame) -> std::io::Result<()> {
+        queue!(out, cursor::MoveTo(0, 0))?;
+        let black = Rgba::opaque(0, 0, 0);
+        match self.display {
+            Display::Kitty => {
+                self.kitty.show(out, grid, frame, |frame| png(&raster(grid, frame, self.scale, black)))?;
+            }
+            Display::Sixel => out.write_all(&sixel(&raster(grid, frame, self.scale, black), black)?)?,
+            Display::Iterm2 => {
+                let raster = raster(grid, frame, self.scale, black);
+                let encoded = png(&raster)?;
+                out.write_all(iterm2_inline(&encoded, raster.width, raster.height).as_bytes())?;
+            }
+            Display::Text => {
+                let text = zoomed_text(&ansi(grid, frame.options.reveal, self.mosaics, self.depth), frame.zoom)
+                    .replace('\n', "\r\n");
+                out.write_all(text.as_bytes())?;
+            }
         }
-        Display::Text => {
-            let text = zoomed_text(&ansi(grid, frame.options.reveal, mosaics, depth), frame.zoom).replace('\n', "\r\n");
-            out.write_all(text.as_bytes())?;
-        }
+        out.flush()
     }
-    out.flush()
+}
+
+/// The most frames of one page kept in the terminal as kitty images: the
+/// flash phases of the palette mode (decision E.12) and of the resolved
+/// mode (decision E.48) with reveal and zoom, with room to spare.
+const KITTY_FRAMES_KEPT: usize = 8;
+
+/// The kitty images of the page shown, one per frame (REQ-RND-029, item
+/// 5 of TODO-2070): each frame is sent once, and a flash or reveal that
+/// returns to a frame already sent only places it again, without sending
+/// the page.
+#[derive(Default)]
+struct KittyImages {
+    grid: Option<Grid>,
+    sent: Vec<(Frame, u32)>,
+    shown: Option<u32>,
+    last_id: u32,
+}
+
+impl KittyImages {
+    /// Shows `frame` of `grid`, sending it first if it has not been; `png`
+    /// draws a frame.
+    fn show(
+        &mut self,
+        out: &mut dyn Write,
+        grid: &Grid,
+        frame: Frame,
+        png: impl Fn(Frame) -> std::io::Result<Vec<u8>>,
+    ) -> std::io::Result<()> {
+        if self.grid.as_ref() != Some(grid) {
+            self.free_all(out)?;
+            self.grid = Some(*grid);
+        }
+        let id = if let Some(&(_, id)) = self.sent.iter().find(|(sent, _)| *sent == frame) {
+            id
+        } else {
+            if self.sent.len() >= KITTY_FRAMES_KEPT
+                && let Some(position) = self.sent.iter().position(|&(_, id)| Some(id) != self.shown)
+            {
+                let (_, old) = self.sent.remove(position);
+                out.write_all(kitty_free(old).as_bytes())?;
+            }
+            // Image ids start at 1: 0 is no id to the protocol.
+            self.last_id = self.last_id.checked_add(1).unwrap_or(1);
+            out.write_all(kitty_transmit(&png(frame)?, self.last_id, false).as_bytes())?;
+            self.sent.push((frame, self.last_id));
+            self.last_id
+        };
+        if self.shown != Some(id) {
+            if let Some(old) = self.shown {
+                out.write_all(kitty_hide(old).as_bytes())?;
+            }
+            out.write_all(kitty_place(id).as_bytes())?;
+            self.shown = Some(id);
+        }
+        Ok(())
+    }
+
+    /// Frees every image sent.
+    fn free_all(&mut self, out: &mut dyn Write) -> std::io::Result<()> {
+        for (_, id) in self.sent.drain(..) {
+            out.write_all(kitty_free(id).as_bytes())?;
+        }
+        self.shown = None;
+        self.grid = None;
+        Ok(())
+    }
 }
 
 /// The terminal text of a page at a page zoom (REQ-L1-020), row by row as

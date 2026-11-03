@@ -170,7 +170,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
 
 - **Owns:**
   - conversion of palette indices to RGB565, RGB888, RGBA8888, grey and 1-bit, with byte order, stride and rotation;
-  - PNG and PPM writers;
+  - PNG, PPM and Sixel writers;
   - text and ANSI output, which always passes the sanitising rules of REQ-SEC-010;
   - terminal graphics output in the kitty, Sixel and iTerm2 protocols, with detection and fallback to ANSI output (decision E.37).
 - **Must not know about:** teletext rules.
@@ -237,7 +237,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
 - **The split between `neoteletext-app` and `neoteletext-cli`:**
   - `neoteletext-app` holds what any program needs. That is the session, reading inputs, both processes of live mode, sandboxing, conversion and slicing, and the `Source` trait a viewer reads pages through.
   - `neoteletext-cli` holds argument parsing, terminal output and the terminal viewer.
-  - `neoteletext-app` also holds what viewers share: the row 24 messages (`interact`), and text and raster output (`present`).
+  - `neoteletext-app` also holds what viewers share: the row 24 messages (`interact`), and text and raster output (`present`), and the reading of a terminal's replies to the graphics queries (`terminal_reply`, DEC-2459); `neottx` sends the queries and draws kitty, Sixel (`neoteletext-image::sixel`) or iTerm2 images.
   - `neoteletext-app::write_text` (feature `write-text`) is `neoteletext-formats::write_text` under the name `neottx write-text` uses (decision E.82, REQ-CLI-010); the writer itself is in L0 (section 4.6).
 - **Requirements:** CLI, SEC-017 to SEC-019, GEN-018.
 

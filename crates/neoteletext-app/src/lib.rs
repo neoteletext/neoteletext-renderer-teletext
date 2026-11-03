@@ -42,6 +42,7 @@ pub mod session;
 #[cfg(feature = "slice")]
 pub mod slice;
 pub mod source;
+pub mod terminal_reply;
 #[cfg(feature = "write-text")]
 pub mod write_text;
 

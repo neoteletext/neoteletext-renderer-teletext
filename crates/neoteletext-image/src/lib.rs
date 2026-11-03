@@ -45,6 +45,7 @@ pub mod ppm;
 #[cfg(feature = "alloc")]
 pub mod raster;
 pub mod scale;
+pub mod sixel;
 
 /// A destination for encoded bytes.
 pub trait Sink {

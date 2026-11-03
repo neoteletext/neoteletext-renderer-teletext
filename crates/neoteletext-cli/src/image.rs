@@ -85,6 +85,71 @@ pub fn iterm2_inline(png: &[u8], width: usize, height: usize) -> String {
     )
 }
 
+/// The most base64 bytes in one kitty graphics escape: the protocol's limit
+/// for a chunk of a transmission (kitty's "Terminal graphics protocol",
+/// "Remote client": chunks of at most 4096 bytes, each a multiple of 4).
+const KITTY_CHUNK: usize = 4096;
+
+/// The kitty graphics protocol's escape around `keys` and `payload`: APC,
+/// `G`, the keys, `;`, the payload, then the String Terminator.
+fn kitty_escape(keys: &str, payload: &str) -> String {
+    if payload.is_empty() { format!("\x1b_G{keys}\x1b\\") } else { format!("\x1b_G{keys};{payload}\x1b\\") }
+}
+
+/// A PNG sent to the terminal by the kitty graphics protocol as image
+/// `id`, in chunks: shown at the cursor when `show` (action `T`), or only
+/// held for a later placement (action `t`). `q=2` asks the terminal to send
+/// no reply. Only these fixed sequences are emitted around data we encoded
+/// ourselves (REQ-SEC-010).
+#[must_use]
+pub fn kitty_transmit(png: &[u8], id: u32, show: bool) -> String {
+    let encoded = base64(png);
+    let action = if show { "T" } else { "t" };
+    let chunks: Vec<&[u8]> = encoded.as_bytes().chunks(KITTY_CHUNK).collect();
+    let mut out = String::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let more = u8::from(index.saturating_add(1) < chunks.len());
+        let chunk = core::str::from_utf8(chunk).unwrap_or("");
+        let keys = if index == 0 { format!("a={action},f=100,i={id},q=2,m={more}") } else { format!("m={more}") };
+        out.push_str(&kitty_escape(&keys, chunk));
+    }
+    out
+}
+
+/// Shows image `id`, already sent, at the cursor, without moving the
+/// cursor (`C=1`).
+#[cfg(feature = "view")]
+#[must_use]
+pub fn kitty_place(id: u32) -> String {
+    kitty_escape(&format!("a=p,i={id},C=1,q=2"), "")
+}
+
+/// Takes image `id` off the screen, keeping its data for a later
+/// placement (`d=i`).
+#[cfg(feature = "view")]
+#[must_use]
+pub fn kitty_hide(id: u32) -> String {
+    kitty_escape(&format!("a=d,d=i,i={id},q=2"), "")
+}
+
+/// Takes image `id` off the screen and frees its data (`d=I`).
+#[cfg(feature = "view")]
+#[must_use]
+pub fn kitty_free(id: u32) -> String {
+    kitty_escape(&format!("a=d,d=I,i={id},q=2"), "")
+}
+
+/// A raster as Sixel graphics (DEC-561: each palette index its own colour
+/// register), transparent areas in `fill`.
+///
+/// # Errors
+/// None in practice: the bytes go to memory.
+pub fn sixel(raster: &Raster, fill: Rgba) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    neoteletext_image::sixel::write(&mut out, &raster.indices, raster.width, raster.height, &raster.palette, fill)?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +174,27 @@ mod tests {
         for (input, expected) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foobar", "Zm9vYmFy")] {
             assert_eq!(base64(input.as_bytes()), expected);
         }
+    }
+
+    /// REQ-382: a kitty graphics transmission, byte for byte, in chunks of
+    /// at most 4096 base64 bytes, `m=1` on all but the last.
+    #[test]
+    fn kitty_sequences() {
+        assert_eq!(kitty_transmit(b"xyz", 7, true), "\x1b_Ga=T,f=100,i=7,q=2,m=0;eHl6\x1b\\");
+        let long = kitty_transmit(&[0u8; 3 * 1024 + 3], 8, false);
+        let first = format!("\x1b_Ga=t,f=100,i=8,q=2,m=1;{}\x1b\\", "A".repeat(4096));
+        assert!(long.starts_with(&first));
+        assert!(long.ends_with("\x1b_Gm=0;AAAA\x1b\\"));
+    }
+
+    /// REQ-382: the viewer's kitty escapes, byte for byte: the placement,
+    /// hiding and freeing of an image.
+    #[cfg(feature = "view")]
+    #[test]
+    fn kitty_placement_sequences() {
+        assert_eq!(kitty_place(8), "\x1b_Ga=p,i=8,C=1,q=2\x1b\\");
+        assert_eq!(kitty_hide(8), "\x1b_Ga=d,d=i,i=8,q=2\x1b\\");
+        assert_eq!(kitty_free(8), "\x1b_Ga=d,d=I,i=8,q=2\x1b\\");
     }
 
     #[test]

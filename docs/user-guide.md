@@ -2,7 +2,7 @@
 
 `neottx` is the command-line receiver of neoteletext (REQ-DOC-002). It decodes World System Teletext (ETSI EN 300 706, Presentation Levels 1.0, 1.5, 2.5 and 3.5) from recordings, live feeds and web services, and shows pages in the terminal, writes them as text or images, or converts them between formats.
 
-`neottx` is built for Linux on x86_64, aarch64, 32-bit Arm and 64-bit RISC-V, for macOS on Apple silicon and Intel, and for Windows with the MinGW toolchain (`scripts/build-targets.sh`, run by the full gate). It sandboxes itself on Linux (REQ-SEC-017). Graphics in the terminal use iTerm2 inline images; every other terminal gets coloured text.
+`neottx` is built for Linux on x86_64, aarch64, 32-bit Arm and 64-bit RISC-V, for macOS on Apple silicon and Intel, and for Windows with the MinGW toolchain (`scripts/build-targets.sh`, run by the full gate). It sandboxes itself on Linux (REQ-SEC-017). Graphics in the terminal use the kitty graphics protocol, Sixel or iTerm2 inline images, whichever the terminal answers it has; every other terminal gets coloured text.
 
 ## Building
 
@@ -118,7 +118,9 @@ A live input runs in two processes (REQ-SEC-018). A fetcher process does the net
 
 `show` and `view` choose the graphics with `--graphics`:
 
-- `auto` (the default): iTerm2 inline images when `TERM_PROGRAM` is `iTerm.app` or `LC_TERMINAL` is `iTerm2`, otherwise text.
+- `auto` (the default): the terminal is asked, before anything is drawn, with the kitty graphics query, XTVERSION and Primary Device Attributes, and the first it has of kitty, Sixel and iTerm2 is used (iTerm2 also when `TERM_PROGRAM` is `iTerm.app` or `LC_TERMINAL` is `iTerm2`); otherwise text. Its replies are read strictly and bounded, and a terminal that has not answered within half a second gets text. Inside tmux or GNU screen, which may not pass graphics through, it is always text. With `-v` both commands say why text was used (DEC-2459).
+- `kitty`: the page is sent as a PNG by the kitty graphics protocol. `view` sends each frame of a page once, its flash phases among them, and then only switches between them.
+- `sixel`: the page is sent as Sixel graphics, each palette index its own colour register (DEC-561), so the terminal needs as many registers as the page has colours: up to 144 at Levels 1 and 1.5.
 - `iterm2`: the page is rendered at full resolution and sent as a PNG inline image (decision E.37).
 - `text`: characters with ANSI colour. Mosaics use the Unicode block mosaic characters; separated mosaics need a font with Unicode 16 separated mosaics, or `--legacy-mosaics` draws them contiguous. `--colours8` uses the eight basic colours instead of 24-bit colour.
 
