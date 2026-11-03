@@ -46,11 +46,26 @@ pub fn mot_position(page: PageNumber) -> MotPosition {
         let ordinal = tens.saturating_mul(MOT_HEX_DIGITS).saturating_add(units.saturating_sub(MOT_DECIMAL_DIGITS));
         (MOT_HEX_UNITS_FIRST_PACKET, ordinal, MOT_PAIRS_HEX_UNITS)
     };
-    let ordinal = usize::from(ordinal);
+    let (packets, pair) = packets_and_pair(usize::from(ordinal), per_packet);
     MotPosition {
-        packet: first_packet.saturating_add(ordinal.checked_div(per_packet).unwrap_or(0) as u8),
-        index: ordinal.checked_rem(per_packet).unwrap_or(0).saturating_mul(2),
+        packet: first_packet.saturating_add(u8::try_from(packets).unwrap_or(u8::MAX)),
+        index: pair.saturating_mul(2),
     }
+}
+
+/// The whole packets before a page's byte pair and the pair's place in its
+/// packet, by repeated subtraction rather than a division: this runs for
+/// every page header a decoder looks up in the Magazine Inventory Page, and
+/// the Cortex-M0 has no divide instruction (REQ-GEN-016). The ordinal is at
+/// most 99 and a packet holds at least 18 pairs (Figure 20), so the loop
+/// runs at most five times.
+const fn packets_and_pair(ordinal: usize, per_packet: usize) -> (usize, usize) {
+    let (mut packets, mut pair) = (0usize, ordinal);
+    while per_packet != 0 && pair >= per_packet {
+        pair = pair.saturating_sub(per_packet);
+        packets = packets.saturating_add(1);
+    }
+    (packets, pair)
 }
 
 /// The object half of a page's byte pair in the Magazine Organization

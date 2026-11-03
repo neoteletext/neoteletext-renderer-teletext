@@ -50,10 +50,9 @@ impl Iterator for SubCodes<'_> {
 /// order. A sub-code is in at most one slot: [`PageStore::allocate`]
 /// finds a stored key before it takes a slot.
 fn listed(pages: &[StoredPage], address: PageAddress) -> impl Iterator<Item = SubCode> + '_ {
-    pages
-        .iter()
-        .filter(move |page| page.key.address == address && page.is_listed_sub_page())
-        .map(|page| page.key.subcode)
+    super::indexed(pages)
+        .filter(move |(_, page)| page.key.address == address && page.is_listed_sub_page())
+        .map(|(_, page)| page.key.subcode)
 }
 
 impl<'a> PageStore<'a> {
@@ -108,9 +107,7 @@ impl<'a> PageStore<'a> {
 
     /// The slot of [`Self::latest`].
     fn latest_slot(&self, address: PageAddress) -> Option<usize> {
-        self.slots()
-            .iter()
-            .enumerate()
+        super::indexed(self.slots())
             .filter(|(_, page)| page.state != PageState::Empty && page.key.address == address)
             .max_by_key(|(_, page)| page.last_received)
             .map(|(index, _)| index)
@@ -226,10 +223,7 @@ impl<'a> PageStore<'a> {
             return Some((index, false));
         }
         let kept = shown.filter(|&address| address != key.address).and_then(|address| self.latest_slot(address));
-        let victim = self
-            .slots()
-            .iter()
-            .enumerate()
+        let victim = super::indexed(self.slots())
             .filter(|&(index, _)| !busy.contains(&Some(index)) && kept != Some(index))
             .min_by_key(|(_, page)| page.last_received)
             .map(|(index, _)| index)?;

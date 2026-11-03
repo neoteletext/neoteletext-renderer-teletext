@@ -37,6 +37,17 @@ pub use page::{Numbering, StoredPage};
 pub use statistics::{EnhancementFaults, EnhancementReport, PageBuild, Statistics};
 pub use store::{PageStore, SubCodes};
 
+/// Each slot of a store with its index. A slice iterator's folds work out
+/// how many elements remain from the difference of two pointers, and with
+/// elements whose size is not a power of two (a `StoredPage` is 2,688
+/// bytes, an `EnhancementSubPage` 120) that is a call to the division
+/// routine on a processor without a divide instruction; counting the index
+/// keeps the stores' searches, which run for every page header, free of it
+/// (REQ-GEN-016).
+fn indexed<T>(slots: &[T]) -> impl Iterator<Item = (usize, &T)> {
+    (0..slots.len()).filter_map(move |index| slots.get(index).map(|slot| (index, slot)))
+}
+
 /// Search state of the requested page (REQ-ACQ-012).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SearchStatus {

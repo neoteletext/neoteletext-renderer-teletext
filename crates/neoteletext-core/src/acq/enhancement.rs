@@ -373,9 +373,7 @@ impl<'a> EnhancementStore<'a> {
     /// (REQ-425).
     fn victim(&self, busy: &[Option<usize>], for_provisional: bool, holding_packets: bool) -> Option<usize> {
         self.visit(self.sub_pages.len());
-        self.sub_pages
-            .iter()
-            .enumerate()
+        super::indexed(self.sub_pages)
             .filter(|(index, entry)| {
                 let free_to_go = !busy.contains(&Some(*index)) || (entry.provisional && !for_provisional);
                 let frees = !holding_packets || entry.received != 0;
