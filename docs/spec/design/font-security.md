@@ -8,6 +8,8 @@ Written on 12 October 2026, before the fonts are built. It changed two requireme
 
 *Note of 1 November 2026:* Noto Teletext replaced Bedstead as the one compiled font (DEC-1761). Where this analysis says Bedstead, or names its files, read Noto Teletext and `third_party/noto/`: nothing trusted is drawn in a loaded font, as before.
 
+*Note of 3 November 2026:* sections 3.12 (a library's `c` lines) and 3.13 (the decoder holding a font per character set) were added; the rest was read against decision E.111 and stands as the notes above qualify it.
+
 *Note of 23 October 2026:* fonts named by a channel or a page were withdrawn (decision E.111, REQ-FNT-006 and REQ-FNT-007): what this analysis says of them, sections 3.4 and 3.5 above all, no longer applies; the threats of user-chosen fonts remain as written.
 
 ## 1. What is being protected
@@ -113,6 +115,22 @@ The one font the project ships must be exactly what it claims to be.
 
 - **Answer:** Noto Teletext is in `third_party/noto/` with its converter, its settings, the pinned addresses and SHA-256 of its sources, and the SHA-256 of each converted file (`PROVENANCE.md`). `cargo xtask check-noto` checks the files in every gate, and a test checks that the compiled table is those files.
 - **Remaining risk:** none of substance: the font is under the SIL Open Font License 1.1, and the licence travels with it.
+
+### 3.12 A library's `c` lines claim conformance
+
+A font library's `fonts.txt` may carry a `c` line for a font: its file name or address and the character sets it claims to conform for, each marked `*` where it also claims the SAA5050 cell (REQ-FNT-004, REQ-FNT-011). `neottx font sets --library-line` writes one. A library is untrusted, so a `c` line can claim anything: that a font draws Greek when it draws nothing, or that it conforms for every set.
+
+- **Answer:** a `c` line is listing data only. A program may use it to list or filter fonts before loading them, and nothing else: once a font is loaded, conformance is computed again from its glyphs by `glyphs::conformance`, and that result alone decides what the font draws (REQ-FNT-011). A `c` line never chooses a font for a page, never puts a font above the compiled one, and a channel or a page cannot name a font at all (decision E.111). On 3 November 2026 no program of the engine or the browser reads a library index (the reader this analysis first described, `neoteletext_web::fonts`, no longer exists); `neottx` only writes a `c` line. A reader added later reads `c` lines with the same bounds as the `f` lines, within the index's 64 KB and 1,000 lines, and as listing data only.
+- **Remaining risk:** a false `c` line can make a font appear in a list where it does not belong. The user who chooses it then sees what it really draws; no trusted text is drawn in it (section 3.2).
+
+### 3.13 The decoder holds many loaded fonts
+
+Since 18 October 2026 a decoder's `GlyphSet` holds the font in use and, for each character set a font can draw, an optional font for that set, so that the user can choose a font per set (REQ-FNT-005). On 3 November 2026 there are 55 such sets (`FONT_SET_COUNT` in `glyphs/conformance.rs`: the standard's 24 and NeoTeletext's own 31), so a decoder may hold up to 56 loaded fonts. When this was first noted there were 24 sets and 25 fonts.
+
+- **Memory.** A `GlyphSet` only borrows each font's glyph table; the program that loaded it owns the table. A table holds at most 1,024 glyphs (`FONT_MAX_CHARACTERS`, REQ-FNT-002) of 48 bytes each (`types::FontGlyph`: a code point and twenty 16-bit lines, measured with `size_of` on 3 November 2026), 49,152 bytes. Fifty-six full tables are 2,752,512 bytes, about 2.6 MB, held by the program, never by the core, which allocates nothing. `neottx` loads one font at most (`render --font`); the browser, which offers a font per set, bounds what it loads by the user's choices.
+- **Each table is checked.** Every table is checked for shape by `LoadedFont::new` before the decoder draws with it, whichever slot it fills (REQ-FNT-008), and a glyph is looked up by a bounded search of a sorted table, so more fonts cost a lookup at most one search per slot tried (the font in use, then the character's set's font, then the compiled font).
+- **Trust is unchanged.** Row 0 and every trusted drawing still use the compiled font alone (REQ-FNT-005), whatever the slots hold, and a channel or a page cannot fill a slot (decision E.111).
+- **Remaining risk:** a program that loads a full font into every slot spends about 2.6 MB. That is a program's choice, bounded by the table limit, and not reachable by a channel.
 
 ## 4. Changes made to the requirements by this analysis
 
