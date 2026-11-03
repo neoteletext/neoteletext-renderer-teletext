@@ -6,7 +6,7 @@
 mod common;
 
 use common::{
-    DISPLAY, Receiver, damage, display_page, feed, g0, invoke, local_data, public_number, row_0, set_position,
+    DISPLAY, Receiver, damage, display_page, feed, g0, invoke, local_data, public_number, row_0, set_position, x26,
 };
 use neoteletext_core::acq::EnhancementReport;
 use neoteletext_core::acq::{Decoder, EnhancementFaults, PageBuild};
@@ -253,8 +253,9 @@ fn enhancement_walk_trace_without_local_data() {
 }
 
 /// REQ-FSM-010, REQ-FSM-007: a known page gives the expected trace of the
-/// Level 1.5 walk, and the strict option of REQ-L15-009 shows as the
-/// action of the write it ignores.
+/// Level 1.5 walk, from its first row "walk begins" to the Termination
+/// Marker or its last row "no more packets" (REQ-139), and the strict
+/// option of REQ-L15-009 shows as the action of the write it ignores.
 #[test]
 fn level_15_walk_trace() {
     let write = |column, code| TripletFunction::G0Diacritic { column, code, diacritic: 0 };
@@ -265,7 +266,9 @@ fn level_15_walk_trace() {
     let diacritic = "G0 character with diacritical mark";
     let expected = |last: &'static str| {
         [
-            ["Start", "Set Active Position", "none", "Walking"],
+            ["Start", "walk begins", "none", "Walking"],
+            ["Walking", "next packet", "none", "Walking"],
+            ["Walking", "Set Active Position", "none", "Walking"],
             ["Walking", diacritic, "write character", "Walking"],
             ["Walking", "damaged triplet", "none", "Walking"],
             ["Walking", diacritic, last, "Walking"],
@@ -277,6 +280,13 @@ fn level_15_walk_trace() {
     let strict = Config { ignore_out_of_order_triplets: true, ..traced(PresentationLevel::Level15) };
     let entries = trace_of(&packets, strict);
     assert_eq!(transitions(&entries, Machine::TripletWalk), expected("ignore out-of-order write"));
+    // REQ-139's last row: data with no Termination Marker ends when the
+    // packets do.
+    let unterminated = display_page(0, &[], vec![x26(0, &[set_position(3, 0)])]);
+    let entries = trace_of(&unterminated, traced(PresentationLevel::Level15));
+    let rows = transitions(&entries, Machine::TripletWalk);
+    assert_eq!(rows.first(), Some(&["Start", "walk begins", "none", "Walking"]));
+    assert_eq!(rows.last(), Some(&["Walking", "no more packets", "none", "Terminated"]));
 }
 
 /// REQ-FSM-010: with tracing off in the configuration, nothing is
