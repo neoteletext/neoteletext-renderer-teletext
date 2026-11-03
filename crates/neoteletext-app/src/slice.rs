@@ -65,6 +65,11 @@ fn slicer_config(config: &neoteletext_core::config::Config) -> neoteletext_slice
 /// parts `choice` gives replaced, and writes the packets found to `output`
 /// as T42. A geometry the reader cannot use is refused with the usage
 /// status. Returns the slicer's quality statistics.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// for a preset or a geometry the reader cannot use, an input or output
+/// that cannot be opened, or a sandbox that cannot be applied.
 pub fn slice(options: &Options, output: &Path, preset: &str, choice: &GeometryChoice) -> Result<Counters, Failure> {
     let preset = match preset {
         "bt8x8" => Preset::Bt8x8,
@@ -80,6 +85,8 @@ pub fn slice(options: &Options, output: &Path, preset: &str, choice: &GeometryCh
     let mut input = input::open(options)?;
     let file = File::create(output).map_err(|error| (exit::INPUT, format!("{}: {error}", output.display())))?;
     let mut writer = neoteletext_formats::write::T42Writer::new(std::io::BufWriter::new(file));
+    // REQ-SEC-017: the capture and the output are open; nothing else is.
+    input::sandbox(options, None)?;
     let mut buffer = vec![0u8; CHUNK];
     let mut failure = None;
     loop {

@@ -9,6 +9,8 @@ use std::io::Write;
 /// `neottx services`: the teletext streams of a transport stream (REQ-INP-007).
 pub fn services(options: &Options) -> Result<(), Failure> {
     let mut input = input::open(options)?;
+    // REQ-SEC-017: the input is open; nothing else is needed.
+    input::sandbox(options, None)?;
     let mut reader = input::reader(options, false);
     let mut found = 0u32;
     let mut out = std::io::stdout().lock();

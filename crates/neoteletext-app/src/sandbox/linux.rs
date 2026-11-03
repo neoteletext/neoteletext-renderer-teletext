@@ -1,9 +1,10 @@
 //! The Linux sandbox: Landlock for files and the network, a seccomp filter
 //! for processes and sockets (REQ-SEC-017, decision E.33 layer 5).
 
-use super::Policy;
+use super::{Policy, SandboxError};
 use landlock::{
-    ABI, Access, AccessFs, AccessNet, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
+    ABI, Access, AccessFs, AccessNet, LandlockStatus, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
+    RulesetStatus,
 };
 use seccompiler::{
     BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter, SeccompRule, TargetArch,
@@ -13,26 +14,51 @@ use std::collections::BTreeMap;
 /// The newest Landlock ABI used: version 4 adds TCP restrictions.
 const LANDLOCK_ABI: ABI = ABI::V4;
 
-fn landlock(policy: Policy<'_>) -> Result<(), String> {
-    let mut ruleset = Ruleset::default().handle_access(AccessFs::from_all(LANDLOCK_ABI)).map_err(|e| e.to_string())?;
+/// Whether Landlock restricted TCP: what the kernel applied of the ruleset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Network {
+    /// Landlock's network rules (ABI 4 and later) are in force.
+    Restricted,
+    /// The kernel's Landlock has no network rules, or the policy allows the network.
+    Unrestricted,
+}
+
+/// What Landlock or the kernel said when a step of the ruleset failed.
+fn landlock_failed(error: impl core::fmt::Display) -> SandboxError {
+    SandboxError::Landlock(error.to_string())
+}
+
+/// What seccompiler or the kernel said when the filter failed.
+fn seccomp_failed(error: impl core::fmt::Display) -> SandboxError {
+    SandboxError::Seccomp(error.to_string())
+}
+
+fn landlock(policy: Policy<'_>) -> Result<Network, SandboxError> {
+    let mut ruleset = Ruleset::default().handle_access(AccessFs::from_all(LANDLOCK_ABI)).map_err(landlock_failed)?;
     if !policy.network {
-        ruleset = ruleset.handle_access(AccessNet::from_all(LANDLOCK_ABI)).map_err(|e| e.to_string())?;
+        ruleset = ruleset.handle_access(AccessNet::from_all(LANDLOCK_ABI)).map_err(landlock_failed)?;
     }
-    let mut created = ruleset.create().map_err(|e| e.to_string())?;
+    let mut created = ruleset.create().map_err(landlock_failed)?;
     for directory in policy.readable {
-        let fd = PathFd::new(directory).map_err(|e| e.to_string())?;
-        created =
-            created.add_rule(PathBeneath::new(fd, AccessFs::from_read(LANDLOCK_ABI))).map_err(|e| e.to_string())?;
+        let fd = PathFd::new(directory).map_err(landlock_failed)?;
+        created = created.add_rule(PathBeneath::new(fd, AccessFs::from_read(LANDLOCK_ABI))).map_err(landlock_failed)?;
     }
     if let Some(directory) = policy.writable_directory {
-        let fd = PathFd::new(directory).map_err(|e| e.to_string())?;
-        created =
-            created.add_rule(PathBeneath::new(fd, AccessFs::from_all(LANDLOCK_ABI))).map_err(|e| e.to_string())?;
+        let fd = PathFd::new(directory).map_err(landlock_failed)?;
+        created = created.add_rule(PathBeneath::new(fd, AccessFs::from_all(LANDLOCK_ABI))).map_err(landlock_failed)?;
     }
-    let status = created.restrict_self().map_err(|e| e.to_string())?;
+    let status = created.restrict_self().map_err(landlock_failed)?;
+    // A kernel older than the newest ABI enforces part of the ruleset: its
+    // file rules always, its TCP rules only from ABI 4 (DEC-2351).
+    let network = match status.landlock {
+        LandlockStatus::Available { effective_abi, .. } if !policy.network && effective_abi >= ABI::V4 => {
+            Network::Restricted
+        }
+        _ => Network::Unrestricted,
+    };
     match status.ruleset {
-        RulesetStatus::FullyEnforced | RulesetStatus::PartiallyEnforced => Ok(()),
-        RulesetStatus::NotEnforced => Err("Landlock is not supported by this kernel".to_string()),
+        RulesetStatus::FullyEnforced | RulesetStatus::PartiallyEnforced => Ok(network),
+        RulesetStatus::NotEnforced => Err(SandboxError::LandlockUnsupported),
     }
 }
 
@@ -56,8 +82,14 @@ fn number(syscall: libc::c_long) -> i64 {
     i64::from(syscall)
 }
 
-fn seccomp(policy: Policy<'_>) -> Result<(), String> {
+fn seccomp(policy: Policy<'_>, network: Network) -> Result<(), SandboxError> {
     let Some(arch) = target_arch() else {
+        // REQ-SEC-017: a sandbox that cannot keep a process with no network
+        // rights off the network is not applied, so the program refuses
+        // unless told to continue (DEC-2351).
+        if !policy.network && network == Network::Unrestricted {
+            return Err(SandboxError::NetworkUnrestricted);
+        }
         eprintln!(
             "neottx: note: no seccomp filter exists for this architecture; only the Landlock sandbox applies (REQ-SEC-017)"
         );
@@ -75,9 +107,9 @@ fn seccomp(policy: Policy<'_>) -> Result<(), String> {
     // clone() is allowed only for threads (CLONE_THREAD set).
     let process_clone = SeccompRule::new(vec![
         SeccompCondition::new(0, SeccompCmpArgLen::Qword, SeccompCmpOp::MaskedEq(libc::CLONE_THREAD as u64), 0)
-            .map_err(|e| e.to_string())?,
+            .map_err(seccomp_failed)?,
     ])
-    .map_err(|e| e.to_string())?;
+    .map_err(seccomp_failed)?;
     rules.insert(number(libc::SYS_clone), vec![process_clone]);
     if !policy.network {
         for syscall in [libc::SYS_socket, libc::SYS_connect, libc::SYS_bind, libc::SYS_listen, libc::SYS_accept4] {
@@ -85,21 +117,20 @@ fn seccomp(policy: Policy<'_>) -> Result<(), String> {
         }
     }
     let filter = SeccompFilter::new(rules, SeccompAction::Allow, SeccompAction::Errno(libc::EPERM as u32), arch)
-        .map_err(|e| e.to_string())?;
-    let program: BpfProgram = filter.try_into().map_err(|e: seccompiler::BackendError| e.to_string())?;
-    seccompiler::apply_filter(&program).map_err(|e| e.to_string())?;
+        .map_err(seccomp_failed)?;
+    let program: BpfProgram = filter.try_into().map_err(|e: seccompiler::BackendError| seccomp_failed(e))?;
+    seccompiler::apply_filter(&program).map_err(seccomp_failed)?;
     // clone3 cannot be inspected; answering "not implemented" makes the
     // C library fall back to clone, which the rule above checks.
     let mut clone3 = BTreeMap::new();
     clone3.insert(number(libc::SYS_clone3), vec![]);
     let filter = SeccompFilter::new(clone3, SeccompAction::Allow, SeccompAction::Errno(libc::ENOSYS as u32), arch)
-        .map_err(|e| e.to_string())?;
-    let program: BpfProgram = filter.try_into().map_err(|e: seccompiler::BackendError| e.to_string())?;
-    seccompiler::apply_filter(&program).map_err(|e| e.to_string())
+        .map_err(seccomp_failed)?;
+    let program: BpfProgram = filter.try_into().map_err(|e: seccompiler::BackendError| seccomp_failed(e))?;
+    seccompiler::apply_filter(&program).map_err(seccomp_failed)
 }
 
-pub(super) fn apply(policy: Policy<'_>) -> Result<(), String> {
-    landlock(policy)
-        .map_err(|e| format!("cannot apply the Landlock sandbox: {e} (use --no-sandbox to run without it)"))?;
-    seccomp(policy).map_err(|e| format!("cannot apply the seccomp sandbox: {e} (use --no-sandbox to run without it)"))
+pub(super) fn apply(policy: Policy<'_>) -> Result<(), SandboxError> {
+    let network = landlock(policy)?;
+    seccomp(policy, network)
 }

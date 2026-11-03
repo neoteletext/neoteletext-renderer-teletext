@@ -1,4 +1,4 @@
-//! REQ-FSM-009: one test per row of the REQ-FSM-002 table.
+//! Tests of REQ-FSM-009: one test per row of the REQ-FSM-002 table.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

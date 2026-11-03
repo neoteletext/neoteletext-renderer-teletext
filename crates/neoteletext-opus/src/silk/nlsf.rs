@@ -138,6 +138,11 @@ pub fn decode(
 /// `silk_NLSF_stabilize`: moves the NLSFs further apart where they are closer than
 /// `delta_min_q15` (one more entry than `nlsf_q15`, the last the distance from the top), and
 /// away from the borders; the output is sorted (RFC 6716 §4.2.7.5.4).
+///
+/// Kept whole, past the source conventions' 80 lines a function: it follows one
+/// routine of the reference decoder step for step, so that it can be read against
+/// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+/// comparison would be harder and the parts would have no meaning of their own.
 pub fn stabilize(nlsf_q15: &mut [i16], delta_min_q15: &[i16]) {
     let l = nlsf_q15.len();
     let Some(delta_min_q15) = delta_min_q15.get(..=l) else { return };

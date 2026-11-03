@@ -100,32 +100,8 @@ fn read_event<'a>(reader: &mut Reader<'a>) -> Result<Event<'a>, InputError> {
     let kind = reader.byte()?;
     Ok(match kind {
         KEY => Event::Key(read_key(reader)?),
-        MOUSE => {
-            let on = read_stamp(reader)?;
-            let flags = reader.byte()?;
-            if flags & MOUSE_RESERVED != 0 {
-                return Err(InputError::Flags);
-            }
-            // REQ-RCH-042: device 3 is reserved, and a protocol error.
-            let device = match (flags & DEVICE_MASK) >> DEVICE_SHIFT {
-                0 => Device::Mouse,
-                1 => Device::Touch,
-                2 => Device::Pen,
-                _ => return Err(InputError::BadValue("mouse device")),
-            };
-            let button = reader.byte()?;
-            Event::Mouse(Mouse { on, action: read_action(flags), button, at: read_point(reader, flags)?, device })
-        }
-        WHEEL => {
-            let on = read_stamp(reader)?;
-            let flags = reader.byte()?;
-            if flags & (WHEEL_RESERVED | ACTION) != 0 {
-                return Err(InputError::Flags);
-            }
-            let dx = reader.sv()?;
-            let dy = reader.sv()?;
-            Event::Wheel(Wheel { on, dx, dy, at: read_point(reader, flags)? })
-        }
+        MOUSE => read_mouse(reader)?,
+        WHEEL => read_wheel(reader)?,
         PASTE => {
             let on = read_stamp(reader)?;
             Event::Paste { on, text: reader.str(MAX_PASTE)? }
@@ -139,50 +115,90 @@ fn read_event<'a>(reader: &mut Reader<'a>) -> Result<Event<'a>, InputError> {
             }
             Event::Resize { columns, rows, width, height }
         }
-        COMPOSE => {
-            let on = read_stamp(reader)?;
-            let cursor = reader.uv()?;
-            let text = reader.str(MAX_COMPOSE)?;
-            check_text(text)?;
-            if usize::try_from(cursor).map_or(true, |cursor| cursor > text.chars().count()) {
-                return Err(InputError::BadValue("compose cursor"));
-            }
-            Event::Compose { on, cursor, text }
-        }
-        HELLO => {
-            let version = reader.uv()?;
-            let caps = reader.uv()?;
-            if caps & RETIRED_PAGE_BIT != 0 {
-                return Err(InputError::BadValue("caps"));
-            }
-            let agent = if caps & AGENT == 0 { None } else { Some(reader.str(MAX_AGENT)?) };
-            if agent.is_some_and(|agent| !agent.bytes().all(|byte| byte.is_ascii_graphic() || byte == b' ')) {
-                return Err(InputError::BadValue("agent"));
-            }
-            Event::Hello { version, caps, agent }
-        }
-        FIRST_EXTENSION..=LAST_EXTENSION => {
-            let length = usize::try_from(reader.uv()?).map_err(|_| InputError::Message)?;
-            if length > MAX_MESSAGE {
-                return Err(InputError::Message);
-            }
-            let payload = reader.take(length)?;
-            // A payload is whole once taken: a field it cuts short is a
-            // fault of the payload, never a wait for more of the stream.
-            let whole = |error| match error {
-                InputError::Wire(WireError::Incomplete) => InputError::BadValue("extension cut short"),
-                other => other,
-            };
-            match kind {
-                HOVER => read_hover(payload).map_err(whole)?,
-                TOUCH => read_touch(payload).map_err(whole)?,
-                RESUME => read_resume(payload).map_err(whole)?,
-                SELECT => read_select(payload).map_err(whole)?,
-                _ => Event::Extension { kind, payload },
-            }
-        }
+        COMPOSE => read_compose(reader)?,
+        HELLO => read_hello(reader)?,
+        FIRST_EXTENSION..=LAST_EXTENSION => read_extension(kind, reader)?,
         other if other > LAST_CORE && other <= CORE_LAST_TYPE => return Err(InputError::Type(other)),
         other => return Err(InputError::Type(other)),
+    })
+}
+
+/// A MOUSE event after its type.
+fn read_mouse<'a>(reader: &mut Reader<'a>) -> Result<Event<'a>, InputError> {
+    let on = read_stamp(reader)?;
+    let flags = reader.byte()?;
+    if flags & MOUSE_RESERVED != 0 {
+        return Err(InputError::Flags);
+    }
+    // REQ-RCH-042: device 3 is reserved, and a protocol error.
+    let device = match (flags & DEVICE_MASK) >> DEVICE_SHIFT {
+        0 => Device::Mouse,
+        1 => Device::Touch,
+        2 => Device::Pen,
+        _ => return Err(InputError::BadValue("mouse device")),
+    };
+    let button = reader.byte()?;
+    Ok(Event::Mouse(Mouse { on, action: read_action(flags), button, at: read_point(reader, flags)?, device }))
+}
+
+/// A WHEEL event after its type.
+fn read_wheel<'a>(reader: &mut Reader<'a>) -> Result<Event<'a>, InputError> {
+    let on = read_stamp(reader)?;
+    let flags = reader.byte()?;
+    if flags & (WHEEL_RESERVED | ACTION) != 0 {
+        return Err(InputError::Flags);
+    }
+    let dx = reader.sv()?;
+    let dy = reader.sv()?;
+    Ok(Event::Wheel(Wheel { on, dx, dy, at: read_point(reader, flags)? }))
+}
+
+/// A COMPOSE event after its type.
+fn read_compose<'a>(reader: &mut Reader<'a>) -> Result<Event<'a>, InputError> {
+    let on = read_stamp(reader)?;
+    let cursor = reader.uv()?;
+    let text = reader.str(MAX_COMPOSE)?;
+    check_text(text)?;
+    if usize::try_from(cursor).map_or(true, |cursor| cursor > text.chars().count()) {
+        return Err(InputError::BadValue("compose cursor"));
+    }
+    Ok(Event::Compose { on, cursor, text })
+}
+
+/// A HELLO event after its type.
+fn read_hello<'a>(reader: &mut Reader<'a>) -> Result<Event<'a>, InputError> {
+    let version = reader.uv()?;
+    let caps = reader.uv()?;
+    if caps & RETIRED_PAGE_BIT != 0 {
+        return Err(InputError::BadValue("caps"));
+    }
+    let agent = if caps & AGENT == 0 { None } else { Some(reader.str(MAX_AGENT)?) };
+    if agent.is_some_and(|agent| !agent.bytes().all(|byte| byte.is_ascii_graphic() || byte == b' ')) {
+        return Err(InputError::BadValue("agent"));
+    }
+    Ok(Event::Hello { version, caps, agent })
+}
+
+/// An extension event of type `kind`, after its type: its length, then its
+/// payload, read by its own reader when the type is known.
+fn read_extension<'a>(kind: u8, reader: &mut Reader<'a>) -> Result<Event<'a>, InputError> {
+    let length = usize::try_from(reader.uv()?).map_err(|_| InputError::Message)?;
+    if length > MAX_MESSAGE {
+        return Err(InputError::Message);
+    }
+    let payload = reader.take(length)?;
+    // A payload is whole once taken: a field it cuts short is a
+    // fault of the payload, never a wait for more of the stream.
+    let whole = |error| match error {
+        InputError::Wire(WireError::Incomplete) => InputError::BadValue("extension cut short"),
+        other => other,
+    };
+    Ok(match kind {
+        HOVER => read_hover(payload).map_err(whole)?,
+        TOUCH => read_touch(payload).map_err(whole)?,
+        RESUME => read_resume(payload).map_err(whole)?,
+        SELECT => read_select(payload).map_err(whole)?,
+        _ => Event::Extension { kind, payload },
     })
 }
 

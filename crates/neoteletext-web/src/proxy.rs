@@ -23,7 +23,7 @@ pub use socks::{
     SOCKS_GREETING, SOCKS_MAX_REPLY, read_socks_choice, read_socks_reply, socks_reply_length, write_socks_connect,
 };
 #[cfg(feature = "std")]
-pub use tunnel::{Proxy, TunnelError, tunnel};
+pub use tunnel::{Proxy, ProxyParseError, TunnelError, tunnel};
 
 use socks::SOCKS_MAX_NAME;
 

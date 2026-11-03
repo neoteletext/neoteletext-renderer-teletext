@@ -9,40 +9,16 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-/// The allowed-dependency table of ARCHITECTURE.md section 9. Foundation
-/// modules and the cross-cutting modules are allowed everywhere listed.
+/// The Foundation and cross-cutting modules of ARCHITECTURE.md section 9,
+/// which a module may use without listing them. The table's own rows for
+/// them must name the same modules (`module_rows`).
 const FOUNDATION: &[&str] = &["consts", "ecc", "limits", "types"];
 const CROSS_CUTTING: &[&str] = &["policy", "config", "trace"];
-const LAYER_TABLE: &[(&str, &[&str])] = &[
-    ("consts", &[]),
-    ("ecc", &[]),
-    // REQ-NUM-031: the numbers of area NUM, with no dependency at all.
-    ("limits", &[]),
-    ("types", &[]),
-    ("packet", &[]),
-    ("fsm", &["packet"]),
-    ("acq", &["packet", "fsm"]),
-    ("service", &["packet"]),
-    ("charset", &[]),
-    ("level1", &["charset", "acq", "colour"]),
-    ("level15", &["charset", "level1", "packet"]),
-    ("colour", &[]),
-    ("objects", &["packet", "acq"]),
-    ("enhance", &["charset", "level1", "packet", "acq", "colour", "objects"]),
-    // REQ-CHR-015: letters are joined after the level's pass.
-    ("joining", &["charset", "level1"]),
-    ("compose", &["acq", "level1", "level15", "enhance", "joining"]),
-    ("glyphs", &["charset"]),
-    ("render", &["glyphs", "level1", "colour"]),
-    ("viewer", &["acq", "level1", "compose", "colour", "render", "service", "nav", "charset"]),
-    ("nav", &["acq", "level1", "level15", "enhance", "colour", "render", "service", "charset"]),
-    // Decision E.127: a page's controls and the looks drawn on them.
-    ("controls", &["acq", "level1", "objects", "packet"]),
-    ("port", &[]),
-    ("policy", &[]),
-    ("config", &[]),
-    ("trace", &[]),
-];
+/// The heading row of section 9's table of the core's modules.
+const MODULE_TABLE_HEADING: &str = "| Module | Layer | May use |";
+/// The layer cells of the Foundation and cross-cutting rows.
+const FOUNDATION_LAYER: &str = "Foundation";
+const CROSS_CUTTING_LAYER: &str = "Cross-cutting";
 
 /// The core module a file belongs to: its first path component under src.
 fn module_of(src: &Path, file: &Path) -> Option<String> {
@@ -54,8 +30,8 @@ fn module_of(src: &Path, file: &Path) -> Option<String> {
 /// REQ-ARCH-011: each core module may use only the modules listed for it, and
 /// each library crate only what ARCHITECTURE.md section 9 lists for it.
 pub fn layers(root: &Path) -> Result<(), String> {
-    let mut violations = module_violations(root);
     let architecture = fs::read_to_string(root.join(ARCHITECTURE)).map_err(|e| format!("{ARCHITECTURE}: {e}"))?;
+    let mut violations = module_violations(root, &module_rows(&architecture)?);
     let rows = crate_rows(&architecture)?;
     for krate in LIBRARY_CRATES.iter().filter(|krate| **krate != CORE) {
         let Some((_, allowed)) = rows.iter().find(|(name, _)| name == krate) else {
@@ -74,7 +50,7 @@ pub fn layers(root: &Path) -> Result<(), String> {
 }
 
 /// The modules of the core's table, for one file of module `module`.
-fn module_faults(module: &str, allowed: &[&str], source: &str) -> Vec<String> {
+fn module_faults(module: &str, allowed: &BTreeSet<String>, source: &str) -> Vec<String> {
     let mut faults = Vec::new();
     let cross_cutting_module = CROSS_CUTTING.contains(&module);
     for used in uses(source) {
@@ -82,7 +58,7 @@ fn module_faults(module: &str, allowed: &[&str], source: &str) -> Vec<String> {
         let ok = if cross_cutting_module {
             foundation
         } else {
-            foundation || CROSS_CUTTING.contains(&used.as_str()) || allowed.contains(&used.as_str())
+            foundation || CROSS_CUTTING.contains(&used.as_str()) || allowed.contains(&used)
         };
         if !ok {
             faults.push(format!("`{module}` may not use `{used}`"));
@@ -91,7 +67,7 @@ fn module_faults(module: &str, allowed: &[&str], source: &str) -> Vec<String> {
     faults
 }
 
-fn module_violations(root: &Path) -> Vec<String> {
+fn module_violations(root: &Path, table: &[(String, BTreeSet<String>)]) -> Vec<String> {
     let src = root.join("crates/neoteletext-core/src");
     let mut files = Vec::new();
     source_files(&src, &["rs"], &mut files);
@@ -101,8 +77,8 @@ fn module_violations(root: &Path) -> Vec<String> {
         if module == "lib" {
             continue;
         }
-        let Some((_, allowed)) = LAYER_TABLE.iter().find(|(name, _)| *name == module) else {
-            violations.push(format!("{}: module `{module}` is not in the layer table", file.display()));
+        let Some((_, allowed)) = table.iter().find(|(name, _)| *name == module) else {
+            violations.push(format!("{}: module `{module}` has no row in section 9 of {ARCHITECTURE}", file.display()));
             continue;
         };
         for fault in module_faults(&module, allowed, &production_source(&file)) {
@@ -144,6 +120,39 @@ fn crate_rows(architecture: &str) -> Result<Vec<(String, BTreeSet<String>)>, Str
     }
     if rows.is_empty() {
         return Err(format!("{ARCHITECTURE}: the table of crates has no rows"));
+    }
+    Ok(rows)
+}
+
+/// The rows of section 9's table of the core's modules: each module and the
+/// modules it may use. A row may name several modules; its Foundation and
+/// cross-cutting rows must name exactly `FOUNDATION` and `CROSS_CUTTING`.
+fn module_rows(architecture: &str) -> Result<Vec<(String, BTreeSet<String>)>, String> {
+    let mut lines = architecture.lines().skip_while(|line| !line.starts_with(MODULE_TABLE_HEADING));
+    lines.next().ok_or_else(|| format!("{ARCHITECTURE} has no table headed {MODULE_TABLE_HEADING}"))?;
+    let mut rows = Vec::new();
+    for line in lines.skip(1).take_while(|line| line.starts_with('|')) {
+        let cells: Vec<&str> = line.split('|').skip(1).map(str::trim).collect();
+        let [modules, layer, may_use, ..] = cells.as_slice() else {
+            return Err(format!("{ARCHITECTURE}: a row of the table of modules has fewer than three cells: {line}"));
+        };
+        let named: Vec<String> = listed_modules(modules).into_iter().collect();
+        let expected = match *layer {
+            FOUNDATION_LAYER => Some(FOUNDATION),
+            CROSS_CUTTING_LAYER => Some(CROSS_CUTTING),
+            _ => None,
+        };
+        if let Some(expected) = expected
+            && named
+                != expected.iter().map(ToString::to_string).collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>()
+        {
+            return Err(format!("{ARCHITECTURE}: the {layer} row names {named:?}, and the check knows {expected:?}"));
+        }
+        let allowed = listed_modules(may_use);
+        rows.extend(named.into_iter().map(|module| (module, allowed.clone())));
+    }
+    if rows.is_empty() {
+        return Err(format!("{ARCHITECTURE}: the table of modules has no rows"));
     }
     Ok(rows)
 }
@@ -206,25 +215,68 @@ mod tests {
     /// REQ-ARCH-011's verification: a forbidden dependency is detected.
     #[test]
     fn a_module_using_what_its_row_does_not_list_is_found() {
-        let faults = module_faults("packet", &[], "use crate::render::Grid;\n");
+        let faults = module_faults("packet", &BTreeSet::new(), "use crate::render::Grid;\n");
         assert_eq!(faults, ["`packet` may not use `render`"]);
     }
 
     #[test]
     fn a_grouped_use_of_a_forbidden_module_is_found() {
-        let faults = module_faults("packet", &[], "use crate::{consts::PAGE_WIDTH, render::Grid};\n");
+        let faults = module_faults("packet", &BTreeSet::new(), "use crate::{consts::PAGE_WIDTH, render::Grid};\n");
         assert_eq!(faults, ["`packet` may not use `render`"]);
     }
 
     #[test]
     fn foundation_and_the_cross_cutting_modules_are_allowed() {
-        assert_eq!(module_faults("packet", &[], "use crate::{consts::A, trace::B, types::C};\n"), [""; 0]);
+        assert_eq!(module_faults("packet", &BTreeSet::new(), "use crate::{consts::A, trace::B, types::C};\n"), [""; 0]);
     }
 
     #[test]
     fn a_cross_cutting_module_uses_only_foundation() {
-        let faults = module_faults("policy", &["config"], "use crate::config::Config;\n");
+        let faults = module_faults("policy", &BTreeSet::from(["config".to_string()]), "use crate::config::Config;\n");
         assert_eq!(faults, ["`policy` may not use `config`"]);
+    }
+
+    const MODULES: &str = "| Module | Layer | May use |\n|---|---|---|\n| `consts`, `ecc`, `limits`, `types` | Foundation | — (none) |\n| `policy`, `config`, `trace` | Cross-cutting | Foundation |\n| `viewer`, `nav` | L6 | Foundation, `acq` (stored pages), `render` |\n\nafter\n";
+
+    /// REQ-ARCH-011: the check reads the table of modules of ARCHITECTURE.md
+    /// section 9, a row naming several modules gives each the same list,
+    /// and a module the table does not list is reported.
+    #[test]
+    fn the_table_of_modules_is_read() {
+        let rows = module_rows(MODULES).unwrap();
+        let allowed = |module: &str| rows.iter().find(|(name, _)| name == module).map(|(_, allowed)| allowed.clone());
+        let viewer: BTreeSet<String> =
+            ["consts", "ecc", "limits", "types", "acq", "render"].map(str::to_string).into_iter().collect();
+        assert_eq!(allowed("viewer"), Some(viewer.clone()));
+        assert_eq!(allowed("nav"), Some(viewer));
+        assert_eq!(allowed("limits"), Some(BTreeSet::new()));
+        assert_eq!(allowed("compose"), None);
+        let faults = module_faults("viewer", &allowed("viewer").unwrap(), "use crate::compose::compose;\n");
+        assert_eq!(faults, ["`viewer` may not use `compose`"]);
+    }
+
+    /// The Foundation and cross-cutting rows must name the modules the
+    /// check treats as such, or the two would differ.
+    #[test]
+    fn a_foundation_row_the_check_does_not_know_is_refused() {
+        let changed = MODULES.replace("`consts`, `ecc`, `limits`, `types`", "`consts`, `ecc`, `types`");
+        assert!(module_rows(&changed).unwrap_err().contains("the Foundation row"));
+    }
+
+    /// The repository's own ARCHITECTURE.md has a row for every module of
+    /// the core, so its table is the one the check enforces.
+    #[test]
+    fn every_module_of_the_core_has_a_row() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let architecture = fs::read_to_string(root.join(ARCHITECTURE)).unwrap();
+        let rows = module_rows(&architecture).unwrap();
+        let src = root.join("crates/neoteletext-core/src");
+        let mut files = Vec::new();
+        source_files(&src, &["rs"], &mut files);
+        for file in files {
+            let module = module_of(&src, &file).unwrap();
+            assert!(module == "lib" || rows.iter().any(|(name, _)| *name == module), "{module} has no row");
+        }
     }
 
     const TABLE: &str = "text\n\n| Crate | May use of `neoteletext-core` |\n|---|---|\n| `a` | Foundation, `packet` (the frame, and `Packet`) |\n| `b` | — |\n\nmore | text\n";

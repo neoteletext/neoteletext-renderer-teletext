@@ -134,6 +134,10 @@ pub struct PacketAddress {
 }
 
 /// Decodes the packet address bytes (REQ-PKT-001).
+///
+/// # Errors
+/// [`PacketError::BadAddress`] when either Hamming 8/4 address byte has
+/// an uncorrectable error (decision E.7).
 pub fn decode_address(packet: &Packet) -> Result<PacketAddress, PacketError> {
     let first = hamming84(packet.byte(ADDRESS_BYTE_0)).ok_or(PacketError::BadAddress)?;
     let second = hamming84(packet.byte(ADDRESS_BYTE_1)).ok_or(PacketError::BadAddress)?;
@@ -256,7 +260,12 @@ pub enum Decoded {
     Ignored(PacketAddress),
 }
 
-/// Decodes one packet (area PKT).
+/// Decodes one packet (area PKT). What it returns borrows `packet`.
+///
+/// # Errors
+/// [`PacketError::BadAddress`] when the packet address is uncorrectable
+/// (decision E.7), and [`PacketError::BadDesignation`] when the designation
+/// code of an enhancement or link packet is (decision E.9).
 pub fn decode(packet: &Packet) -> Result<Decoded, PacketError> {
     let address = decode_address(packet)?;
     let magazine = address.magazine;

@@ -15,7 +15,7 @@ use std::net::IpAddr;
 
 mod feed;
 
-pub use feed::{Opening, is_live, link_address, open_live, opening};
+pub use feed::{Opening, OpeningError, is_live, link_address, open_live, opening};
 
 /// What to read and how to decode it: the options every `neottx` command
 /// accepts (REQ-CLI-002), free of any argument parser.
@@ -70,6 +70,10 @@ pub struct Options {
 pub const CHUNK: usize = 64 * 1024;
 
 /// The configuration from the profile and the overrides (REQ-PRF-005).
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// for a profile name that is not one the engine knows.
 pub fn config(options: &Options) -> Result<Config, Failure> {
     let mut config = Config::profile(&options.profile)
         .ok_or_else(|| (exit::USAGE, format!("unknown profile {:?} (en300706, saa5050, saa5246a)", options.profile)))?;
@@ -96,6 +100,11 @@ pub fn config(options: &Options) -> Result<Config, Failure> {
 }
 
 /// Opens the input: a file, or standard input for `-`.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when the file cannot be opened, or a live input is given where only a
+/// file can be read.
 pub fn open(options: &Options) -> Result<Box<dyn Read>, Failure> {
     if is_live(&options.input) {
         return Err((exit::USAGE, "this command needs a file or standard input, not a live feed".into()));
@@ -109,6 +118,10 @@ pub fn open(options: &Options) -> Result<Box<dyn Read>, Failure> {
 }
 
 /// Feeds every chunk of `input` to `reader`.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when reading the input fails.
 pub fn pump(input: &mut dyn Read, reader: &mut dyn Reader, out: &mut dyn FnMut(Item<'_>)) -> Result<(), Failure> {
     let mut buffer = vec![0u8; CHUNK];
     loop {
@@ -140,26 +153,79 @@ pub fn reader(options: &Options, encode_pages: bool) -> Box<AutoReader> {
 }
 
 /// Reads the whole input into a new session.
+///
+/// # Errors
+/// As [`load_for`].
 pub fn load(options: &Options) -> Result<Session, Failure> {
     load_for(options, None)
 }
 
 /// Reads the whole input into a new session; for live feeds, asks for and
 /// waits for `wanted`.
+///
+/// # Errors
+/// A [`Failure`]: the exit status and the message for the user (DEC-2451),
+/// when the input cannot be opened or read, the sandbox cannot be applied,
+/// the input holds no teletext, or nothing arrives from a live feed.
 pub fn load_for(options: &Options, wanted: Option<PageAddress>) -> Result<Session, Failure> {
     if is_live(&options.input) {
         return feed::load_live(options, wanted);
     }
+    let mut input = open(options)?;
+    load_from(options, input.as_mut())
+}
+
+/// Reads the whole input into a new session under the sandbox (REQ-SEC-017):
+/// a file or standard input is opened, then `sandbox` is applied, and only
+/// then is a byte of it parsed. A live feed starts its fetcher process
+/// first, which must reach the network, and the decoder is sandboxed when
+/// the feed has given `wanted`.
+///
+/// # Errors
+/// An input that cannot be opened or read, or a sandbox that cannot be applied.
+pub fn load_sandboxed(
+    options: &Options,
+    wanted: Option<PageAddress>,
+    sandbox: impl FnOnce() -> Result<(), Failure>,
+) -> Result<Session, Failure> {
+    if is_live(&options.input) {
+        let session = feed::load_live(options, wanted)?;
+        sandbox()?;
+        return Ok(session);
+    }
+    let mut input = open(options)?;
+    sandbox()?;
+    load_from(options, input.as_mut())
+}
+
+/// Applies the sandbox with no network, and `writable` the one directory the
+/// command may still write in (REQ-SEC-017); `options.no_sandbox` is
+/// `--no-sandbox`.
+///
+/// # Errors
+/// A sandbox that cannot be applied, with the reason.
+pub fn sandbox(options: &Options, writable: Option<&std::path::Path>) -> Result<(), Failure> {
+    crate::sandbox::apply(
+        crate::sandbox::Policy { writable_directory: writable, network: false, readable: &[] },
+        options.no_sandbox,
+    )
+    .map_err(|error| (exit::INPUT, error.to_string()))
+}
+
+/// Reads all of an opened file or standard input into a new session.
+///
+/// # Errors
+/// An input that cannot be read, or that holds no teletext.
+pub fn load_from(options: &Options, input: &mut dyn Read) -> Result<Session, Failure> {
     let config = config(options)?;
     let mut session = Session::new(config, options.pages);
-    let mut input = open(options)?;
     let mut reader = reader(options, true);
     let mut packets = 0u64;
     let mut detected = None;
     let mut languages: Vec<(u16, [u8; 3])> = Vec::new();
     let mut selected_pid = None;
     let verbose = options.verbose;
-    pump(input.as_mut(), reader.as_mut(), &mut |item| match item {
+    pump(input, reader.as_mut(), &mut |item| match item {
         Item::Packet { packet, meta } => {
             packets = packets.saturating_add(1);
             session.push(&packet, &meta);
@@ -279,6 +345,38 @@ mod tests {
             ..profile
         };
         assert_eq!(config(&given).unwrap(), changed);
+    }
+
+    /// REQ-430 (REQ-SEC-017): a file is opened, then the sandbox applied,
+    /// and only then parsed. The file holds no teletext when it is opened,
+    /// and the sandbox step replaces its content with a page: a load that
+    /// parsed before the sandbox would find no teletext.
+    #[test]
+    #[allow(clippy::unwrap_used, reason = "a test")]
+    fn a_file_is_parsed_only_after_the_sandbox() {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp/input-sandbox-order");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("page.tti");
+        std::fs::write(&path, "not teletext\n").unwrap();
+        let given = Options { input: path.to_string_lossy().into_owned(), pages: 16, ..options("en300706") };
+        let mut applied = false;
+        let session = load_sandboxed(&given, None, || {
+            std::fs::write(&path, "PN,10000\nOL,1,HELLO\n").unwrap();
+            applied = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(applied);
+        assert_eq!(session.pages().len(), 1);
+    }
+
+    /// REQ-430: a sandbox that cannot be applied stops the load before a
+    /// byte of the input is parsed.
+    #[test]
+    fn a_sandbox_that_fails_stops_the_load() {
+        let given = Options { input: env!("CARGO_MANIFEST_DIR").to_owned() + "/Cargo.toml", ..options("en300706") };
+        let result = load_sandboxed(&given, None, || Err((exit::INPUT, "refused".to_owned())));
+        assert!(matches!(result, Err((exit::INPUT, ref message)) if message == "refused"), "{:?}", result.err());
     }
 
     /// REQ-SEC-003: a broken input is refused, not a panic.

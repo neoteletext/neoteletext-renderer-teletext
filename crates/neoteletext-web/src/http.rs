@@ -76,6 +76,10 @@ impl Method {
 }
 
 /// Writes the request line (RFC 9112 section 3).
+///
+/// # Errors
+/// [`Overflow`] when the line does not fit in the writer; the part that
+/// fitted stays written, so the caller abandons the request.
 pub fn write_request_line(writer: &mut Writer<'_>, method: Method, target: &str) -> Result<(), Overflow> {
     writer.put(method.token())?;
     writer.byte(b' ')?;
@@ -86,6 +90,10 @@ pub fn write_request_line(writer: &mut Writer<'_>, method: Method, target: &str)
 }
 
 /// Writes one header field (RFC 9112 section 5).
+///
+/// # Errors
+/// [`Overflow`] when the field does not fit in the writer; the part that
+/// fitted stays written, so the caller abandons the request.
 pub fn write_header(writer: &mut Writer<'_>, name: &[u8], value: &[u8]) -> Result<(), Overflow> {
     writer.put(name)?;
     writer.put(b": ")?;
@@ -95,6 +103,10 @@ pub fn write_header(writer: &mut Writer<'_>, name: &[u8], value: &[u8]) -> Resul
 
 /// Writes the `Host` header from the address's authority (RFC 9110
 /// section 7.2).
+///
+/// # Errors
+/// [`Overflow`] when the field does not fit in the writer, as for
+/// [`write_header`].
 pub fn write_host(writer: &mut Writer<'_>, url: &crate::url::Url) -> Result<(), Overflow> {
     write_header(writer, header::HOST, url.authority())
 }

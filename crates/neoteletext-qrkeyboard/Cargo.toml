@@ -25,6 +25,12 @@ hkdf = "=0.12.4"
 hmac = "=0.12.1"
 sha2 = "=0.10.9"
 p256 = { version = "=0.14.0", default-features = false, features = ["arithmetic"] }
+# subtle 2.6.1 (BSD-3-Clause): ConstantTimeEq, a comparison whose time does
+# not depend on where the bytes differ, for the pairing confirmation and the
+# phone's hash (decision E.116 item 4, DEC-640; approved by the owner on
+# 1 November 2026, TODO-1432). Already in the lockfile through aes-gcm,
+# p256 and rustls; the slice comparison needs neither of its features.
+subtle = { version = "=2.6.1", default-features = false }
 # MIT or Apache-2.0: the operating system's random numbers: salts, keys
 # and SPAKE2 scalars.
 getrandom = "=0.2.17"

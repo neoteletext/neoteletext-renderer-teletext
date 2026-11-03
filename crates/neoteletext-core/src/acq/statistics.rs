@@ -17,6 +17,11 @@ pub struct Statistics {
     pub address_failures: u32,
     /// Uncorrectable designation codes.
     pub designation_failures: u32,
+    /// Builds of a page whose character set designation names a reserved
+    /// entry of Table 32, so that the fallback of REQ-72 (REQ-CHR-003)
+    /// chose its sets; added by
+    /// [`Decoder::record_designation`](crate::acq::Decoder::record_designation).
+    pub designation_fallbacks: u32,
     /// Hamming 8/4 bytes corrected, in every packet's protected bytes
     /// ([`crate::packet::protection`]).
     pub hamming84_corrected: u32,

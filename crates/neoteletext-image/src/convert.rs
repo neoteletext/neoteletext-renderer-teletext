@@ -129,6 +129,10 @@ fn put(out: &mut [u8], bit: usize, colour: Rgba, format: PixelFormat, order: Byt
 /// per row) into `out` (`out_stride` bytes per output row), rotated.
 /// `palette` is the 144 colours of the palette mode or the 32 of a Colour
 /// Map (REQ-RND-030); an index beyond it is transparent.
+///
+/// # Errors
+/// [`ConvertError::BufferTooSmall`] when `indices` or `out` is too short
+/// for the geometry and strides given.
 #[allow(clippy::too_many_arguments)] // Each argument is a separate geometry or format parameter of REQ-RND-018.
 pub fn convert(
     indices: &[u8],

@@ -30,16 +30,15 @@ pub fn show(
     if selection == Selection::All {
         return Err((exit::USAGE, "show displays one page; use text or render for all".into()));
     }
-    let mut session = input::load_for(options, selection.page())?;
     let is_terminal = std::io::stdout().is_terminal();
     let (display, reason) = terminal::detect(display(graphics), is_terminal);
     if let (Some(reason), true) = (reason, options.verbose > 0) {
         eprintln!("neottx: using text output: {reason}");
     }
-    let frame = Frame::still(session.decoder().config(), raster_args.reveal);
     // Measure the terminal before the sandbox closes /dev/tty.
     let area = if display == Display::Text { None } else { terminal::text_area() };
-    sandbox_closed(options.no_sandbox)?;
+    let mut session = input::load_sandboxed(options, selection.page(), || sandbox_closed(options.no_sandbox))?;
+    let frame = Frame::still(session.decoder().config(), raster_args.reveal);
     let key = *selected(&session, selection)?.first().ok_or((exit::NOT_FOUND, "no page found".to_owned()))?;
     let grid = grid_of(&mut session, key)?;
     let mut out = std::io::stdout().lock();

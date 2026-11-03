@@ -37,13 +37,46 @@ const T13: usize = 12;
 #[must_use]
 pub fn stream_bits(values: &TripletValues, start: usize, count: usize) -> Option<u32> {
     let mut out = 0u32;
+    let mut at = StreamPosition::of(start);
     for offset in 0..count {
-        let position = start.saturating_add(offset);
-        let value = values.get(position / TRIPLET_STREAM_BITS).copied().flatten()?;
-        let bit = value.wrapping_shr((position % TRIPLET_STREAM_BITS) as u32) & 1;
+        let value = values.get(at.triplet).copied().flatten()?;
+        let bit = value.wrapping_shr(at.bit) & 1;
         out |= bit.wrapping_shl(offset as u32);
+        at.advance();
     }
     Some(out)
+}
+
+/// A bit's place in the stream of triplet values: which triplet, and
+/// which of its 18 data bits. Kept as the two numbers and stepped one bit
+/// at a time, so reading a colour word divides nothing on a packet's path
+/// (REQ-GEN-016: the Cortex-M0 has no divide instruction).
+#[derive(Clone, Copy)]
+struct StreamPosition {
+    triplet: usize,
+    bit: u32,
+}
+
+impl StreamPosition {
+    /// The place of bit `position` of the stream, found by subtraction:
+    /// a packet holds 13 triplets, so the loop runs at most 13 times.
+    fn of(mut position: usize) -> Self {
+        let mut triplet = 0usize;
+        while position >= TRIPLET_STREAM_BITS {
+            position = position.saturating_sub(TRIPLET_STREAM_BITS);
+            triplet = triplet.saturating_add(1);
+        }
+        Self { triplet, bit: u32::try_from(position).unwrap_or(0) }
+    }
+
+    /// The next bit of the stream.
+    fn advance(&mut self) {
+        self.bit = self.bit.saturating_add(1);
+        if self.bit as usize >= TRIPLET_STREAM_BITS {
+            self.bit = 0;
+            self.triplet = self.triplet.saturating_add(1);
+        }
+    }
 }
 
 /// The page function and page coding, triplet 1 bits 1 to 7 (Table 3).
@@ -252,15 +285,16 @@ pub(super) mod encode {
 
 /// Writes the low `count` bits of `bits` into the stream from `start`.
 fn set_stream_bits(values: &mut [u32; TRIPLETS_PER_PACKET], start: usize, count: usize, bits: u32) {
+    let mut at = StreamPosition::of(start);
     for offset in 0..count {
-        let position = start.saturating_add(offset);
-        if let Some(value) = values.get_mut(position / TRIPLET_STREAM_BITS) {
-            let mask = 1u32.wrapping_shl((position % TRIPLET_STREAM_BITS) as u32);
+        if let Some(value) = values.get_mut(at.triplet) {
+            let mask = 1u32.wrapping_shl(at.bit);
             if bits.wrapping_shr(offset as u32) & 1 == 1 {
                 *value |= mask;
             } else {
                 *value &= !mask;
             }
         }
+        at.advance();
     }
 }

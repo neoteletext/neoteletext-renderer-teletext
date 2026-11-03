@@ -178,6 +178,9 @@ pub(super) enum Element {
 /// Colour: rows 1 to 23 are addresses 41 to 63 and row 24 is address 40
 /// (clause 12.3.1). Inside an object the same addresses give the row
 /// offset from the object's origin.
+///
+/// # Errors
+/// [`AuthorError::BadPosition`] for row 0 or a row above 24.
 pub fn row_address(row: u8) -> Result<u8> {
     match row {
         1..=23 => Ok(ROW_ADDRESS_BASE.saturating_add(row)),
@@ -242,6 +245,9 @@ impl Triplets {
     }
 
     /// Full Row Colour (row mode 00001) for page row `row` (1 to 24).
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for a row outside 1 to 24.
     pub fn full_row_colour(&mut self, row: u8, colour: u8, scope: RowScope) -> Result<&mut Self> {
         let address = row_address(row)?;
         Ok(self.function(TripletFunction::FullRowColour {
@@ -252,6 +258,9 @@ impl Triplets {
 
     /// Set Active Position (row mode 00100) to page row `row` (1 to 24)
     /// and column `column`.
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for a row outside 1 to 24.
     pub fn position(&mut self, row: u8, column: u8) -> Result<&mut Self> {
         let address = row_address(row)?;
         Ok(self.function(TripletFunction::SetActivePosition { address, column }))
@@ -377,6 +386,9 @@ impl Triplets {
     /// does not act on it (decision E.96); this writes it for test pages.
     /// `following_rows` above 7, which three bits cannot hold, is refused
     /// as a position outside its range.
+    ///
+    /// # Errors
+    /// [`AuthorError::BadPosition`] for `following_rows` above 7.
     pub fn font_style(&mut self, column: u8, style: FontStyle, following_rows: u8) -> Result<&mut Self> {
         if following_rows > FONT_STYLE_MAX_ROWS {
             return Err(AuthorError::BadPosition);

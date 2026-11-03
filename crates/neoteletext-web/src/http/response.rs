@@ -46,6 +46,10 @@ impl HeadCollector {
     /// empty line, CR LF CR LF). Returns the bytes of `input` used and
     /// whether the head is complete. Each byte is looked at once, so the
     /// work is linear in the head's length (REQ-SEC-012).
+    ///
+    /// # Errors
+    /// [`HttpError::HeadTooLarge`] when the head runs past the end of
+    /// `buffer`, whose length is the caller's limit on a head's size.
     pub fn feed(&mut self, buffer: &mut [u8], input: &[u8]) -> Result<(usize, bool), HttpError> {
         let mut found = None;
         for (index, &byte) in input.iter().enumerate() {
@@ -223,6 +227,29 @@ pub fn is_interim(bytes: &[u8]) -> bool {
 
 /// Parses and checks a complete response head held in `bytes`.
 /// `on_set_cookie` receives each `Set-Cookie` value in order.
+///
+/// # Errors
+/// The response is refused when:
+/// - [`HttpError::TooManyHeaders`]: it has more than
+///   [`crate::consts::MAX_RESPONSE_HEADERS`] fields;
+/// - [`HttpError::Malformed`]: the head is incomplete, has bytes after its
+///   end, or breaks the syntax of RFC 9112, obsolete line folding
+///   included;
+/// - [`HttpError::Version`]: the version is neither HTTP/1.0 nor HTTP/1.1;
+/// - [`HttpError::Status`]: the status is outside 100 to 599, or is an
+///   interim 1xx other than 101, which [`is_interim`] reads past first;
+/// - [`HttpError::BadContentLength`]: a `Content-Length` is not a decimal
+///   number of at most [`MAX_CONTENT_LENGTH_DIGITS`] digits, or two
+///   disagree;
+/// - [`HttpError::BadTransferEncoding`]: a transfer coding other than one
+///   `chunked`, or any over HTTP/1.0;
+/// - [`HttpError::Compressed`]: a `Content-Encoding` other than
+///   `identity`;
+/// - [`HttpError::AmbiguousFraming`]: both `Content-Length` and chunked
+///   transfer coding.
+///
+/// `Set-Cookie` values before the faulty field may already have been
+/// passed to `on_set_cookie`.
 pub fn parse_head(bytes: &[u8], on_set_cookie: &mut dyn FnMut(&[u8])) -> Result<ResponseHead, HttpError> {
     let parsed = head::parse(bytes).map_err(|error| match error {
         HeadError::TooManyFields => HttpError::TooManyHeaders,

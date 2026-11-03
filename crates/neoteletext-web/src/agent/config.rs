@@ -48,7 +48,9 @@ pub struct Config {
     /// showing its content (REQ-WEB-021). An upgrade from `http` to `https`
     /// on the same host and folder, between the default ports, keeps the
     /// channel. For a service opened by its descriptor, the channel is its
-    /// origin. Off by default, which keeps `neottx`'s behaviour.
+    /// origin. On by default, the safer choice (REQ-SEC-020): a port that
+    /// follows redirects out of the channel turns it off, as `neottx` does
+    /// for a service opened by its descriptor.
     pub redirects_within_channel: bool,
     /// The program the agent names itself as, in its `User-Agent`
     /// (REQ-WEB-031); `None` names the engine.
@@ -75,7 +77,7 @@ impl Default for Config {
             cookies_per_host: DEFAULT_COOKIES_PER_HOST,
             cookies_total: DEFAULT_COOKIES_TOTAL,
             persist_cookies: false,
-            redirects_within_channel: false,
+            redirects_within_channel: true,
             product: None,
             proxied: false,
         }

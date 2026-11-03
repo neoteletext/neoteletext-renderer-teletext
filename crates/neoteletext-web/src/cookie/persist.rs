@@ -30,6 +30,11 @@ impl<const SLOTS: usize, const BYTES: usize> CookieJar<SLOTS, BYTES> {
     /// path-length scope-length` in decimal, a space, then the four texts
     /// back to back (decision E.104: the times a port lists and clears by;
     /// version 3: the channel's folder, the start of the path, REQ-515).
+    ///
+    /// # Errors
+    /// [`Overflow`] when the data does not fit in `out`. What was written
+    /// before the overflow, possibly part of a record, stays in `out`, so
+    /// the caller must not save it.
     pub fn export(&self, now: u64, out: &mut Writer<'_>) -> Result<usize, Overflow> {
         out.put(EXPORT_VERSION)?;
         let mut count = 0usize;

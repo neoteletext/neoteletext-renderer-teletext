@@ -6,6 +6,8 @@ name = "neoteletext-fuzz"
 version = "0.0.0"
 edition = "2024"
 publish = false
+# The project's licence (LICENSE): cargo-deny refuses a crate with none.
+license = "MIT"
 
 [package.metadata]
 cargo-fuzz = true
@@ -22,8 +24,15 @@ neoteletext-web = { path = "../crates/neoteletext-web", features = ["default", "
 neoteletext-audio = { path = "../crates/neoteletext-audio", features = ["default", "encode"] }
 neoteletext-opus = { path = "../crates/neoteletext-opus" }
 neoteletext-input = { path = "../crates/neoteletext-input" }
-# The terminal replies `neottx` reads when it asks for graphics (DEC-2459).
+# The pipe between neottx's fetcher and decoder processes (REQ-SEC-018),
+# and the terminal replies `neottx` reads when it asks for graphics
+# (DEC-2459). Without its default features the application crate builds
+# no TLS and no web module: neither needs them.
 neoteletext-app = { path = "../crates/neoteletext-app", default-features = false }
+# The qrkeyboard client's readers of what the relay and the phone send
+# (REQ-SEC-003).
+neoteletext-qrkeyboard = { path = "../crates/neoteletext-qrkeyboard" }
+neoteletext-picture = { path = "../crates/neoteletext-picture" }
 
 [workspace]
 members = ["."]
@@ -227,6 +236,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "font_library"
+path = "fuzz_targets/font_library.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "subpages"
 path = "fuzz_targets/subpages.rs"
 test = false
@@ -262,8 +278,22 @@ doc = false
 bench = false
 
 [[bin]]
+name = "pipe_frames"
+path = "fuzz_targets/pipe_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "subpages_record"
 path = "fuzz_targets/subpages_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qrkeyboard_json"
+path = "fuzz_targets/qrkeyboard_json.rs"
 test = false
 doc = false
 bench = false
@@ -283,8 +313,29 @@ doc = false
 bench = false
 
 [[bin]]
+name = "qrkeyboard_messages"
+path = "fuzz_targets/qrkeyboard_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "terminal_reply"
 path = "fuzz_targets/terminal_reply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qrkeyboard_pairing"
+path = "fuzz_targets/qrkeyboard_pairing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "picture_convert"
+path = "fuzz_targets/picture_convert.rs"
 test = false
 doc = false
 bench = false

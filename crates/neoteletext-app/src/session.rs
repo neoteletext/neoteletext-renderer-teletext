@@ -1,7 +1,9 @@
 //! A decoding session: the decoder over a heap-allocated page store, the
 //! magazine and service data, and composing grids for display.
 
-use neoteletext_core::acq::{Decoder, EnhancementPacket, EnhancementStore, EnhancementSubPage, Event, StoredPage};
+use neoteletext_core::acq::{
+    Decoder, EnhancementPacket, EnhancementStore, EnhancementSubPage, Event, PageBuild, StoredPage,
+};
 use neoteletext_core::compose::compose_level_traced;
 use neoteletext_core::config::Config;
 use neoteletext_core::consts::{
@@ -180,7 +182,8 @@ impl Session {
     /// row 0 with the status area showing the page number (decision E.10),
     /// Level 1 then the pass of the presentation level (REQ-PRF-006).
     /// `None` when the page is not stored. At Levels 2.5 and 3.5 the faults
-    /// met are added to the decoder's statistics (REQ-L25-051). With
+    /// met are added to the decoder's statistics (REQ-L25-051), and at every
+    /// level a designation that fell back is counted (REQ-72). With
     /// tracing on, the transitions of the level's walk are printed
     /// (REQ-FSM-010).
     pub fn grid(&mut self, key: PageKey, row24: Option<[u8; COLUMNS]>) -> Option<Grid> {
@@ -199,10 +202,12 @@ impl Session {
         let mut entries = Vec::new();
         let mut keep = |entry| entries.push(Event::Trace(entry));
         let mut trace = TraceSink { time: Instant(self.clock), entries: &mut keep };
+        let build = PageBuild::of(page, config.level);
         let report = compose_level_traced(&mut grid, page, &magazine, &lookup, config, &options, &mut trace);
         if let Some(report) = report {
             self.decoder.record_enhancement(report.build, &report.faults);
         }
+        self.decoder.record_designation(build, grid.designation_fallback);
         self.trace.extend(entries);
         self.print_trace();
         Some(grid)

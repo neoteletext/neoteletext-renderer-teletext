@@ -20,6 +20,9 @@ pub trait DataSource {
     type Error;
 
     /// Reads up to `buffer.len()` bytes. `Ok(0)` means the end of input.
+    ///
+    /// # Errors
+    /// The source's own [`Self::Error`], when it cannot read.
     fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
 }
 

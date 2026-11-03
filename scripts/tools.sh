@@ -19,8 +19,15 @@ readonly DENY_VERSION="0.20.2"
 readonly FUZZ_VERSION="0.13.2"
 readonly MACHETE_VERSION="0.9.2"
 readonly LLVM_COV_VERSION="0.9.1"
-# libFuzzer needs a nightly compiler; this one is pinned by date.
+# libFuzzer needs a nightly compiler; this one is pinned by date. Miri, the
+# interpreter that checks the core's tests for undefined behaviour
+# (REQ-GEN-006), runs on the same one, with the standard library's source.
 readonly FUZZ_NIGHTLY="nightly-2026-10-01"
+readonly MIRI_COMPONENTS=(miri rust-src)
+# REQ-GEN-001: the workspace builds with its stated minimum version as well
+# as the pinned one; scripts/build-targets.sh checks that this is
+# Cargo.toml's rust-version.
+readonly MSRV_TOOLCHAIN="1.96.0"
 # cargo-llvm-cov reads its profiles with the pinned toolchain's own LLVM tools.
 readonly COVERAGE_COMPONENT="llvm-tools"
 
@@ -47,8 +54,17 @@ tools_out_of_date() {
     done <<<"$TOOLS"
     # grep reads to the end: stopping at the match would break the pipe rustup
     # is still writing to, and pipefail would then call the tool missing.
+    if ! rustup toolchain list | grep "^$MSRV_TOOLCHAIN" >/dev/null; then
+        printf '%s\n' "$MSRV_TOOLCHAIN"
+    fi
     if ! rustup toolchain list | grep "^$FUZZ_NIGHTLY" >/dev/null; then
         printf '%s\n' "$FUZZ_NIGHTLY"
+    else
+        local component installed
+        installed="$(rustup component list --installed --toolchain "$FUZZ_NIGHTLY")"
+        for component in "${MIRI_COMPONENTS[@]}"; do
+            grep "^$component" <<<"$installed" >/dev/null || printf '%s %s\n' "$FUZZ_NIGHTLY" "$component"
+        done
     fi
     if ! (cd "$tools_root/.." && rustup component list --installed) | grep "^$COVERAGE_COMPONENT" >/dev/null; then
         printf '%s\n' "$COVERAGE_COMPONENT"
@@ -100,6 +116,8 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
         printf '%s %s: installing\n' "$crate" "$version"
         install_tool "$crate" "$version" "$sha256"
     done <<<"$TOOLS"
+    rustup toolchain install --profile minimal "$MSRV_TOOLCHAIN"
     rustup toolchain install --profile minimal --component clippy "$FUZZ_NIGHTLY"
+    rustup component add --toolchain "$FUZZ_NIGHTLY" "${MIRI_COMPONENTS[@]}"
     (cd "$tools_root/.." && rustup component add "$COVERAGE_COMPONENT")
 fi

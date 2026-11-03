@@ -55,6 +55,11 @@ pub struct SideInfo {
 impl SideInfo {
     /// `silk_decode_indices` for a 20 ms frame coded independently. `active` is the frame's VAD
     /// flag, or true for an LBRR frame.
+    ///
+    /// Kept whole, past the source conventions' 80 lines a function: it follows one
+    /// routine of the reference decoder step for step, so that it can be read against
+    /// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+    /// comparison would be harder and the parts would have no meaning of their own.
     pub fn decode(range: &mut EcDec, rate: InternalRate, active: bool) -> Self {
         // RFC 6716 §4.2.7.3: the signal type and the quantisation offset type
         // The C's `ix` is the symbol, plus 2 for an active frame: its high bit the signal type

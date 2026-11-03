@@ -40,7 +40,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 
 | Command | What it does |
 |---|---|
-| `neottx list INPUT` | Lists the pages and sub-pages found, with reception counts and error statistics. |
+| `neottx list INPUT` | Lists the pages and sub-pages found, with reception counts and error statistics, including how many pages named a character set designation that Table 32 reserves and so fell back to another set. |
 | `neottx show INPUT PAGE` | Shows one page in the terminal and exits. |
 | `neottx view INPUT` | Browses pages interactively. |
 | `neottx probe CHANNEL` | Opens a channel as a receiver does and reports what it found, for a channel's developer. |
@@ -53,6 +53,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx check FILES...` | Checks TTI page files for authoring problems, a row longer than the page among them. `--descriptor FILE` resolves link targets against a channel's `channel.ttx` or a service's descriptor. |
 | `neottx font convert INPUT OUTPUT` | Converts a BDF font of another cell size to a 12 × 10 or 12 × 20 font that `neottx render --font` loads, only where the conversion is exact. See "Fonts" below. |
 | `neottx font sets FONT` | Reports, for each of the 55 character sets fonts draw (the standard's 24 and NeoTeletext's own 31), whether a 12 × 10 or 12 × 20 font conforms for it (REQ-FNT-011), how many of its 96 positions it draws, and the first rule it fails; `--library-line NAME` prints the font's `c` line for a library's `fonts.txt`. |
+| `neottx font library LIBRARY` | Lists a font library's fonts by title, from its `fonts.txt` (the folder or the file), with each font's file name or address, its SHA-256 and the sets its `c` line states; each malformed line is reported on standard error. No font is read or fetched. |
 | `neottx write-text --set SET --page PAGE INPUT OUTPUT` | Writes a TTI page from a UTF-8 text file in the named character set, or with `--language TAG` in the set a language takes. See "Writing pages from text" below. |
 | `neottx sound --page PAGE IN.wav OUT.t42` | Writes a sound as the audio profile's packets, with the command that plays it on `PAGE`: IMA ADPCM by default, `--codec pcm` for 16-bit PCM. The WAVE file is 16-bit PCM at 8, 11.025, 16, 22.05, 24, 32, 44.1 or 48 kHz; stereo is mixed to mono. With `--codec opus` the input is instead an encoder's Ogg Opus file, whose packets are carried as they are: mono, 20 ms frames, constant rate, 1 to 160 bytes a packet (for example `ffmpeg -i in.wav -ac 1 -c:a libopus -b:a 16k -vbr off -frame_duration 20 out.opus`); a file or packet outside that is refused with status 3, naming the byte offset of the page or the packet's number (DEC-2448). `--channel 0-3`, `--gain 0-100`, `--loop` and `--repeat N` set the rest. Append the output to a channel's T42 stream, and a receiver that plays sound plays it while that page is open. See `docs/spec/design/audio.md`. |
 | `neottx qr TEXT --page PAGE OUT.tti` | Writes `TEXT`, such as a qrkeyboard join address, as a QR code in a page's mosaics, from row 2 unless `--row` says otherwise, so a channel can show a code a phone scans. See DOC-2029. |
@@ -106,10 +107,10 @@ In a transport stream, the first teletext stream is used unless `--pid` names on
 A live input runs in two processes (REQ-SEC-018). A fetcher process does the networking and TLS; the decoder process never touches the network. Both sandbox themselves on Linux with Landlock and seccomp. On macOS the processes are separated but not sandboxed (Phase 2).
 
 - `--duration SECONDS` sets how long the non-interactive commands collect pages from a live feed before acting. The default is 20 seconds. `show` and `text` stop as soon as the requested page is complete.
-- Web services on local-network addresses are refused (REQ-SEC-006). `--allow-local 127.0.0.1` allows one address, for example a test server.
-- `--proxy http://host:port` or `--proxy socks5://host:port` sends every connection through that proxy, TLS still end to end (REQ-WEB-032); with a proxy, `localhost`, names of one label such as `router`, and names under `.local`, `.internal`, `.home.arpa`, `.lan`, `.corp`, `.intranet`, `.private` and `.localdomain` are refused too, since the proxy resolves the rest and only the name can be checked. A proxy that needs a password is not supported.
+- Web services on local-network addresses are refused (REQ-SEC-006). `--allow-local 127.0.0.1` allows one address, for example a test server. The risk: any service you open can then make `neottx` contact that address, so allow a test server's address only, never a device you care about.
+- `--proxy http://host:port` or `--proxy socks5://host:port` sends every connection through that proxy, TLS still end to end (REQ-WEB-032); with a proxy, `localhost`, names of one label such as `router`, and names under `.local`, `.internal`, `.home.arpa`, `.lan`, `.corp`, `.intranet`, `.private` and `.localdomain` are refused too, since the proxy resolves the rest and only the name can be checked. A proxy that needs a password is not supported. The risk: the proxy sees every host `neottx` contacts, so use only a proxy you chose. The settings a port can change, with their defaults and risks, are listed in `docs/spec/design/porting.md`, "Security settings and their defaults".
 - Plain `http://` works, by the owner's decision E.32. The viewer marks pages that arrived unencrypted.
-- `--no-sandbox` turns the operating-system sandbox off, for debugging.
+- `--no-sandbox` turns the operating-system sandbox off, for debugging. Every command that reads a file or a feed sandboxes itself once its inputs and outputs are open, and refuses to run when the sandbox cannot be applied. The risk of turning it off: a fault in a reader of the untrusted input can then reach every file and the network you can.
 - Offline (REQ-WEB-009): when the network goes, pages already received stay viewable. A page that has not been received or confirmed current for 60 seconds shows "?" in the status area. Asking for a page that was never received shows "Page not available offline". The page on screen is asked for again every 10 seconds, so it is the first one updated when the network returns.
 
 ## Outputs
@@ -257,6 +258,37 @@ neottx check pages/*.tti --descriptor service.json
 neottx sound --page 100 chime.wav chime.t42 && cat pages.t42 chime.t42 > channel.t42
 ```
 
+## Pictures to pages: `neottx-picture`
+
+`neottx-picture` turns a picture into a teletext page of mosaic graphics (DEC-2325, REQ-2337). It is a program of its own, not part of `neottx`:
+
+```sh
+cargo build --release -p neoteletext-picture-cli
+target/release/neottx-picture photo.jpg page.tti --t42 page.t42 --level 3.5
+neottx render page.t42 100 -o page.png
+```
+
+It reads PNG, JPEG, GIF, BMP and WebP files of up to 64 MiB and 32,768 pixels a side, turns a photograph upright by its orientation tag, and writes page 100 as a TTI file, and as T42 with `--t42`. Its options:
+
+| Option | What it does |
+|---|---|
+| `--level 1\|1.5\|2.5\|3.5` | The presentation level; 3.5 by default. Levels 1 and 1.5 use the eight colours and spacing attributes; 2.5 and 3.5 redefine colours and change them with X/26 triplets. |
+| `--objects` | Levels 2.5 and 3.5: carry the colour changes in Active objects on page 1A0, which holds far more of them. The default `neottx` build does not show objects; build it with `--features objects`. |
+| `--hold-mosaics` | Levels 1 and 1.5: an attribute's cell shows the last mosaic rather than the background. |
+| `--display neottx\|tv` | The shape to crop for: square dots as `neottx` draws them (the default), or a 4:3 television's. |
+| `--smooth area\|lanczos` | The scaling filter: the mean of each area (the default), or a sharper Lanczos filter. |
+| `--fit crop\|contain\|stretch` | Fill the page and cut off the rest (the default), show the whole picture between bars, or distort it to fill. |
+| `--align ALIGN` | Which part a crop keeps, or where the picture sits between bars: `center`, `top`, `bottom`, `left`, `right`, `top-left`, `top-right`, `bottom-left` or `bottom-right`. |
+| `--background COLOUR` | The colour of bars and of transparent areas: a Level 1 colour name or `#RRGGBB`; black by default. |
+| `--pixel-art` | Each pixel is one sixel, enlarged by the largest whole number that fits; a picture over 80 by 75 is refused. |
+| `--no-auto-orient` | Take the picture as stored, ignoring its orientation tag. |
+| `--crop X,Y,WIDTH,HEIGHT` | Cut this region out first. |
+| `--no-upscale` | Never enlarge: a small picture keeps its size on bars. |
+| `--focus auto` | Crop where the picture has the most detail. |
+| `--keep-header` | Draw rows 1 to 24 only and leave row 0 to the page's header. |
+
+Options that contradict each other, such as `--hold-mosaics` at Level 3.5, are refused with the reason. The library behind it, `neoteletext-picture`, takes the picture's bytes and returns the page, so other programs can use it; `docs/spec/design/pictures.md` explains how it works.
+
 ## Glyphs
 
 Pages are drawn in Noto Teletext, the one compiled font (REQ-FNT-001, DEC-1761): the Noto fonts converted to teletext's 12 × 20 cell, drawn line for line. It holds every character of the standard's 24 sets and of neoteletext's own sets, with every letter a base and a diacritical mark compose to. A mark on a letter Unicode does not compose is laid over the letter, and a character the font does not hold is drawn as a hollow box. `neottx render --font` draws in another font: a 12 × 10 or 12 × 20 BDF file (area FNT).
@@ -277,6 +309,10 @@ G0-Cyrillic-3                      90/96  rule 2: no glyph at 2/6
 ```
 
 A library's `fonts.txt` may state each font's conformance on a `c` line: `c`, the font's file name or address as its `f` line gives it, and the sets separated by spaces, each followed by `*` for the SAA5050 cell profile. `neottx font sets --library-line NAME FONT` writes that line. A program can use it to list fonts before loading them, and recomputes conformance from the glyphs once a font has loaded.
+
+`neottx font library LIBRARY` lists a library: one line per font, giving its title, its file name or address, its SHA-256 and the sets its `c` line states, separated by tabs. A malformed line (a field missing or extra, a title of more than 32 characters, a checksum that is not 64 hexadecimal digits, a second `f` line for a font, a `c` line for a font no `f` line lists or a second one for a font, or an unknown set name) is reported with its number on standard error and ignored; a line of an unknown kind is ignored. An index over 64 kilobytes or 1,000 lines is refused. Listing a library reads only its index: no font is fetched (REQ-FNT-004).
+
+`neottx render --font FILE --font-sha256 HEX` draws in the font only when the file's SHA-256 is the one named, as a library gives it; a file with any other is refused before it is read (REQ-FNT-003). Fonts are loaded from local files; loading one from an `http` or `https` address is not built yet.
 
 `neottx font convert INPUT OUTPUT` makes a loadable font from fonts of other sizes, only where nothing is lost (REQ-FNT-010, decision E.77):
 

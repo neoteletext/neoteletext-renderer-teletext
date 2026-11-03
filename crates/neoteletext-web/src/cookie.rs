@@ -179,6 +179,10 @@ pub trait Cookies {
     ) -> (usize, bool);
     /// Processes one `Set-Cookie` header value: see
     /// [`CookieJar::store_within`].
+    ///
+    /// # Errors
+    /// The [`CookieRejected`] rule the cookie breaks, as
+    /// [`CookieJar::store`] lists them; the cookie is not stored.
     #[allow(clippy::too_many_arguments, reason = "the arguments of `CookieJar::store_within`")]
     fn store_within(
         &mut self,

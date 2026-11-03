@@ -1,4 +1,4 @@
-//! `neottx sound` (REQ-CLI-011, REQ-AUD-020): a WAVE file written as the
+//! Tests of `neottx sound` (REQ-CLI-011, REQ-AUD-020): a WAVE file written as the
 //! audio profile's packets plays back, through the receiver, as the same
 //! sound on the page it was written for; written live (REQ-AUD-014), it
 //! plays as it arrives at the player's pace.

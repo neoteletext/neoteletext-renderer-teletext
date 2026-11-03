@@ -9,6 +9,10 @@ use crate::port::RandomSource;
 
 /// Writes one complete, masked client frame (RFC 6455 section 5.2). The
 /// client never fragments what it sends.
+///
+/// # Errors
+/// [`Overflow`] when the whole frame, header and masked payload, does not
+/// fit in the writer; the writer is then left as it was.
 pub fn write_frame(
     writer: &mut Writer<'_>,
     opcode: u8,
@@ -21,6 +25,10 @@ pub fn write_frame(
 }
 
 /// Writes a frame with a given masking key.
+///
+/// # Errors
+/// [`Overflow`] when the whole frame does not fit in the writer; the
+/// writer is then left as it was.
 pub fn write_frame_with_mask(
     writer: &mut Writer<'_>,
     opcode: u8,
@@ -53,6 +61,10 @@ pub fn write_frame_with_mask(
 }
 
 /// Writes a close frame with a status code (RFC 6455 section 5.5.1).
+///
+/// # Errors
+/// [`Overflow`] when the frame does not fit in the writer; the writer is
+/// then left as it was.
 pub fn write_close(writer: &mut Writer<'_>, code: u16, random: &mut dyn RandomSource) -> Result<(), Overflow> {
     write_frame(writer, OPCODE_CLOSE, &code.to_be_bytes(), random)
 }

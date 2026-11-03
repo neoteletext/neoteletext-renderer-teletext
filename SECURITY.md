@@ -23,5 +23,5 @@ A release requires (REQ-SEC-023):
 
 - every requirement of area SEC passing its tests;
 - no open security advisories against any dependency;
-- clean fuzzing for a stated minimum time;
+- clean fuzzing for a stated minimum time: the full gate's run of every target with debug assertions and overflow checks, for at least 20 seconds a target (`NEOTELETEXT_FUZZ_SECONDS`, which a release may raise but not lower), after every input that ever found a fault is replayed, on the commit released (DEC-2384);
 - the software bill of materials published.

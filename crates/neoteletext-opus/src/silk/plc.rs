@@ -163,6 +163,11 @@ impl Concealment {
 
     /// `silk_PLC_conceal`: extrapolates a lost frame of `input.layout` into `frame`, and sets
     /// the pitch lags of `parameters`.
+    ///
+    /// Kept whole, past the source conventions' 80 lines a function: it follows one
+    /// routine of the reference decoder step for step, so that it can be read against
+    /// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+    /// comparison would be harder and the parts would have no meaning of their own.
     #[cold]
     #[inline(never)]
     pub fn conceal(

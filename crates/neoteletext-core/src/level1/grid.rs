@@ -28,6 +28,10 @@ pub struct Grid {
     pub mix: bool,
     /// The character sets the page uses, for Level 1.5 and the port.
     pub designation: Designation,
+    /// The page's Table 32 entry is reserved, so the fallback of REQ-72
+    /// (REQ-CHR-003) chose `designation`. The port counts it with
+    /// `Decoder::record_designation`, once per build of the page.
+    pub designation_fallback: bool,
     /// The page's Colour Map (REQ-L25-030); Table 30 at Levels 1 and 1.5.
     pub colour_map: ColourMap,
     /// The screen colour, for the borders around the rows (decision E.45).
@@ -79,6 +83,7 @@ impl Grid {
             boxed_mode: false,
             mix: false,
             designation: DEFAULT_DESIGNATION,
+            designation_fallback: false,
             colour_map: ColourMap::DEFAULT,
             screen_colour: COLOUR_BLACK,
             row_colours: [COLOUR_BLACK; ROWS],
@@ -94,6 +99,7 @@ impl Grid {
         self.boxed_mode = false;
         self.mix = false;
         self.designation = DEFAULT_DESIGNATION;
+        self.designation_fallback = false;
         self.colour_map = ColourMap::DEFAULT;
         self.screen_colour = COLOUR_BLACK;
         self.row_colours = [COLOUR_BLACK; ROWS];
