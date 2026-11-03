@@ -58,7 +58,8 @@ readonly NO_PANIC_ROOTS=(crates/neoteletext-core/src/lib.rs crates/neoteletext-f
     crates/neoteletext-input/src/lib.rs
     crates/neoteletext-transport/src/lib.rs crates/neoteletext-qrkeyboard/src/lib.rs
     crates/neoteletext-app/src/lib.rs crates/neoteletext-cli/src/lib.rs
-    crates/neoteletext-cli/src/main.rs)
+    crates/neoteletext-cli/src/main.rs crates/neoteletext-picture/src/lib.rs
+    crates/neoteletext-picture-cli/src/main.rs)
 
 check_no_panic_lists() {
     local first="" root list listed

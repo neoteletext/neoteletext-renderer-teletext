@@ -28,6 +28,7 @@ neoteletext-app = { path = "../crates/neoteletext-app", default-features = false
 # The qrkeyboard client's readers of what the relay and the phone send
 # (REQ-SEC-003).
 neoteletext-qrkeyboard = { path = "../crates/neoteletext-qrkeyboard" }
+neoteletext-picture = { path = "../crates/neoteletext-picture" }
 
 [workspace]
 members = ["."]
@@ -303,6 +304,13 @@ bench = false
 [[bin]]
 name = "qrkeyboard_pairing"
 path = "fuzz_targets/qrkeyboard_pairing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "picture_convert"
+path = "fuzz_targets/picture_convert.rs"
 test = false
 doc = false
 bench = false
