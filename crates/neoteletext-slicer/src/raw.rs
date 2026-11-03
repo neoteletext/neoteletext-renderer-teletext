@@ -333,6 +333,7 @@ impl RawReader {
                 sample_rate_hz: geometry.sample_rate_hz,
                 line: line_number,
                 second_field: Some(field == 1),
+                position_in_field: u16::try_from(line_in_field).ok(),
                 sync_offset_ns: None,
                 timestamp_us: Some(fields.saturating_mul(FIELD_PERIOD_US)),
             };

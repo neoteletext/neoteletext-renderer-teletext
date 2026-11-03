@@ -486,7 +486,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `write_text/`: the writer's set table and encoding, right-to-left lines, and `runs`, text runs at their places with their triplets merged into a program's.
 
 **`neoteletext-slicer`**
-- `slicer/`: the line slicer's parts: the line, its settings, black level, run-in, framing code, bits, the transition driver and the outcome.
+- `slicer/`: the line slicer's parts: the line, its settings, black level, run-in, framing code, the lines expected to carry teletext (`expected.rs`, DEC-1092), bits, the transition driver and the outcome.
 - `generator/`: the test-signal generator's noise source.
 
 **`neoteletext-image`**

@@ -229,7 +229,7 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `black_colour_codes` | E.18 | On |
 | `page_completion_timeout_us` | E.19 | 100 ms |
 | `row24` | E.23 | Annex H |
-| `framing_tolerance` | E.24: accept one wrong framing-code bit | On |
+| `framing_tolerance` | E.24 as DEC-1092 limits it: accept one wrong framing-code bit on a line that carried three packets with the exact code within a second, each within a second of the one before; off, the exact code on every line | On |
 | `store_hexadecimal_pages` | REQ-ACQ-013: also store pages with a hexadecimal digit, for diagnostics; never the reserved numbers mFD, mFE, mFF, 1BE and 1F0, whose tables are kept as received apart from the pages (DEC-2341) | Off |
 | `stale_after_us` | REQ-ACQ-012 | 60 s |
 | `reveal`, `momentary_reveal_us` | REQ-NAV-007 | Latched; 160 ms |

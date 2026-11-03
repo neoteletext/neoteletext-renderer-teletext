@@ -33,6 +33,12 @@ pub struct Line<'a> {
     pub line: Option<u16>,
     /// The field, where known: `Some(false)` first, `Some(true)` second.
     pub second_field: Option<bool>,
+    /// The line's place within its field, counted from 0 at the first line
+    /// of the field the source holds, where known. With [`Line::line`] it
+    /// tells the slicer which line this is, so that the one-bit framing
+    /// tolerance applies only on a line already carrying teletext
+    /// (DEC-1092); a line with neither is held to the exact framing code.
+    pub position_in_field: Option<u16>,
     /// The time of the first sample after the half-amplitude point of the
     /// line synchronising pulse's leading edge, in nanoseconds, where known.
     /// Negative when the first sample comes before the edge.
@@ -51,6 +57,7 @@ impl<'a> Line<'a> {
             sample_rate_hz,
             line: None,
             second_field: None,
+            position_in_field: None,
             sync_offset_ns: None,
             timestamp_us: None,
         }

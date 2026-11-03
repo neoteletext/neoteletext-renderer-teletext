@@ -20,6 +20,7 @@ impl Slicer {
     /// Slices one line, passing each transition to `trace` when tracing is
     /// on in the settings (REQ-FSM-010).
     pub fn slice_traced<F: FnMut(TraceEntry)>(&mut self, line: &Line<'_>, mut trace: F) -> Result<Sliced, Rejection> {
+        self.line_slot = self.expected.arrive(line);
         let mut state = SlicerState::Start;
         let mut work = Work::new();
         let mut outcome = Err(Rejection::NoSignal);
@@ -87,6 +88,8 @@ impl Slicer {
                 counters.accepted = counters.accepted.saturating_add(1);
                 if work.framing_corrected {
                     counters.framing_corrected = counters.framing_corrected.saturating_add(1);
+                } else {
+                    self.expected.exact_packet(self.line_slot);
                 }
                 let packet = work.packet.unwrap_or(Packet { bytes: work.bytes });
                 let quality = SliceQuality {

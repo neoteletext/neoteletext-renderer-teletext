@@ -127,7 +127,11 @@ fn row_08_one_bit_framing_error_is_corrected() {
     let mut bytes = line_bytes(&known_packet());
     bytes[FRAMING_INDEX] ^= 0x08;
     let samples = line_with(&bytes, &nominal(), RATE);
-    let (outcome, trace, counters) = traced(&samples, RATE, Config::new());
+    // DEC-1092: on a line already carrying teletext.
+    let mut slicer = expecting(Config { trace: true, ..Config::new() }, RATE);
+    let mut trace = Vec::new();
+    let outcome = slicer.slice_traced(&placed(&samples, RATE, TELETEXT_LINE), |entry| trace.push(entry));
+    let counters = slicer.counters();
     assert_row(
         &trace,
         SlicerState::LookingForFramingCode,

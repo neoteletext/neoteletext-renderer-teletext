@@ -1,5 +1,6 @@
 //! The framing code search (REQ-SLC-008, decision E.24): offsets within
-//! two bits, nearest first, with one-bit errors corrected.
+//! two bits, nearest first, with one-bit errors corrected on a line expected
+//! to carry teletext (DEC-1092).
 
 use neoteletext_core::consts::FRAMING_CODE;
 
@@ -52,7 +53,8 @@ impl Slicer {
                 return SlicerEvent::FramingExact;
             }
         }
-        if self.config.framing_tolerance {
+        // DEC-1092: one wrong bit only where teletext is expected.
+        if self.config.framing_tolerance && self.expected.is_expected(self.line_slot) {
             for offset in FRAMING_OFFSETS {
                 // Exactly one bit differs: the difference is a power of two.
                 if (candidate(offset) ^ FRAMING_CODE).is_power_of_two() {
