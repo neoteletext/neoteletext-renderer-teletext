@@ -123,6 +123,25 @@ pub fn sextant_code(pattern: usize) -> u8 {
     SIXEL_BITS.iter().enumerate().filter(|&(k, _)| pattern >> k & 1 == 1).fold(MOSAIC_BIT5, |code, (_, bit)| code | bit)
 }
 
+/// A colour as eight bits a primary.
+pub fn to_rgb8(colour: Rgb) -> crate::Rgb8 {
+    colour.map(|primary| u8::try_from(primary.clamp(0, i64::from(u8::MAX))).unwrap_or(u8::MAX))
+}
+
+impl Picture {
+    /// The page's two views of the picture, as [`crate::Page`] holds them:
+    /// the sixels aimed at, and those drawn, black where nothing is drawn.
+    pub fn views(&self, shown: &[Rgb]) -> (Vec<crate::Rgb8>, Vec<crate::Rgb8>) {
+        let picture = self.pixels.iter().map(|&colour| to_rgb8(colour)).collect();
+        let drawn = shown
+            .iter()
+            .zip(&self.weights)
+            .map(|(&colour, &weight)| if weight > 0 { to_rgb8(colour) } else { [0; 3] })
+            .collect();
+        (picture, drawn)
+    }
+}
+
 /// The squared distance between two colours.
 #[allow(
     clippy::arithmetic_side_effects,

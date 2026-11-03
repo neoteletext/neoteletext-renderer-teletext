@@ -691,9 +691,12 @@ pub fn encode(picture: &Picture, options: &Options) -> Result<Page, Error> {
     let shown: Vec<Rgb> = drawn(picture, &encoded).iter().map(|&entry| palette.colours[entry]).collect();
     let place = if objects == 0 { "in the page's X/26".to_string() } else { format!("in {objects} objects") };
     let triplets: usize = row_triplets.iter().map(Vec::len).sum();
+    let (pixels, drawn) = picture.views(&shown);
     Ok(Page {
         tti: tti::text(&lines),
         summary: format!("{} colours, {triplets} triplets {place}", palette.colours.len()),
         mean_squared_error: mean_squared_error(picture, &shown),
+        picture: pixels,
+        drawn,
     })
 }

@@ -65,6 +65,14 @@ pub struct Page {
     /// The mean squared error of the page as drawn against the picture's
     /// sixels, each sixel weighted by its height; lower is closer.
     pub mean_squared_error: u64,
+    /// The picture as the page's 80 by 75 sixels, row by row from the top
+    /// left: what the encoder aimed at.
+    pub picture: Vec<Rgb8>,
+    /// Each sixel as a receiver draws the page, in the same order, so that
+    /// a program can check what it shows (REQ-2335). A sixel the page does
+    /// not draw is black: the receiver's eight columns of row 0, and the
+    /// whole of row 0 when the header is kept.
+    pub drawn: Vec<Rgb8>,
 }
 
 impl Page {

@@ -839,6 +839,7 @@ dependencies = [
  "image",
  "neoteletext-core",
  "neoteletext-formats",
+ "neoteletext-image",
 ]
 
 [[package]]

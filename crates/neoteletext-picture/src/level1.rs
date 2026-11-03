@@ -223,9 +223,12 @@ pub fn encode(picture: &Picture, hold: bool) -> Page {
         }
     }
     let attributes = rows.iter().flatten().filter(|cell| cell.code < SPACE).count();
+    let (pixels, drawn) = picture.views(&shown);
     Page {
         tti: tti::text(&tti::level_1_lines(&codes, picture.first_row)),
         summary: format!("{CLUT_ENTRIES} colours, {attributes} attribute cells"),
         mean_squared_error: crate::enhanced::mean_squared_error(picture, &shown),
+        picture: pixels,
+        drawn,
     }
 }

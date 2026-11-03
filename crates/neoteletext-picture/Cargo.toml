@@ -20,5 +20,12 @@ neoteletext-formats = { workspace = true, features = ["tti", "std"] }
 # other format and no threads.
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 
+[dev-dependencies]
+# The round trip receives, composes and renders the converter's pages as
+# `neottx render` does, with every capability compiled in, objects
+# included (TODO-1184).
+neoteletext-core = { workspace = true, features = ["default", "objects"] }
+neoteletext-image = { workspace = true, features = ["alloc"] }
+
 [lints]
 workspace = true
