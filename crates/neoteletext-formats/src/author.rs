@@ -45,7 +45,7 @@ pub use display::{
 };
 pub use mot::{Mot, MotLevel, object_link};
 pub use objects::{ObjectPage, pointer_place, public_number};
-pub use triplets::{FlashMode, FlashRate, LocalObject, ObjectRef, RowScope, Triplets, row_address};
+pub use triplets::{FlashMode, FlashRate, FontStyle, LocalObject, ObjectRef, RowScope, Triplets, row_address};
 
 use crate::consts::TTI_PS_TRANSMIT;
 use crate::encode::{default_clut_2_and_3, encode_page, packed_line_of};

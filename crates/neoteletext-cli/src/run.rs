@@ -35,7 +35,9 @@ pub fn run() -> ExitCode {
         Command::Convert { common, output, to, page } => {
             commands::convert(&common.options(), &output, to, page.as_deref())
         }
-        Command::Slice { common, output, preset } => commands::slice(&common.options(), &output, &preset),
+        Command::Slice { common, output, preset, geometry } => {
+            commands::slice(&common.options(), &output, &preset, &geometry)
+        }
         Command::Services { common } => commands::services(&common.options()),
         Command::ServiceInfo { common } => commands::service_info(&common.options()),
         Command::Check { files, descriptor } => commands::check(&files, descriptor.as_deref()),

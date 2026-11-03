@@ -54,7 +54,7 @@ pub use render::render;
 pub use service_info::service_info;
 pub use services::services;
 pub use show::show;
-pub use slice::slice;
+pub use slice::{SliceGeometry, slice};
 pub use sound::{PLAYER_PACKETS_PER_SECOND, SoundOptions, sound};
 pub use text::text;
 pub use view::view;
@@ -76,6 +76,8 @@ pub enum ConvertTarget {
     T42,
     /// TTI page files.
     Tti,
+    /// edit.tf page addresses, one page a line (REQ-INP-016).
+    Edittf,
 }
 
 /// What a page argument selects (REQ-CLI-003).

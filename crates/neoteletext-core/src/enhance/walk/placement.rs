@@ -37,6 +37,13 @@ impl<'s> Walker<'_, 's> {
         // REQ-OBJ-013).
         let Some(column) = function.active_column() else { return };
         frame.column = column;
+        // REQ-338: an Adaptive object's range runs to the rightmost
+        // cell any of its triplets addresses, whether or not the triplet
+        // then writes anything there; a cell past the page is no cell.
+        let (row, addressed) = frame.position();
+        if frame.plane == Plane::Adaptive && row < ROWS && addressed < COLUMNS {
+            out.touch(row, addressed, frame.slot);
+        }
         let mut change = AttrChange::default();
         let character = match function {
             TripletFunction::ForegroundColour { colour, .. } if ATTRIBUTES && colour.is_defined() => {
@@ -86,11 +93,15 @@ impl<'s> Walker<'_, 's> {
             return;
         }
         let Some((row, column)) = self.placeable(frame) else { return };
+        // REQ-PRF-004, DEC-570: with the option on, a write before the
+        // position this source last wrote is ignored, as at Level 1.5; the
+        // position still counts as the last one, as it does there.
+        let before = frame.last_write.replace((row, column));
+        if self.inputs.ignore_out_of_order && before.is_some_and(|last| (row, column) < last) {
+            return;
+        }
         // Annex A.8 item 3: something displayable was written.
         self.successive = 0;
-        if frame.plane == Plane::Adaptive {
-            out.touch(row, column, frame.slot);
-        }
         if let Some(Flash::On { start, .. }) = change.flash.as_mut() {
             *start = column as u8;
         }

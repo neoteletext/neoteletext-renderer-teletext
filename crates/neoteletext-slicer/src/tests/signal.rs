@@ -34,6 +34,32 @@ fn twenty_db_noise_keeps_addresses() {
     }
 }
 
+/// REQ-452, held at the tolerance's worst corner as measured on 2 November
+/// 2026 (TODO-2077 item 6): 20 dB of noise at the highest rate and the
+/// earliest timing offset of REQ-SLC-004 gave 99.2 per cent of addresses,
+/// against the target of 99, so a change that loses the margin fails here.
+#[test]
+fn twenty_db_noise_keeps_addresses_at_the_worst_corner() {
+    let rate = RATES[3];
+    let params = SignalParams { timing_offset_ns: -1000.0, ..SignalParams::nominal(rate as f32) };
+    let params = SignalParams { noise_rms: params.noise_for_snr_db(20.0), ..params };
+    let tally = run_batch(rate, &params, 1000, 7, Config::new());
+    assert!(tally.address_percent() >= 99.0, "{tally:?}");
+}
+
+/// REQ-441 (REQ-SLC-002): the slicer works at the lowest rate the
+/// requirement names, 13.5 MHz (ITU-R BT.601), at nominal timing and at the
+/// timing offsets the other rates are tested at.
+#[test]
+fn the_lowest_sample_rate_slices() {
+    const LOWEST_RATE: u32 = 13_500_000;
+    for timing_offset_ns in [-1000.0, -500.0, 0.0, 400.0] {
+        let params = SignalParams { timing_offset_ns, ..SignalParams::nominal(LOWEST_RATE as f32) };
+        let tally = run_batch(LOWEST_RATE, &params, 100, 11, Config::new());
+        assert_eq!(tally.address_percent(), 100.0, "{timing_offset_ns} ns: {tally:?}");
+    }
+}
+
 #[test]
 fn sixteen_bit_samples() {
     let rate = RATES[0];

@@ -129,3 +129,25 @@ fn a_page_file_over_the_limit_is_skipped_before_it_is_read() {
     let message = String::from_utf8_lossy(&output.stderr);
     assert!(message.contains(&format!("larger than {limit} bytes")), "{message}");
 }
+
+/// REQ-93: the contents stay within what the reader of REQ-WEB-025 takes.
+/// 500 pages with long titles would pass its 64 kilobytes, so the listing
+/// stops before the entry that would, says so, and exits with status 4;
+/// what was written is a file the reader accepts whole.
+#[test]
+fn contents_stop_before_passing_the_readers_size_limit() {
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join("contents-size");
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let title = "x".repeat(neoteletext_web::contents::MAX_TITLE);
+    for number in 100..600 {
+        write(&folder, &format!("{number}.tti"), &format!("DE,{title} {number}\nPN,{number}00\nOL,1,page\n"));
+    }
+    let output = neottx(&["contents", folder.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(i32::from(neoteletext_app::exit::CHECK_ERRORS)), "{output:?}");
+    assert!(output.stdout.len() <= neoteletext_web::contents::MAX_BYTES, "{} bytes", output.stdout.len());
+    let lines = String::from_utf8_lossy(&output.stdout).lines().count();
+    assert!(lines <= neoteletext_web::contents::MAX_LINES, "{lines} lines");
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(message.contains("stopped before page"), "{message}");
+}

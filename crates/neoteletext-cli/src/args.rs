@@ -266,6 +266,9 @@ pub(crate) enum Command {
         /// Capture geometry preset.
         #[arg(long, default_value = "bt8x8")]
         preset: String,
+        /// The capture's geometry, each part replacing the preset's.
+        #[command(flatten)]
+        geometry: crate::commands::SliceGeometry,
     },
     /// List the teletext streams, languages and subtitle pages of a transport stream.
     Services {

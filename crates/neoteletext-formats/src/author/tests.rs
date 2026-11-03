@@ -25,9 +25,9 @@ use std::vec::Vec;
 mod round_trip;
 
 const BOTH: ObjectUsage = ObjectUsage(0b11);
-/// Font Style data with proportional spacing, bold and italic (D0 to D2)
-/// for two more rows (D6 to D4), Table 29.
-const EVERY_STYLE_TWO_ROWS: u8 = 0b010_0111;
+/// Every style of Font Style: proportional spacing, bold and italic (data
+/// bits D0 to D2, Table 29).
+const EVERY_STYLE: FontStyle = FontStyle { proportional: true, bold: true, italics: true };
 
 fn values(triplets: &Triplets) -> Vec<u32> {
     let resolve = |_: LocalObject, _: ObjectKind| -> Result<Triplet> { Err(AuthorError::UnknownLocalObject) };
@@ -325,7 +325,8 @@ fn drcs_and_character_triplets_match_the_worked_encodings() {
         ),
         (
             one(|t| {
-                t.function(TripletFunction::UnsupportedColumn { column: 4, mode: 0b01110, data: EVERY_STYLE_TWO_ROWS });
+                // REQ-189: Font Style by name, for two more rows (D6 to D4).
+                t.font_style(4, EVERY_STYLE, 2).unwrap();
             }),
             0x13B84,
             [0x44, 0x6E, 0x53],
@@ -364,4 +365,19 @@ fn controls_are_written_as_input_md_gives_them() {
     assert_eq!(hamming2418_encode(0x2A942), [0x98, 0x94, 0xD5], "column 2, width 21, joined");
     assert_eq!(page.local().control(32, 9, false).err(), Some(AuthorError::BadPosition), "past column 39");
     assert_eq!(page.local().control(0, 0, false).err(), Some(AuthorError::BadPosition), "no width");
+}
+
+/// REQ-189: Font Style's row count has three bits, so eight more rows are
+/// refused, and a style left clear is written as a cancel (Table 29).
+#[test]
+fn font_style_refuses_more_than_seven_rows() {
+    let mut triplets = Triplets::new();
+    assert_eq!(triplets.font_style(0, FontStyle::default(), 8).err(), Some(AuthorError::BadPosition));
+    let bold = FontStyle { bold: true, ..FontStyle::default() };
+    assert_eq!(
+        one(|t| {
+            t.font_style(5, bold, 7).unwrap();
+        }) >> 11,
+        0b111_0010
+    );
 }

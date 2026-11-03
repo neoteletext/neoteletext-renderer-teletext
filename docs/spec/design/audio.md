@@ -436,7 +436,7 @@ These are tellyboy's constraints as built (`<tellyboy/audio.h>`; `components/AUD
 | Objects held | 8 | 256 |
 | Progressive and live sound | network only | yes |
 
-A receiver publishes its actual figures.
+A receiver publishes its actual figures: `Receiver::limits` returns the store's bytes, the objects and the records in flight it was built with, and `ReceiverLimits::meets` checks them against `LEVEL_A_MINIMUM` or `LEVEL_B_MINIMUM` in `neoteletext-audio` (REQ-AUD-017). KB and MB here are binary multiples: 16,384 and 4,194,304 bytes (DEC-2372).
 
 The Level A numbers are proposals. They must be checked against the RAM the teletext renderer leaves on its smallest microcontroller target (open decision 5). The SAMD21's 32 KB, the floor of tellyboy's own budget, is too small to hold the renderer, the store and the stream rings at once.
 

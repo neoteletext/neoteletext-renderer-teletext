@@ -4,13 +4,27 @@
 use std::vec::Vec;
 
 use neoteletext_core::consts::{
-    COLUMNS, CONTROL_JOINED, CONTROL_WIDTH_MASK, MODE_CONTROL, ROW_ADDRESS_BASE, ROW_ADDRESS_LAST, ROW_ADDRESS_ROW_24,
+    COLUMNS, CONTROL_JOINED, CONTROL_WIDTH_MASK, FONT_STYLE_BOLD, FONT_STYLE_ITALICS, FONT_STYLE_MAX_ROWS,
+    FONT_STYLE_PROPORTIONAL, FONT_STYLE_ROWS_SHIFT, MODE_CONTROL, MODE_FONT_STYLE, ROW_ADDRESS_BASE, ROW_ADDRESS_LAST,
+    ROW_ADDRESS_ROW_24,
 };
 use neoteletext_core::packet::{
     ColourData, DisplayAttributes, ObjectKind, ObjectNumber, ObjectSource, Triplet, TripletFunction,
 };
 
 use super::{AuthorError, Result};
+
+/// The styles of a Font Style triplet (Table 29, mode 01110): each one set
+/// is turned on, each one clear is cancelled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct FontStyle {
+    /// Proportional spacing (data bit D0).
+    pub proportional: bool,
+    /// Bold (data bit D1).
+    pub bold: bool,
+    /// Italics (data bit D2).
+    pub italics: bool,
+}
 
 /// The rows that a Full Row Colour or Address Display Row 0 triplet
 /// colours: bits S1 S0 of its data (Table 28).
@@ -355,6 +369,29 @@ impl Triplets {
     /// Additional Flash Functions (column mode 00111).
     pub fn flash(&mut self, column: u8, mode: FlashMode, rate: FlashRate) -> &mut Self {
         self.function(TripletFunction::AdditionalFlash { column, mode: mode.bits(), rate: rate.bits(), reserved: 0 })
+    }
+
+    /// Font Style (column mode 01110, Level 3.5 only; Table 29): the
+    /// styles set, cancelling those not set, from `column` to the end of the
+    /// row and over `following_rows` more rows. The receiver sends it and
+    /// does not act on it (decision E.96); this writes it for test pages.
+    /// `following_rows` above 7, which three bits cannot hold, is refused
+    /// as a position outside its range.
+    pub fn font_style(&mut self, column: u8, style: FontStyle, following_rows: u8) -> Result<&mut Self> {
+        if following_rows > FONT_STYLE_MAX_ROWS {
+            return Err(AuthorError::BadPosition);
+        }
+        let mut data = following_rows << FONT_STYLE_ROWS_SHIFT;
+        for (on, bit) in [
+            (style.proportional, FONT_STYLE_PROPORTIONAL),
+            (style.bold, FONT_STYLE_BOLD),
+            (style.italics, FONT_STYLE_ITALICS),
+        ] {
+            if on {
+                data |= bit;
+            }
+        }
+        Ok(self.raw(Triplet { address: column, mode: MODE_FONT_STYLE, data }))
     }
 
     /// Display Attributes (column mode 01100).

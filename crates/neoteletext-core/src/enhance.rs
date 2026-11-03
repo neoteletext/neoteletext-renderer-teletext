@@ -132,6 +132,9 @@ struct Frame<'s> {
     designation: Option<(G0Set, G2Set)>,
     /// A Passive object's own attributes (REQ-OBJ-011).
     passive: Attrs,
+    /// The position this source last wrote, for the option that ignores a
+    /// write before it (REQ-PRF-004): each source has its own walk.
+    last_write: Option<(usize, usize)>,
 }
 
 /// An Adaptive object's extent on the row being resolved (REQ-OBJ-010).
@@ -195,6 +198,9 @@ struct Inputs<'a, 's> {
     default_sets: (G0Set, G2Set),
     /// Whether NeoTeletext's row set triplet acts (REQ-2180).
     row_sets: bool,
+    /// Whether a write to a position before the last one written by the
+    /// same source is ignored (REQ-PRF-004; DEC-570, Annex A.4).
+    ignore_out_of_order: bool,
 }
 
 /// One run of the walk of REQ-FSM-011.

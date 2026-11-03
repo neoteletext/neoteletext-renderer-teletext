@@ -46,7 +46,9 @@ pub struct Scale {
     pub x: usize,
     /// Vertical factor.
     pub y: usize,
-    /// Stretch height by 1.2 for 4:3 proportions.
+    /// Stretch the width by `ASPECT_NUMERATOR / ASPECT_DENOMINATOR` (16/13)
+    /// for 4:3 proportions: on a 4:3 set a pixel of the 12-by-20 cell is
+    /// wider than tall (REQ-RND-004).
     pub aspect: bool,
 }
 

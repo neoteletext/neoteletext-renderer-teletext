@@ -131,6 +131,10 @@ fn a_live_sound_plays_as_the_player_reaches_it_and_fades_when_it_ends() {
     std::fs::write(&input, wave(&samples, 8_000)).unwrap();
     let run = neottx(&["sound", "--page", "123", "--live", input.to_str().unwrap(), output.to_str().unwrap()]);
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    // REQ-96: the report names the samples, the rate, the bytes of
+    // sound and the packets; 32 blocks of 256 bytes are 8,192.
+    let report = String::from_utf8_lossy(&run.stderr);
+    assert!(report.contains("16000 samples at 8000 Hz, 8192 bytes of ima sent live 1 times, 654 packets"), "{report}");
     let stream = std::fs::read(&output).unwrap();
     let packets = stream.as_chunks::<PACKET_BYTES>().0;
     // 32 blocks of 505 samples, the last due at 2.02 s: 646 packets at the

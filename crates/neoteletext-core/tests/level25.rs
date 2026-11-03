@@ -427,3 +427,21 @@ fn every_mode_with_every_class_of_data() {
         }
     }
 }
+
+/// REQ-370 (REQ-PRF-004), DEC-570: the option that ignores out-of-order
+/// triplets is independent of the profile, so it acts at Levels 2.5 and
+/// 3.5 as it does at Level 1.5. The local data writes column 5, then column
+/// 2, which is earlier in the same source: with the option the second write
+/// is ignored, and without it applied (Annex A.4 permits either).
+#[test]
+fn out_of_order_triplets_are_ignored_at_levels_2_5_and_3_5_when_asked() {
+    let local = [set_position(4, 5), g0(5, b'x'), g0(2, b'y'), end()];
+    let packets = display_page(0, &[(4, b"0123456")], local_data(&local));
+    for level in [PresentationLevel::Level25, PresentationLevel::Level35] {
+        for (ignore, expected) in [(false, "01y34x6"), (true, "01234x6")] {
+            let config = Config { level, ignore_out_of_order_triplets: ignore, ..Config::default() };
+            let grid = Receiver::new().run(&packets, config, |decoder| grid_of(decoder, &config)).0;
+            assert_eq!(&text(&grid, 4)[..7], expected, "{level:?}, ignoring {ignore}");
+        }
+    }
+}

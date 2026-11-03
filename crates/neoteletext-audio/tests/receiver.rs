@@ -1076,3 +1076,20 @@ fn a_newer_generation_too_large_leaves_the_older_playing() {
     assert_eq!(receiver.store().entry(1).unwrap().sound.generation, 1);
     assert_eq!(sink.take(), []);
 }
+
+/// REQ-51 (REQ-AUD-017): a receiver publishes what it holds, and a port
+/// checks it against its level's minimum; one record short of Level A's two
+/// in flight, or one byte short of its store, does not meet it.
+#[test]
+fn a_receiver_publishes_its_limits_against_its_levels_minimum() {
+    use neoteletext_audio::{LEVEL_A_MINIMUM, LEVEL_B_MINIMUM, ReceiverLimits};
+    let mut arena = vec![0; LEVEL_A_MINIMUM.store_bytes];
+    let level_a = Receiver::<8, 2>::new(&mut arena).limits();
+    assert_eq!(level_a, ReceiverLimits { store_bytes: 16 * 1024, objects: 8, records_in_flight: 2 });
+    assert!(level_a.meets(&LEVEL_A_MINIMUM));
+    assert!(!level_a.meets(&LEVEL_B_MINIMUM));
+    assert!(!Receiver::<8, 1>::new(&mut arena).limits().meets(&LEVEL_A_MINIMUM));
+    let mut short = vec![0; LEVEL_A_MINIMUM.store_bytes - 1];
+    assert!(!Receiver::<8, 2>::new(&mut short).limits().meets(&LEVEL_A_MINIMUM));
+    assert_eq!(LEVEL_B_MINIMUM, ReceiverLimits { store_bytes: 4 * 1024 * 1024, objects: 256, records_in_flight: 8 });
+}

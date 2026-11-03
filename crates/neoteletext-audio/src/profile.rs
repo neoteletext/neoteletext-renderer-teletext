@@ -54,3 +54,41 @@ pub const PROGRESSIVE_BUFFER_MS: u32 = 40;
 /// Opus sound waits for one to free; a stored sound frees its decoder once
 /// every block is decoded.
 pub const OPUS_DECODERS: usize = 2;
+
+/// A kibibyte: the audio design's "KB" and "MB" of receiver memory are
+/// binary multiples (DEC-2372), as a port's buffers are.
+const KIB: usize = 1024;
+
+/// What a receiver holds (REQ-AUD-017): the bytes of its object store, the
+/// objects it keeps, and the records it reassembles at once. A port sizes
+/// its receiver, publishes these, and holds at least its level's minimum.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ReceiverLimits {
+    /// Bytes of the object store's arena.
+    pub store_bytes: usize,
+    /// Objects held at once.
+    pub objects: usize,
+    /// Records reassembled at once (REQ-AUD-007).
+    pub records_in_flight: usize,
+}
+
+impl ReceiverLimits {
+    /// True when every figure is at least `minimum`'s.
+    #[must_use]
+    pub const fn meets(&self, minimum: &Self) -> bool {
+        self.store_bytes >= minimum.store_bytes
+            && self.objects >= minimum.objects
+            && self.records_in_flight >= minimum.records_in_flight
+    }
+}
+
+/// The least a microcontroller receiver, Level A, holds (REQ-AUD-017;
+/// `docs/spec/design/audio.md` section 12): 16 KB of sounds, about four
+/// seconds of IMA ADPCM at 8 kHz, 8 objects and 2 records in flight.
+pub const LEVEL_A_MINIMUM: ReceiverLimits = ReceiverLimits { store_bytes: 16 * KIB, objects: 8, records_in_flight: 2 };
+
+/// The least a desktop receiver, Level B, holds (REQ-AUD-017;
+/// `docs/spec/design/audio.md` section 12): 4 MB of sounds, 256 objects and
+/// 8 records in flight.
+pub const LEVEL_B_MINIMUM: ReceiverLimits =
+    ReceiverLimits { store_bytes: 4 * KIB * KIB, objects: 256, records_in_flight: 8 };

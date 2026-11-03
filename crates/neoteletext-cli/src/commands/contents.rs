@@ -20,7 +20,7 @@ use neoteletext_app::{Failure, exit};
 use neoteletext_core::types::PageAddress;
 use neoteletext_web::channel::{self, ChannelFile};
 use neoteletext_web::consts::DEFAULT_PAGE_LIMIT;
-use neoteletext_web::contents::MAX_TITLE;
+use neoteletext_web::contents::{MAX_BYTES, MAX_LINES, MAX_TITLE};
 use neoteletext_web::subpages::MAX_SUBPAGE_FILE;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -284,21 +284,60 @@ pub fn contents(options: &Options) -> Result<(), Failure> {
     let mut folder = read_folder(options, |page| page.page.is_decimal())?;
     sandbox_closed(options.no_sandbox)?;
     let pages = pages_of(&mut folder);
-    let mut out = std::io::stdout().lock();
+    let mut listing = Listing::default();
     let mut magazine = None;
     for (page, found) in &pages {
-        if magazine != Some(page.magazine) {
-            magazine = Some(page.magazine);
-            let heading = PageAddress::from_mpp(u16::from(page.magazine.number()) << 8)
+        let heading = if magazine == Some(page.magazine) {
+            String::new()
+        } else {
+            let title = PageAddress::from_mpp(u16::from(page.magazine.number()) << 8)
                 .and_then(|first| pages.get(&first))
                 .map_or_else(|| format!("Magazine {}", page.magazine.number()), |first| first.title.clone());
-            let _ = writeln!(out, "s\t{heading}");
-        }
+            format!("s\t{title}\n")
+        };
         let number = String::from_utf8_lossy(&page.ascii()).into_owned();
         let dated = found.modified.and_then(date).map(|date| format!("\t{date}")).unwrap_or_default();
-        let _ = writeln!(out, "p\t{number}\t{}{dated}", found.title);
+        let entry = format!("{heading}p\t{number}\t{}{dated}\n", found.title);
+        if !listing.push(&entry) {
+            eprintln!(
+                "contents stopped before page {number}: listing it would pass the {MAX_BYTES} bytes or {MAX_LINES} \
+                 lines a contents file may hold (REQ-WEB-025)"
+            );
+            listing.write();
+            return Err((exit::CHECK_ERRORS, format!("contents stopped before page {number}")));
+        }
+        magazine = Some(page.magazine);
     }
+    listing.write();
     skipped_files(&folder)
+}
+
+/// The contents written so far, kept within what the contents reader of
+/// REQ-WEB-025 takes whole: a larger file would be refused entire.
+#[derive(Default)]
+struct Listing {
+    text: String,
+    lines: usize,
+}
+
+impl Listing {
+    /// Adds `entry`, whole lines, unless it would take the file past the
+    /// reader's limits; false when it would.
+    fn push(&mut self, entry: &str) -> bool {
+        let lines = self.lines.saturating_add(entry.matches('\n').count());
+        if self.text.len().saturating_add(entry.len()) > MAX_BYTES || lines > MAX_LINES {
+            return false;
+        }
+        self.text.push_str(entry);
+        self.lines = lines;
+        true
+    }
+
+    fn write(&self) {
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(self.text.as_bytes());
+        let _ = out.flush();
+    }
 }
 
 #[cfg(test)]

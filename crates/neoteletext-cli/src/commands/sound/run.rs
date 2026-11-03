@@ -74,11 +74,17 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
             out.write_all(&packet.bytes).map_err(|error| io_failure(output, error))?;
         }
         out.flush().map_err(|error| io_failure(output, error))?;
+        // Every block sent is whole, the last padded with silence, so the
+        // bytes of sound are the blocks times the block's size.
+        let per_block = usize::try_from(sound.samples_per_block()).unwrap_or(usize::MAX).max(1);
+        let blocks = wave.samples().len().saturating_mul(usize::from(options.repeat)).div_ceil(per_block);
         eprintln!(
-            "{}: {} samples at {} Hz sent live {} times, {} packets at {} a second for page {page:03X}",
+            "{}: {} samples at {} Hz, {} bytes of {} sent live {} times, {} packets at {} a second for page {page:03X}",
             output.display(),
             wave.samples().len(),
             wave.rate_hz(),
+            blocks.saturating_mul(usize::from(sound.block_bytes)),
+            options.codec,
             options.repeat,
             packets.len(),
             options.pace
