@@ -140,6 +140,28 @@ impl PageCode {
         }
     }
 
+    /// True when Table 24 says the page needs at most one page of storage,
+    /// or (note 1, codes 01 and 81) that a decoder should store only its
+    /// last transmitted version: 01, 70 to 7A, 7C, 7D, 7F, 81 and F9. Such a
+    /// page keeps its latest version only, as code 79 does (REQ-NUM-021,
+    /// DEC-2338).
+    #[must_use]
+    pub const fn one_page_of_storage(self) -> bool {
+        let code = self.0;
+        matches!(
+            code,
+            MIP_SINGLE_PAGE
+                | MIP_SUBTITLE_MENU
+                | MIP_NOT_FOLLOWING_RULES
+                | MIP_TV_WARNING
+                | MIP_PROGRAMME_SINGLE
+                | MIP_NOW_AND_NEXT
+                | MIP_TV_INDEX_SINGLE
+                | MIP_SCHEDULE_SINGLE
+                | MIP_KEYWORD_SINGLE
+        ) || within(code, MIP_SUBTITLE)
+    }
+
     /// True when the code's number of sub-pages is in packets X/15 to X/24
     /// (clause 11.3.4).
     #[must_use]

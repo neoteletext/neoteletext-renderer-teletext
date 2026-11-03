@@ -560,3 +560,29 @@ fn the_sub_codes_at_each_end_are_received() {
         assert_eq!(stored, Some(subcode), "{subcode:04X}");
     }
 }
+
+/// REQ-NUM-021, DEC-2338: every MIP code that Table 24 gives one page of
+/// storage (01, 70 to 7A, 7C, 7D, 7F, 81, F9) keeps its latest version
+/// only, as code 79 does; a code with sub-pages (4F, 7B) still lists them.
+#[test]
+fn every_code_of_one_page_of_storage_keeps_its_latest_version() {
+    let single = [0x01, 0x70, 0x73, 0x77, 0x78, 0x79, 0x7A, 0x7C, 0x7D, 0x7F, 0x81, 0xF9];
+    let times = [0x0001, 0x0002, 0x0003].map(|code| header(0x150, code));
+    for code in (0..=u8::MAX).filter(|code| single.contains(code) || [0x4F, 0x7B].contains(code)) {
+        assert_eq!(PageCode(code).one_page_of_storage(), single.contains(&code), "{code:02X}");
+        with_decoder(8, |decoder| {
+            let mut stream = mip_packets(1, &[(0x50, code)], &[]);
+            stream.extend(times.iter().copied());
+            stream.extend(filling());
+            feed(decoder, &stream);
+            let expected: &[u16] = if single.contains(&code) { &[] } else { &[0x0001, 0x0002, 0x0003] };
+            assert_eq!(listed(decoder, 0x150), expected, "{code:02X}");
+            assert_eq!(decoder.store().latest(address(0x150)).unwrap().key.subcode.value(), 0x0003, "{code:02X}");
+        });
+    }
+    let all_single: Vec<u8> = (0..=u8::MAX).filter(|&code| PageCode(code).one_page_of_storage()).collect();
+    let mut expected = single.to_vec();
+    expected.extend([0x71, 0x72, 0x74, 0x75, 0x76]);
+    expected.sort_unstable();
+    assert_eq!(all_single, expected);
+}
