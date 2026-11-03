@@ -68,5 +68,50 @@ pub mod store;
 pub mod ttau;
 
 pub use codec::*;
+
+/// REQ-GEN-011: the error types implement `core::error::Error`. Their
+/// `Display` text is their `Debug` text, and both need `core::fmt`, which
+/// REQ-GEN-016 keeps behind this optional feature so that a small build
+/// leaves it out.
+#[cfg(feature = "error-trait")]
+mod error_trait {
+    macro_rules! error_trait {
+        ($($error:ty),+ $(,)?) => {$(
+            impl core::fmt::Display for $error {
+                fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    core::fmt::Debug::fmt(self, formatter)
+                }
+            }
+            impl core::error::Error for $error {}
+        )+};
+    }
+    error_trait!(crate::record::RecordError);
+    #[cfg(feature = "idl")]
+    error_trait!(crate::idl::IdlError, crate::receiver::MessageError);
+    #[cfg(feature = "ima")]
+    error_trait!(crate::ima::ImaError);
+    #[cfg(feature = "encode")]
+    error_trait!(crate::encode::EncodeError);
+
+    #[cfg(test)]
+    mod tests {
+        const fn is_error<T: core::error::Error>() {}
+
+        // REQ-155: every error type of the crate is an error.
+        #[test]
+        fn every_error_type_is_an_error() {
+            is_error::<crate::record::RecordError>();
+            #[cfg(feature = "idl")]
+            {
+                is_error::<crate::idl::IdlError>();
+                is_error::<crate::receiver::MessageError>();
+            }
+            #[cfg(feature = "ima")]
+            is_error::<crate::ima::ImaError>();
+            #[cfg(feature = "encode")]
+            is_error::<crate::encode::EncodeError>();
+        }
+    }
+}
 pub use profile::*;
 pub use serial::serial_newer;

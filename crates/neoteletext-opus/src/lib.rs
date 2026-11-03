@@ -40,3 +40,34 @@ mod slices;
 
 pub use decoder::{DecodeError, Decoder, FRAME_SAMPLES, SAMPLE_RATE};
 pub use packet::{MAX_PACKET, PacketError};
+
+/// REQ-GEN-011: the error types implement `core::error::Error`. Their
+/// `Display` text is their `Debug` text, and both need `core::fmt`, which
+/// REQ-GEN-016 keeps behind this optional feature so that a small build
+/// leaves it out.
+#[cfg(feature = "error-trait")]
+mod error_trait {
+    macro_rules! error_trait {
+        ($($error:ty),+ $(,)?) => {$(
+            impl core::fmt::Display for $error {
+                fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    core::fmt::Debug::fmt(self, formatter)
+                }
+            }
+            impl core::error::Error for $error {}
+        )+};
+    }
+    error_trait!(crate::DecodeError, crate::PacketError);
+
+    #[cfg(test)]
+    mod tests {
+        const fn is_error<T: core::error::Error>() {}
+
+        // REQ-155: every error type of the crate is an error.
+        #[test]
+        fn every_error_type_is_an_error() {
+            is_error::<crate::DecodeError>();
+            is_error::<crate::PacketError>();
+        }
+    }
+}

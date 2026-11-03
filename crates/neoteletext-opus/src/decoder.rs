@@ -52,7 +52,7 @@ const fn bits_in(bytes: usize) -> i32 {
 const _: () = assert!(8 * MAX_PACKET < i32::MAX as usize);
 
 /// Why a packet produced no frame.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DecodeError {
     /// The packet is outside the profile; nothing was decoded and the decoder is unchanged.
     Packet(PacketError),

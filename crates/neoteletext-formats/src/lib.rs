@@ -126,5 +126,54 @@ mod testing;
 
 pub use item::{Diagnostic, DiagnosticKind, Item, Reader};
 
+/// REQ-GEN-011: the error types implement `core::error::Error`. Their
+/// `Display` text is their `Debug` text, and both need `core::fmt`, which
+/// REQ-GEN-016 keeps behind this optional feature so that a small build
+/// leaves it out.
+#[cfg(feature = "error-trait")]
+mod error_trait {
+    macro_rules! error_trait {
+        ($($error:ty),+ $(,)?) => {$(
+            impl core::fmt::Display for $error {
+                fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    core::fmt::Debug::fmt(self, formatter)
+                }
+            }
+            impl core::error::Error for $error {}
+        )+};
+    }
+    error_trait!(crate::item::DiagnosticKind, crate::log::LogRefused);
+    #[cfg(feature = "bdf")]
+    error_trait!(crate::bdf::FontError, crate::bdf::convert::ConvertError, crate::bdf::convert::MapError);
+    #[cfg(all(feature = "std", feature = "tti"))]
+    error_trait!(crate::author::AuthorError);
+
+    #[cfg(test)]
+    mod tests {
+        const fn is_error<T: core::error::Error>() {}
+
+        // REQ-155: every error type of the crate is an error.
+        #[test]
+        fn every_error_type_is_an_error() {
+            is_error::<crate::item::DiagnosticKind>();
+            is_error::<crate::log::LogRefused>();
+            #[cfg(feature = "bdf")]
+            {
+                is_error::<crate::bdf::FontError>();
+                is_error::<crate::bdf::convert::ConvertError>();
+                is_error::<crate::bdf::convert::MapError>();
+            }
+            #[cfg(all(feature = "std", feature = "tti"))]
+            is_error::<crate::author::AuthorError>();
+            #[cfg(feature = "write-text")]
+            {
+                is_error::<crate::write_text::WriteError>();
+                is_error::<crate::write_text::RunError>();
+                is_error::<crate::write_text::RunFault>();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod robustness;

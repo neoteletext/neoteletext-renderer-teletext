@@ -48,6 +48,9 @@ alloc = []
 # triplets (REQ-CLI-010, REQ-2148), and text runs at their places on a page
 # (REQ-2214). With `std` and `tti`, whole pages as TTI files.
 write-text = ["alloc", "neoteletext-core/extended-sets", "dep:unicode-bidi"]
+# REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types,
+# which needs `core::fmt`.
+error-trait = []
 # REQ-GEN-010: the writers need `std::io`. It is not a default because the
 # crate is `no_std`. The page writers also need `pages`, the TTI writer and
 # the authoring module `tti`.

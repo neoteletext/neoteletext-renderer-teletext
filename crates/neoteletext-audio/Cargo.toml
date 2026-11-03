@@ -41,6 +41,9 @@ opus = ["dep:neoteletext-opus"]
 # Writing sounds: the IMA ADPCM encoder, records and broadcast packets, for
 # publishing tools (REQ-AUD-020). It allocates, so it is not a default.
 encode = ["ima", "idl"]
+# REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types,
+# which needs `core::fmt`.
+error-trait = []
 
 [lints]
 workspace = true
