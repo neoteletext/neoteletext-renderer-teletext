@@ -88,3 +88,20 @@ fn a_letter_with_a_mark_still_joins() {
     join_row(&mut cells);
     assert_eq!(forms(&cells, 3), [JoinForm::Final, JoinForm::Medial, JoinForm::Initial]);
 }
+
+/// REQ-82, REQ-84 (TODO-1164): the Balochi set holds ۏ and ࢩ, and they
+/// join: visual ۏ then ࢩ, read right to left as ࢩ initial (dual-joining)
+/// and ۏ final (right-joining), each drawn at a joined form of its own.
+#[test]
+fn balochi_waw_with_dot_above_and_yeh_join() {
+    let balochi = CharSet::G0(G0 { set: G0Set::Balochi, national: None });
+    let mut cells = [Cell::BLANK; COLUMNS];
+    for (cell, letter) in cells.iter_mut().zip(['\u{06CF}', '\u{08A9}']) {
+        let code = (0x20..0x7F).find(|&code| to_unicode(CharRef::new(balochi, code)).base == letter).unwrap();
+        cell.glyph = Glyph::Char(CharRef::new(balochi, code));
+    }
+    join_row(&mut cells);
+    assert_eq!(forms(&cells, 2), [JoinForm::Final, JoinForm::Initial]);
+    assert_ne!(joined_form('\u{06CF}', JoinForm::Final), '\u{06CF}');
+    assert_ne!(joined_form('\u{08A9}', JoinForm::Initial), '\u{08A9}');
+}

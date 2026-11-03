@@ -396,3 +396,39 @@ fn to_unicode_never_gives_a_private_use_code_point() {
         }
     }
 }
+
+/// The code of `letter` in `set`.
+fn code_of(set: CharSet, letter: char) -> u8 {
+    (SPACE..0x7F)
+        .find(|&code| to_unicode(CharRef::new(set, code)).base == letter)
+        .unwrap_or_else(|| panic!("{letter} is in {set:?}"))
+}
+
+/// REQ-77, DEC-2350 (TODO-1164): ё and Ё are reached on a Cyrillic page
+/// that lacks them as е and Е with the diaeresis placed by X/26, on the
+/// standard's Russian set and on NeoTeletext's Kyrgyz set alike, and are
+/// drawn from the font's precomposed glyphs.
+#[cfg(all(feature = "extended-sets", feature = "render"))]
+#[test]
+fn yo_is_e_with_a_diaeresis_on_a_cyrillic_page() {
+    const DIAERESIS: u8 = 8;
+    let glyphs = crate::glyphs::GlyphSet::noto_teletext();
+    for set in [G0Set::Cyrillic2, G0Set::KyrgyzMongolian] {
+        let set = CharSet::G0(G0 { set, national: None });
+        for (plain, with_diaeresis) in [('е', 'ё'), ('Е', 'Ё')] {
+            let character = CharRef { diacritic: DIAERESIS, ..CharRef::new(set, code_of(set, plain)) };
+            let unicode = to_unicode(character);
+            assert_eq!(compose(unicode.base, unicode.combining.unwrap()), Some(with_diaeresis), "{set:?}");
+            assert_eq!(Some(&glyphs.glyph(character)), glyphs.lookup(with_diaeresis), "{set:?} draws {with_diaeresis}");
+        }
+    }
+}
+
+/// REQ-82 (TODO-1164): the Tatar set holds Щ at 2/7 and щ at 3/E, in
+/// place of Table 39's apostrophe and greater-than sign.
+#[cfg(feature = "extended-sets")]
+#[test]
+fn tatar_holds_shcha_at_2_7_and_3_e() {
+    let tatar = CharSet::G0(G0 { set: G0Set::Tatar, national: None });
+    assert_eq!((to_unicode(CharRef::new(tatar, 0x27)).base, to_unicode(CharRef::new(tatar, 0x3E)).base), ('Щ', 'щ'));
+}
