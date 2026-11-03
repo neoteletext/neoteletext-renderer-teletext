@@ -94,8 +94,9 @@ fn process(
         grid.double_height_rows = 0;
         return EnhancementReport::new(build, level);
     }
-    let (designation, second_g0, _) = resolve_designation(Some(page), magazine, &config);
+    let (designation, second_g0, fallback) = resolve_designation(Some(page), magazine, &config);
     grid.designation = designation;
+    grid.designation_fallback = fallback;
 
     let presentation = presentation(page, magazine, &links, level);
     let default_sets = (designation.g0.set, designation.g2);

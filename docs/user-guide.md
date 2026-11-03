@@ -40,7 +40,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 
 | Command | What it does |
 |---|---|
-| `neottx list INPUT` | Lists the pages and sub-pages found, with reception counts and error statistics. |
+| `neottx list INPUT` | Lists the pages and sub-pages found, with reception counts and error statistics, including how many pages named a character set designation that Table 32 reserves and so fell back to another set. |
 | `neottx show INPUT PAGE` | Shows one page in the terminal and exits. |
 | `neottx view INPUT` | Browses pages interactively. |
 | `neottx probe CHANNEL` | Opens a channel as a receiver does and reports what it found, for a channel's developer. |

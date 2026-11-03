@@ -1,5 +1,5 @@
-//! Enhancement faults in the decoder's statistics (REQ-L25-051,
-//! REQ-ARCH-007), and the transition trace of the Level 1.5 walk and the
+//! Enhancement faults and designation fallbacks in the decoder's
+//! statistics (REQ-L25-051, REQ-72, REQ-ARCH-007), and the transition trace of the Level 1.5 walk and the
 //! Level 2.5 and 3.5 walk (REQ-FSM-010).
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
 
@@ -67,8 +67,12 @@ fn address() -> PageAddress {
     PageAddress::from_mpp(DISPLAY).unwrap()
 }
 
-/// Composes page 100 as the viewer does, and returns its report.
-fn compose(decoder: &Decoder<'_>, config: &Config) -> Option<EnhancementReport> {
+/// Composes page 100 as the viewer does, and returns its report, its
+/// build, and whether its designation fell back.
+fn compose_with_designation(
+    decoder: &Decoder<'_>,
+    config: &Config,
+) -> (Option<EnhancementReport>, Option<PageBuild>, bool) {
     let mut viewer = Viewer::new(address());
     let _ = viewer.event(ViewerEvent::Started);
     let _ = viewer.event(ViewerEvent::PagePresent);
@@ -84,10 +88,17 @@ fn compose(decoder: &Decoder<'_>, config: &Config) -> Option<EnhancementReport> 
     };
     let page = decoder.store().get(address(), SubCode::ANY);
     let mut grid = Box::new(Grid::EMPTY);
-    match viewer.compose(&mut grid, page, &context) {
+    let report = match viewer.compose(&mut grid, page, &context) {
         Composed::Built(report) => report,
         Composed::Held => panic!("the viewer is not holding"),
-    }
+    };
+    let build = page.map(|page| PageBuild::of(page, config.level));
+    (report, build, grid.designation_fallback)
+}
+
+/// Composes page 100 as the viewer does, and returns its report.
+fn compose(decoder: &Decoder<'_>, config: &Config) -> Option<EnhancementReport> {
+    compose_with_designation(decoder, config).0
 }
 
 /// Composes page 100 and records the report, as a port does on a redraw.
@@ -173,6 +184,49 @@ fn redraws_do_not_count_again() {
         // At Levels 1 and 1.5 there is no report to record.
         assert!(compose(decoder, &config(PresentationLevel::Level15)).is_none());
     });
+}
+
+/// Composes page 100 and records both of its reports, as the viewers of
+/// `neottx` and the application do on a redraw.
+fn redraw_counting_designation(decoder: &mut Decoder<'_>, config: &Config) {
+    let (report, build, fell_back) = compose_with_designation(decoder, config);
+    if let Some(report) = report {
+        decoder.record_enhancement(report.build, &report.faults);
+    }
+    decoder.record_designation(build.expect("page 100 is stored"), fell_back);
+}
+
+/// A receiver region in which Table 32 assigns no entry, so that a page
+/// with no designation of its own falls back to group 0000 (REQ-72).
+const RESERVED_REGION: u8 = 0b1110;
+
+/// REQ-72 (REQ-CHR-003, "the fallback shall be counted as a diagnostic"):
+/// at every level, a page whose Table 32 entry is reserved is counted once
+/// for each build however often it is redrawn, and again when it is
+/// received again; a page whose entry is assigned is not counted.
+#[test]
+fn a_designation_fallback_is_counted_once_per_build() {
+    let packets = display_page(0, &[(1, b"TEXT")], Vec::new());
+    for level in
+        [PresentationLevel::Level1, PresentationLevel::Level15, PresentationLevel::Level25, PresentationLevel::Level35]
+    {
+        let assigned = config(level);
+        let reserved = Config { default_region: RESERVED_REGION, ..assigned };
+        Receiver::new().run_mut(&packets, reserved, |decoder| {
+            assert_eq!(decoder.statistics().designation_fallbacks, 0, "nothing counted before a build");
+            for _ in 0..3 {
+                redraw_counting_designation(decoder, &reserved);
+            }
+            assert_eq!(decoder.statistics().designation_fallbacks, 1, "three redraws, one build, at {level:?}");
+            feed(decoder, &packets, SECOND_FEED_US);
+            redraw_counting_designation(decoder, &reserved);
+            assert_eq!(decoder.statistics().designation_fallbacks, 2, "a new reception, at {level:?}");
+        });
+        Receiver::new().run_mut(&packets, assigned, |decoder| {
+            redraw_counting_designation(decoder, &assigned);
+            assert_eq!(decoder.statistics().designation_fallbacks, 0, "an assigned entry, at {level:?}");
+        });
+    }
 }
 
 /// Builds page 100 from `packets` with the walk traced, and returns the

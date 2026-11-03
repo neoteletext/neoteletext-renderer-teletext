@@ -35,6 +35,9 @@ impl ViewState {
             if let Some(report) = self.unrecorded.take() {
                 session.decoder_mut().record_enhancement(report.build, &report.faults);
             }
+            if let Some((build, fell_back)) = self.unrecorded_designation.take() {
+                session.decoder_mut().record_designation(build, fell_back);
+            }
             let now = Instant(self.start.elapsed().as_micros().try_into().unwrap_or(u64::MAX));
             if self.live {
                 self.live = source.poll(session, now);
