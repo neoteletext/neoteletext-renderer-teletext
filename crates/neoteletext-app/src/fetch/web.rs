@@ -433,11 +433,15 @@ fn send_page(page: &PageBytes<'_>) -> std::io::Result<()> {
 /// Tells the decoder about a (new) service's refresh period, linked
 /// services and aliases before any of its pages (Appendix E).
 fn announce_service(descriptor: Option<&Descriptor>) -> std::io::Result<()> {
-    let names: Vec<String> = descriptor
+    let services: Vec<pipe::ServiceEntry> = descriptor
         .map(|descriptor| {
             descriptor
                 .services()
-                .map(|service| String::from_utf8_lossy(service.short_name.as_bytes()).into_owned())
+                .map(|service| pipe::ServiceEntry {
+                    short_name: String::from_utf8_lossy(service.short_name.as_bytes()).into_owned(),
+                    display_name: String::from_utf8_lossy(service.display_name.as_bytes()).into_owned(),
+                    origin: origin_of(descriptor.service_address(service)),
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -453,8 +457,25 @@ fn announce_service(descriptor: Option<&Descriptor>) -> std::io::Result<()> {
         send(&Frame::Notice(Notice::Refresh(seconds)))?;
     }
     send(&Frame::Notice(Notice::Region(descriptor.and_then(|descriptor| descriptor.region))))?;
-    send(&Frame::Notice(Notice::Service(names)))?;
+    send(&Frame::Notice(Notice::Service(services)))?;
     send(&Frame::Notice(Notice::Aliases(aliases)))
+}
+
+/// An address's origin (REQ-WEB-015) serialised as RFC 6454 section 6.2
+/// does: the scheme, the host in lower case, and the port when it is not the
+/// scheme's own; empty for an address that does not parse.
+fn origin_of(address: &str) -> String {
+    let Ok(url) = neoteletext_web::url::Url::parse(address) else { return String::new() };
+    let origin = url.origin();
+    let scheme = String::from_utf8_lossy(url.scheme().name()).into_owned();
+    // RFC 3986 section 3.2.2: an IPv6 address is written in brackets.
+    let host = origin.host.as_str();
+    let host = if host.contains(':') { format!("[{host}]") } else { host.to_owned() };
+    if origin.port == url.scheme().default_port() {
+        format!("{scheme}://{host}")
+    } else {
+        format!("{scheme}://{host}:{}", origin.port)
+    }
 }
 
 /// Gives the agent what the decoder asked for: a page, a key, or a link to

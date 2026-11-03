@@ -9,7 +9,7 @@ use crate::clock::now_ms;
 use crate::frame::Frame;
 use crate::terminal::Display;
 use crossterm::event::Event;
-use neoteletext_app::interact::message_row;
+use neoteletext_app::interact::{leave_prompt, message_row};
 use neoteletext_app::session::Session;
 use neoteletext_app::source::Source;
 use neoteletext_core::config::Config;
@@ -81,7 +81,7 @@ impl ViewState {
     }
 
     /// Carries out the action the viewer asked for last, and clears it.
-    fn act(&mut self, session: &mut Session, source: &mut dyn Source) {
+    pub(super) fn act(&mut self, session: &mut Session, source: &mut dyn Source) {
         match self.action {
             Action::Request(address, subcode) => {
                 session.decoder_mut().set_requested(Some(address));
@@ -90,7 +90,9 @@ impl ViewState {
             }
             Action::FollowService(target) => {
                 if let Some(service) = target.service {
-                    self.confirmed_services.insert(service);
+                    if let Some(linked) = source.linked_service(service).filter(|linked| !linked.origin.is_empty()) {
+                        self.confirmed_origins.insert(linked.origin);
+                    }
                     source.follow(service, target.address, target.subcode);
                     self.viewer = Viewer::new(target.address);
                     let _ = self.viewer.event(ViewerEvent::Started);
@@ -98,8 +100,9 @@ impl ViewState {
                 self.prompt = None;
             }
             Action::ConfirmService(target) => {
-                let name = target.service.and_then(|service| source.service_name(service)).unwrap_or_default();
-                self.prompt = Some(message_row(&format!("Leave for {name}? Press the same key again")));
+                let linked = target.service.and_then(|service| source.linked_service(service)).unwrap_or_default();
+                let name = if linked.display_name.is_empty() { &linked.short_name } else { &linked.display_name };
+                self.prompt = Some(leave_prompt(name, &linked.origin));
             }
             Action::None => {}
         }

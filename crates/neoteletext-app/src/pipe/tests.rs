@@ -15,7 +15,14 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
         Frame::Notice(Notice::Input(true)),
         Frame::Input(vec![0x61, 0xFF, 0x01, 0x04, 0x02]),
         Frame::Notice(Notice::Message("hello".into())),
-        Frame::Notice(Notice::Service(vec!["other".into(), "weather".into()])),
+        Frame::Notice(Notice::Service(vec![
+            ServiceEntry {
+                short_name: "other".into(),
+                display_name: "Other service".into(),
+                origin: "https://other.example".into(),
+            },
+            ServiceEntry::default(),
+        ])),
         Frame::Notice(Notice::Current(0x100)),
         Frame::Notice(Notice::Offline(0x8FF)),
         Frame::Request(0x123, 0xFFFF),
@@ -64,6 +71,8 @@ fn frames_round_trip_and_bad_frames_are_rejected() {
         &[b'X', 0, 0, 0, 0],
         &[b'P', 0, 0, 0, 1, 0],
         &[b'S', 0, 0, 0, 2, 0, 9],
+        // A service with its short name alone, as the pipe carried before.
+        &[b'S', 0, 0, 0, 7, 0, 1, 0, 0, 0, 1, b'a'],
         &[b'L', 0, 0, 0, 8, 1, 0, 0xFF, 0xFF, 0, 0, 0, 9],
         // A region is four bits, and one.
         &[b'r', 0, 0, 0, 1, 16],

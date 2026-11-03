@@ -3,7 +3,7 @@
 
 use super::{
     Frame, IndexEntry, IndexPart, ListPart, LiveList, MAX_FRAME, MAX_INDEX_PAGES, MAX_INPUT_MESSAGE, MAX_LIST_ROWS,
-    MAX_LIST_VERSION, MAX_LIVE_LIST, Notice, Origin, PageData,
+    MAX_LIST_VERSION, MAX_LIVE_LIST, Notice, Origin, PageData, ServiceEntry,
 };
 use neoteletext_core::consts::NIBBLE_MASK;
 use std::io::{self, Read, Write};
@@ -145,11 +145,13 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
         Frame::Notice(Notice::InitialPage(mpp)) => put(out, INITIAL, &mpp.to_be_bytes()),
         Frame::Notice(Notice::Unencrypted) => put(out, UNENCRYPTED, &[]),
         Frame::Notice(Notice::Message(text)) => put(out, MESSAGE, text.as_bytes()),
-        Frame::Notice(Notice::Service(names)) => {
+        Frame::Notice(Notice::Service(services)) => {
             let mut buffer = Vec::new();
-            buffer.extend_from_slice(&u16::try_from(names.len().min(MAX_STRINGS)).unwrap_or(0).to_be_bytes());
-            for name in names.iter().take(MAX_STRINGS) {
-                put_string(&mut buffer, name);
+            buffer.extend_from_slice(&u16::try_from(services.len().min(MAX_STRINGS)).unwrap_or(0).to_be_bytes());
+            for service in services.iter().take(MAX_STRINGS) {
+                put_string(&mut buffer, &service.short_name);
+                put_string(&mut buffer, &service.display_name);
+                put_string(&mut buffer, &service.origin);
             }
             put(out, SERVICE, &buffer)
         }
@@ -308,9 +310,17 @@ pub fn read(input: &mut dyn Read) -> io::Result<Option<Frame>> {
         MESSAGE => Frame::Notice(Notice::Message(String::from_utf8_lossy(&payload).into_owned())),
         SERVICE => {
             let count = usize::from(cursor.u16()?);
-            let names = (0..count.min(MAX_STRINGS)).map(|_| cursor.string()).collect::<io::Result<Vec<_>>>()?;
+            let services = (0..count.min(MAX_STRINGS))
+                .map(|_| {
+                    Ok(ServiceEntry {
+                        short_name: cursor.string()?,
+                        display_name: cursor.string()?,
+                        origin: cursor.string()?,
+                    })
+                })
+                .collect::<io::Result<Vec<_>>>()?;
             cursor.end()?;
-            Frame::Notice(Notice::Service(names))
+            Frame::Notice(Notice::Service(services))
         }
         CURRENT => {
             Frame::Notice(Notice::Current(u16::from_be_bytes(payload.as_slice().try_into().map_err(|_| invalid())?)))

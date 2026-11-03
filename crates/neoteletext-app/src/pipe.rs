@@ -87,9 +87,9 @@ pub enum Notice {
     Unencrypted,
     /// A message for the user.
     Message(String),
-    /// A new service is ready; its linked services' short names in
-    /// descriptor order (Appendix E).
-    Service(Vec<String>),
+    /// A new service is ready; its linked services in descriptor order
+    /// (Appendix E).
+    Service(Vec<ServiceEntry>),
     /// A new service's default character set region, or none: then the
     /// receiver's own (REQ-WEB-002, decision E.4). Read before its pages.
     Region(Option<u8>),
@@ -154,6 +154,19 @@ pub enum Notice {
     /// and its `LN`, `LK` and `LT` lines, for the same store as a page
     /// file's; none replaces the links held for the sub-page.
     Links(Vec<u8>),
+}
+
+/// A service a descriptor links to (Appendix E, REQ-288).
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct ServiceEntry {
+    /// The short name `LN` targets use.
+    pub short_name: String,
+    /// The name shown to the viewer.
+    pub display_name: String,
+    /// Its origin (REQ-WEB-015) as RFC 6454 section 6.2 serialises one:
+    /// `https://host`, with `:port` when the port is not the scheme's own;
+    /// empty when its address does not parse.
+    pub origin: String,
 }
 
 /// One page of a live channel's index.

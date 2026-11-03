@@ -34,7 +34,9 @@ pub struct Live {
     frames: Receiver<Frame>,
     notices: Vec<Notice>,
     extras: HashMap<(PageAddress, SubCode), PageExtras>,
-    services: Vec<String>,
+    services: Vec<pipe::ServiceEntry>,
+    /// The linked services' short names, as a page's links name them.
+    service_names: Vec<String>,
     ended: bool,
     /// The bytes each page last arrived as, to take in again when the
     /// server confirms them current (REQ-WEB-009).
@@ -92,6 +94,7 @@ impl Live {
             notices: Vec::new(),
             extras: HashMap::new(),
             services: Vec::new(),
+            service_names: Vec::new(),
             ended: false,
             last_bytes: HashMap::new(),
             requested: None,
@@ -136,7 +139,7 @@ impl Live {
         let mut reader = Box::new(AutoReader::new(AutoConfig { format, encode_pages: true, ..AutoConfig::default() }));
         let mut packets: Vec<(Packet, PacketMeta)> = Vec::new();
         let mut first = None;
-        let services = self.services.clone();
+        let services = self.service_names.clone();
         let allowed = if page.origin == Origin::Page { Fill::Asked(&self.asked) } else { Fill::Any };
         let extras = &mut self.extras;
         let mut collect = |item: Item<'_>| match item {
@@ -189,7 +192,7 @@ impl Live {
     /// A live sub-page's links, as a page file's `LN`, `LK` and `LT` lines
     /// give them, replace those held for it; none removes them (DOC-1958).
     fn take_links(&mut self, tti: &[u8]) {
-        let services = self.services.clone();
+        let services = self.service_names.clone();
         let extras = &mut self.extras;
         let mut reader = neoteletext_formats::tti::TtiReader::new();
         let mut take = |item: Item<'_>| {
@@ -252,7 +255,7 @@ impl Source for Live {
                 Frame::T42(page) => self.receive(session, Some(Format::T42(T42Variant::Plain)), &page, now),
                 Frame::Undeclared(page) => self.receive(session, None, &page, now),
                 Frame::Notice(Notice::Region(region)) => self.take_region(session, region),
-                Frame::Notice(Notice::Service(names)) => {
+                Frame::Notice(Notice::Service(services)) => {
                     session.restart();
                     self.extras.clear();
                     self.last_bytes.clear();
@@ -260,7 +263,8 @@ impl Source for Live {
                     self.channel_lists = list::LiveLists::default();
                     self.index.clear();
                     self.index_sending = None;
-                    self.services = names;
+                    self.service_names = services.iter().map(|service| service.short_name.clone()).collect();
+                    self.services = services;
                 }
                 Frame::Notice(Notice::Refresh(seconds)) => {
                     // The descriptor bounds it; the pipe could carry any value.
@@ -404,13 +408,13 @@ impl Source for Live {
     }
 
     fn follow(&mut self, service: u8, page: PageAddress, subcode: SubCode) {
-        if let Some(name) = self.services.get(usize::from(service)).cloned() {
+        if let Some(name) = self.service_names.get(usize::from(service)).cloned() {
             let sub = if subcode.is_any() { u16::MAX } else { subcode.value() };
             self.send(&Frame::Follow(name, page.mpp(), sub));
         }
     }
 
-    fn service_name(&self, service: u8) -> Option<String> {
+    fn linked_service(&self, service: u8) -> Option<pipe::ServiceEntry> {
         self.services.get(usize::from(service)).cloned()
     }
 }

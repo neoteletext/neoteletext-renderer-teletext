@@ -414,3 +414,60 @@ fn the_viewer_writes_the_trace_where_it_does_not_spoil_the_page() {
     state.write_trace(&mut session, &mut written, false);
     assert_eq!(written, b"");
 }
+
+/// A source of a service linking to others, as a descriptor lists them.
+#[derive(Default)]
+struct Linking(Vec<neoteletext_app::pipe::ServiceEntry>);
+
+impl neoteletext_app::source::Source for Linking {
+    fn poll(
+        &mut self,
+        _session: &mut neoteletext_app::session::Session,
+        _now: neoteletext_core::types::Instant,
+    ) -> bool {
+        true
+    }
+
+    fn linked_service(&self, service: u8) -> Option<neoteletext_app::pipe::ServiceEntry> {
+        self.0.get(usize::from(service)).cloned()
+    }
+}
+
+fn linked(short_name: &str, display_name: &str, origin: &str) -> neoteletext_app::pipe::ServiceEntry {
+    neoteletext_app::pipe::ServiceEntry {
+        short_name: short_name.into(),
+        display_name: display_name.into(),
+        origin: origin.into(),
+    }
+}
+
+// Verifies REQ-288: the question names the service as its descriptor gives
+// it and its origin, with the whole instruction; following the link
+// confirms the origin for the session, so a new service's notice keeps it,
+// and another origin under the same short name in the next descriptor is
+// asked about again.
+#[test]
+fn a_confirmed_origin_lasts_the_session_and_another_is_asked() {
+    use neoteletext_core::nav::LinkTarget;
+    use neoteletext_core::types::{PageAddress, SubCode};
+    use neoteletext_core::viewer::Action;
+    let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
+    let mut state = view_state(&session);
+    let mut source = Linking(vec![linked("weather", "The Weather Channel", "https://weather.example")]);
+    let target = LinkTarget { address: PageAddress::from_mpp(0x100).unwrap(), subcode: SubCode::ANY, service: Some(0) };
+    state.action = Action::ConfirmService(target);
+    state.act(&mut session, &mut source);
+    assert_eq!(
+        state.prompt,
+        Some(neoteletext_app::interact::leave_prompt("The Weather Channel", "https://weather.example"))
+    );
+    assert!(!state.origin_confirmed(&source, 0));
+    state.action = Action::FollowService(target);
+    state.act(&mut session, &mut source);
+    assert!(state.origin_confirmed(&source, 0));
+    let mut recorded = Recorded::default();
+    state.take_notice(neoteletext_app::pipe::Notice::Service(source.0.clone()), &mut recorded);
+    assert!(state.origin_confirmed(&source, 0), "kept across a new service");
+    let other = Linking(vec![linked("weather", "Other weather", "https://other.example")]);
+    assert!(!state.origin_confirmed(&other, 0), "the same short name at another origin");
+}

@@ -49,7 +49,6 @@ impl ViewState {
                     self.adopt_initial(address);
                 }
             }
-            Notice::Service(_) => self.confirmed_services.clear(),
             Notice::Input(open) => {
                 let clock_ms = now_ms(self.start);
                 self.typing.connection(source, open, clock_ms);
@@ -60,7 +59,9 @@ impl ViewState {
             Notice::Offline(mpp) if PageAddress::from_mpp(mpp) == Some(self.viewer.requested().0) => {
                 self.prompt = Some(message_row("Page not available offline"));
             }
-            Notice::Offline(_)
+            // An origin confirmed stays confirmed for the session (REQ-288).
+            Notice::Service(_)
+            | Notice::Offline(_)
             | Notice::Current(_)
             | Notice::ServiceName(_)
             | Notice::Bundle(_)

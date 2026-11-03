@@ -157,7 +157,7 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 | `z` | Zoom: top half, bottom half, off. |
 | `q`, Esc or Ctrl+C | Quit. |
 
-A link to another service asks for confirmation: press the same key again.
+A link to another service asks for confirmation: the status area shows `LEAVE?`, and row 24 the service's name and its origin, as in `Same key: Weather at weather.example` (the scheme is shown when it is not `https`), and pressing the same key again goes there; any other key stays. Once an origin is confirmed it is not asked about again for as long as the viewer runs, in any service (REQ-288, DEC-2454).
 
 With `-vv` the viewer writes the state machines' transitions, as the other commands do, to standard error; since the page is drawn on the terminal, standard error must be redirected for them to be written (`neottx view -vv INPUT 2>trace.txt`). The walk of a page's presentation level is traced once for each reception of the page shown. Without the redirection the trace is dropped, and the viewer says so when it ends.
 

@@ -71,8 +71,9 @@ pub trait Source {
     /// Follows a link to another service.
     fn follow(&mut self, _service: u8, _page: PageAddress, _subcode: SubCode) {}
 
-    /// The short name of a linked service.
-    fn service_name(&self, _service: u8) -> Option<String> {
+    /// A linked service: its short name, the name shown and its origin
+    /// (REQ-288).
+    fn linked_service(&self, _service: u8) -> Option<crate::pipe::ServiceEntry> {
         None
     }
 }

@@ -102,7 +102,7 @@ impl ViewState {
             self.pending_step = None;
             self.step_subpage(key == Key::NextSubPage, source, session, shown);
         } else {
-            self.machine_key(key, session, shown);
+            self.machine_key(key, source, session, shown);
         }
     }
 
@@ -134,20 +134,29 @@ impl ViewState {
                 // The machine steps only through a page it shows.
                 if self.viewer.state() == ViewerState::Displaying {
                     let key = if forward { Key::NextSubPage } else { Key::PreviousSubPage };
-                    self.machine_key(key, session, shown);
+                    self.machine_key(key, source, session, shown);
                 }
             }
         }
     }
 
+    /// Whether a linked service's origin was confirmed this session, in any
+    /// service (REQ-288): the confirmation belongs to the origin, not to a
+    /// place in one descriptor's list.
+    #[cfg(test)]
+    pub(super) fn origin_confirmed(&self, source: &dyn Source, service: u8) -> bool {
+        confirmed_in(&self.confirmed_origins, source, service)
+    }
+
     /// A key for the viewer machine, with the links of the page shown.
-    fn machine_key(&mut self, key: Key, session: &Session, shown: &Shown<'_>) {
+    fn machine_key(&mut self, key: Key, source: &dyn Source, session: &Session, shown: &Shown<'_>) {
         let links = shown
             .extras
             .and_then(|extras| extras.links)
             .or_else(|| shown.page.map(PageLinks::from_page))
             .unwrap_or_default();
-        let confirmed = |service| self.confirmed_services.contains(&service);
+        let origins = &self.confirmed_origins;
+        let confirmed = |service| confirmed_in(origins, source, service);
         // REQ-SEC-024: links work only while their prompts are on
         // screen: shown whole in row 24, and not zoomed off.
         let zoomed_off = self.viewer.zoom() == neoteletext_core::level1::Zoom::Top;
@@ -166,4 +175,9 @@ impl ViewState {
             self.prompt = None;
         }
     }
+}
+
+/// Whether a linked service's origin is among those confirmed.
+fn confirmed_in(origins: &std::collections::HashSet<String>, source: &dyn Source, service: u8) -> bool {
+    source.linked_service(service).is_some_and(|linked| !linked.origin.is_empty() && origins.contains(&linked.origin))
 }

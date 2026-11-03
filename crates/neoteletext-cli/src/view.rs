@@ -61,7 +61,8 @@ struct ViewState {
     last_drawn: Option<(Grid, Option<Frame>, bool, Zoom)>,
     action: Action,
     prompt: Option<[u8; COLUMNS]>,
-    confirmed_services: HashSet<u8>,
+    // The origins confirmed this session (REQ-288), kept across services.
+    confirmed_origins: HashSet<String>,
     typing: Typing,
     // The reception of the page whose walk was last traced (REQ-FSM-010).
     traced: Option<(neoteletext_core::fsm::PageKey, Instant)>,
@@ -110,7 +111,7 @@ impl ViewState {
             last_drawn: None,
             action,
             prompt: None,
-            confirmed_services: HashSet::new(),
+            confirmed_origins: HashSet::new(),
             typing,
             traced: None,
             walk_trace: Vec::new(),
