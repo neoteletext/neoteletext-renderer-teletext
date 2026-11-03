@@ -12,7 +12,11 @@ use crate::consts::{
 };
 use crate::level1::{Cell, DisplayOptions, Grid, PageRows, Size, resolve_designation};
 use crate::objects::{self, EnhancementLinks};
-use crate::trace::TraceSink;
+use crate::trace::{Machine, TraceSink};
+
+/// The state named in a trace of row resolution, which runs after the walk
+/// and has no states of its own to report.
+const ROW_RESOLUTION: &str = "Resolving the row";
 
 /// True when the page is an enhancement page and so never shown as text
 /// (REQ-OBJ-041): the Magazine Organization Table, or a page whose stored
@@ -116,8 +120,9 @@ fn process(
 
     // The page-level run: screen and row colours (decision E.45).
     let mut page_level = Collector::new(None, last_colour_row);
+    let mut trace = trace;
     let mut walker = Walker::new(&inputs);
-    walker.walk(&mut page_level, trace);
+    walker.walk(&mut page_level, trace.as_deref_mut());
     let mut report = walker.report;
     let (screen, row_colours) = page_colours(&page_level, &presentation);
 
@@ -134,7 +139,7 @@ fn process(
         level_1_g0: designation.g0,
         boxed_page: control & (C5_NEWSFLASH | C6_SUBTITLE) != 0,
     };
-    rebuild_rows(grid, &rows, shown, &mut report);
+    rebuild_rows(grid, &rows, shown, &mut report, trace);
 
     store_presentation(grid, &presentation, screen, row_colours);
     report
@@ -193,7 +198,17 @@ fn store_presentation(
 
 /// Rebuilds the rows the page shows, top to bottom, so that each row knows
 /// the row above it (REQ-L25-025, REQ-L25-026).
-fn rebuild_rows(grid: &mut Grid, rows: &Rows<'_, '_>, shown: PageRows, report: &mut EnhancementReport) {
+/// Each undefined character position a row shows is traced, when `trace`
+/// is given, as a transition of that row's attribute machine (REQ-L25-010,
+/// decision E.50): the position is found only here, where the row's sets
+/// are resolved.
+fn rebuild_rows(
+    grid: &mut Grid,
+    rows: &Rows<'_, '_>,
+    shown: PageRows,
+    report: &mut EnhancementReport,
+    mut trace: Option<&mut TraceSink<'_>>,
+) {
     let receiver_area: [Cell; RECEIVER_COLUMNS] = core::array::from_fn(|column| {
         grid.cells.first().and_then(|row| row.get(column)).copied().unwrap_or(Cell::BLANK)
     });
@@ -213,7 +228,19 @@ fn rebuild_rows(grid: &mut Grid, rows: &Rows<'_, '_>, shown: PageRows, report: &
             let upper = cells.above.get(column).copied().flatten().unwrap_or(Cell::BLANK);
             Cell { foreground: upper.foreground, background: upper.background, boxed: upper.boxed, ..Cell::BLANK }
         });
+        let undefined_before = report.faults.undefined_characters;
         let spacing_double = rows.row(row, lower, &fill, &mut cells, report);
+        if let Some(trace) = trace.as_deref_mut() {
+            for _ in undefined_before..report.faults.undefined_characters {
+                trace.transition(
+                    Machine::RowAttributes(u8::try_from(row).unwrap_or(u8::MAX)),
+                    ROW_RESOLUTION,
+                    "undefined character position",
+                    "show a space (decision E.50, REQ-L25-010)",
+                    ROW_RESOLUTION,
+                );
+            }
+        }
         for (column, cell) in cells.cells.iter().enumerate() {
             let mut cell = cell.unwrap_or_else(|| fill.get(column).copied().unwrap_or(Cell::BLANK));
             // REQ-L25-050: row 0 columns 0 to 7 stay the receiver's.

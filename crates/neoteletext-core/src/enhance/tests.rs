@@ -997,6 +997,46 @@ fn the_walk_is_traced() {
     assert_eq!(entries[entries.len() - 2..], expected);
 }
 
+/// REQ-262 (REQ-L25-010, decision E.50): an undefined G3 position shows
+/// a space and is traced, as a transition of its row's attribute machine,
+/// once for each such cell; a defined one is not, and nothing is traced
+/// without the configuration's trace.
+#[test]
+fn an_undefined_character_position_is_traced() {
+    let g3 = |column: u8, code: u8| TripletFunction::G3Character { column, code, level_15_form: false };
+    let packets = page(
+        0,
+        &[(1, b"ROW 1")],
+        local_data(&[position(1, 0), g3(2, G3_UNDEFINED[0]), g3(3, 0x41), g3(4, G3_UNDEFINED[1])]),
+    );
+    let run = |trace: bool| {
+        let config = Config { trace, ..level(PresentationLevel::Level25) };
+        with_page(PAGE, &packets, &config, |page, magazine, lookup| {
+            let options = DisplayOptions::default();
+            let mut grid = Box::new(Grid::EMPTY);
+            build_grid(&mut grid, Some(page), magazine, &config, &options);
+            let mut entries = Vec::new();
+            let mut receive = |entry: crate::trace::TraceEntry| {
+                if entry.machine != crate::trace::Machine::EnhancementWalk {
+                    entries.push((entry.machine, entry.event, entry.action));
+                }
+            };
+            let mut sink = crate::trace::TraceSink { time: Instant(0), entries: &mut receive };
+            let report = apply_traced(&mut grid, page, magazine, lookup, &config, &options, &mut sink);
+            assert_eq!(report.faults.undefined_characters, 2);
+            assert_eq!((shown(&grid.cells[1][2]), shown(&grid.cells[1][4])), (' ', ' '));
+            entries
+        })
+    };
+    let undefined = (
+        crate::trace::Machine::RowAttributes(1),
+        "undefined character position",
+        "show a space (decision E.50, REQ-L25-010)",
+    );
+    assert_eq!(run(true), [undefined, undefined]);
+    assert_eq!(run(false), []);
+}
+
 /// True when no two names are the same.
 fn distinct(names: &[&str]) -> bool {
     let mut sorted = names.to_vec();
