@@ -270,6 +270,244 @@ mod opus {
     static FINAL_RANGE: fn(&Decoder) -> u32 = final_range;
 }
 
+/// The web module's readers a port calls itself, outside the user agent: a
+/// channel's records, its contents file, its descriptor, a sub-page list,
+/// and a cookie header (REQ-GEN-019: every public entry point).
+#[cfg(feature = "web")]
+mod web_readers {
+    use super::black_box;
+    use neoteletext_web::cookie::SetCookie;
+    use neoteletext_web::descriptor::Descriptor;
+    use neoteletext_web::records::{cookie, denied, index, links, log, redirect, subpages as subpage_records};
+    use neoteletext_web::url::Url;
+    use neoteletext_web::{contents, subpages};
+
+    fn records(body: &[u8]) {
+        black_box(index::read(body).is_ok());
+        black_box(links::read(body).is_ok());
+        black_box(log::read(body).is_ok());
+        black_box(redirect::read(body).is_ok());
+        black_box(subpage_records::read(body).is_ok());
+        black_box(denied::read(body).is_ok());
+        black_box(cookie::read(body).is_ok());
+    }
+
+    fn files(bytes: &[u8], base: &Url) {
+        if let Ok(entries) = contents::read(bytes) {
+            for entry in entries {
+                let _ = black_box(entry);
+            }
+        }
+        black_box(subpages::read(bytes).is_ok());
+        black_box(Descriptor::parse(bytes, base).is_ok());
+        black_box(Descriptor::parse_channel(bytes, base).is_ok());
+    }
+
+    fn cookie_header(header: &[u8], wall_clock: bool) {
+        black_box(SetCookie::parse(header, wall_clock).is_ok());
+    }
+
+    #[used]
+    static RECORDS: fn(&[u8]) = records;
+    #[used]
+    static FILES: fn(&[u8], &Url) = files;
+    #[used]
+    static COOKIE_HEADER: fn(&[u8], bool) = cookie_header;
+}
+
+/// The software data slicer (area SLC): raw lines into packets. REQ-GEN-016
+/// allows it floating point, so the size check leaves this build out of the
+/// float check by name.
+#[cfg(feature = "slicer")]
+mod slicer {
+    use super::black_box;
+    use neoteletext_slicer::{Config, Line, RawGeometry, RawReader, Slicer};
+
+    fn raw(geometry: RawGeometry, config: Config, chunk: &[u8]) {
+        if let Ok(mut reader) = RawReader::new(geometry, config) {
+            reader.feed(chunk, |packet, meta| {
+                black_box((packet, meta));
+            });
+            black_box(reader.finish());
+        }
+    }
+
+    fn slice(slicer: &mut Slicer, line: &Line<'_>) {
+        black_box(slicer.slice(line).is_ok());
+    }
+
+    #[used]
+    static RAW: fn(RawGeometry, Config, &[u8]) = raw;
+    #[used]
+    static SLICE: fn(&mut Slicer, &Line<'_>) = slice;
+}
+
+/// The pixel and image helpers that need no allocation (REQ-RND-018,
+/// REQ-RND-024, REQ-RND-030): conversion, scaling, palettes and the PNG and
+/// PPM writers into a port's sink.
+#[cfg(feature = "image")]
+mod image {
+    use super::black_box;
+    use neoteletext_core::colour::ColourMap;
+    use neoteletext_core::consts::COLOURS;
+    use neoteletext_image::Sink;
+    use neoteletext_image::convert::{ByteOrder, PixelFormat, Rotation, convert};
+    use neoteletext_image::palette::{Rgba, colour_map_palette, palette};
+    use neoteletext_image::scale::{scale_indices, scale_rgb_smoothed};
+    use neoteletext_image::{png, ppm};
+
+    /// A stand-in for the port's output.
+    pub struct Out;
+
+    impl Sink for Out {
+        type Error = ();
+        fn write_all(&mut self, bytes: &[u8]) -> Result<(), ()> {
+            black_box(bytes);
+            Ok(())
+        }
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "the geometry and format of one conversion")]
+    fn pixels(
+        indices: &[u8],
+        width: usize,
+        height: usize,
+        colours: &[Rgba],
+        format: PixelFormat,
+        order: ByteOrder,
+        rotation: Rotation,
+        out: &mut [u8],
+    ) {
+        black_box(convert(indices, width, height, width, colours, format, order, rotation, out, width).is_ok());
+        black_box(scale_indices(indices, width, height, 2, 2, true, out).is_ok());
+        black_box(scale_rgb_smoothed(indices, width, height, 2, 2, true, out).is_ok());
+    }
+
+    fn colours(map: &ColourMap, clut: &[Rgba; COLOURS], picture: Rgba) {
+        black_box(colour_map_palette(map, picture));
+        black_box(palette(clut, picture, true, false));
+    }
+
+    fn files(indices: &[u8], width: usize, height: usize, colours: &[Rgba], scratch: &mut [u8]) {
+        black_box(ppm::write(&mut Out, indices, width, height, colours, Rgba::default()).is_ok());
+        let mut row = |y: usize, out: &mut [u8]| {
+            black_box((y, &out));
+        };
+        black_box(png::write(&mut Out, width, height, colours, &mut row, scratch).is_ok());
+    }
+
+    #[used]
+    static PIXELS: fn(&[u8], usize, usize, &[Rgba], PixelFormat, ByteOrder, Rotation, &mut [u8]) = pixels;
+    #[used]
+    static PALETTES: fn(&ColourMap, &[Rgba; COLOURS], Rgba) = colours;
+    #[used]
+    static FILES: fn(&[u8], usize, usize, &[Rgba], &mut [u8]) = files;
+}
+
+/// The audio receiver (area AUD): independent data lines, messages, records
+/// and files into a port's voice sink.
+#[cfg(feature = "audio")]
+mod audio {
+    use super::{Packet, black_box};
+    use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
+    use neoteletext_audio::receiver::Receiver;
+    use neoteletext_audio::{record, ttau};
+
+    /// A stand-in for the port's mixer.
+    pub struct Sink;
+
+    impl VoiceSink for Sink {
+        fn define(&mut self, sound: SoundId, format: SoundFormat) {
+            black_box((sound, format));
+        }
+        fn samples(&mut self, sound: SoundId, first: u32, pcm: &[i16]) {
+            black_box((sound, first, pcm));
+        }
+        fn forget(&mut self, sound: SoundId) {
+            black_box(sound);
+        }
+        fn stream(&mut self, sound: SoundId, rate_hz: u32) {
+            black_box((sound, rate_hz));
+        }
+        fn stream_samples(&mut self, sound: SoundId, pcm: &[i16]) {
+            black_box((sound, pcm));
+        }
+        fn start(&mut self, channel: u8, start: Start) {
+            black_box((channel, start));
+        }
+        fn stop(&mut self, channel: u8, fade_ms: u16) {
+            black_box((channel, fade_ms));
+        }
+        fn gain(&mut self, channel: u8, gain: u8, fade_ms: u16) {
+            black_box((channel, gain, fade_ms));
+        }
+    }
+
+    /// Objects and reassembly slots as a small port might choose.
+    type SmallReceiver<'a> = Receiver<'a, 8, 4>;
+
+    fn new(arena: &mut [u8]) {
+        black_box(SmallReceiver::new(arena).statistics());
+    }
+
+    fn receive(receiver: &mut SmallReceiver<'_>, packet: &Packet, bytes: &[u8], now_ms: u64) {
+        let sink = &mut Sink;
+        black_box(receiver.push_packet(packet, sink));
+        black_box(receiver.push_message(bytes, sink).is_ok());
+        receiver.push_record(bytes, sink);
+        black_box(receiver.push_file(bytes, sink));
+        receiver.open_page(Some(0x100), sink);
+        receiver.follow_service(1, sink);
+        receiver.tick(now_ms, sink);
+        receiver.reset(sink);
+    }
+
+    fn parse(bytes: &[u8]) {
+        black_box(record::parse(bytes).is_ok());
+        for item in ttau::records(bytes) {
+            black_box(item);
+        }
+    }
+
+    #[used]
+    static NEW: fn(&mut [u8]) = new;
+    #[used]
+    static RECEIVE: fn(&mut SmallReceiver<'_>, &Packet, &[u8], u64) = receive;
+    #[used]
+    static PARSE: fn(&[u8]) = parse;
+}
+
+/// The input protocol's client (area INT): the session, the channel's
+/// control records and the cursor record.
+#[cfg(feature = "input")]
+mod input {
+    use super::black_box;
+    use neoteletext_input::event::Item;
+    use neoteletext_input::session::Session;
+    use neoteletext_input::{control, cursor};
+
+    fn session(caps: u32, now_ms: u32, record: &[u8], item: &Item<'_>, out: &mut [u8]) {
+        let mut session = Session::new(caps);
+        black_box(session.open(now_ms, None, out).is_ok());
+        if let Ok(control) = control::read(record) {
+            black_box(session.control(&control).is_ok());
+        }
+        black_box(session.send(item, now_ms, out).is_ok());
+        session.tick(now_ms);
+        session.close();
+    }
+
+    fn records(record: &[u8]) {
+        black_box(control::read(record).is_ok());
+        black_box(cursor::read(record).is_ok());
+    }
+
+    #[used]
+    static SESSION: fn(u32, u32, &[u8], &Item<'_>, &mut [u8]) = session;
+    #[used]
+    static RECORDS: fn(&[u8]) = records;
+}
+
 /// REQ-GEN-019: one floating-point operation, which the symbol check must
 /// find on targets without a floating-point unit.
 #[cfg(feature = "float-probe")]
