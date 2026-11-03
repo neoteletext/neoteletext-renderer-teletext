@@ -267,6 +267,43 @@ fn origin_modifier_and_elements_past_column_39() {
     assert!(grid.cells[5].iter().all(|cell| char_of(cell) == ' '), "nothing from the first object wraps");
 }
 
+// REQ-342 (REQ-OBJ-014), REQ-470: an object's elements that fall below row
+// 24 are discarded and the object goes on, at both levels: a Passive
+// object placed at row 22 writes rows 22, 23 and 24 (row 24 is placed, not
+// discarded, though this page does not show it under decision E.23's rule
+// for row 24), and its two elements on row 25 are each discarded; and an
+// Origin Modifier that takes the object's origin below row 24 leaves nothing
+// on the page.
+#[test]
+fn elements_below_row_24_are_discarded() {
+    let object = local_object(
+        ObjectKind::Passive,
+        1,
+        &[
+            g0(0, b'A'),
+            set_position(1, 0),
+            g0(0, b'B'),
+            set_position(2, 0),
+            g0(0, b'C'),
+            set_position(3, 0),
+            g0(0, b'D'),
+            g0(1, b'F'),
+        ],
+    );
+    let invocation = invoke(ObjectSource::Local, ObjectKind::Passive, local_number(1, 0));
+    for level in [L25, L35] {
+        let (grid, report) =
+            build(&page_with_objects(&[], &[set_position(22, 0), invocation], std::slice::from_ref(&object)), level);
+        let column_0: String = [22, 23].iter().map(|&row| char_of(&grid.cells[row][0])).collect();
+        assert_eq!(column_0, "AB", "{level:?}");
+        assert_eq!(report.unwrap().faults.discarded_writes, 2, "D and F, on row 25, and not C, at {level:?}");
+        let moved = [set_position(23, 5), origin(2, 0), invocation];
+        let (grid, report) = build(&page_with_objects(&[], &moved, std::slice::from_ref(&object)), level);
+        assert!(grid.cells.iter().flatten().all(|cell| char_of(cell) == ' '), "nothing placed at {level:?}");
+        assert_eq!(report.unwrap().faults.discarded_writes, 5, "every element, at {level:?}");
+    }
+}
+
 /// REQ-1644, REQ-1643: a page that enables side panels, at any width and
 /// with either status flag, and places objects in columns 40 to 71, shows
 /// exactly what it shows with that data removed, at Levels 2.5 and 3.5.
@@ -474,9 +511,16 @@ fn object_bodies_cross_packets_and_reach_x26() {
     assert_eq!(&text(&grid, 2)[..3], "END");
 }
 
-/// REQ-OBJ-020, REQ-TST-017: the limits of Annex A.8, reached and exceeded.
+/// REQ-OBJ-020, REQ-TST-017: the limits of Annex A.8, reached and exceeded,
+/// at Level 2.5 and at Level 3.5 (REQ-470).
 #[test]
 fn limits_of_annex_a8() {
+    for level in [L25, L35] {
+        limits_at(level);
+    }
+}
+
+fn limits_at(level: PresentationLevel) {
     // 130 Passive objects, each at its own cell, invoked by one Active
     // object: 127 run.
     let mut body = vec![];
@@ -492,7 +536,7 @@ fn limits_of_annex_a8() {
     let local = [invoke(ObjectSource::Public, ObjectKind::Active, public_number(0, 0))];
     let mut packets = page_with_objects(&[], &local, &[]);
     packets.extend(object_page(POP, 0, &objects));
-    let (grid, report) = build(&packets, L25);
+    let (grid, report) = build(&packets, level);
     let shown = grid.cells.iter().flatten().filter(|cell| char_of(cell) == 'p').count();
     assert_eq!(shown, usize::from(OBJECT_INVOCATIONS_PER_TYPE));
     assert_eq!(report.unwrap().faults.limited_invocations, 3);
@@ -503,7 +547,7 @@ fn limits_of_annex_a8() {
     let more: Vec<TripletFunction> = core::iter::repeat_n(invocation, 8).collect();
     let object = local_object(ObjectKind::Passive, 2, &[g0(0, b'o')]);
     let packets = display_page(0, &[], vec![x26(0, &local), x26(1, &more), x26(2, &object)]);
-    let report = build(&packets, L25).1.unwrap();
+    let report = build(&packets, level).1.unwrap();
     assert_eq!((report.objects, report.faults.limited_invocations), (OBJECTS_OPEN_AT_ONCE as u32, 5));
     // Objects that write nothing, opened one after another at their own
     // cells: the sixteenth in succession is ignored.
@@ -515,7 +559,7 @@ fn limits_of_annex_a8() {
     }
     let packets =
         display_page(0, &[], vec![x26(0, &local[..13]), x26(1, &local[13..26]), x26(2, &local[26..]), x26(3, &silent)]);
-    let report = build(&packets, L25).1.unwrap();
+    let report = build(&packets, level).1.unwrap();
     assert_eq!((report.objects, report.faults.limited_invocations), (15, 3));
 }
 
