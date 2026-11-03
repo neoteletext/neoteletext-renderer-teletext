@@ -75,6 +75,10 @@ fn every_set_name_designates_its_set() {
         assert_eq!(sets.second.is_some(), own, "{name}: only neoteletext's own sets and Table 44 have a second set");
     }
     assert_eq!(write("klingon", 0x100, "a").unwrap_err(), WriteError::UnknownSet("klingon".into()));
+    // DEC-2239, DEC-2240, DEC-2244: the withdrawn sets' names write nothing.
+    for withdrawn in ["thai", "lao", "yoruba-igbo"] {
+        assert_eq!(write(withdrawn, 0x100, "a").unwrap_err(), WriteError::UnknownSet(withdrawn.into()));
+    }
 }
 
 /// Each set writes a sample and reads it back unchanged.

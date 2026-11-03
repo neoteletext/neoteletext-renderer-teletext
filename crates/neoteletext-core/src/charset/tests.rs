@@ -354,3 +354,17 @@ fn the_igbo_set_holds_no_yoruba_only_letters() {
         ['Ọ', 'Ị', 'Ụ', 'ọ', 'ị', 'ụ']
     );
 }
+
+/// REQ-2166, DEC-2241: the private-use range the withdrawn mark pairs used,
+/// U+F0100 to U+F017F, is retired: no allocation of the core lies in it.
+#[cfg(feature = "extended-sets")]
+#[test]
+fn no_private_use_allocation_lies_in_the_retired_range() {
+    const RETIRED: core::ops::RangeInclusive<char> = '\u{F0100}'..='\u{F017F}';
+    assert!(joined_forms().iter().all(|&(_, _, point)| !RETIRED.contains(&point)));
+    for code in 0x20u8..=0x7F {
+        for set in [G2Set::Latin, G2Set::Cyrillic, G2Set::Greek, G2Set::Arabic, G2Set::Vietnamese, G2Set::Armenian] {
+            assert!(!RETIRED.contains(&glyph_key(CharRef::new(CharSet::G2(set), code))));
+        }
+    }
+}
