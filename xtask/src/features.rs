@@ -35,6 +35,9 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-core", features: "render" },
     Build { package: "neoteletext-core", features: "extended-sets" },
     Build { package: "neoteletext-core", features: "viewer" },
+    // Error and Display on the core's types, which needs core::fmt
+    // (REQ-GEN-016 keeps it out of small builds).
+    Build { package: "neoteletext-core", features: "error-trait" },
     Build { package: "neoteletext-formats", features: "" },
     Build { package: "neoteletext-formats", features: "transport" },
     Build { package: "neoteletext-formats", features: "sliced" },
@@ -43,6 +46,7 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-formats", features: "ep1,edittf,dump" },
     Build { package: "neoteletext-formats", features: "check" },
     Build { package: "neoteletext-formats", features: "bdf" },
+    Build { package: "neoteletext-formats", features: "alloc" },
     Build { package: "neoteletext-formats", features: "std" },
     Build { package: "neoteletext-formats", features: "std,tti" },
     Build { package: "neoteletext-formats", features: "write-text" },
@@ -51,6 +55,17 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-web", features: "push" },
     Build { package: "neoteletext-web", features: "cookies" },
     Build { package: "neoteletext-web", features: "dbsc" },
+    Build { package: "neoteletext-web", features: "error-trait" },
+    Build { package: "neoteletext-web", features: "alloc" },
+    Build { package: "neoteletext-web", features: "std" },
+    // The software data slicer and the image helpers, with no optional
+    // area and each alone (TODO-1142).
+    Build { package: "neoteletext-slicer", features: "" },
+    Build { package: "neoteletext-slicer", features: "error-trait" },
+    Build { package: "neoteletext-image", features: "" },
+    Build { package: "neoteletext-image", features: "error-trait" },
+    Build { package: "neoteletext-image", features: "alloc" },
+    Build { package: "neoteletext-image", features: "std" },
     Build { package: "neoteletext-audio", features: "" },
     Build { package: "neoteletext-audio", features: "idl" },
     Build { package: "neoteletext-audio", features: "ima" },
@@ -61,17 +76,25 @@ const BUILDS: &[Build] = &[
     // compiled out, Opus alone (decision E.131).
     Build { package: "neoteletext-audio", features: "idl,opus" },
     Build { package: "neoteletext-opus", features: "" },
+    Build { package: "neoteletext-audio-mix", features: "" },
     Build { package: "neoteletext-input", features: "" },
     Build { package: "neoteletext-transport", features: "" },
+    Build { package: "neoteletext-qrkeyboard", features: "" },
     Build { package: "neoteletext-app", features: "" },
     Build { package: "neoteletext-app", features: "live" },
     Build { package: "neoteletext-app", features: "slice" },
+    Build { package: "neoteletext-app", features: "write-text" },
     Build { package: "neoteletext-cli", features: "" },
     Build { package: "neoteletext-cli", features: "view" },
     Build { package: "neoteletext-cli", features: "live" },
     Build { package: "neoteletext-cli", features: "slice" },
     Build { package: "neoteletext-cli", features: "sound" },
     Build { package: "neoteletext-cli", features: "keyboard" },
+    Build { package: "neoteletext-cli", features: "write-text" },
+    // The capabilities of Levels 2.5 and 3.5 that no build has by default
+    // (decision E.105).
+    Build { package: "neoteletext-cli", features: "objects" },
+    Build { package: "neoteletext-cli", features: "additional-flash-functions" },
 ];
 
 /// `cargo xtask features`: lints and tests each build of [`BUILDS`].

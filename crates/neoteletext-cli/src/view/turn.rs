@@ -54,6 +54,7 @@ impl ViewState {
             }
             let session: &Session = session;
             let page = self.page_shown(session, requested, subcode);
+            self.mark_security(page.and_then(|page| source.came_unencrypted(page.key.address)));
             self.typing.set_drawn(page.and_then(|page| Stamp::new(page.key.address.mpp(), page.key.subcode.value())));
             let page_extras = page.and_then(|page| source.extras(page.key.address, page.key.subcode)).cloned();
             let shown = Shown { page, extras: page_extras.as_ref(), config: &config, now };

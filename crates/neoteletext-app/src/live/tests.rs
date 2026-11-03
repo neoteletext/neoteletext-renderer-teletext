@@ -224,3 +224,31 @@ fn an_address_says_where_a_viewer_opens() {
         assert!(opening(address).is_err(), "{address}");
     }
 }
+
+/// REQ-421 (REQ-SEC-008): the unencrypted marker follows the page on
+/// screen, so what is known of a page is how it last came: a secure page
+/// after a plain one clears it, a plain one after a secure one sets it, and
+/// a pushed page, whose connection the fetcher reports, leaves it.
+#[test]
+fn how_a_page_came_follows_its_latest_arrival() {
+    let (sender, frames) = mpsc::channel();
+    let mut live = routed(frames, Box::new(std::io::sink()));
+    let mut session = Session::new(neoteletext_core::config::Config::default(), 8);
+    let page = PageAddress::from_mpp(0x100).unwrap();
+    let other = PageAddress::from_mpp(0x200).unwrap();
+    let arrive = |live: &mut Live, session: &mut Session, secure: bool, origin: Origin| {
+        let bytes = b"PN,10000\nOL,1,HELLO\n".to_vec();
+        sender.send(Frame::Tti(PageData { secure, origin, bytes })).unwrap();
+        live.poll(session, Instant(0));
+    };
+    assert_eq!(live.came_unencrypted(page), None, "nothing is known before it arrives");
+    arrive(&mut live, &mut session, false, Origin::FrontDoor);
+    assert_eq!(live.came_unencrypted(page), Some(true));
+    arrive(&mut live, &mut session, true, Origin::FrontDoor);
+    assert_eq!(live.came_unencrypted(page), Some(false), "a secure page clears the marker");
+    arrive(&mut live, &mut session, false, Origin::Push);
+    assert_eq!(live.came_unencrypted(page), Some(false), "a pushed page leaves it");
+    arrive(&mut live, &mut session, false, Origin::FrontDoor);
+    assert_eq!(live.came_unencrypted(page), Some(true));
+    assert_eq!(live.came_unencrypted(other), None);
+}

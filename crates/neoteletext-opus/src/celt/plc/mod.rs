@@ -114,6 +114,11 @@ impl CeltDecoder {
     }
 
     /// The history extended at its pitch through its prediction filter, fading.
+    ///
+    /// Kept whole, past the source conventions' 80 lines a function: it follows one
+    /// routine of the reference decoder step for step, so that it can be read against
+    /// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+    /// comparison would be harder and the parts would have no meaning of their own.
     fn conceal_with_pitch(&mut self, n: usize) {
         let (pitch_index, fade) = if self.loss_duration == 0 {
             let pitch_index = self.pitch_search();

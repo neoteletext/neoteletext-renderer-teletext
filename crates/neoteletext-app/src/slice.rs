@@ -74,6 +74,8 @@ pub fn slice(options: &Options, output: &Path, preset: &str, choice: &GeometryCh
     let mut input = input::open(options)?;
     let file = File::create(output).map_err(|error| (exit::INPUT, format!("{}: {error}", output.display())))?;
     let mut writer = neoteletext_formats::write::T42Writer::new(std::io::BufWriter::new(file));
+    // REQ-SEC-017: the capture and the output are open; nothing else is.
+    input::sandbox(options, None)?;
     let mut buffer = vec![0u8; CHUNK];
     let mut failure = None;
     loop {

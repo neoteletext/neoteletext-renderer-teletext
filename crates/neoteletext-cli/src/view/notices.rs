@@ -39,6 +39,16 @@ impl ViewState {
         }
     }
 
+    /// Sets the security indicator from how the page on screen came, when the
+    /// source knows (REQ-SEC-008): the unencrypted marker shows whenever,
+    /// and only while, that page came over plain HTTP, so a secure page
+    /// that replaces a plain one clears it.
+    pub(super) fn mark_security(&mut self, came_unencrypted: Option<bool>) {
+        if let Some(plain) = came_unencrypted {
+            self.viewer.set_indicator(if plain { SecurityIndicator::Unencrypted } else { SecurityIndicator::None });
+        }
+    }
+
     /// Acts on one of the source's notices.
     pub(super) fn take_notice(&mut self, notice: Notice, source: &mut dyn Source) {
         match notice {

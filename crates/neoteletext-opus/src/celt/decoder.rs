@@ -236,6 +236,11 @@ impl CeltDecoder {
     /// The decoding of a frame of `len` bytes (at most 1275) into the history (RFC 6716 §4.3),
     /// the de-emphasis aside. The C's `int` arithmetic wraps, as it compiles to; on these
     /// magnitudes it never does.
+    ///
+    /// Kept whole, past the source conventions' 80 lines a function: it follows one
+    /// routine of the reference decoder step for step, so that it can be read against
+    /// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+    /// comparison would be harder and the parts would have no meaning of their own.
     fn decode_frame(&mut self, duration: FrameDuration, len: i32, dec: &mut EcDec) {
         let frame_bits = len.wrapping_mul(8);
         let lm = duration.lm();

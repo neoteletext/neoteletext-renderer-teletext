@@ -294,6 +294,11 @@ struct Partition {
 /// `quant_partition`: a partition `part` into `x`, split in two (recursively, so a band can end
 /// up split in 8 parts) while it has more bits than one codebook can use, folded from `lowband`
 /// where it gets no pulse.
+///
+/// Kept whole, past the source conventions' 80 lines a function: it follows one
+/// routine of the reference decoder step for step, so that it can be read against
+/// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+/// comparison would be harder and the parts would have no meaning of their own.
 fn quant_partition(ctx: &mut BandCtx, x: &mut [i16], lowband: Option<&[i16]>, part: Partition) -> u32 {
     let Partition { mut n, bits: mut b, blocks: mut big_b, mut lm, gain, mut fill } = part;
     #[allow(clippy::cast_sign_loss, reason = "a partition's size is positive")]
@@ -463,6 +468,11 @@ struct Folding<'n, 's> {
 }
 
 /// `quant_band`, mono: a band `part` into `x`, folding as `fold` says.
+///
+/// Kept whole, past the source conventions' 80 lines a function: it follows one
+/// routine of the reference decoder step for step, so that it can be read against
+/// that routine and stays bit-exact with libopus 1.5.2 (REQ-AUD-023); split, the
+/// comparison would be harder and the parts would have no meaning of their own.
 fn quant_band(ctx: &mut BandCtx, x: &mut [i16], part: Partition, fold: Folding) -> u32 {
     static BIT_INTERLEAVE_TABLE: [i32; 16] = [0, 1, 1, 1, 2, 3, 3, 3, 2, 3, 3, 3, 2, 3, 3, 3];
     static BIT_DEINTERLEAVE_TABLE: [u32; 16] =

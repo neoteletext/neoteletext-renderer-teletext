@@ -21,6 +21,13 @@ neoteletext-web = { path = "../crates/neoteletext-web", features = ["default", "
 neoteletext-audio = { path = "../crates/neoteletext-audio" }
 neoteletext-opus = { path = "../crates/neoteletext-opus" }
 neoteletext-input = { path = "../crates/neoteletext-input" }
+# The pipe between neottx's fetcher and decoder processes (REQ-SEC-018).
+# Without its default features the application crate builds no TLS and no
+# web module: the pipe's codec needs neither.
+neoteletext-app = { path = "../crates/neoteletext-app", default-features = false }
+# The qrkeyboard client's readers of what the relay and the phone send
+# (REQ-SEC-003).
+neoteletext-qrkeyboard = { path = "../crates/neoteletext-qrkeyboard" }
 
 [workspace]
 members = ["."]
@@ -259,6 +266,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "pipe_frames"
+path = "fuzz_targets/pipe_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "subpages_record"
 path = "fuzz_targets/subpages_record.rs"
 test = false
@@ -266,8 +280,29 @@ doc = false
 bench = false
 
 [[bin]]
+name = "qrkeyboard_json"
+path = "fuzz_targets/qrkeyboard_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "push_reader"
 path = "fuzz_targets/push_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qrkeyboard_messages"
+path = "fuzz_targets/qrkeyboard_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qrkeyboard_pairing"
+path = "fuzz_targets/qrkeyboard_pairing.rs"
 test = false
 doc = false
 bench = false

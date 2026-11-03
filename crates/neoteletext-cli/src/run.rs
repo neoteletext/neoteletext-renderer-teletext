@@ -8,6 +8,10 @@ use neoteletext_app::{exit, sandbox};
 use std::process::ExitCode;
 
 /// Runs `neottx` with the process's arguments, returning its exit status.
+///
+/// Kept whole, past the source conventions' 80 lines a function: it is the
+/// table of commands, one arm for each, each arm only passing a command's
+/// arguments on, and split it would be a table in pieces.
 #[must_use]
 pub fn run() -> ExitCode {
     let cli = match Cli::try_parse() {
@@ -40,7 +44,7 @@ pub fn run() -> ExitCode {
         }
         Command::Services { common } => commands::services(&common.options()),
         Command::ServiceInfo { common } => commands::service_info(&common.options()),
-        Command::Check { files, descriptor } => commands::check(&files, descriptor.as_deref()),
+        Command::Check { files, descriptor, no_sandbox } => commands::check(&files, descriptor.as_deref(), no_sandbox),
         Command::Font { action: FontCommand::Convert { input, output, map, no_sandbox } } => {
             commands::convert_font(&input, &output, map.as_deref(), no_sandbox)
         }

@@ -592,9 +592,9 @@ If `neoteletext-core` grows unwieldy, the natural split is `core` (Foundation to
 ## 8. The rules, and how they are enforced
 
 1. **Downward dependencies only.** Between crates this is enforced by the crate graph. Within `neoteletext-core`, `cargo xtask check-layers` reads each module's paths, however a `use` is written, and compares them with the allowed-dependency table in section 9; it does the same for each library crate's use of the core against the table of crates there. The push gate fails on any violation (REQ-ARCH-011). This check and those of `check-constants` and `check-io` read production code only: a file whose module is declared for tests is skipped whole, and a test-only item anywhere else is skipped where it stands (`xtask/src/test_code.rs`).
-2. **One narrow type per boundary** (section 5). Types from two or more layers down shall not appear in a layer's public interface.
+2. **One narrow type per boundary** (section 5). Types from two or more layers down shall not appear in a layer's public interface. No check sees the types of a public signature, so this rule is held by the review of each change to a public interface (DEC-2408).
 3. **No input or output below L9.** Layers 0 to 7 are sans-IO and pure (REQ-SEC-016), enforced by `cargo xtask check-io`, which finds a forbidden item however it is written.
-4. **Security decisions in one place.** Only `policy` decides. Other layers call it, and the check in rule 1 forbids them from reimplementing it by forbidding direct use of the low-level address and origin tests outside `policy` and L7.
+4. **Security decisions in one place.** Only `policy` decides: whether a column is the receiver's, whether an address may be contacted, whether two origins are the same, whether a move is a downgrade, whether a cookie may be sent, and whether a character or a file name's byte may be written. Other layers call it, which the tables of section 9 allow everywhere. A function elsewhere that decided the same again cannot be told from ordinary code by a check of paths, so that is for review (DEC-2408).
 5. **Pure presentation.** L3 and L4 are pure functions of their inputs (REQ-ARCH-006). They can be recomputed or cached at will without touching acquisition.
 6. **Data, not code, for what changes.** Glyphs, character tables and profiles are data (REQ-RND-020): the bundled font is a generated table, and every other font is a file loaded at run time (area FNT, decision E.72). The Noto-derived fonts are such files, kept in `third_party/noto/` and checked by `xtask check-noto` (decision E.77), as is the X11 misc-fixed 6x10 font, kept in `third_party/misc-fixed/` and checked by `xtask check-misc-fixed` (REQ-2223). neoteletext's own character tables are generated from reviewed data files, as the standard's are.
 7. **Every state machine lives in the layer that owns its state:**
@@ -609,11 +609,12 @@ If `neoteletext-core` grows unwieldy, the natural split is `core` (Foundation to
 
 ## 9. Allowed dependencies inside `neoteletext-core`
 
-A module may use the modules listed for it, and nothing else. The cross-cutting modules (`policy`, `config`, `trace`) may be used by any module, and may themselves use only Foundation.
+A module may use the modules listed for it, and nothing else. The cross-cutting modules (`policy`, `config`, `trace`) may be used by any module, and may themselves use only Foundation. `cargo xtask check-layers` reads this table, so it and the check cannot differ (REQ-ARCH-011); every module of the core has a row.
 
 | Module | Layer | May use |
 |---|---|---|
 | `consts`, `ecc`, `limits`, `types` | Foundation | — (`limits` uses nothing, not even the other Foundation modules) |
+| `policy`, `config`, `trace` | Cross-cutting | Foundation |
 | `packet` | L1 | Foundation |
 | `fsm` | L2 | Foundation, `packet` |
 | `acq` | L2 | Foundation, `packet`, `fsm` |
@@ -625,10 +626,12 @@ A module may use the modules listed for it, and nothing else. The cross-cutting 
 | `objects` | L3 | Foundation, `packet` (triplet, link and table types), `acq` (read-only stored page types and enhancement lookup) |
 | `joining` | L3 | Foundation, `charset`, `level1` (grid types) |
 | `enhance` | L3 | Foundation, `charset`, `level1` (grid types and the Level 1 row machine), `packet` (triplet and X/28 field types), `acq` (read-only stored page types and enhancement lookup), `colour`, `objects` |
+| `compose` | L3 | Foundation, `acq` (read-only stored page types), `level1`, `level15`, `enhance`, `joining` (the grid of a page at its level, then joined; REQ-CHR-015) |
 | `glyphs` | L4 | Foundation, `charset` (character references) |
 | `render` | L4 | Foundation, `glyphs`, `level1` (grid types), `colour` (Colour Map) |
-| `viewer`, `nav` | L6 | Foundation, `acq`, `level1`, `level15`, `enhance`, `colour`, `render` (change tracking), `service` |
-| `controls` | L6 | Foundation, `acq` (read-only stored page types), `objects` (the local enhancement data's triplets and row addresses), `packet` (triplet functions), `level1` (grid types, for the looks); decision E.127 |
+| `viewer` | L6 | Foundation, `acq`, `level1`, `compose` (the grid of the page on screen), `colour`, `render` (change tracking), `service`, `nav`, `charset` (the receiver's own text) |
+| `nav` | L6 | Foundation, `acq` (the stored pages it steps through) |
+| `controls` | L6 | Foundation, `acq` (read-only stored page types), `objects` (the local enhancement data's triplets and row addresses), `packet` (triplet functions), `level1` (grid types, for the looks; decision E.127) |
 | `port` | L8 | Foundation |
 
 What each library crate may use of `neoteletext-core`, which `cargo xtask check-layers` reads from this table (DEC-2118). Words in brackets say why; what is not named is forbidden.
@@ -646,4 +649,4 @@ What each library crate may use of `neoteletext-core`, which `cargo xtask check-
 
 The application crates use whatever they need of it.
 
-`level15` remains the Level 1.5 pass, used only at Level 1.5. The modules `colour`, `objects` and `enhance` serve Levels 2.5 and 3.5 (section 4.5); `drcs` was removed on 20 October 2026 (decision E.95). The G3 glyph data generated by `xtask` belongs to `glyphs`, whose dependencies do not change. The `xtask` layer check holds its own copy of this table, which shall be updated in the same change that adds these modules (REQ-ARCH-011). `joining` (decision E.79) is added to it in the change that creates the module.
+`level15` remains the Level 1.5 pass, used only at Level 1.5. The modules `colour`, `objects` and `enhance` serve Levels 2.5 and 3.5 (section 4.5); `drcs` was removed on 20 October 2026 (decision E.95). The G3 glyph data generated by `xtask` belongs to `glyphs`, whose dependencies do not change. A new module gets its row here in the change that creates it, or `cargo xtask check-layers` fails.

@@ -723,6 +723,7 @@ dependencies = [
  "qrcodegen",
  "rustls",
  "sha2",
+ "subtle",
 ]
 
 [[package]]
