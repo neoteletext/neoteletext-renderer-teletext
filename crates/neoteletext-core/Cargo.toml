@@ -136,6 +136,12 @@ name = "objects"
 required-features = ["level25", "objects"]
 
 [[test]]
+name = "hostile_pages"
+# Whole pages that attack the receiver's own cells, by every route of
+# Levels 1.5 to 3.5, objects among them (REQ-SEC-005, REQ-SEC-024).
+required-features = ["level15", "level25", "objects", "level35-32colors"]
+
+[[test]]
 name = "performance"
 required-features = ["level25", "render"]
 
