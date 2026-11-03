@@ -1,7 +1,12 @@
 //! Tests of the renderer: rounding, mosaics, the palette, row independence
 //! and change tracking. The tests of the rendering of Levels 2.5 and 3.5
 //! and of loaded fonts are in tests/level25.rs and tests/fonts.rs.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

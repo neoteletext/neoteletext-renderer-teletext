@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, clippy::unreachable, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::unreachable,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and `unreachable!` on branches it rules out"
+)]
 use super::spawn::read_frames;
 use super::*;
 use neoteletext_core::consts::LINK_SCHEME;

@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
+)]
 
 use super::terminal_io::{Wakened, next_event};
 use super::typing::{Typing, input_of};
@@ -803,4 +807,33 @@ fn a_pages_own_number_link_wins_over_the_alias() {
     assert_eq!(state.pending_link, None);
     type_number(&mut state, &mut source, &session, Some(&extras), &[KeyCode::Backspace]);
     assert_eq!(state.viewer.requested().0, page(0x100), "one visit: Back goes to the page before");
+}
+
+/// REQ-89 (REQ-CLI-004): the interactive viewer takes a key for each
+/// function the requirement lists: page number entry, next and previous
+/// page, the four Fastext keys on F1 to F4 and on r, g, y and c, Index,
+/// reveal, hold, mix, zoom and sub-page stepping. Quitting (`q` or Escape)
+/// is the loop's own key, read before this mapping (`input.rs`).
+#[test]
+fn every_function_of_the_interactive_viewer_has_its_key() {
+    use super::keys::map_key;
+    use neoteletext_core::viewer::Key;
+    let key = |code: KeyCode| map_key(KeyEvent::new(code, KeyModifiers::NONE));
+    for digit in 0..=9u8 {
+        assert_eq!(key(KeyCode::Char(char::from(b'0' + digit))), Some(Key::Digit(digit)));
+    }
+    assert_eq!(key(KeyCode::Up), Some(Key::NextPage));
+    assert_eq!(key(KeyCode::Down), Some(Key::PreviousPage));
+    let fastext = [(1, 'r', Key::Red), (2, 'g', Key::Green), (3, 'y', Key::Yellow), (4, 'c', Key::Cyan)];
+    for (function, letter, wanted) in fastext {
+        assert_eq!(key(KeyCode::F(function)), Some(wanted), "F{function}");
+        assert_eq!(key(KeyCode::Char(letter)), Some(wanted), "{letter}");
+    }
+    assert_eq!(key(KeyCode::Char('i')), Some(Key::Index));
+    assert_eq!(key(KeyCode::Char('?')), Some(Key::Reveal));
+    assert_eq!(key(KeyCode::Char('H')), Some(Key::Hold));
+    assert_eq!(key(KeyCode::Char('m')), Some(Key::Mix));
+    assert_eq!(key(KeyCode::Char('z')), Some(Key::Zoom));
+    assert_eq!(key(KeyCode::Right), Some(Key::NextSubPage));
+    assert_eq!(key(KeyCode::Left), Some(Key::PreviousSubPage));
 }

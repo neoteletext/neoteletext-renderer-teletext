@@ -19,11 +19,7 @@ pub struct Px {
 }
 
 impl Px {
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::arithmetic_side_effects,
-        reason = "indices within the page's sixels and a palette of at most 32 colours"
-    )]
+    #[allow(clippy::indexing_slicing, reason = "indices within the page's sixels and a palette of at most 32 colours")]
     fn channel(self, axis: usize) -> u8 {
         [self.r, self.g, self.b][axis]
     }
@@ -31,7 +27,6 @@ impl Px {
 
 #[allow(
     clippy::cast_sign_loss,
-    clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
     reason = "indices within the page's sixels and a palette of at most 32 colours"
 )]
@@ -44,11 +39,6 @@ fn dist_sqr(a: Px, b: Px) -> u32 {
 }
 
 /// The pixel hash.
-#[allow(
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    reason = "indices within the page's sixels and a palette of at most 32 colours"
-)]
 fn pixel_hash(p: Px) -> u32 {
     u32::from(p.r).wrapping_mul(463)
         ^ (u32::from(p.g) << 8).wrapping_mul(10069)
@@ -77,11 +67,7 @@ const RESIZE_FACTOR: u32 = 3;
 /// The table's next length, as the original computes it: `!start % t` is always 0, so the
 /// loop that looks like a primality test never rejects, and the result is
 /// the first value whose low four bits pass the unit table.
-#[allow(
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    reason = "indices within the page's sixels and a palette of at most 32 colours"
-)]
+#[allow(clippy::indexing_slicing, reason = "indices within the page's sixels and a palette of at most 32 colours")]
 fn find_prime(mut start: u32, dir: i32) -> u32 {
     const UNIT: [bool; 16] =
         [false, true, false, true, false, false, false, true, false, true, false, true, false, true, false, false];
@@ -95,26 +81,15 @@ fn find_prime(mut start: u32, dir: i32) -> u32 {
 }
 
 impl Table {
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::arithmetic_side_effects,
-        reason = "indices within the page's sixels and a palette of at most 32 colours"
-    )]
     fn new(compare: Compare) -> Self {
         Self { compare, chains: vec![Vec::new(); MIN_LENGTH as usize], count: 0 }
     }
 
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::arithmetic_side_effects,
-        reason = "indices within the page's sixels and a palette of at most 32 colours"
-    )]
     fn length(&self) -> u32 {
         self.chains.len() as u32
     }
 
     #[allow(
-        clippy::indexing_slicing,
         clippy::arithmetic_side_effects,
         reason = "indices within the page's sixels and a palette of at most 32 colours"
     )]
@@ -141,11 +116,7 @@ impl Table {
     }
 
     /// Where `key` is in its chain, or where it goes: `Ok(found)`, `Err(insert at)`.
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::arithmetic_side_effects,
-        reason = "indices within the page's sixels and a palette of at most 32 colours"
-    )]
+    #[allow(clippy::indexing_slicing, reason = "indices within the page's sixels and a palette of at most 32 colours")]
     fn find(&self, bucket: usize, key: Px) -> Result<usize, usize> {
         for (index, node) in self.chains[bucket].iter().enumerate() {
             let order = self.cmp(node.0, key);
@@ -160,7 +131,6 @@ impl Table {
     }
 
     #[allow(
-        clippy::indexing_slicing,
         clippy::arithmetic_side_effects,
         reason = "indices within the page's sixels and a palette of at most 32 colours"
     )]
@@ -237,11 +207,7 @@ impl Table {
         }
     }
 
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::arithmetic_side_effects,
-        reason = "indices within the page's sixels and a palette of at most 32 colours"
-    )]
+    #[allow(clippy::indexing_slicing, reason = "indices within the page's sixels and a palette of at most 32 colours")]
     fn lookup(&self, key: Px) -> Option<u32> {
         let bucket = self.bucket(key);
         self.find(bucket, key).ok().map(|index| self.chains[bucket][index].1)
@@ -275,7 +241,6 @@ struct BoxNode {
     clippy::if_not_else,
     clippy::many_single_char_names,
     clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
     reason = "indices within the page's sixels and a palette of at most 32 colours"
 )]
 fn mergesort_pixels(list: &mut [PixelList], head: usize, i: usize) -> usize {
@@ -338,7 +303,6 @@ struct Heap {
 #[allow(
     clippy::cast_possible_wrap,
     clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
     reason = "indices within the page's sixels and a palette of at most 32 colours"
 )]
 fn box_cmp(boxes: &[BoxNode], a: usize, b: usize) -> i32 {
@@ -418,7 +382,6 @@ fn compute_box_volume(boxes: &mut [BoxNode], list: &[PixelList], node: usize) ->
 #[allow(
     clippy::many_single_char_names,
     clippy::if_not_else,
-    clippy::too_many_lines,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
     reason = "indices within the page's sixels and a palette of at most 32 colours"
@@ -548,8 +511,6 @@ fn annotate(boxes: &[BoxNode], list: &[PixelList], node: usize, table: &mut Tabl
 #[allow(
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation,
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
     reason = "indices within the page's sixels and a palette of at most 32 colours"
 )]
 fn mean_channel(total: u32, count: u32) -> u8 {
@@ -616,7 +577,6 @@ fn nearest(tables: &Distances, palette: &[Px], pixel: Px, start: u32) -> u32 {
 }
 
 #[allow(
-    clippy::too_many_lines,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
     reason = "indices within the page's sixels and a palette of at most 32 colours"
@@ -794,7 +754,6 @@ struct Cube {
 
 impl Cube {
     #[allow(
-        clippy::indexing_slicing,
         clippy::arithmetic_side_effects,
         reason = "indices within the page's sixels and a palette of at most 32 colours"
     )]
@@ -808,17 +767,11 @@ impl Cube {
         }
     }
 
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::arithmetic_side_effects,
-        reason = "indices within the page's sixels and a palette of at most 32 colours"
-    )]
     fn position(&self, r: u32, g: u32, b: u32) -> usize {
         (r << self.offset[0] | g << self.offset[1] | b << self.offset[2]) as usize
     }
 
     #[allow(
-        clippy::indexing_slicing,
         clippy::arithmetic_side_effects,
         reason = "indices within the page's sixels and a palette of at most 32 colours"
     )]
@@ -830,11 +783,6 @@ impl Cube {
         )
     }
 
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::arithmetic_side_effects,
-        reason = "indices within the page's sixels and a palette of at most 32 colours"
-    )]
     fn used(&self) -> usize {
         self.buckets.iter().filter(|bucket| bucket.count > 0).count()
     }
@@ -882,8 +830,6 @@ impl Cube {
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     clippy::if_not_else,
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
     reason = "indices within the page's sixels and a palette of at most 32 colours"
 )]
 fn average(bucket: &Bucket) -> Px {
@@ -896,11 +842,7 @@ fn average(bucket: &Bucket) -> Px {
     }
 }
 
-#[allow(
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    reason = "indices within the page's sixels and a palette of at most 32 colours"
-)]
+#[allow(clippy::indexing_slicing, reason = "indices within the page's sixels and a palette of at most 32 colours")]
 fn subtract(cube: &mut Cube, buckets: &[Bucket]) {
     for subtrahend in buckets {
         if subtrahend.count == 0 {
@@ -930,11 +872,6 @@ fn add_lookup(cube: &mut Cube, palette: &[Bucket], count: usize, offset: usize) 
 
 /// By count, descending, and among equal counts in bucket order: a stable
 /// sort gives the same palette on every machine (DEC-2142 item 3).
-#[allow(
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    reason = "indices within the page's sixels and a palette of at most 32 colours"
-)]
 fn sorted(buckets: &[Bucket]) -> Vec<Bucket> {
     let mut out = buckets.to_vec();
     out.sort_by_key(|bucket| std::cmp::Reverse(bucket.count));

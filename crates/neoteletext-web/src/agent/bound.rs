@@ -560,7 +560,10 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests")]
+    #![allow(
+        clippy::unwrap_used,
+        reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+    )]
     use super::*;
 
     /// Finding F-14 (decision E.114 item 6): an sf-string holds only

@@ -69,8 +69,10 @@ pub struct WalkContext {
 /// The transition function of the walk (REQ-FSM-007), one arm for each row
 /// of its table; pairs the table does not list change nothing
 /// (REQ-FSM-001).
-// Arms with equal bodies are kept apart so each matches one table row.
-#[allow(clippy::match_same_arms)]
+#[allow(
+    clippy::match_same_arms,
+    reason = "arms with equal bodies are kept apart so each matches one row of the walk's table (REQ-FSM-001)"
+)]
 #[must_use]
 pub fn walk_transition(state: WalkState, event: WalkEvent, context: WalkContext) -> (WalkState, WalkAction) {
     match (state, event) {

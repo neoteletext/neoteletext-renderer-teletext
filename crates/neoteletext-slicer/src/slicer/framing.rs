@@ -12,16 +12,20 @@ use super::{FRAMING_WINDOW_BITS, Slicer, Work};
 /// The order in which framing code offsets are tried: nearest first.
 const FRAMING_OFFSETS: [i32; 2 * FRAMING_SEARCH_BITS + 1] = framing_offsets();
 
-// Evaluated only in the constant above, where overflow or an index out of
-// range is a compile error, not a run-time panic.
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "evaluated only in the constant above, where overflow or an index out of range is a compile error, not a run-time panic"
+)]
 const fn framing_offsets() -> [i32; 2 * FRAMING_SEARCH_BITS + 1] {
     let mut offsets = [0; 2 * FRAMING_SEARCH_BITS + 1];
     let mut distance = 1;
     let mut index = 1;
     while distance <= FRAMING_SEARCH_BITS {
-        // The search reach is a small constant, so the conversion is exact.
-        #[allow(clippy::cast_possible_wrap)]
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "the search reach is a small constant, so the conversion is exact"
+        )]
         let signed = distance as i32;
         offsets[index] = -signed;
         offsets[index + 1] = signed;

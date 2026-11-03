@@ -91,8 +91,10 @@ impl LiveStorage {
     /// Zeroed buffers. Large: the caller places them in static memory or
     /// on the heap.
     #[must_use]
-    // The arrays are the buffers themselves; building them is the point.
-    #[allow(clippy::large_stack_arrays)]
+    #[allow(
+        clippy::large_stack_arrays,
+        reason = "the arrays are the buffers themselves, so building them is the point; the caller places the value in static memory or on the heap"
+    )]
     pub const fn new() -> Self {
         Self { head: [0; DEFAULT_HEADER_LIMIT], request: [0; 1024], message: [0; DEFAULT_PUSH_LIMIT] }
     }

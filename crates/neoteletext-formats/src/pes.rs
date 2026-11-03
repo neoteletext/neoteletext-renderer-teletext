@@ -107,7 +107,9 @@ impl PesParser {
         self.unit_len = 0;
     }
 
-    /// Reads bytes whose first byte is at `offset`.
+    /// Reads bytes whose first byte is at `offset`, counted from the start
+    /// of the input; any value is accepted, and it serves only to place
+    /// diagnostics.
     pub fn feed(&mut self, bytes: &[u8], offset: u64, out: &mut dyn FnMut(Item<'_>)) {
         for (index, &byte) in bytes.iter().enumerate() {
             self.step(byte, offset_of(offset, index), out);

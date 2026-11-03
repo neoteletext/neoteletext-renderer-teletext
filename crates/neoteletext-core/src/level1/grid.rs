@@ -109,7 +109,6 @@ impl Grid {
     // The grid is the value being built, so its arrays are as large as it
     // is; in a constant such as `Grid::EMPTY` it is built at compile time,
     // and ports with small stacks build grids in place with `clear`.
-    #[allow(clippy::large_stack_arrays)]
     #[must_use]
     pub const fn empty() -> Self {
         Self {
@@ -172,8 +171,7 @@ pub enum Zoom {
 }
 
 /// What the receiver contributes to the grid (decisions E.10, E.11, E.23).
-// Each flag is a separate viewer setting (REQ-L1-020, REQ-SEC-005).
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "each flag is a separate viewer setting (REQ-L1-020, REQ-SEC-005)")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DisplayOptions {
     /// Row 0 columns 0 to 6: the receiver status area, 7-bit codes.

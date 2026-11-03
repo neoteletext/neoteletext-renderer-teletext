@@ -83,7 +83,7 @@ pub enum CookieRejected {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(clippy::struct_excessive_bools)] // Each flag is one cookie attribute of REQ-WEB-006.
+#[allow(clippy::struct_excessive_bools, reason = "each flag is one cookie attribute of REQ-WEB-006")]
 struct Record {
     start: u32,
     host_len: u16,

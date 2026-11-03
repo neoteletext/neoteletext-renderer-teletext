@@ -3,7 +3,6 @@
 //! sound on the page it was written for; written live (REQ-AUD-014), it
 //! plays as it arrives at the player's pace.
 #![cfg(feature = "sound")]
-#![allow(missing_docs)]
 
 mod common;
 

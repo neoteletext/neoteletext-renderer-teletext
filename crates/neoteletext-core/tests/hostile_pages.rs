@@ -2,7 +2,13 @@
 //! the enhancement processor as a receiver builds them, that try to write
 //! the receiver's own cells: the status area (REQ-418, REQ-SEC-005) and
 //! row 24 with its link prompts (REQ-437, REQ-SEC-024).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    missing_docs,
+    reason = "a test: a failed unwrap or index is a failed test, the builders' arithmetic is on small known values, and test functions need no documentation"
+)]
 
 mod common;
 

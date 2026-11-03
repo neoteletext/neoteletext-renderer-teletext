@@ -7,7 +7,7 @@
     clippy::indexing_slicing,
     clippy::panic,
     clippy::arithmetic_side_effects,
-    reason = "a test"
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, `expect` naming what it expected, indexing into data it built to a known size, `panic!` on outcomes it rules out and arithmetic on small values it chose, where an overflow would also fail it"
 )]
 
 use super::connection::READS_AHEAD;

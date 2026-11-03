@@ -199,8 +199,10 @@ impl ObjectUsage {
 
 /// The six functions of a Display Attributes triplet (Table 29, mode
 /// 01100). D3 is reserved.
-// Each flag is one bit of the data field, which Table 29 defines one by one.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one bit of the data field, which Table 29 defines one by one"
+)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Default)]
 pub struct DisplayAttributes {
     /// D0: double height; with D6, double size.

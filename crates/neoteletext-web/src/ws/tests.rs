@@ -1,4 +1,8 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
+)]
 //! The tests of the WebSocket handshake, frame writing and frame reader (RFC 6455).
 
 use super::*;

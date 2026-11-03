@@ -18,6 +18,8 @@ fn stored_g3_glyphs_are_up_to_date() {
     assert_eq!(stored(G3_TARGET), g3_source(&stored(G3_TEXT)).unwrap(), "{G3_TARGET} is stale");
 }
 
+/// REQ-2163: step 4 of the font pipeline, the compiled table, is what the
+/// font files give.
 /// REQ-RND-020: the stored font is the Noto Teletext files.
 /// REQ-132: the compiled table is the files of `third_party/noto`.
 #[test]
@@ -43,6 +45,8 @@ fn the_font_files_must_agree() {
     assert!(same.contains("which the standard's sets need"), "{same}");
 }
 
+/// REQ-2163: step 2 of the font pipeline, the converter's lists, is what the
+/// character tables give.
 /// The required characters are generated from the character set
 /// tables, never chosen by hand.
 #[test]

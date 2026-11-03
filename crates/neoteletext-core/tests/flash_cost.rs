@@ -6,10 +6,7 @@
 //! --ignored --nocapture`.
 #![allow(
     clippy::unwrap_used,
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    clippy::cast_precision_loss,
-    missing_docs
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
 )]
 
 mod common;

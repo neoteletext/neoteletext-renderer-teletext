@@ -272,10 +272,10 @@ impl<'a> GlyphSet<'a> {
     /// placeholder; spaces give an empty glyph. The renderer draws G3
     /// characters from [`GlyphSet::g3`].
     #[must_use]
-    // Every cell line of every row looks its glyph up; inlining it into the
-    // cell raster measured 12 percent faster whole-screen rendering
-    // (REQ-TST-050, `tests/performance.rs`).
-    #[allow(clippy::inline_always)]
+    #[allow(
+        clippy::inline_always,
+        reason = "every cell line of every row looks its glyph up; inlining it into the cell raster measured 12 percent faster whole-screen rendering (REQ-TST-050, `tests/performance.rs`)"
+    )]
     #[inline(always)]
     pub fn glyph(&self, character: CharRef) -> GlyphRows {
         let unicode = to_unicode(character);

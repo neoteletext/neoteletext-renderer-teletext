@@ -34,7 +34,7 @@ pub const SIXEL_DOTS: usize = CELL_WIDTH / SIXELS_ACROSS;
 const TENTHS: usize = 10;
 /// Lines of each band of sixels as the engine draws a 20-line cell: 6, 8
 /// and 6.
-#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects, reason = "a constant, checked when it is compiled")]
+#[allow(clippy::indexing_slicing, reason = "a constant, checked when it is compiled")]
 pub const SIXEL_LINES: [usize; SIXELS_DOWN] = {
     let mut lines = [0; SIXELS_DOWN];
     let mut band = 0;

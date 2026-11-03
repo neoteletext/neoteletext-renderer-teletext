@@ -1,4 +1,8 @@
-#![allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `unwrap` on results it expects to be good"
+)]
 
 // Tests of REQ-AUD-005, REQ-AUD-009 and REQ-AUD-014.
 use super::*;

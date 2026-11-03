@@ -1,6 +1,9 @@
 //! The alternatives of REQ-PRF-004 (REQ-370) under each profile: each
 //! takes effect whichever profile it is set on.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 mod common;
 

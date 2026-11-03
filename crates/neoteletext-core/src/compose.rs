@@ -38,8 +38,10 @@ pub fn compose_level(
         PresentationLevel::Level25 | PresentationLevel::Level35 => {
             Some(crate::enhance::apply(grid, page, magazine, lookup, config, options))
         }
-        // `available` returns only compiled levels.
-        #[allow(unreachable_patterns)]
+        #[allow(
+            unreachable_patterns,
+            reason = "`available` returns only compiled levels, so with every level compiled in this arm cannot be reached; it serves builds that leave a level out"
+        )]
         _ => None,
     };
     // REQ-CHR-015: letters are joined from what the cells finally hold.
@@ -74,8 +76,10 @@ pub fn compose_level_traced(
         PresentationLevel::Level25 | PresentationLevel::Level35 => {
             Some(crate::enhance::apply_traced(grid, page, magazine, lookup, config, options, trace))
         }
-        // `available` returns only compiled levels.
-        #[allow(unreachable_patterns)]
+        #[allow(
+            unreachable_patterns,
+            reason = "`available` returns only compiled levels, so with every level compiled in this arm cannot be reached; it serves builds that leave a level out"
+        )]
         _ => None,
     };
     #[cfg(feature = "extended-sets")]

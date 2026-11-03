@@ -1,4 +1,7 @@
-#![allow(clippy::indexing_slicing, reason = "a test")]
+#![allow(
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size"
+)]
 use super::*;
 use neoteletext_core::charset::{CharRef, CharSet, G0, G0Set, NationalOption};
 use neoteletext_core::consts::{ALPHA_YELLOW, COLUMNS, ROWS, SPACE, STATUS_COLUMNS};

@@ -1,9 +1,8 @@
 #![allow(
-    clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
-    clippy::panic
+    reason = "a test reports a failure by panicking, so it uses `expect` naming what it expected, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
 )]
 //! The record reader's reassembly (DOC-1952): a record followed from its
 //! fragment 0, other records of the same service left alone, and a damaged

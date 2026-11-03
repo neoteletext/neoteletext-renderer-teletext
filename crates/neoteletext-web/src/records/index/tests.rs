@@ -1,9 +1,8 @@
 #![allow(
     clippy::unwrap_used,
-    clippy::expect_used,
     clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    clippy::panic
+    clippy::panic,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and `panic!` on outcomes it rules out"
 )]
 //! The index record at its bounds (REQ-1477, REQ-1480, DOC-1955), through
 //! packets, the reader and the sending's progress.

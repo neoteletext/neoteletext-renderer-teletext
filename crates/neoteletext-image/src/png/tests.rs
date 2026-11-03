@@ -1,5 +1,11 @@
 //! PNG writer tests, checked against an independent fixed-Huffman inflater.
-#![allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::comparison_chain)]
+#![allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::arithmetic_side_effects,
+    clippy::comparison_chain,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size, `unwrap` on results it expects to be good and arithmetic on small values it chose, where an overflow would also fail it; the inflater tests a symbol's ranges in the order RFC 1951 section 3.2.5 lists them"
+)]
 
 use super::deflate::{DISTANCE_BASE, LENGTH_BASE};
 use super::*;

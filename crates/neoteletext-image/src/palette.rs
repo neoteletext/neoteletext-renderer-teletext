@@ -103,7 +103,10 @@ pub fn clut0_of(map: &ColourMap) -> [Rgba; COLOURS] {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing)]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size"
+)]
 mod tests {
     use super::*;
     use neoteletext_core::colour::colour_index;

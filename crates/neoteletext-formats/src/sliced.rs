@@ -24,7 +24,9 @@ pub enum ByteOrder {
 
 impl ByteOrder {
     /// Reads a 32-bit field at `offset` of a record, in the byte order the
-    /// format names rather than the host's (REQ-GEN-007).
+    /// format names rather than the host's (REQ-GEN-007). `offset` may be
+    /// any position: a field that does not lie wholly within `record` gives
+    /// `None`.
     #[must_use]
     pub fn word(self, record: &[u8], offset: usize) -> Option<u32> {
         let bytes: [u8; 4] = record.get(offset..offset.saturating_add(4))?.try_into().ok()?;

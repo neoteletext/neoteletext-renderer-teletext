@@ -82,7 +82,11 @@ impl<'a> Iterator for Records<'a> {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::panic)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `unwrap` on results it expects to be good"
+)]
 mod tests {
     // Tests of REQ-AUD-008 and REQ-AUD-021.
     use super::*;

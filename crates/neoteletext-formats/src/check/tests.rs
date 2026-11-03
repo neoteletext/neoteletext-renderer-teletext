@@ -1,5 +1,4 @@
 //! Page checker tests: one page per problem (REQ-CLI-006).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use super::*;
 use crate::tti::tests::read;

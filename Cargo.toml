@@ -72,6 +72,9 @@ missing_errors_doc = "warn"
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
+# DEVELOPMENT.md section 6: every suppression is narrow, at its site, and
+# says why in its `reason`.
+allow_attributes_without_reason = "warn"
 
 [profile.release]
 panic = "abort"

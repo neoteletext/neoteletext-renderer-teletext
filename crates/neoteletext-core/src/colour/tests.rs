@@ -3,7 +3,10 @@
     not(feature = "level35-32colors"),
     allow(dead_code, unused_imports, reason = "helpers of the tests whose capability is compiled out (decision E.71)")
 )]
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 // The module is compiled for tests only (see the parent file); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

@@ -20,7 +20,8 @@ use crate::text::copy_prefix;
 
 /// Reads a whole dump into `page`; with `repeated_rows`, a row repeating
 /// the double-height row above it is left out. Returns false when `data`
-/// is neither size.
+/// is neither size: [`DUMP_BYTES_25`] bytes
+/// for 25 rows or [`DUMP_BYTES_24`] for 24.
 pub fn parse(data: &[u8], page: &mut PageFile, repeated_rows: bool) -> bool {
     if data.len() != DUMP_BYTES_25 && data.len() != DUMP_BYTES_24 {
         return false;
@@ -99,7 +100,11 @@ impl Reader for DumpReader {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
+)]
 mod tests {
     use super::*;
     use std::vec::Vec;

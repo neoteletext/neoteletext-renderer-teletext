@@ -2,7 +2,10 @@
 //! as any other that could not be read (REQ-CLI-005). No network is touched:
 //! the fetcher refuses a feed it does not know.
 #![cfg(feature = "live")]
-#![allow(clippy::unwrap_used, missing_docs, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
+)]
 
 mod common;
 use common::neottx;

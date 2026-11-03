@@ -1,7 +1,12 @@
 //! The packet trace of `-vv` (REQ-87, REQ-CLI-002): every packet with its
 //! decoded fields and error status, for a command that reads a session and
 //! for `convert --to t42`, which has none.
-#![allow(missing_docs, clippy::unwrap_used, clippy::indexing_slicing)]
+#![allow(
+    missing_docs,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test: a failed unwrap or index is a failed test, and test functions need no documentation"
+)]
 
 mod common;
 

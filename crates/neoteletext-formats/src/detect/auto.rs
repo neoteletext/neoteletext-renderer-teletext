@@ -11,7 +11,10 @@ use crate::text::copy_prefix;
 
 use super::{AnyReader, AutoConfig, DETECTION_BYTES, Detection, Format, detect};
 #[derive(Clone, Debug)]
-#[allow(clippy::large_enum_variant)] // As for AnyReader.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the active state holds an `AnyReader`, whose variants differ greatly in size by design: fixed buffers that cannot be boxed without allocation"
+)]
 enum State {
     Detecting,
     Active(AnyReader),
@@ -38,9 +41,13 @@ impl AutoReader {
     }
 
     /// Feeds the active reader, encoding pages into packets when asked.
-    // Without `pages` no reader produces pages, so the configuration has
-    // nothing to say.
-    #[cfg_attr(not(feature = "pages"), allow(unused_variables))]
+    #[cfg_attr(
+        not(feature = "pages"),
+        allow(
+            unused_variables,
+            reason = "without `pages` no reader produces pages, so the configuration has nothing to say and goes unread"
+        )
+    )]
     fn pass(state: &mut State, config: &AutoConfig, bytes: &[u8], finish: bool, out: &mut dyn FnMut(Item<'_>)) {
         let State::Active(reader) = state else { return };
         #[cfg(feature = "pages")]
