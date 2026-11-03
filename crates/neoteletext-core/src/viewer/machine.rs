@@ -160,8 +160,11 @@ pub enum ViewerAction {
 /// The transition function of the viewer machine (REQ-FSM-005), one arm
 /// for each row of its table; pairs the table does not list are explicit
 /// arms that change nothing (REQ-FSM-001).
-// Arms with equal bodies are kept apart so each matches one table row.
-#[allow(clippy::match_same_arms, clippy::too_many_lines)]
+#[allow(
+    clippy::match_same_arms,
+    clippy::too_many_lines,
+    reason = "arms with equal bodies are kept apart so each matches one row of the viewer's table (REQ-FSM-001), and one arm per row makes the function as long as the table"
+)]
 #[must_use]
 pub fn viewer_transition(machine: ViewerMachine, input: ViewerInput) -> (ViewerMachine, ViewerAction) {
     use ViewerAction as A;

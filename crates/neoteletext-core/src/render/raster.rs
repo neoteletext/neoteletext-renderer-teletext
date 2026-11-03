@@ -199,9 +199,10 @@ fn g3_line(glyphs: &GlyphSet, code: u8, source: usize, mode: CellMode) -> u16 {
 /// the resolved mode, invert, flash, conceal and the display planes are
 /// all applied here.
 #[must_use]
-// The row renderer calls this for every cell of every line; inlined into
-// its loop it measured 2 times faster (REQ-TST-050, `tests/performance.rs`).
-#[allow(clippy::inline_always)]
+#[allow(
+    clippy::inline_always,
+    reason = "the row renderer calls this for every cell of every line; inlined into its loop it measured 2 times faster (REQ-TST-050, `tests/performance.rs`)"
+)]
 #[inline(always)]
 pub fn cell_line(
     cell: &Cell,

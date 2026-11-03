@@ -1,10 +1,9 @@
 //! Tests of the Level 1.5 overwrite walk (REQ-FSM-007, decision E.5).
 #![allow(
-    clippy::unwrap_used,
     clippy::indexing_slicing,
     clippy::panic,
     clippy::unnecessary_wraps,
-    clippy::arithmetic_side_effects
+    reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size and `panic!` on outcomes it rules out; the helper `t` returns `Option<Triplet>` because the walk's triplet event carries one"
 )]
 
 // The module is compiled for tests only (see the parent file); the

@@ -265,9 +265,10 @@ impl CellAttributes {
 }
 
 /// One cell of the grid (REQ-L1-001, REQ-L25-006).
-// The flags are the independent cell attributes REQ-L1-001 and REQ-L25-006
-// list one by one.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the flags are the independent cell attributes REQ-L1-001 and REQ-L25-006 list one by one"
+)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct Cell {
     /// What the cell shows. G3 characters are characters of the set

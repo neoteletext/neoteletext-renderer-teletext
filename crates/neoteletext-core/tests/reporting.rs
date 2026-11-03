@@ -1,7 +1,11 @@
 //! Enhancement faults and designation fallbacks in the decoder's
 //! statistics (REQ-L25-051, REQ-72, REQ-ARCH-007), and the transition trace of the Level 1.5 walk and the
 //! Level 2.5 and 3.5 walk (REQ-FSM-010).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, missing_docs)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
+)]
 
 mod common;
 

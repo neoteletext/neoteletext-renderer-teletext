@@ -11,8 +11,10 @@ use crate::glyphs::GlyphSet;
 use crate::level1::{Grid, Zoom};
 
 /// Writes one cell line as twelve 8-bit indices.
-// Called for every cell of every line, as cell_line is.
-#[allow(clippy::inline_always)]
+#[allow(
+    clippy::inline_always,
+    reason = "called for every cell of every line, as `cell_line` is, and inlined for the same measured gain (REQ-TST-050, `tests/performance.rs`)"
+)]
 #[inline(always)]
 fn fill_cell(target: &mut [u8; CELL_WIDTH], raster: CellLine) {
     for (dot, pixel) in target.iter_mut().enumerate() {

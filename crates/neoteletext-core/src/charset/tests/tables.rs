@@ -1,5 +1,5 @@
 //! Tests of the character set tables of clause 15.
-#![allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects)]
+#![allow(clippy::indexing_slicing, clippy::unwrap_used, clippy::arithmetic_side_effects, reason = "a test reports a failure by panicking, so it uses indexing into data it built to a known size, `unwrap` on results it expects to be good and arithmetic on small values it chose, where an overflow would also fail it")]
 
 // The module is compiled for tests only (see `charset/tests.rs`); the
 // attribute also marks this file as test code for `cargo xtask check-layers`.

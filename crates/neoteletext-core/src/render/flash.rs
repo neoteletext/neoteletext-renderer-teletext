@@ -46,8 +46,10 @@ impl FlashPhase {
         let mut on = 0;
         let mut index = 0;
         while index < rates.len() {
-            // `index` is below the array's constant length.
-            #[allow(clippy::indexing_slicing)]
+            #[allow(
+                clippy::indexing_slicing,
+                reason = "the loop condition keeps `index` below the array's constant length"
+            )]
             let rate = rates[index];
             if flash_on(rate, unit) {
                 on |= rate_bit(rate);

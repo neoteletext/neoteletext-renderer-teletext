@@ -3,9 +3,8 @@
 #![allow(
     clippy::unwrap_used,
     clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
     clippy::cast_precision_loss,
-    missing_docs
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size; counts and rates made floating point for measurements, all below 2^24 or within the measurement's tolerance"
 )]
 
 mod common;

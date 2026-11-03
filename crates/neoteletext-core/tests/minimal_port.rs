@@ -1,7 +1,11 @@
 //! The minimal port example run as a port runs it (REQ-31, REQ-ARCH-009):
 //! a stream of T42 packets through its data source, key presses through its
 //! `Keys`, and the page it prints, using only the platform interface.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, missing_docs, reason = "a test")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good and indexing into data it built to a known size"
+)]
 
 #[path = "../examples/minimal_port.rs"]
 mod minimal_port;

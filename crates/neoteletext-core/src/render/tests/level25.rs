@@ -3,7 +3,12 @@
 //! conceal, G3 drawing and the flash timing
 //! (REQ-RND-030 to REQ-RND-040). Every grid is built by hand, so these
 //! tests depend on nothing but the grid (REQ-RND-001).
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good, indexing into data it built to a known size and arithmetic on small values it chose, where an overflow would also fail it"
+)]
 
 // The module is compiled for tests only (see `render/tests.rs`); the attribute
 // also marks this file as test code for `cargo xtask check-layers`.

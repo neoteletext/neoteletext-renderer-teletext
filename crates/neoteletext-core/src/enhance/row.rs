@@ -21,9 +21,10 @@ use crate::level1::{Cell, CellAttributes, CharSource, Glyph, Size, row_codes};
 use crate::types::FixedVec;
 
 /// The inputs of a row's resolution that do not change along it.
-// Each flag is an independent input: a page setting, a profile setting or
-// the row's position.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent input: a page setting, a profile setting or the row's position"
+)]
 #[derive(Clone, Copy)]
 struct RowContext {
     remapping: Remapping,
@@ -40,8 +41,7 @@ struct RowContext {
 
 /// The record of REQ-FSM-006 for the underlying plane, with the fields
 /// REQ-FSM-012 adds.
-// Each flag is a field REQ-FSM-006 or REQ-FSM-012 lists.
-#[allow(clippy::struct_excessive_bools)]
+#[allow(clippy::struct_excessive_bools, reason = "each flag is a field REQ-FSM-006 or REQ-FSM-012 lists")]
 #[derive(Clone, Copy)]
 struct RowState {
     /// The attributes, with `conceal` the non-spacing conceal.

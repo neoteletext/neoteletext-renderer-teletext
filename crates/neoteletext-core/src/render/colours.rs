@@ -50,7 +50,6 @@ pub fn background_index(cell: &Cell, grid: &Grid) -> u8 {
 /// shows; outside the boxes of a boxed page everything is picture; mix
 /// makes backgrounds picture (REQ-L1-020). Row colours never colour row 0,
 /// columns 0 to 7 (decision E.45).
-#[allow(clippy::too_many_arguments)] // The pixel's colour, role, cell and position.
 fn plane(index: u8, background: bool, cell: &Cell, grid: &Grid, row: usize, column: usize) -> u8 {
     if (grid.boxed_mode && !cell.boxed) || (background && grid.mix) {
         return COLOUR_TRANSPARENT;
