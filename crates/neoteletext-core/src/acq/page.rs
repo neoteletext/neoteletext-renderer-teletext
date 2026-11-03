@@ -127,6 +127,9 @@ impl StoredPage {
         let is_text = |format: Option<PageFormat>| {
             format.is_none_or(|format| format.function == PAGE_FUNCTION_BASIC && format.coding == PAGE_CODING_PARITY)
         };
+        // X/28/4's page function is coded as X/28/0's (Table 10, clause
+        // 9.4.2.1), so either one naming a data function makes the page
+        // data (REQ-NUM-027).
         is_text(self.page_data.and_then(|data| data.format))
             && is_text(self.page_data_level35.and_then(|data| data.format))
             && is_text(self.download_function)
