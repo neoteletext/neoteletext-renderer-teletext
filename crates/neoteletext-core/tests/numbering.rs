@@ -503,10 +503,15 @@ fn a_page_of_8190_sub_pages_is_held_and_stepped() {
         // From the rotating display, the latest (3F7E) steps on to the first.
         assert_eq!(viewer.key(Key::NextSubPage, &context), Action::Request(address(0x100), SubCode::new(0x0001)));
         assert_eq!(&viewer.status(store), b"P100/01");
-        for &expected in &codes[1..] {
+        // DEC-2349: every place to 8,190 is shown whole, giving up the "P"
+        // at three digits and the page number at four.
+        let shown = [(99, &b"P100/99"[..]), (100, b"100/100"), (999, b"100/999"), (1000, b"P/1000"), (8190, b"P/8190")];
+        for (place, &expected) in (2..).zip(&codes[1..]) {
             assert_eq!(viewer.key(Key::NextSubPage, &context), Action::Request(address(0x100), SubCode::new(expected)));
+            if let Some((_, text)) = shown.iter().find(|(at, _)| *at == place) {
+                assert_eq!(&viewer.status(store)[..text.len()], *text, "place {place}");
+            }
         }
-        assert_eq!(&viewer.status(store), b"100/+++", "place 8,190 does not fit");
         assert_eq!(
             viewer.key(Key::NextSubPage, &context),
             Action::Request(address(0x100), SubCode::new(0x0001)),

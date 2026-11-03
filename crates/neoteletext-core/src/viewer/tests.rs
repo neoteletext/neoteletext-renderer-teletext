@@ -423,3 +423,28 @@ fn sub_page_stepping_and_numbering() {
     viewer.key(Key::Index, &context(&links, decoder.store(), &config, &no));
     assert_eq!(&viewer.status(decoder.store()), b"P100/00");
 }
+
+/// REQ-290, REQ-137, DEC-2349: the status area shows a chosen sub-page's
+/// place after "/", a rotating page's count of stored sub-pages after "+",
+/// and "?" in place of either separator while the page is stale, so a
+/// stale chosen sub-page is marked too.
+#[test]
+fn the_status_area_shows_place_count_and_staleness() {
+    let mut slots = std::vec![StoredPage::EMPTY; 8];
+    let mut decoder = Decoder::new(&mut slots, Config::default());
+    receive(&mut decoder, &[(0x100, 0x0005), (0x100, 0x0001), (0x100, 0x0002)]);
+    let config = Config::default();
+    let links = PageLinks::default();
+    let no = |_| false;
+    let keys = context(&links, decoder.store(), &config, &no);
+    let mut viewer = displaying();
+    assert_eq!(&viewer.status(decoder.store()), b"P100+03", "three stored, rotating");
+    viewer.event(ViewerEvent::PageStale);
+    assert_eq!(&viewer.status(decoder.store()), b"P100?03");
+    viewer.event(ViewerEvent::PageUpdated);
+    viewer.key(Key::NextSubPage, &keys);
+    viewer.event(ViewerEvent::PagePresent);
+    assert_eq!(&viewer.status(decoder.store()), b"P100/03");
+    viewer.event(ViewerEvent::PageStale);
+    assert_eq!(&viewer.status(decoder.store()), b"P100?03", "a stale chosen sub-page is marked");
+}

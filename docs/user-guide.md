@@ -157,6 +157,13 @@ On a channel that takes input (its descriptor's `push` says `"input": true`), th
 
 Row 0 columns 0 to 7 always belong to the receiver: they show the page number being searched for and the security indicators, which a page cannot forge (REQ-SEC-005).
 
+The status area in row 0's first seven columns shows the page number, and (DEC-2349):
+- on a page whose sub-pages rotate, how many are stored, after `+`: `P100+12`;
+- on a sub-page chosen with Left, Right or a link, its place among those stored, after `/`: `P100/03`;
+- `?` in place of the `+` or `/` when the page has not been received again for a while (`P100?03`), or after the number (`P100 ?`).
+
+A place or count of three digits gives up the `P` (`100/123`), and one of four digits gives up the page number (`P/8190`), whose header still shows it.
+
 ## Checking a channel
 
 `neottx probe CHANNEL` opens a channel the way a receiver does and says what happened at each step: the entry file, the push connection's handshake and subprotocol, the input protocol, and each sample selection and how it ended, with a page or with DENIED and its status. It selects the place the address names, or the initial page; then each `--select PLACE`; and then a page few channels have, to see a selection refused. A local server needs `--allow-local 127.0.0.1`.
