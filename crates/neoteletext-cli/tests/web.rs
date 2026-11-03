@@ -89,6 +89,41 @@ fn a_page_of_undeclared_format_is_detected() {
     }
 }
 
+/// The status line and `ETag` of a GET of `path` from the test server, sent
+/// with `If-None-Match: etag` when given.
+fn get_head(port: u16, path: &str, etag: Option<&str>) -> (String, Option<String>) {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("the test server");
+    let condition = etag.map(|etag| format!("If-None-Match: {etag}\r\n")).unwrap_or_default();
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{condition}Connection: close\r\n\r\n").unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).unwrap();
+    let answer = String::from_utf8_lossy(&answer).into_owned();
+    let status = answer.lines().next().unwrap_or_default().to_owned();
+    let tag = answer.lines().find_map(|line| line.strip_prefix("ETag: ")).map(str::to_owned);
+    (status, tag)
+}
+
+// Verifies REQ-502 (REQ-WEB-013) and REQ-501 (REQ-WEB-012): the test server
+// serves T42 pages with validators over HTTP, and an ETag on every page,
+// the regional channel's too; a request naming the validator is answered
+// 304; and neottx reads the service whose pages are T42.
+#[test]
+fn the_test_server_serves_t42_pages_with_validators() {
+    let server = server();
+    for path in ["/pages/100.t42", "/pages/100.tti", "/regional/100.tti"] {
+        let (status, etag) = get_head(server.port, path, None);
+        assert!(status.contains(" 200 "), "{path}: {status}");
+        let etag = etag.unwrap_or_else(|| panic!("{path} has an ETag"));
+        let (again, _) = get_head(server.port, path, Some(&etag));
+        assert!(again.contains(" 304 "), "{path}: {again}");
+    }
+    let url = format!("http://127.0.0.1:{}/t42.json", server.port);
+    let (ok, text, errors) = neottx(&["text", &url, "100", "--allow-local", "127.0.0.1", "--duration", "15"]);
+    assert!(ok, "{errors}");
+    assert!(text.contains("NEOTELETEXT TEST SERVICE"), "{text}");
+}
+
 // Verifies REQ-1462 item 4: the count is gathered for 20 seconds, so a command
 // shorter than that writes no line at the first rise.
 #[test]

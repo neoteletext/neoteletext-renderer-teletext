@@ -219,7 +219,9 @@ fn tti_response(headers: &[&str]) -> Reply {
 /// REQ-WEB-014: every request carries only the permitted headers, never
 /// `Referer`, always `Accept-Encoding: identity`.
 fn assert_profile_headers(replay: &Replay) {
-    const PERMITTED: [&str; 15] = [
+    // REQ-503's table of request headers, exactly: no request sends
+    // Content-Type, and the agent offers no WebSocket extension.
+    const PERMITTED: [&str; 13] = [
         "host",
         "user-agent",
         "accept",
@@ -227,13 +229,11 @@ fn assert_profile_headers(replay: &Replay) {
         "cookie",
         "if-none-match",
         "if-modified-since",
-        "content-type",
         "content-length",
         "upgrade",
         "connection",
         "sec-websocket-key",
         "sec-websocket-version",
-        "sec-websocket-extensions",
         "sec-websocket-protocol",
     ];
     assert_ne!(replay.requests.len(), 0);
@@ -254,7 +254,6 @@ fn assert_profile_headers(replay: &Replay) {
         if !names.contains(&"upgrade".to_string()) {
             assert_eq!(header_value(request, "Accept-Encoding").as_deref(), Some("identity"));
         }
-        assert!(!names.contains(&"content-type".to_string()), "no request has a body to type");
     }
 }
 

@@ -134,6 +134,9 @@ DESCRIPTOR = """{{
 # A service whose pages are T42 under a media type that does not say so:
 # /undeclared/{octet,plain}/ (REQ-WEB-003).
 UNDECLARED_TYPES = {"octet": "application/octet-stream", "plain": "text/plain"}
+# The same service with its pages as T42 (REQ-WEB-013: T42 pages with
+# validators over HTTP).
+T42_DESCRIPTOR = """{"name": "T42 service", "initial_page": "100", "page_template": "/pages/{mpp}.t42"}"""
 UNDECLARED_DESCRIPTOR = """{{"name": "T", "initial_page": "100", "page_template": "/undeclared/{kind}/{{mpp}}"}}"""
 
 
@@ -161,6 +164,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def validated(self, body, media, cookies):
+        """A page with its ETag (REQ-WEB-012: an ETag on every page), and 304
+        to a request that names it (REQ-WEB-004)."""
+        data = body.encode("latin-1") if isinstance(body, str) else body
+        etag = '"' + hashlib.sha256(data).hexdigest()[:16] + '"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
+        return self.send(200, data, media, cookies + [("ETag", etag)])
+
     def undeclared(self, path, cookies):
         kind, _, name = path[len("/undeclared/"):].partition("/")
         if kind not in UNDECLARED_TYPES:
@@ -187,20 +203,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/regional/channel.ttx":
             return self.send(200, REGIONAL_CHANNEL, "application/json", cookies)
         if path == "/regional/100.tti":
-            return self.send(200, REGIONAL_PAGE, "text/x-teletext-tti", cookies)
-        if path.startswith("/pages/") and path.endswith(".tti"):
-            page = path[len("/pages/"):-len(".tti")]
+            return self.validated(REGIONAL_PAGE, "text/x-teletext-tti", cookies)
+        if path == "/t42.json":
+            return self.send(200, T42_DESCRIPTOR, "application/json", cookies)
+        if path.startswith("/pages/") and (path.endswith(".tti") or path.endswith(".t42")):
+            page, _, extension = path[len("/pages/"):].partition(".")
             if page not in PAGES:
                 return self.send(404, "", "text/plain", cookies)
-            body = PAGES[page]
-            etag = '"' + hashlib.sha256(body.encode("latin-1")).hexdigest()[:16] + '"'
-            if self.headers.get("If-None-Match") == etag:
-                self.send_response(304)
-                self.send_header("ETag", etag)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return None
-            return self.send(200, body, "text/x-teletext-tti", cookies + [("ETag", etag)])
+            if extension == "t42":
+                return self.validated(t42_page(PAGES[page]), "application/x-teletext-t42", cookies)
+            return self.validated(PAGES[page], "text/x-teletext-tti", cookies)
         if path.startswith("/undeclared/"):
             return self.undeclared(path, cookies)
         if path == "/push":
