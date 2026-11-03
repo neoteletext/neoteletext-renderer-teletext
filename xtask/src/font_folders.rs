@@ -23,7 +23,7 @@ const PROVENANCE: &str = "PROVENANCE.md";
 const INDEX: &str = "fonts.txt";
 /// A checksum line of the record: "- `NAME.bdf`: `SHA-256`".
 const LINE_PREFIX: &str = "- `";
-/// A font line of the index: "f<TAB>FILE<TAB>NAME<TAB>SHA-256" (REQ-FNT-004).
+/// A font line of the index: `f`, the file, the name and the SHA-256, separated by tabs (REQ-FNT-004).
 const INDEX_FONT_PREFIX: &str = "f\t";
 
 /// Noto Teletext, the compiled font (DEC-1761).
