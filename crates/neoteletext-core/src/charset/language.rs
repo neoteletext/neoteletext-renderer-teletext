@@ -1,7 +1,9 @@
 //! The one table from a language to the character set that writes it
 //! (REQ-2181): every language NeoTeletext writes, by its BCP 47 language
 //! and script subtags, with the Table 32 value of its set and, where
-//! EN 300 706 has one, the standard's own set for it.
+//! EN 300 706 has one, the standard's own set for it. EN 300 706 names
+//! sets by Table 32 value and national option, never by language; the
+//! table is NeoTeletext's, under DEC-602 item 1.
 
 use crate::consts::DESIGNATION_GROUP_SHIFT;
 

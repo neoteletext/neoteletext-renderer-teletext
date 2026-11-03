@@ -19,7 +19,8 @@ use crate::trace::{Machine, TraceSink};
 const ROW_RESOLUTION: &str = "Resolving the row";
 
 /// True when the page is an enhancement page and so never shown as text
-/// (REQ-OBJ-041): the Magazine Organization Table, or a page whose stored
+/// (REQ-OBJ-041; EN 300 706 clause 9.4.2.1: its page function says it is
+/// not for direct display; DEC-581, REQ-1639 item 13): the Magazine Organization Table, or a page whose stored
 /// enhancement copy names an object, DRCS or table page function. A page
 /// named only by a link is still shown, so that a wrong link never hides a
 /// display page.
@@ -73,7 +74,10 @@ pub fn apply_traced(
     process(grid, page, magazine, lookup, config, options, config.trace.then_some(trace))
 }
 
-/// [`apply`], with `trace` `None` when tracing is off.
+/// [`apply`], with `trace` `None` when tracing is off. It acts only at
+/// Levels 2.5 and 3.5, where EN 300 706 Table 1 gives X/26 its
+/// non-spacing attributes and objects (clause 10.2), in place of the Level
+/// 1.5 pass (DEC-564).
 fn process(
     grid: &mut Grid,
     page: &StoredPage,
@@ -198,7 +202,10 @@ fn store_presentation(
 }
 
 /// Rebuilds the rows the page shows, top to bottom, so that each row knows
-/// the row above it (REQ-L25-025, REQ-L25-026).
+/// the row above it (REQ-L25-025, REQ-L25-026). A row the page hides keeps
+/// its Level 1 cells (DEC-581, REQ-1639 item 12), and the row below spacing
+/// double height or size shows the local background and no foreground
+/// (EN 300 706 Table 26, codes 0/D and 0/F).
 /// Each undefined character position a row shows is traced, when `trace`
 /// is given, as a transition of that row's attribute machine (REQ-L25-010,
 /// decision E.50): the position is found only here, where the row's sets

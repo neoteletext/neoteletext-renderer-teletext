@@ -6,7 +6,9 @@
 pub const ROWS: usize = 25;
 /// Columns of a page.
 pub const COLUMNS: usize = 40;
-/// Stored rows including X/25: 0 to 25.
+/// Stored rows including X/25: 0 to 25. X/25 carries a page's key-word
+/// search labels (EN 300 706 clause 9.1, Table 1), not a display row: it is
+/// stored (REQ-7) and never displayed (DEC-1118), so [`ROWS`] stops at 24.
 pub const STORED_ROWS: usize = 26;
 /// Displayable bytes of a header: packet bytes 14 to 45.
 pub const HEADER_DISPLAY_BYTES: usize = 32;

@@ -235,7 +235,10 @@ pub fn row_24_shown(page: &StoredPage, config: &Config) -> bool {
 }
 
 /// True when no row of `page` below row 0 is displayed: REQ-L1-016 inhibit
-/// display, REQ-ACQ-014 a page that is not text.
+/// display, REQ-ACQ-014 a page that is not text. C10, Inhibit Display, says
+/// data addressed to rows 1 to 24 is not to be displayed (EN 300 706 clause
+/// 9.3.1.3, Table 2), and a page whose X/28 page function is not basic text
+/// is not for direct display (clause 9.4.2.1).
 fn inhibited(page: &StoredPage) -> bool {
     page.control.0 & C10_INHIBIT_DISPLAY != 0 || !page.is_text_page()
 }
@@ -279,7 +282,9 @@ impl PageRows {
 }
 
 /// Blanks row 0 for a page with C7 set, keeping the status area when asked
-/// (REQ-L1-014).
+/// (REQ-L1-014): C7, Suppress Header, says data addressed to row 0 is not
+/// to be displayed (EN 300 706 clause 9.3.1.3, Table 2); the status area is
+/// the receiver's, not the page's (decision E.10).
 fn hide_header(grid: &mut Grid, keep_status: bool) {
     if let Some(cells) = grid.cells.get_mut(0) {
         for (column, cell) in cells.iter_mut().enumerate() {
@@ -290,7 +295,8 @@ fn hide_header(grid: &mut Grid, keep_status: bool) {
     }
 }
 
-/// On a boxed page everything outside a box is the picture (REQ-L1-011),
+/// On a boxed page everything outside a box is the picture (REQ-L1-011;
+/// EN 300 706 clause 9.3.1.3, Table 2, bits C5 and C6; Table 26, code 0/B),
 /// so the receiver's own cells are boxed while a security indicator is on:
 /// REQ-SEC-005 and REQ-SEC-008 require it to show on every page, a
 /// newsflash or subtitle page among them.

@@ -60,7 +60,9 @@ pub enum WalkAction {
 #[derive(Clone, Copy, Debug)]
 pub struct WalkContext {
     /// The default sets (decision E.4); national options and ESC do not
-    /// apply (REQ-L15-010).
+    /// apply (REQ-L15-010): national option substitution "does not apply
+    /// when characters are referenced via packets X/26 or objects"
+    /// (EN 300 706 clause 12.1, Table 25), nor does ESC (Table 26, code 1/B).
     pub designation: Designation,
     /// The clause 12.3.2 row rule instead of Annex A.3 (decision E.3).
     pub strict_row_setting: bool,
@@ -174,6 +176,8 @@ fn triplet_transition(row: u8, column: u8, triplet: Triplet, context: WalkContex
 
 /// The column moves to `column`, and the character is written there unless
 /// its data value is reserved: REQ-PKT-009, values below 2/0 write nothing.
+/// EN 300 706 Table 29: data field values below 2/0 are reserved, but the
+/// decoder still sets the column of the Active Position.
 const fn write_at(row: u8, column: u8, character: CharRef) -> (WalkState, WalkAction) {
     let next = WalkState::Walking { row, column };
     if character.code < TRIPLET_FIRST_CHARACTER {
@@ -229,7 +233,8 @@ pub type EnhancementPackets = [[Option<Triplet>; crate::consts::TRIPLETS_PER_PAC
 /// receiver stay as they are (REQ-L1-014 to REQ-L1-016).
 ///
 /// REQ-L15-001: at Level 1 the packets are stored but not applied, so the
-/// pass does nothing. Choosing between this pass (Level 1.5) and the
+/// pass does nothing: EN 300 706 Table 1 gives the character overwrites of
+/// X/26 to Levels 1.5 and up only (decision E.1, DEC-564). Choosing between this pass (Level 1.5) and the
 /// enhancement processor (Levels 2.5 and 3.5) is the caller's dispatch.
 pub fn apply(grid: &mut Grid, packets: &EnhancementPackets, present: u16, config: &Config, rows: PageRows) {
     walk(grid, packets, present, config, rows, None);
@@ -281,6 +286,9 @@ fn walk(
         state = next;
         let mut ignored = false;
         if let (WalkAction::Write(character), WalkState::Walking { row, column }) = (action, next) {
+            // EN 300 706 Annex A.4: triplets are sent in increasing order of
+            // address; a receiver may ignore one that goes back (DEC-570,
+            // REQ-L15-009).
             let out_of_order = previous.is_some_and(|before| (row, column) < before);
             ignored = out_of_order && config.ignore_out_of_order_triplets;
             if !ignored {

@@ -28,7 +28,8 @@ impl Plane {
     }
 
     /// REQ-OBJ-008: local data invokes anything; Active objects Adaptive
-    /// and Passive ones; Adaptive objects Passive ones; Passive nothing.
+    /// and Passive ones; Adaptive objects Passive ones; Passive nothing
+    /// (EN 300 706 clause 13.3 item 3, clause 13.4 item 4, clause 13.6).
     pub(super) const fn may_invoke(self, kind: ObjectKind) -> bool {
         match self {
             Self::Local => true,

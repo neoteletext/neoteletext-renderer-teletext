@@ -130,6 +130,8 @@ impl RowState {
                 // REQ-L25-026: the row below is suppressed.
                 self.spacing_double |= context.double_allowed;
             }
+            // EN 300 706 Table 26, codes 0/E and 0/F: double width and
+            // double size have effect at Levels 2.5 and 3.5.
             DOUBLE_WIDTH => self.size(false, true),
             ESC => self.second_g0 = !self.second_g0,
             RELEASE_MOSAICS => self.hold = false,
@@ -366,7 +368,9 @@ fn resolve_segment(
 
 /// What a Level 1 byte shows (REQ-FSM-006 step 2): a space or the held
 /// mosaic for an attribute, a mosaic, or a character of the Level 1 G0 set
-/// with its national option.
+/// with its national option. ESC selects the second G0 set for these bytes
+/// only: it "does not affect characters written via packets X/26 or as part
+/// of an object" (EN 300 706 Table 26, code 1/B; clause 15.4).
 fn level_1_glyph(state: &RowState, code: u8, separated: bool, context: &RowContext) -> (Glyph, bool) {
     if code <= ATTRIBUTE_LAST {
         if state.hold

@@ -73,7 +73,8 @@ impl PagePresentation {
 ///   source, in the order X/28/0, X/28/4 (Level 3.5), M/29/0, M/29/4
 ///   (Level 3.5), whose field group is valid; substitution then falls back
 ///   to the table's POP link.
-/// - The sources' side-panel fields have no effect (REQ-1644).
+/// - The sources' side-panel fields have no effect (REQ-1644): NeoTeletext
+///   has no side panels (DEC-1636).
 /// - At Levels 1 and 1.5 the result is the defaults over `base`.
 #[must_use]
 pub fn resolve(sources: &PresentationSources<'_>, level: PresentationLevel, base: &ColourMap) -> PagePresentation {

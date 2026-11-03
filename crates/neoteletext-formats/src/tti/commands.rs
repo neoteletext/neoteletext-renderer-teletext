@@ -60,6 +60,8 @@ impl TtiReader {
         let args = args.unwrap_or(&[]);
         match &name {
             b"PN" => self.page_number(args, out),
+            // REQ-177 (the MRG format): DE and DS are kept as metadata,
+            // and CT, the cycle time, is ignored.
             b"DE" | b"DS" => self.description(name, args, out),
             b"CT" => {}
             b"LG" => self.log_line(args, out),
@@ -90,6 +92,8 @@ impl TtiReader {
                 }
                 None => self.diagnostic(bad, out),
             },
+            // REQ-177, decision E.21: PS bits map to the header's control
+            // bits C4 to C14 (EN 300 706 clause 9.3.1.3, Table 2).
             b"PS" => match hex(args).and_then(|value| u16::try_from(value).ok()) {
                 Some(value) => self.page.status = value,
                 None => self.diagnostic(bad, out),
@@ -104,6 +108,8 @@ impl TtiReader {
                 Some(value) => self.page.region = u8::try_from(value).ok(),
                 None => self.diagnostic(bad, out),
             },
+            // REQ-177: page function and page coding, as X/28/0 Format 1
+            // carries them (EN 300 706 clause 9.4.2.1).
             b"PF" => {
                 let mut fields = Args::new(args);
                 let function = hex(fields.next()).filter(|&value| value <= REGION_LAST);
@@ -217,6 +223,9 @@ impl TtiReader {
             Some(number @ PACKET_ENHANCEMENT..=PACKET_MAGAZINE_ENHANCEMENT) => {
                 self.packed_line(number, text, out);
             }
+            // REQ-177: OL names rows 0 to 25 and packets 26 to 29 only;
+            // packets 30 and 31 are not part of a page (EN 300 706 clause
+            // 9.1, Table 1).
             _ => self.diagnostic(DiagnosticKind::BadArgument { command: *b"OL" }, out),
         }
     }

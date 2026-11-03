@@ -14,8 +14,9 @@ use crate::types::Rgb12;
 /// from it (REQ-RND-001).
 ///
 /// Everything a row needs travels in the grid, so a row is rendered from
-/// the grid alone (decision E.29). It is 40 columns at every level
-/// (REQ-1644).
+/// the grid alone (decision E.29). It is 40 columns at every level, the
+/// 40 character spaces of EN 300 706 clause 12.1, Table 25, with no side
+/// panels (DEC-1636, REQ-1644).
 // Boxed mode, mix, the designation's fallback and the receiver's row 24
 // are separate facts of the page on screen, each set and read alone.
 #[allow(clippy::struct_excessive_bools, reason = "four independent facts of the page on screen")]

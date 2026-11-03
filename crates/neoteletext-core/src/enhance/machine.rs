@@ -254,7 +254,8 @@ pub const fn walk_action_name(action: WalkAction) -> &'static str {
 }
 
 /// The trace's action for a transition whose step met a fault
-/// (REQ-L25-051): the fault, in place of the action that met it. A step
+/// (REQ-L25-051): the fault, in place of the action that met it. Faults are
+/// counted and the Level 1 page still shown (DEC-581, REQ-1639). A step
 /// meets at most one fault of the walk, except in Placing default objects,
 /// where finding the next default object may pass over several.
 pub(super) fn traced_action(

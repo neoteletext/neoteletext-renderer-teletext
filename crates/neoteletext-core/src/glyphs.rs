@@ -104,7 +104,9 @@ const PLACEHOLDER_EDGE: u16 = 0b0111_1111_1110;
 /// The sides of the placeholder.
 const PLACEHOLDER_SIDES: u16 = 0b0100_0000_0010;
 
-/// A visible placeholder for characters with no glyph (REQ-CHR-004): a
+/// A visible placeholder for characters with no glyph (REQ-CHR-004;
+/// DEC-1761 item 6: a missing glyph is a defect of the font, shown, never
+/// drawn as a wrong character): a
 /// hollow box on lines 2 to 15, where the font's capitals stand, so that it
 /// reads as a missing letter and never as a mosaic.
 pub const PLACEHOLDER: GlyphRows = [

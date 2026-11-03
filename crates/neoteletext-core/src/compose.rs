@@ -13,7 +13,9 @@ use crate::trace::TraceSink;
 
 /// Applies the pass of the presentation level to a page's Level 1 grid
 /// (REQ-PRF-006): nothing at Level 1, the Level 1.5 pass at Level 1.5, and
-/// the enhancement processor at Levels 2.5 and 3.5 (REQ-L25-001). The
+/// the enhancement processor at Levels 2.5 and 3.5 (REQ-L25-001), as
+/// EN 300 706 clauses 10.1 and 10.2 divide the levels (DEC-564); a level
+/// not compiled in falls back first (decision E.61). The
 /// level is read on every build, so changing it never re-acquires a page.
 /// At Levels 2.5 and 3.5 it returns the processor's report of the faults it
 /// met, for the caller's statistics and trace (REQ-L25-051).
