@@ -127,7 +127,9 @@ impl StoredPage {
         let is_text = |format: Option<PageFormat>| {
             format.is_none_or(|format| format.function == PAGE_FUNCTION_BASIC && format.coding == PAGE_CODING_PARITY)
         };
-        is_text(self.page_data.and_then(|data| data.format)) && is_text(self.download_function)
+        is_text(self.page_data.and_then(|data| data.format))
+            && is_text(self.page_data_level35.and_then(|data| data.format))
+            && is_text(self.download_function)
     }
 
     /// True when the page is stored and is a display page by its page

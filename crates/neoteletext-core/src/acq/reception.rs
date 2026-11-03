@@ -159,9 +159,10 @@ impl Decoder<'_> {
                     (crate::consts::PACKET_PAGE_ENHANCEMENT, 0)
                 });
                 let format = match packet {
-                    PagePacket::Format1(data) => data.format,
+                    // X/28/4 triplet 1 carries the page function and
+                    // coding as X/28/0 does (Table 10; clause 9.4.2.1).
+                    PagePacket::Format1(data) | PagePacket::Level35(data) => data.format,
                     PagePacket::PageFunction(format) => format,
-                    PagePacket::Level35(_) => None,
                 };
                 if let (Some(index), Some(format)) = (stored, format) {
                     self.page_format(index, format, now, events);

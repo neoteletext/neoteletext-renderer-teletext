@@ -586,3 +586,44 @@ fn every_code_of_one_page_of_storage_keeps_its_latest_version() {
     expected.sort_unstable();
     assert_eq!(all_single, expected);
 }
+
+/// REQ-NUM-028, REQ-NUM-010, DEC-2341: the Basic TOP Table, page 1F0, is
+/// kept as received in the enhancement store, where a reader of TOP finds
+/// it, and never reaches the page store or a list of display pages, with or
+/// without the diagnostic setting that stores hexadecimal pages.
+#[test]
+fn the_basic_top_table_is_kept_as_the_data_page_it_is() {
+    for diagnostic in [false, true] {
+        let mut pages = vec![StoredPage::EMPTY; 8];
+        let mut sub_pages = vec![EnhancementSubPage::EMPTY; 16];
+        let mut packets = vec![EnhancementPacket::EMPTY; 400];
+        let store = EnhancementStore::new(&mut sub_pages, &mut packets);
+        let config = Config { store_hexadecimal_pages: diagnostic, ..Config::default() };
+        let mut decoder = Decoder::with_enhancement_store(&mut pages, store, config);
+        let btt = address(0x1F0);
+        let row = [hamming84_encode(0x5); DATA_BYTES];
+        let mut stream = vec![header(0x1F0, 0), encode::row(btt.magazine, 1, &row)];
+        stream.extend(filling());
+        feed(&mut decoder, &stream);
+        let table = decoder.enhancement_lookup().basic_top_table();
+        assert_eq!(table.and_then(|table| table.row(1).copied()), Some(row), "diagnostic {diagnostic}");
+        assert!(!decoder.store().contains(btt), "diagnostic {diagnostic}");
+        assert_eq!(decoder.store().subpage_count(btt), 0, "diagnostic {diagnostic}");
+    }
+}
+
+/// REQ-NUM-027: a page function given by X/28/4 (Table 10, as clause
+/// 9.4.2.1) decides how the page is read, as X/28/0's does: a page whose
+/// X/28/4 names the Basic TOP Table function is not a display page.
+#[test]
+fn a_page_function_in_x_28_4_is_honoured() {
+    with_decoder(8, |decoder| {
+        let format = PageFormat { function: PAGE_FUNCTION_BTT, coding: 0 };
+        let level35 = encode::page_enhancement(address(0x150).magazine, 4, format, &PresentationFields::default());
+        let mut stream = vec![header(0x150, 0), level35, header(0x151, 0)];
+        stream.extend(filling());
+        feed(decoder, &stream);
+        assert_eq!(step_stored(address(0x149), true, decoder.store()), address(0x151));
+        assert_eq!(decoder.store().subpage_count(address(0x150)), 0);
+    });
+}
