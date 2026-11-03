@@ -79,3 +79,25 @@ fn a_page_converts_to_an_edittf_address_that_reads_back_the_same() {
     assert!(back.status.success(), "{back:?}");
     assert_eq!(String::from_utf8_lossy(&back.stdout), text_of(&original, "200"));
 }
+
+// Verifies REQ-188: page files converted to T42 go in the transmission
+// order of Annex B.7, object pages before the pages that invoke them,
+// whatever their order in the file.
+#[test]
+fn page_files_convert_to_t42_in_transmission_order() {
+    let folder = folder("convert-b7-order");
+    let input = folder.join("in.tti");
+    fs::write(&input, "PN,10000\nOL,1,DISPLAY\nPN,1A000\nPF,3,2\nOL,1,OBJECTS\n").unwrap();
+    let output = folder.join("out.t42");
+    let run = neottx(&["convert", input.to_str().unwrap(), "--to", "t42", "-o", output.to_str().unwrap()]);
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let written = fs::read(&output).unwrap();
+    // The page number of each header, packet 0, in the order written.
+    let decode = |byte: u8| neoteletext_core::ecc::hamming84_decode(byte).0;
+    let headers: Vec<u8> = written
+        .chunks(42)
+        .filter(|packet| (decode(packet[0]) >> 3) | (decode(packet[1]) << 1) == 0)
+        .map(|packet| (decode(packet[3]) << 4) | decode(packet[2]))
+        .collect();
+    assert_eq!(headers, [0xA0, 0x00], "the object page comes first");
+}
