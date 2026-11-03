@@ -12,10 +12,14 @@ its cache and checks by SHA-256.
 
 import importlib.util
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+# Loading the module under test leaves no __pycache__ beside it, which
+# `cargo xtask check-noto` would refuse in the font folder.
+sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("arabic_sets", HERE / "arabic-sets.py")
 arabic_sets = importlib.util.module_from_spec(SPEC)

@@ -182,6 +182,8 @@ push_steps() {
     step "the Arabic-script tables are what scripts/arabic-sets.py writes, allocated append-only (REQ-2164, REQ-2166)"
     uv run scripts/arabic-sets.py --check
     uv run scripts/test_arabic_sets.py
+    step "the font converter's drawing rules (REQ-2165)"
+    uv run third_party/noto/test_convert.py
 }
 
 linux_steps() {
