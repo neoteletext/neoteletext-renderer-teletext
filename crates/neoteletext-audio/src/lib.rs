@@ -71,5 +71,15 @@ pub mod store;
 pub mod ttau;
 
 pub use codec::*;
+
+/// Copies `source` into `target` as far as both go. Unlike
+/// `copy_from_slice`, it has no panic path for lengths that differ, which
+/// the linked receiver must not hold (REQ-GEN-019); every caller passes
+/// slices of one length.
+pub(crate) fn copy_into<T: Copy>(target: &mut [T], source: &[T]) {
+    for (to, &from) in target.iter_mut().zip(source) {
+        *to = from;
+    }
+}
 pub use profile::*;
 pub use serial::serial_newer;

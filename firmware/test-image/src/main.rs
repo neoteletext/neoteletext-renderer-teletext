@@ -270,6 +270,101 @@ mod opus {
     static FINAL_RANGE: fn(&Decoder) -> u32 = final_range;
 }
 
+/// The audio receiver (area AUD, REQ-AUD-017): every entry point a port
+/// calls, with a voice sink that keeps nothing, sized at audio Level A's
+/// minimums for the microcontroller shape and Level B's for the desktop
+/// shape (`LEVEL_A_MINIMUM`, `LEVEL_B_MINIMUM`). The arena is the port's
+/// and is not counted here.
+#[cfg(any(feature = "audio-microcontroller", feature = "audio-desktop"))]
+mod audio {
+    use super::black_box;
+    use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
+    use neoteletext_core::packet::Packet;
+
+    /// Sounds and records in flight the receiver holds: Level A's minimum
+    /// in the microcontroller shape, Level B's in the desktop shape.
+    #[cfg(feature = "audio-microcontroller")]
+    const OBJECTS: usize = neoteletext_audio::LEVEL_A_MINIMUM.objects;
+    #[cfg(feature = "audio-microcontroller")]
+    const SLOTS: usize = neoteletext_audio::LEVEL_A_MINIMUM.records_in_flight;
+    #[cfg(all(feature = "audio-desktop", not(feature = "audio-microcontroller")))]
+    const OBJECTS: usize = neoteletext_audio::LEVEL_B_MINIMUM.objects;
+    #[cfg(all(feature = "audio-desktop", not(feature = "audio-microcontroller")))]
+    const SLOTS: usize = neoteletext_audio::LEVEL_B_MINIMUM.records_in_flight;
+
+    type Receiver<'a> = neoteletext_audio::receiver::Receiver<'a, OBJECTS, SLOTS>;
+
+    /// A sink that keeps nothing: the port's own sink is not measured.
+    struct Quiet;
+
+    impl VoiceSink for Quiet {
+        fn define(&mut self, sound: SoundId, format: SoundFormat) {
+            black_box((sound, format));
+        }
+        fn samples(&mut self, sound: SoundId, first: u32, pcm: &[i16]) {
+            black_box((sound, first, pcm));
+        }
+        fn forget(&mut self, sound: SoundId) {
+            black_box(sound);
+        }
+        fn stream(&mut self, sound: SoundId, rate_hz: u32) {
+            black_box((sound, rate_hz));
+        }
+        fn stream_samples(&mut self, sound: SoundId, pcm: &[i16]) {
+            black_box((sound, pcm));
+        }
+        fn start(&mut self, channel: u8, start: Start) {
+            black_box((channel, start));
+        }
+        fn stop(&mut self, channel: u8, fade_ms: u16) {
+            black_box((channel, fade_ms));
+        }
+        fn gain(&mut self, channel: u8, gain: u8, fade_ms: u16) {
+            black_box((channel, gain, fade_ms));
+        }
+    }
+
+    /// A receiver made over the caller's arena, as a port keeps one.
+    fn new<'a>(place: &mut Option<Receiver<'a>>, arena: &'a mut [u8]) {
+        *place = Some(Receiver::new(arena));
+    }
+
+    fn packet(receiver: &mut Receiver<'_>, packet: &Packet) {
+        black_box(receiver.push_packet(packet, &mut Quiet));
+    }
+
+    fn message(receiver: &mut Receiver<'_>, message: &[u8]) {
+        black_box(receiver.push_message(message, &mut Quiet).is_ok());
+    }
+
+    fn file(receiver: &mut Receiver<'_>, file: &[u8]) {
+        black_box(receiver.push_file(file, &mut Quiet));
+    }
+
+    fn tick(receiver: &mut Receiver<'_>, now_ms: u64) {
+        receiver.tick(now_ms, &mut Quiet);
+        black_box(receiver.next_tick_ms());
+    }
+
+    fn page(receiver: &mut Receiver<'_>, page: Option<u16>, on: bool) {
+        receiver.open_page(page, &mut Quiet);
+        receiver.set_page_sounds(on, &mut Quiet);
+    }
+
+    #[used]
+    static NEW: for<'a> fn(&mut Option<Receiver<'a>>, &'a mut [u8]) = new;
+    #[used]
+    static PACKET: fn(&mut Receiver<'_>, &Packet) = packet;
+    #[used]
+    static MESSAGE: fn(&mut Receiver<'_>, &[u8]) = message;
+    #[used]
+    static FILE: fn(&mut Receiver<'_>, &[u8]) = file;
+    #[used]
+    static TICK: fn(&mut Receiver<'_>, u64) = tick;
+    #[used]
+    static PAGE: fn(&mut Receiver<'_>, Option<u16>, bool) = page;
+}
+
 /// REQ-GEN-019: one floating-point operation, which the symbol check must
 /// find on targets without a floating-point unit.
 #[cfg(feature = "float-probe")]

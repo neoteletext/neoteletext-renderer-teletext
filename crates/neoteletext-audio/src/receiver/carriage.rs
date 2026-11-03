@@ -3,6 +3,7 @@
 //! (REQ-AUD-008), a WebSocket's binary message of the same packets.
 
 use super::{Receiver, bump};
+use crate::copy_into;
 use crate::idl::fragment;
 use crate::port::VoiceSink;
 use crate::record::is_input_type;
@@ -59,7 +60,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                     let mut copy = [0_u8; crate::MAX_RECORD];
                     let length = record.len().min(copy.len());
                     if let (Some(target), Some(source)) = (copy.get_mut(..length), record.get(..length)) {
-                        target.copy_from_slice(source);
+                        copy_into(target, source);
                     }
                     self.push_record(copy.get(..length).unwrap_or(&[]), sink);
                 }

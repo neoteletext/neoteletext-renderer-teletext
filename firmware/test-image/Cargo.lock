@@ -13,6 +13,7 @@ name = "neoteletext-audio"
 version = "0.1.0"
 dependencies = [
  "neoteletext-core",
+ "neoteletext-opus",
 ]
 
 [[package]]
@@ -34,6 +35,7 @@ version = "0.1.0"
 name = "neoteletext-test-image"
 version = "0.0.0"
 dependencies = [
+ "neoteletext-audio",
  "neoteletext-core",
  "neoteletext-formats",
  "neoteletext-opus",

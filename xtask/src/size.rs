@@ -65,6 +65,11 @@ const BUILDS: &[Build] = &[
     // The Opus decoder of the audio profile alone (decision E.123), over the core with no
     // optional area.
     Build { name: "opus", features: "opus", budget: None },
+    // The audio receiver over the core with no optional area (decision
+    // E.131): the microcontroller shape, PCM16 and IMA ADPCM at Level A's
+    // minimums, and the desktop shape, Opus at Level B's.
+    Build { name: "audio-mcu", features: "audio-microcontroller", budget: None },
+    Build { name: "audio-desktop", features: "audio-desktop", budget: None },
 ];
 
 /// Targets without a floating-point unit, where the float probe must be

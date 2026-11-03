@@ -63,7 +63,7 @@ pub fn split(bytes: &[u8]) -> Result<(u8, &[u8]), RecordError> {
     if bytes.len() > length {
         return Err(RecordError::TrailingBytes);
     }
-    let (header, rest) = bytes.split_at(RECORD_HEADER);
+    let (header, rest) = bytes.split_at_checked(RECORD_HEADER).ok_or(RecordError::Truncated)?;
     let (body, crc) = rest.split_at(rest.len().saturating_sub(RECORD_CRC));
     let crc: [u8; RECORD_CRC] = crc.try_into().map_err(|_| RecordError::Truncated)?;
     if crc32_parts(header, body) != u32::from_be_bytes(crc) {

@@ -117,7 +117,19 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
             }
         }
         let taken = taken.get_mut(..count)?;
-        taken.sort_unstable();
+        // An insertion sort, not the library's: its sort keeps a panic path
+        // for an inconsistent order, which the linked receiver must not hold
+        // (REQ-GEN-019). The store holds few sounds, and this runs only when
+        // one is defined.
+        for sorted in 1..taken.len() {
+            let mut at = sorted;
+            while let Some(before) = at.checked_sub(1)
+                && taken.get(before) > taken.get(at)
+            {
+                taken.swap(before, at);
+                at = before;
+            }
+        }
         let mut start = 0;
         for &(from, to) in taken.iter() {
             if from.saturating_sub(start) >= size {

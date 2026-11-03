@@ -4,6 +4,7 @@
 //! are evicted to make room, and nothing leaves for a sound that is refused.
 
 use crate::Codec;
+use crate::copy_into;
 use crate::port::SoundId;
 use crate::record::Data;
 
@@ -281,7 +282,7 @@ impl<'a, const OBJECTS: usize> Store<'a, OBJECTS> {
             }
             let start = entry.offset.saturating_add(usize::from(block).saturating_mul(usize::from(entry.block_bytes)));
             if let Some(target) = self.arena.get_mut(start..start.saturating_add(bytes.len())) {
-                target.copy_from_slice(bytes);
+                copy_into(target, bytes);
             }
             let bit = entry.offset.saturating_add(entry.data_bytes()).saturating_add(usize::from(block / 8));
             if let Some(byte) = self.arena.get_mut(bit) {
