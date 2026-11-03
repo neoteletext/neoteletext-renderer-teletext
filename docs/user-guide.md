@@ -43,7 +43,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx probe CHANNEL` | Opens a channel as a receiver does and reports what it found, for a channel's developer. |
 | `neottx text INPUT PAGE` | Writes one page, or `all`, as UTF-8 text on standard output. |
 | `neottx render INPUT PAGE -o FILE` | Writes one page as a PNG or PPM image; with `all`, `-o` names a directory. |
-| `neottx convert INPUT --to t42\|tti -o FILE` | Converts a recording or page files to T42 packets or TTI pages. `--page 100` keeps one page. |
+| `neottx convert INPUT --to t42\|tti\|edittf -o FILE` | Converts a recording or page files to T42 packets, TTI pages, or edit.tf page addresses (one page a line, each `https://edit.tf/#` and the page, which the editor opens). `--page 100` keeps one page, `--page 100/0001` one sub-page. |
 | `neottx slice RAW -o OUT.t42` | Slices raw sampled video into T42 packets and prints quality statistics. |
 | `neottx services INPUT` | Lists the teletext streams, languages and subtitle pages of a transport stream. |
 | `neottx service-info INPUT` | Prints the broadcast service data of packet 8/30: network, time, programme label and status message. |

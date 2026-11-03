@@ -23,7 +23,15 @@ pub enum Target {
     T42,
     /// TTI page files.
     Tti,
+    /// edit.tf page addresses (REQ-INP-016), one page a line, each a web
+    /// address whose fragment holds the page, as the editor opens it.
+    Edittf,
 }
+
+/// The web address an edit.tf page address follows: the editor reads the
+/// page from the fragment (REQ-INP-016), and the reader ignores what
+/// comes before the `#`.
+pub const EDITTF_ADDRESS_PREFIX: &[u8] = b"https://edit.tf/#";
 
 /// Converts the input to `to`, written to `output`; with a filter, only
 /// that page, and with a sub-code other than `SubCode::ANY` only that
@@ -65,6 +73,26 @@ pub fn convert(
             let mut out = std::io::BufWriter::new(file);
             neoteletext_formats::write::write_tti(&references, &mut out)
                 .map_err(|error| (exit::INPUT, error.to_string()))?;
+            out.flush().map_err(|error| (exit::INPUT, error.to_string()))
+        }
+        Target::Edittf => {
+            let session = input::load(options)?;
+            let pages = session_page_files(&session, filter);
+            let mut out = std::io::BufWriter::new(file);
+            let mut failure = None;
+            for page in &pages {
+                let mut write = |bytes: &[u8]| {
+                    if failure.is_none() {
+                        failure = out.write_all(bytes).err();
+                    }
+                };
+                write(EDITTF_ADDRESS_PREFIX);
+                neoteletext_formats::edittf::write(page, &mut write);
+                write(b"\n");
+            }
+            if let Some(error) = failure {
+                return Err((exit::INPUT, error.to_string()));
+            }
             out.flush().map_err(|error| (exit::INPUT, error.to_string()))
         }
     }

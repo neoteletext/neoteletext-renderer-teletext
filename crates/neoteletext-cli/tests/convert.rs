@@ -64,3 +64,18 @@ fn a_page_alone_selects_all_its_sub_pages() {
     assert!(holds(&written, "SUB ONE") && holds(&written, "SUB ZERO"));
     assert!(!holds(&written, "OTHER"));
 }
+
+// Verifies REQ-86: convert writes edit.tf addresses, one page a line, which
+// read back as the same pages.
+#[test]
+fn a_page_converts_to_an_edittf_address_that_reads_back_the_same() {
+    let written = converted("convert-edittf", "edittf", "200");
+    let text = String::from_utf8(written).unwrap();
+    assert_eq!(text.lines().count(), 1, "{text}");
+    assert!(text.starts_with("https://edit.tf/#"), "{text}");
+    let file = Path::new(env!("CARGO_TARGET_TMPDIR")).join("convert-edittf/out.edittf");
+    let original = Path::new(env!("CARGO_TARGET_TMPDIR")).join("convert-edittf/in.tti");
+    let back = neottx(&["text", file.to_str().unwrap(), "200", "--format", "edittf"]);
+    assert!(back.status.success(), "{back:?}");
+    assert_eq!(String::from_utf8_lossy(&back.stdout), text_of(&original, "200"));
+}

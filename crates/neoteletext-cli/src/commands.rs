@@ -76,6 +76,8 @@ pub enum ConvertTarget {
     T42,
     /// TTI page files.
     Tti,
+    /// edit.tf page addresses, one page a line (REQ-INP-016).
+    Edittf,
 }
 
 /// What a page argument selects (REQ-CLI-003).
