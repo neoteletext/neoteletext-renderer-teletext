@@ -60,3 +60,32 @@ fn a_picture_is_a_png_of_the_page() {
     assert_eq!((dimension(WIDTH_AT), dimension(WIDTH_AT + 4)), picture_size());
     assert_ne!(png, picture_of(b"WORLD"));
 }
+
+/// REQ-245 (REQ-L1-020), REQ-292: a zoomed raster is the page's top or
+/// bottom half drawn by `render_line`, line for line, and differs from the
+/// unzoomed one.
+#[test]
+fn a_zoomed_raster_draws_each_line_as_render_line_does() {
+    use super::{Scale, raster, raster_zoomed};
+    use crate::palette::Rgba;
+    use neoteletext_core::config::Config;
+    use neoteletext_core::consts::PAGE_WIDTH;
+    use neoteletext_core::glyphs::GlyphSet;
+    use neoteletext_core::level1::Zoom;
+    use neoteletext_core::render::{FlashPhase, IndexFormat, RenderOptions, render_line};
+    let noto = GlyphSet::noto_teletext();
+    let grid = grid_of_packets(&packets(b"ZOOM ME"), address(), STATUS).unwrap();
+    let options = RenderOptions::for_level(&Config::default(), false, FlashPhase::STEADY);
+    let one = Scale { x: 1, y: 1, aspect: false };
+    let off = raster(&grid, options, true, &noto, one, Rgba::TRANSPARENT);
+    for zoom in [Zoom::Top, Zoom::Bottom] {
+        let zoomed = raster_zoomed(&grid, options, true, &noto, one, Rgba::TRANSPARENT, zoom);
+        assert_eq!((zoomed.width, zoomed.height), (off.width, off.height));
+        assert_ne!(zoomed.indices, off.indices, "{zoom:?}");
+        let mut line = alloc::vec![0u8; PAGE_WIDTH];
+        for (y, drawn) in zoomed.indices.chunks(PAGE_WIDTH).enumerate() {
+            render_line(&grid, y, zoom, &noto, options, IndexFormat::Bits8, &mut line).unwrap();
+            assert_eq!(drawn, &line[..], "{zoom:?} line {y}");
+        }
+    }
+}

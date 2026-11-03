@@ -26,7 +26,7 @@ pub fn raster(grid: &Grid, frame: Frame, scale: Scale, picture: Rgba) -> Raster 
 /// Renders a grid to a scaled raster in the given glyphs (`--font`).
 #[must_use]
 pub fn raster_in(grid: &Grid, frame: Frame, scale: Scale, picture: Rgba, glyphs: &GlyphSet<'_>) -> Raster {
-    present::raster(grid, frame.options, frame.flash_visible, glyphs, scale, picture)
+    present::raster_zoomed(grid, frame.options, frame.flash_visible, glyphs, scale, picture, frame.zoom)
 }
 
 /// Encodes a raster as PNG bytes.

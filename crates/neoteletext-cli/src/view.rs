@@ -18,7 +18,8 @@ use neoteletext_app::source::Source;
 use neoteletext_core::acq::{EnhancementReport, StoredPage};
 use neoteletext_core::config::Config;
 use neoteletext_core::consts::COLUMNS;
-use neoteletext_core::level1::Grid;
+use neoteletext_core::level1::{Grid, Zoom};
+use neoteletext_core::render::ZOOM_ROWS;
 use neoteletext_core::service::initial_page;
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 use neoteletext_core::viewer::{Action, Viewer, ViewerEvent};
@@ -53,7 +54,7 @@ struct ViewState {
     messages: Vec<String>,
     live: bool,
     grid: Grid,
-    last_drawn: Option<(Grid, Option<Frame>, bool)>,
+    last_drawn: Option<(Grid, Option<Frame>, bool, Zoom)>,
     action: Action,
     prompt: Option<[u8; COLUMNS]>,
     confirmed_services: HashSet<u8>,
@@ -178,11 +179,33 @@ fn draw(
             out.write_all(iterm2_inline(&encoded, raster.width, raster.height).as_bytes())?;
         }
         Display::Text => {
-            let text = ansi(grid, frame.options.reveal, mosaics, depth).replace('\n', "\r\n");
+            let text = zoomed_text(&ansi(grid, frame.options.reveal, mosaics, depth), frame.zoom).replace('\n', "\r\n");
             out.write_all(text.as_bytes())?;
         }
     }
     out.flush()
+}
+
+/// The terminal text of a page at a page zoom (REQ-L1-020), row by row as
+/// `render_line` draws the picture: each row of the half shown on two
+/// lines, since a text cell cannot be split, then the first row after the
+/// half once, where the picture shows its upper half.
+fn zoomed_text(text: &str, zoom: Zoom) -> String {
+    let first = match zoom {
+        Zoom::Off => return text.to_owned(),
+        Zoom::Top => 0,
+        Zoom::Bottom => ZOOM_ROWS,
+    };
+    let rows: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len().saturating_mul(2));
+    for row in rows.iter().skip(first).take(ZOOM_ROWS) {
+        out.push_str(row);
+        out.push_str(row);
+    }
+    if let Some(row) = rows.get(first.saturating_add(ZOOM_ROWS)) {
+        out.push_str(row);
+    }
+    out
 }
 
 #[cfg(test)]

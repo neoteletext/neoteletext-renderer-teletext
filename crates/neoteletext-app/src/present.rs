@@ -11,7 +11,7 @@ use neoteletext_core::policy::is_safe_output_char;
 
 mod receiver_page;
 
-pub use neoteletext_image::raster::{Raster, Scale, raster};
+pub use neoteletext_image::raster::{Raster, Scale, raster, raster_zoomed};
 pub use receiver_page::receiver_grid;
 
 /// How mosaics are written.

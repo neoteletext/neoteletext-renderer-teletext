@@ -14,10 +14,11 @@ use neoteletext_core::compose::compose_level;
 use neoteletext_core::config::Config;
 use neoteletext_core::consts::{PACKET_BYTES, PAGE_WIDTH, ROWS, STATUS_COLUMNS};
 use neoteletext_core::glyphs::GlyphSet;
-use neoteletext_core::level1::{DisplayOptions, Grid, build_grid};
+use neoteletext_core::level1::{DisplayOptions, Grid, Zoom, build_grid};
 use neoteletext_core::packet::{Packet, PacketMeta};
 use neoteletext_core::render::{
-    ALL_ROWS, ColourMode, FlashPhase, IndexBuffer, IndexFormat, RenderOptions, palette_mode_allowed, render_screen,
+    ALL_ROWS, ColourMode, FlashPhase, IndexBuffer, IndexFormat, RenderOptions, palette_mode_allowed, render_line,
+    render_screen,
 };
 use neoteletext_core::types::{Instant, PageAddress};
 
@@ -63,6 +64,22 @@ pub fn raster(
     scale: Scale,
     picture: Rgba,
 ) -> Raster {
+    raster_zoomed(grid, options, flash_visible, glyphs, scale, picture, Zoom::Off)
+}
+
+/// [`raster`] with page zoom (REQ-L1-020): at [`Zoom::Top`] or
+/// [`Zoom::Bottom`] each output line is the line `render_line` gives for
+/// it, so the half of the page is drawn at double height.
+#[must_use]
+pub fn raster_zoomed(
+    grid: &Grid,
+    options: RenderOptions,
+    flash_visible: bool,
+    glyphs: &GlyphSet,
+    scale: Scale,
+    picture: Rgba,
+    zoom: Zoom,
+) -> Raster {
     let mut options = options;
     if options.colour == ColourMode::Palette && !palette_mode_allowed(grid) {
         options.colour = ColourMode::Resolved(FlashPhase::STEADY);
@@ -73,7 +90,13 @@ pub fn raster(
     let mut buffer = IndexBuffer { format: IndexFormat::Bits8, data: &mut indices, stride: width };
     // The buffer is sized for the whole page and the mode suits the grid,
     // so rendering cannot fail.
-    let _ = render_screen(grid, ALL_ROWS, glyphs, options, &mut buffer);
+    if zoom == Zoom::Off {
+        let _ = render_screen(grid, ALL_ROWS, glyphs, options, &mut buffer);
+    } else {
+        for (y, line) in buffer.data.chunks_mut(width).enumerate() {
+            let _ = render_line(grid, y, zoom, glyphs, options, IndexFormat::Bits8, line);
+        }
+    }
     let (scaled_width, scaled_height) = scaled_size(width, height, scale.x, scale.y, scale.aspect);
     let mut scaled = vec![0u8; scaled_width.saturating_mul(scaled_height)];
     let _ = scale_indices(&indices, width, height, scale.x.max(1), scale.y.max(1), scale.aspect, &mut scaled);

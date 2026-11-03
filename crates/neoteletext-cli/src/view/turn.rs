@@ -56,8 +56,8 @@ impl ViewState {
             self.compose(session, requested, &shown);
             let reveal = self.viewer.reveal(now);
             // Images change with the flash phase; text flashes by itself.
-            let frame = Frame::at(&config, reveal, now);
-            let state = (self.grid, (display == Display::Iterm2).then_some(frame), reveal);
+            let frame = Frame { zoom: self.viewer.zoom(), ..Frame::at(&config, reveal, now) };
+            let state = (self.grid, (display == Display::Iterm2).then_some(frame), reveal, frame.zoom);
             if self.last_drawn.as_ref() != Some(&state) {
                 paint(&self.grid, frame)?;
                 self.last_drawn = Some(state);

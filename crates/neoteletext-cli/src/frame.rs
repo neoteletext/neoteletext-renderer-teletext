@@ -2,6 +2,7 @@
 //! (decision E.55, REQ-RND-040).
 
 use neoteletext_core::config::Config;
+use neoteletext_core::level1::Zoom;
 #[cfg(feature = "view")]
 use neoteletext_core::render::ColourMode;
 use neoteletext_core::render::{FlashPhase, RenderOptions};
@@ -16,13 +17,20 @@ pub struct Frame {
     pub options: RenderOptions,
     /// The phase of decision E.12, used by the palette mode only.
     pub flash_visible: bool,
+    /// Page zoom (REQ-L1-020): which half of the page is drawn at double
+    /// height. Only the viewer zooms.
+    pub zoom: Zoom,
 }
 
 impl Frame {
     /// A still image: flashing characters in their "on" phase.
     #[must_use]
     pub const fn still(config: &Config, reveal: bool) -> Self {
-        Self { options: RenderOptions::for_level(config, reveal, FlashPhase::STEADY), flash_visible: true }
+        Self {
+            options: RenderOptions::for_level(config, reveal, FlashPhase::STEADY),
+            flash_visible: true,
+            zoom: Zoom::Off,
+        }
     }
 
     /// The frame at a time on the decoder's clock. In the resolved mode
@@ -33,7 +41,7 @@ impl Frame {
         let options = RenderOptions::for_level(config, reveal, FlashPhase::at(now, config));
         let flash_visible =
             options.colour != ColourMode::Palette || neoteletext_core::render::flash_visible(now, config);
-        Self { options, flash_visible }
+        Self { options, flash_visible, zoom: Zoom::Off }
     }
 }
 

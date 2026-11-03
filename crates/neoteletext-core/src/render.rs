@@ -38,7 +38,7 @@ pub use flash::{FlashPhase, flash_on, flash_unit, flash_visible};
 pub use options::{ColourMode, RenderOptions};
 use raster::CELL_LAST_HALF_DOT;
 pub use raster::cell_line;
-pub use row::{render_line, render_row, render_screen};
+pub use row::{ZOOM_ROWS, render_line, render_row, render_screen};
 
 /// One line of one cell (REQ-RND-016).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

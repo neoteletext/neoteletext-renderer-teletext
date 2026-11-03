@@ -359,3 +359,24 @@ fn a_late_8_30_gives_the_initial_page() {
     state.follow_service_initial(&session);
     assert_eq!((state.initial, state.viewer.requested().0), (page(0x150), page(0x150)));
 }
+
+/// REQ-245, REQ-292: the terminal text zooms as the picture does: the top
+/// half's rows 0 to 11 each on two lines then row 12 once, the bottom
+/// half's rows 12 to 23 then row 24, which leaves row 24 off the screen at
+/// the top half; with no zoom the text is as it was.
+#[test]
+fn the_text_output_zooms_as_the_picture_does() {
+    use neoteletext_core::level1::Zoom;
+    let text: String = (0..25).map(|row| format!("row {row}")).collect::<Vec<_>>().join("\n") + "\n";
+    let lines = |zoom| super::zoomed_text(&text, zoom).lines().map(str::to_owned).collect::<Vec<_>>();
+    let expect = |first: usize| {
+        let mut rows: Vec<String> =
+            (first..first + 12).flat_map(|row| [format!("row {row}"), format!("row {row}")]).collect();
+        rows.push(format!("row {}", first + 12));
+        rows
+    };
+    assert_eq!(lines(Zoom::Top), expect(0));
+    assert_eq!(lines(Zoom::Bottom), expect(12));
+    assert!(!lines(Zoom::Top).contains(&"row 24".to_owned()), "row 24 is off the screen");
+    assert_eq!(super::zoomed_text(&text, Zoom::Off), text);
+}
