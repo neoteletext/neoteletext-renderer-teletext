@@ -34,9 +34,15 @@ pub fn view(
     let scale = scale_for(raster_args, area, (PAGE_WIDTH, height));
     sandbox_closed(options.no_sandbox)?;
     let depth = if colours8 { ColourDepth::Eight } else { ColourDepth::TrueColour };
-    let ran =
-        crate::view::run(&mut session, source.as_mut(), opening, display, scale, depth, mosaic_style(legacy_mosaics))
-            .map_err(|error| (exit::INPUT, error.to_string()));
+    let look = crate::view::Look {
+        display,
+        scale,
+        depth,
+        mosaics: mosaic_style(legacy_mosaics),
+        text_row_pixels: area.and_then(terminal::TextArea::text_row_pixels),
+    };
+    let ran = crate::view::run(&mut session, source.as_mut(), opening, look)
+        .map_err(|error| (exit::INPUT, error.to_string()));
     // REQ-RND-029: why characters were drawn, as `show` says it, once the
     // terminal is the user's again.
     if let (Some(reason), true) = (reason, options.verbose > 0) {

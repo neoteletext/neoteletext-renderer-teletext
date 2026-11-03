@@ -5,7 +5,9 @@
 
 use crate::ansi::{ColourDepth, MosaicStyle, ansi};
 use crate::frame::Frame;
-use crate::image::{Scale, iterm2_inline, kitty_free, kitty_hide, kitty_place, kitty_transmit, png, raster, sixel};
+use crate::image::{
+    Raster, Scale, iterm2_inline, kitty_free, kitty_hide, kitty_place, kitty_transmit, png, raster, sixel,
+};
 use crate::terminal::Display;
 use crossterm::event::{
     self, EnableBracketedPaste, EnableFocusChange, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
@@ -58,7 +60,9 @@ struct ViewState {
     messages: Vec<String>,
     live: bool,
     grid: Grid,
-    last_drawn: Option<(Grid, Option<Frame>, bool, Zoom)>,
+    last_drawn: Option<turn::DrawnState>,
+    // The next drawing sends the whole page: the terminal was resized.
+    repaint_whole: bool,
     action: Action,
     prompt: Option<[u8; COLUMNS]>,
     // The origins confirmed this session (REQ-288), kept across services.
@@ -112,6 +116,7 @@ impl ViewState {
             live: true,
             grid: Grid::EMPTY,
             last_drawn: None,
+            repaint_whole: true,
             action,
             prompt: None,
             confirmed_origins: HashSet::new(),
@@ -165,16 +170,26 @@ impl ViewState {
     }
 }
 
+/// How the viewer draws pages: the protocol, the scale and the text
+/// output's colours and mosaics, as the command chose them.
+#[derive(Clone, Copy)]
+pub struct Look {
+    /// The graphics protocol, or characters.
+    pub display: Display,
+    /// The scale of a picture.
+    pub scale: Scale,
+    /// The colours of the text output.
+    pub depth: ColourDepth,
+    /// The mosaics of the text output.
+    pub mosaics: MosaicStyle,
+    /// The height of a text row in pixels, when the terminal reports its
+    /// size in pixels and the rows divide it exactly; a Sixel redraw of
+    /// the changed rows alone needs it (REQ-RND-029).
+    pub text_row_pixels: Option<usize>,
+}
+
 /// Runs the viewer until the user quits.
-pub fn run(
-    session: &mut Session,
-    source: &mut dyn Source,
-    opening: Opening,
-    display: Display,
-    scale: Scale,
-    depth: ColourDepth,
-    mosaics: MosaicStyle,
-) -> std::io::Result<()> {
+pub fn run(session: &mut Session, source: &mut dyn Source, opening: Opening, look: Look) -> std::io::Result<()> {
     terminal::enable_raw_mode()?;
     // Releases and repeats where the terminal has the Kitty keyboard
     // protocol, a paste as one event, and the focus (`docs/user-guide.md`, "The viewer").
@@ -208,8 +223,9 @@ pub fn run(
     source.set_wake(Arc::new(move || {
         let _ = woken.send(Wakened::Source);
     }));
-    let mut drawer = Drawer { display, scale, depth, mosaics, kitty: KittyImages::default() };
-    state.run(session, source, &wakes, display, &mut |grid, frame| drawer.draw(&mut out, grid, frame))?;
+    let display = look.display;
+    let mut drawer = Drawer::new(look);
+    state.run(session, source, &wakes, display, &mut |grid, frame, whole| drawer.draw(&mut out, grid, frame, whole))?;
     drawer.kitty.free_all(&mut out)?;
     drop(guard);
     for message in state.into_messages() {
@@ -218,24 +234,42 @@ pub fn run(
     Ok(())
 }
 
-/// How the viewer draws a page, and the kitty images it holds.
+/// How the viewer draws a page, and what it keeps of the pages drawn: the
+/// kitty images, and the last Sixel picture.
 struct Drawer {
     display: Display,
     scale: Scale,
     depth: ColourDepth,
     mosaics: MosaicStyle,
     kitty: KittyImages,
+    sixel: SixelRows,
 }
 
 impl Drawer {
-    fn draw(&mut self, out: &mut std::io::Stdout, grid: &Grid, frame: Frame) -> std::io::Result<()> {
+    fn new(look: Look) -> Self {
+        Self {
+            display: look.display,
+            scale: look.scale,
+            depth: look.depth,
+            mosaics: look.mosaics,
+            kitty: KittyImages::default(),
+            sixel: SixelRows { last: None, text_row_pixels: look.text_row_pixels },
+        }
+    }
+
+    /// Draws `frame` of `grid`. `whole` asks for the whole page even where
+    /// only changed rows would be sent, as after the terminal was resized.
+    fn draw(&mut self, out: &mut impl Write, grid: &Grid, frame: Frame, whole: bool) -> std::io::Result<()> {
         queue!(out, cursor::MoveTo(0, 0))?;
         let black = Rgba::opaque(0, 0, 0);
         match self.display {
             Display::Kitty => {
+                if whole {
+                    self.kitty.free_all(out)?;
+                }
                 self.kitty.show(out, grid, frame, |frame| png(&raster(grid, frame, self.scale, black)))?;
             }
-            Display::Sixel => out.write_all(&sixel(&raster(grid, frame, self.scale, black), black)?)?,
+            Display::Sixel => self.sixel.draw(out, raster(grid, frame, self.scale, black), whole, black)?,
             Display::Iterm2 => {
                 let raster = raster(grid, frame, self.scale, black);
                 let encoded = png(&raster)?;
@@ -248,6 +282,80 @@ impl Drawer {
             }
         }
         out.flush()
+    }
+}
+
+/// The rows of a picture that changed since the last one drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Changed {
+    /// Nothing changed.
+    Nothing,
+    /// Pixel rows `start` to `end` (exclusive) are to be sent, from the
+    /// top of text row `text_row`.
+    Rows { text_row: u16, start: usize, end: usize },
+}
+
+/// Which rows of `current` differ from `previous`, widened to whole text
+/// rows of `text_row_pixels` at the top, where the terminal can place an
+/// image, and to whole Sixel bands at the bottom; `None` when the whole
+/// picture must be sent: its size or palette changed (each palette index is
+/// its own colour register, and a terminal that shares registers between
+/// images would recolour the rows already drawn, VT340 manual section
+/// 14.3.4).
+fn changed_rows(previous: &Raster, current: &Raster, text_row_pixels: usize) -> Option<Changed> {
+    use neoteletext_image::sixel::BAND_ROWS;
+    if (previous.width, previous.height, &previous.palette) != (current.width, current.height, &current.palette)
+        || previous.width == 0
+        || text_row_pixels == 0
+    {
+        return None;
+    }
+    let rows = || previous.indices.chunks(previous.width).zip(current.indices.chunks(current.width));
+    let Some(first) = rows().position(|(before, after)| before != after) else { return Some(Changed::Nothing) };
+    let last = rows().rposition(|(before, after)| before != after).unwrap_or(first);
+    let text_row = first.checked_div(text_row_pixels)?;
+    let start = text_row.saturating_mul(text_row_pixels);
+    let bands = last.saturating_add(1).saturating_sub(start).div_ceil(BAND_ROWS);
+    let end = start.saturating_add(bands.saturating_mul(BAND_ROWS)).min(current.height);
+    Some(Changed::Rows { text_row: u16::try_from(text_row).ok()?, start, end })
+}
+
+/// The last Sixel picture drawn, so that a change sends only the rows
+/// that changed (REQ-RND-029 item 4): a flash phase, a clock or one row of
+/// a page sends a band, not the page.
+struct SixelRows {
+    last: Option<Raster>,
+    text_row_pixels: Option<usize>,
+}
+
+impl SixelRows {
+    /// Draws `picture`, from the cursor at the top left when it is sent
+    /// whole; `fill` takes the transparent pixels.
+    fn draw(&mut self, out: &mut impl Write, picture: Raster, whole: bool, fill: Rgba) -> std::io::Result<()> {
+        let changed = match (&self.last, self.text_row_pixels) {
+            (Some(last), Some(row_pixels)) if !whole => changed_rows(last, &picture, row_pixels),
+            _ => None,
+        };
+        match changed {
+            Some(Changed::Nothing) => {}
+            Some(Changed::Rows { text_row, start, end }) => {
+                let band = Raster {
+                    width: picture.width,
+                    height: end.saturating_sub(start),
+                    indices: picture
+                        .indices
+                        .get(start.saturating_mul(picture.width)..end.saturating_mul(picture.width))
+                        .unwrap_or_default()
+                        .to_vec(),
+                    palette: picture.palette.clone(),
+                };
+                queue!(out, cursor::MoveTo(0, text_row))?;
+                out.write_all(&sixel(&band, fill)?)?;
+            }
+            None => out.write_all(&sixel(&picture, fill)?)?,
+        }
+        self.last = Some(picture);
+        Ok(())
     }
 }
 

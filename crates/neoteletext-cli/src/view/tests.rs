@@ -528,3 +528,102 @@ fn kitty_sends_each_flash_phase_once_and_switches_between_them() {
     assert_eq!(text.matches("a=d,d=I,").count(), 2, "both old images freed: {text:?}");
     assert_eq!(text.matches("a=t,").count(), 1);
 }
+
+/// A grid showing `text` on row `row`.
+fn grid_showing(row: usize, text: &[u8]) -> super::Grid {
+    use neoteletext_core::charset::{CharRef, CharSet, G0, G0Set, NationalOption};
+    use neoteletext_core::level1::Glyph;
+    let mut grid = super::Grid::EMPTY;
+    let g0 = CharSet::G0(G0 { set: G0Set::Latin, national: Some(NationalOption::English) });
+    for (cell, &byte) in grid.cells[row].iter_mut().zip(text) {
+        cell.glyph = Glyph::Char(CharRef::new(g0, byte));
+    }
+    grid
+}
+
+/// The height a Sixel image declares in its raster attributes, `"1;1;W;H`.
+fn sixel_heights(output: &[u8]) -> Vec<usize> {
+    let text = String::from_utf8_lossy(output);
+    text.split("\"1;1;")
+        .skip(1)
+        .map(|rest| {
+            let height: String = rest.split(';').nth(1).unwrap().chars().take_while(char::is_ascii_digit).collect();
+            height.parse().unwrap()
+        })
+        .collect()
+}
+
+/// REQ-382 (REQ-RND-029 item 4, TODO-2070): with Sixel, a change to one row
+/// of the page sends an image of that row's text rows only, placed at its
+/// text row, where the whole page was sent before; a page that did not
+/// change sends nothing; and a whole redraw, as after a resize, sends the
+/// page.
+#[test]
+fn sixel_sends_only_the_rows_that_changed() {
+    use super::{Drawer, Look, Scale};
+    use crate::ansi::{ColourDepth, MosaicStyle};
+    use crate::frame::Frame;
+    use crate::terminal::Display;
+    // Text rows of 16 pixels; at scale 1 a teletext row is 20.
+    const TEXT_ROW_PIXELS: usize = 16;
+    let look = Look {
+        display: Display::Sixel,
+        scale: Scale { x: 1, y: 1, aspect: false },
+        depth: ColourDepth::TrueColour,
+        mosaics: MosaicStyle::Unicode16,
+        text_row_pixels: Some(TEXT_ROW_PIXELS),
+    };
+    let mut drawer = Drawer::new(look);
+    let frame = Frame::still(&neoteletext_core::config::Config::default(), false);
+    let mut first = Vec::new();
+    drawer.draw(&mut first, &grid_showing(5, b"ALPHA"), frame, true).unwrap();
+    let page_height = sixel_heights(&first)[0];
+    assert_eq!(page_height, 500, "the whole page first");
+
+    let mut changed = Vec::new();
+    drawer.draw(&mut changed, &grid_showing(5, b"OMEGA"), frame, false).unwrap();
+    let heights = sixel_heights(&changed);
+    assert_eq!(heights.len(), 1);
+    // Teletext row 5 is pixel rows 100 to 119; its first changed pixel
+    // row lies in text row 6 (pixels 96 to 111), where the image starts,
+    // and it ends with the Sixel band holding the last changed pixel row,
+    // at most row 119: at most four bands of six.
+    let height = heights[0];
+    assert!((1..=24).contains(&height), "{height}: {:?}", String::from_utf8_lossy(&changed));
+    assert!(String::from_utf8_lossy(&changed).contains("\u{1b}[7;1H"), "placed at text row 6");
+
+    let mut unchanged = Vec::new();
+    drawer.draw(&mut unchanged, &grid_showing(5, b"OMEGA"), frame, false).unwrap();
+    assert!(sixel_heights(&unchanged).is_empty(), "nothing changed, nothing sent");
+
+    let mut whole = Vec::new();
+    drawer.draw(&mut whole, &grid_showing(5, b"OMEGA"), frame, true).unwrap();
+    assert_eq!(sixel_heights(&whole), [page_height]);
+}
+
+/// REQ-382: every picture protocol draws the page again when only the
+/// flash phase changes, as it draws flash itself; text does not, as the
+/// terminal's blink flashes it.
+#[test]
+fn a_picture_is_drawn_again_at_each_flash_phase() {
+    use super::turn::drawn_state;
+    use crate::frame::Frame;
+    use crate::terminal::Display;
+    let on = Frame::still(&neoteletext_core::config::Config::default(), false);
+    let off = Frame { flash_visible: false, ..on };
+    let grid = super::Grid::EMPTY;
+    for display in [Display::Kitty, Display::Sixel, Display::Iterm2] {
+        assert_ne!(drawn_state(&grid, display, on, false), drawn_state(&grid, display, off, false), "{display:?}");
+    }
+    assert_eq!(drawn_state(&grid, Display::Text, on, false), drawn_state(&grid, Display::Text, off, false));
+}
+
+/// REQ-382: a text row's height is known only when the rows divide the
+/// reported height exactly.
+#[test]
+fn a_text_rows_height_needs_rows_that_divide_the_height() {
+    use crate::terminal::TextArea;
+    assert_eq!(TextArea { width: 800, height: 600, rows: 30 }.text_row_pixels(), Some(20));
+    assert_eq!(TextArea { width: 800, height: 604, rows: 30 }.text_row_pixels(), None, "padding");
+    assert_eq!(TextArea { width: 800, height: 600, rows: 0 }.text_row_pixels(), None);
+}
