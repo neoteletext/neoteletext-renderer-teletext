@@ -113,6 +113,8 @@ pub enum MediaType {
     /// `application/json`
     Json,
     /// `application/x-font-bdf`, accepted for fonts only (REQ-FNT-003).
+    /// Interface for ports: a user's font fetched from an address
+    /// (REQ-123) is judged by it (DEC-2377).
     FontBdf,
     /// `text/html`, which no channel's file is (REQ-WEB-027).
     Html,

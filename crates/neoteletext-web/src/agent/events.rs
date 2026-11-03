@@ -43,7 +43,8 @@ pub enum Input<'a> {
     OpenChannel(&'a str),
     /// Fetch the open channel's `contents.txt` (REQ-WEB-025), answered by
     /// [`Event::Contents`], [`Event::ContentsMissing`] or
-    /// [`Event::ContentsFailed`].
+    /// [`Event::ContentsFailed`]. Interface for ports: a receiver with a
+    /// contents view of a static channel asks for it (DEC-2377).
     FetchContents,
     /// Follow a link to a page of another service named in the current
     /// descriptor (Appendix E). The request is a cross-service navigation

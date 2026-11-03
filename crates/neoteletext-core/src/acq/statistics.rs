@@ -111,7 +111,8 @@ pub struct EnhancementReport {
     /// Triplets read, over every run of the walk.
     pub steps: u32,
     /// Modified G0 and G2 Character Set Designation triplets applied
-    /// (Table 34, REQ-L25-012).
+    /// (Table 34, REQ-L25-012). Like `objects` and `steps`, a count for
+    /// the port's own record of what a page did (DEC-2377).
     pub designations: u32,
 }
 
