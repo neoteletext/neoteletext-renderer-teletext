@@ -310,6 +310,18 @@ fn inactivity_reconnects_then_gives_up() {
     assert_eq!(harness.pump.transport.connects.len(), connects, "no more attempts");
 }
 
+// REQ-186: 5 seconds without a `clock` or `header` message is a dropped
+// connection, whatever else arrives: `bsdp` messages alone do not keep it.
+#[test]
+fn bsdp_alone_does_not_keep_the_connection() {
+    let mut harness = connected("teefax");
+    for _ in 0..5 {
+        harness.advance(SECOND);
+        harness.server(&[BSDP]);
+    }
+    assert!(has_event(&harness.take(), "Reconnecting { attempt: 1,"));
+}
+
 #[test]
 fn wrong_name_stops_reconnection() {
     let mut harness = connected("teefax");

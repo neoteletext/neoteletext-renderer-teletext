@@ -129,6 +129,46 @@ fn forward(
         LiveOutput::Event(LiveEvent::WrongName) => {
             emit(&Frame::Notice(Notice::Message("live feed: wrong service name".into())))
         }
+        // REQ-186: any disagreement between the server's header fields and
+        // the decoded packet is reported.
+        LiveOutput::Event(LiveEvent::HeaderMismatch { field, server, decoded }) => {
+            let decoded = decoded.map_or_else(|| "uncorrectable".to_owned(), |value| format!("{value:#X}"));
+            emit(&Frame::Notice(Notice::Message(format!(
+                "live feed: header {field:?} disagrees: the server says {server:#X}, the packet decodes to {decoded}"
+            ))))
+        }
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic, reason = "a test")]
+mod tests {
+    use super::*;
+    use neoteletext_web::zxnet::HeaderField;
+
+    /// The message `forward` gives for `event`.
+    fn message(event: LiveEvent) -> String {
+        let deadline = Cell::new(None);
+        let mut sent = Vec::new();
+        forward(LiveOutput::Event(event), &deadline, &mut |frame| {
+            sent.push(frame.clone());
+            Ok(())
+        })
+        .unwrap();
+        match sent.as_slice() {
+            [Frame::Notice(Notice::Message(text))] => text.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // REQ-186: a disagreement between the server's header fields and the
+    // decoded packet is reported, naming the field and both values.
+    #[test]
+    fn a_header_disagreement_is_reported() {
+        let text = message(LiveEvent::HeaderMismatch { field: HeaderField::SubCode, server: 3, decoded: Some(4) });
+        assert!(text.contains("SubCode") && text.contains("0x3") && text.contains("0x4"), "{text}");
+        let text = message(LiveEvent::HeaderMismatch { field: HeaderField::Page, server: 0x104, decoded: None });
+        assert!(text.contains("Page") && text.contains("0x104") && text.contains("uncorrectable"), "{text}");
     }
 }

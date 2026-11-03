@@ -129,8 +129,10 @@ impl<R: RandomSource> ZxnetFeed<'_, R> {
                     walk.last_row = Some(now);
                 }
             }
+            // REQ-186: only `clock` and `header` show the connection alive,
+            // as the zxnet viewer has it; a server sending broadcast service
+            // data alone has stopped sending pages.
             Message::Bsdp(data) => {
-                self.last_activity = now;
                 let service = Magazine::new(SERVICE_MAGAZINE).unwrap_or(Magazine::from_bits(0));
                 sink(LiveOutput::Packet(rebuild(service, PACKET_SERVICE, &data)));
             }
