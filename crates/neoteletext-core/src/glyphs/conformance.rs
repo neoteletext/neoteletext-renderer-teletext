@@ -194,6 +194,10 @@ pub struct SetConformance {
     pub drawn: u8,
     /// The first rule that fails, or none when the font conforms.
     pub failure: Option<Failure>,
+    /// Every code position that fails the same rule as [`Self::failure`]
+    /// (REQ-131): bit `code - 2/0` for each, so a report names them all,
+    /// not only the first. Zero when the font conforms.
+    pub failing: u128,
     /// Every glyph of the set's assigned characters the font has leaves
     /// the top line and the leftmost dot column blank.
     pub saa5050_cell: bool,
@@ -204,6 +208,32 @@ impl SetConformance {
     #[must_use]
     pub const fn conforms(&self) -> bool {
         self.failure.is_none()
+    }
+
+    /// The code positions of [`Self::failing`], 2/0 first.
+    pub fn failing_codes(&self) -> impl Iterator<Item = u8> + '_ {
+        (FIRST_CODE..=LAST_CODE).filter(|&code| self.failing & position_bit(code) != 0)
+    }
+}
+
+/// The bit of `code` in [`SetConformance::failing`].
+const fn position_bit(code: u8) -> u128 {
+    match 1u128.checked_shl((code.wrapping_sub(FIRST_CODE)) as u32) {
+        Some(bit) => bit,
+        None => 0,
+    }
+}
+
+impl Failure {
+    /// True when both faults break the same rule, whatever their position.
+    const fn same_rule(self, other: Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Missing(_), Self::Missing(_))
+                | (Self::Space, Self::Space)
+                | (Self::Blank(_), Self::Blank(_))
+                | (Self::MissingForm(_), Self::MissingForm(_))
+        )
     }
 }
 
@@ -220,6 +250,9 @@ pub fn conformance(font: &LoadedFont<'_>, set: CharSet) -> SetConformance {
     let space_blank = glyph(font, ' ').is_some_and(|rows| rows.iter().all(|&row| row == 0));
     let mut drawn = 0u8;
     let mut failure = None;
+    // Each position's fault, so that every position failing the first
+    // rule can be reported (REQ-131); 96 entries on the stack, no allocation.
+    let mut faults = [None; SET_POSITIONS as usize];
     // The SAA5050 cell is a 12 by 10 profile, never reported for a 12 by 20
     // font (REQ-FNT-011, decision E.77).
     let mut saa5050_cell = !font.is_tall();
@@ -234,6 +267,9 @@ pub fn conformance(font: &LoadedFont<'_>, set: CharSet) -> SetConformance {
                 }
             },
         };
+        if let Some(slot) = faults.get_mut(usize::from(code.wrapping_sub(FIRST_CODE))) {
+            *slot = fault;
+        }
         match fault {
             None => drawn = drawn.saturating_add(1),
             Some(fault) => failure = failure.or(Some(fault)),
@@ -251,10 +287,21 @@ pub fn conformance(font: &LoadedFont<'_>, set: CharSet) -> SetConformance {
                 .any(|&(entry, _, point)| entry == letter && glyph(font, point).is_none());
             if lacks_form {
                 failure = failure.or(Some(Failure::MissingForm(code)));
+                if let Some(slot) = faults.get_mut(usize::from(code.wrapping_sub(FIRST_CODE)))
+                    && slot.is_none()
+                {
+                    *slot = Some(Failure::MissingForm(code));
+                }
             }
         }
     }
-    SetConformance { drawn, failure, saa5050_cell }
+    let failing = failure.map_or(0, |first| {
+        (FIRST_CODE..=LAST_CODE)
+            .zip(faults)
+            .filter(|(_, fault)| fault.is_some_and(|fault| fault.same_rule(first)))
+            .fold(0, |mask, (code, _)| mask | position_bit(code))
+    });
+    SetConformance { drawn, failure, failing, saa5050_cell }
 }
 
 /// The sets of [`FONT_SETS`] a font conforms for, and of those, the sets for

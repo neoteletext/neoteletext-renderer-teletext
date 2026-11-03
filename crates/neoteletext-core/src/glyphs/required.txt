@@ -392,6 +392,7 @@ U+0386 Ά G2 Greek 6/E
 U+0388 Έ G2 Greek 7/E
 U+0389 Ή G2 Greek 6/F
 U+038A Ί G2 Greek 5/9
+U+038C Ό ComposedExtended U+039F+U+0301
 U+038E Ύ G2 Greek 5/A
 U+038F Ώ G2 Greek 5/B
 U+0390 ΐ G0 Greek 4/0

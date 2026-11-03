@@ -196,26 +196,35 @@ impl<'a> GlyphSet<'a> {
     /// The glyph of a G0 or G2 character from the loaded fonts: the
     /// font in use, then the user's font for the character's own set
     /// (REQ-FNT-005, REQ-FNT-008); `None` when neither has it, and the set's
-    /// own glyphs draw it. A character with a diacritical
-    /// mark is found by its precomposed form only; without one it falls to
-    /// the set's own glyphs, which overlay the mark (decision E.26).
+    /// own glyphs draw it. A character with a diacritical mark is drawn
+    /// from one loaded font by the same steps as [`GlyphSet::glyph`]
+    /// (decision E.26, DEC-2005): its precomposed glyph, the plain letter
+    /// with the mark plus the dot of a dotted letter, or the mark's spacing
+    /// glyph overlaid on the letter, each from that font's own glyphs; only
+    /// when no loaded font has what a step needs does the cell fall to the
+    /// compiled font (TODO-1166).
     #[must_use]
     pub fn loaded(&self, character: CharRef) -> Option<LoadedGlyph> {
         if !self.has_fonts() || !matches!(character.set, CharSet::G0(_) | CharSet::G2(_)) {
             return None;
         }
         let unicode = to_unicode(character);
-        let wanted = match unicode.combining.filter(|_| character.diacritic != DIACRITIC_NONE) {
-            Some(mark) => compose(unicode.base, mark)?,
-            None => crate::charset::glyph_key(character),
-        };
+        let drawn = crate::charset::glyph_key(character);
+        let mark = unicode.combining.filter(|_| character.diacritic != DIACRITIC_NONE);
         let for_set = font_set_of(character.set).and_then(|place| self.by_set.get(place).copied().flatten());
         [self.in_use, for_set].into_iter().flatten().find_map(|font| {
-            font.lookup(wanted).map(|glyph| LoadedGlyph {
-                rows: glyph.rows,
-                tall: glyph.tall,
-                dot_matrix: font.is_dot_matrix(),
-            })
+            let lookup = |c: char| font.lookup(c).map(|glyph| glyph.rows);
+            let rows = match mark {
+                None => lookup(drawn),
+                Some(mark) => compose(unicode.base, mark)
+                    .and_then(lookup)
+                    .or_else(|| on_dotted_letter(lookup, unicode.base, mark))
+                    .or_else(|| {
+                        let base = lookup(drawn).or_else(|| lookup(unicode.base))?;
+                        Some(overlaid(base, &spacing_glyph(lookup, mark)?))
+                    }),
+            }?;
+            Some(LoadedGlyph { rows, tall: font.is_tall(), dot_matrix: font.is_dot_matrix() })
         })
     }
 
@@ -275,42 +284,76 @@ impl<'a> GlyphSet<'a> {
         let Some(mark) = unicode.combining.filter(|_| character.diacritic != DIACRITIC_NONE) else {
             return *base;
         };
-        if let Some(precomposed) = compose(unicode.base, mark).and_then(|c| self.lookup(c)) {
-            return *precomposed;
+        let lookup = |c: char| self.lookup(c).copied();
+        if let Some(precomposed) = compose(unicode.base, mark).and_then(lookup) {
+            return precomposed;
         }
-        if let Some(both) = self.on_dotted_letter(unicode.base, mark) {
+        if let Some(both) = on_dotted_letter(lookup, unicode.base, mark) {
             return both;
         }
-        let spacing = spacing_mark(mark).and_then(|c| self.lookup(c)).copied().unwrap_or([0; CELL_HEIGHT]);
-        let mut out = *base;
-        for (row, mark_row) in out.iter_mut().zip(spacing.iter()) {
-            *row |= *mark_row;
-        }
-        out
+        overlaid(*base, &spacing_glyph(lookup, mark).unwrap_or([0; CELL_HEIGHT]))
     }
 }
 
-impl GlyphSet<'_> {
-    /// A mark on a letter with a dot below, such as Igbo's `Ọ̀`, which
-    /// Unicode gives no single character (TODO-1988). A spacing mark sits at
-    /// the height of a small letter, so overlaid on a capital it merges into
-    /// the capital's top lines. The font's letter with that mark makes room
-    /// for it, and the dot is what the dotted letter adds to the plain one.
-    fn on_dotted_letter(&self, dotted: char, mark: char) -> Option<GlyphRows> {
-        let letter = without_dot_below(dotted)?;
-        let mut out = *self.lookup(compose(letter, mark)?)?;
-        let plain = self.lookup(letter)?;
-        let with_dot = self.lookup(dotted)?;
-        for ((row, with_dot), plain) in out.iter_mut().zip(with_dot).zip(plain) {
-            *row |= with_dot & !plain;
-        }
-        Some(out)
+/// A letter with a mark's glyph laid over it (decision E.26).
+fn overlaid(mut letter: GlyphRows, mark: &GlyphRows) -> GlyphRows {
+    for (row, mark_row) in letter.iter_mut().zip(mark) {
+        *row |= *mark_row;
     }
+    letter
 }
+
+/// The glyph laid over a letter for a mark, from one font's `lookup`: the
+/// dot below as the font draws it under a letter, otherwise the mark's
+/// spacing character (decision E.26). `None` when the font has neither.
+fn spacing_glyph(lookup: impl Fn(char) -> Option<GlyphRows>, mark: char) -> Option<GlyphRows> {
+    let dot = if mark == DOT_BELOW { dot_below(&lookup) } else { None };
+    dot.or_else(|| spacing_mark(mark).and_then(&lookup))
+}
+
+/// The dot below on its own, where the font draws it under a letter
+/// (TODO-1110): what the reference letter ạ adds to a. Unicode has no
+/// spacing dot below, and the full stop that stands for it in
+/// [`SPACING_MARKS`] sits on the baseline, beside the letter's foot rather
+/// than under it. `None` when the font lacks either letter.
+fn dot_below(lookup: impl Fn(char) -> Option<GlyphRows>) -> Option<GlyphRows> {
+    let (dotted, plain) = DOT_BELOW_REFERENCE;
+    let with_dot = lookup(dotted)?;
+    let without = lookup(plain)?;
+    Some(core::array::from_fn(|line| with_dot.get(line).zip(without.get(line)).map_or(0, |(with, out)| with & !out)))
+}
+
+/// A mark on a letter with a dot below, such as Igbo's `Ọ̀`, which Unicode
+/// gives no single character (TODO-1988), from one font's `lookup`. A
+/// spacing mark sits at the height of a small letter, so overlaid on a
+/// capital it merges into the capital's top lines. The font's letter with
+/// that mark makes room for it, and the dot is what the dotted letter adds
+/// to the plain one.
+fn on_dotted_letter(lookup: impl Fn(char) -> Option<GlyphRows>, dotted: char, mark: char) -> Option<GlyphRows> {
+    let letter = without_dot_below(dotted)?;
+    let mut out = lookup(compose(letter, mark)?)?;
+    let plain = lookup(letter)?;
+    let with_dot = lookup(dotted)?;
+    for ((row, with_dot), plain) in out.iter_mut().zip(with_dot).zip(plain) {
+        *row |= with_dot & !plain;
+    }
+    Some(out)
+}
+
+/// U+0323, the combining dot below (REQ-CHR-008, column 4/9 of the G2 set).
+const DOT_BELOW: char = '\u{0323}';
+
+/// The letter whose dot below is the one drawn under a letter that has no
+/// precomposed form with it, and the same letter without it: ạ and a. A
+/// small letter is used because its dot lies wholly under the baseline,
+/// where the dot of every letter is drawn.
+const DOT_BELOW_REFERENCE: (char, char) = ('\u{1EA1}', 'a');
 
 /// Each combining mark of the diacritical marks (REQ-CHR-008) and the
 /// spacing character whose glyph is overlaid for it (decision E.26). Every
-/// glyph set needs a glyph for each spacing character.
+/// glyph set needs a glyph for each spacing character. The dot below is
+/// drawn from the font's own ạ where it has one ([`GlyphSet::glyph`]), and
+/// the full stop only when it has not.
 pub const SPACING_MARKS: [(char, char); 16] = [
     ('\u{0300}', '`'),
     ('\u{0301}', '\u{00B4}'),

@@ -25,6 +25,10 @@ is made. Afterwards the folder's `fonts.txt` index (REQ-FNT-004) is written,
 with each font's conformance from `neottx font sets` when --neottx is given,
 and the checksums in PROVENANCE.md are brought up to date for
 `cargo xtask check-noto`.
+
+The converter is step 3 of the pipeline that makes Noto Teletext; the steps
+and their order are written once, in PROVENANCE.md, "How the fonts are made"
+(REQ-2163).
 """
 
 import argparse

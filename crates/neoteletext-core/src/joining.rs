@@ -13,10 +13,13 @@ use crate::consts::COLUMNS;
 use crate::level1::{Glyph, Grid};
 
 /// The letter of a cell when it is one of a group 1001 set's, with its set.
+/// A diacritical mark placed on the letter by X/26 does not change how it
+/// joins: Unicode gives combining marks the joining type transparent
+/// (`ArabicShaping.txt`), so the letter keeps its own (DEC-2350, REQ-84).
 fn letter(glyph: Glyph) -> Option<(CharSet, JoiningType)> {
     let Glyph::Char(character) = glyph else { return None };
     let CharSet::G0(G0 { set, .. }) = character.set else { return None };
-    if !set.is_joined() || character.diacritic != 0 {
+    if !set.is_joined() {
         return None;
     }
     let kind = joining_type(to_unicode(character).base)?;

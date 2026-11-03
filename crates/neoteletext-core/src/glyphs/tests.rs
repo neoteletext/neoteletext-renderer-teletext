@@ -83,7 +83,8 @@ fn every_diacritic_overlays_its_spacing_form() {
         let combining = to_unicode(character).combining.unwrap();
         assert_eq!(spacing_mark(combining), Some(spacing), "mark {mark}");
         assert_eq!(compose('q', combining), None);
-        let mark_glyph = set.lookup(spacing).unwrap();
+        // TODO-1110: the dot below is the font's own, from ạ, not the full stop.
+        let mark_glyph = if combining == '\u{0323}' { &dot_below(&set) } else { set.lookup(spacing).unwrap() };
         assert_ne!(*mark_glyph, [0; CELL_HEIGHT], "mark {mark} draws something");
         let overlay: GlyphRows = core::array::from_fn(|row| base[row] | mark_glyph[row]);
         assert_eq!(set.glyph(character), overlay, "mark {mark}");
@@ -91,6 +92,38 @@ fn every_diacritic_overlays_its_spacing_form() {
     // A combining character outside the fifteen has no spacing form.
     assert_eq!(spacing_mark('\u{0305}'), None);
     assert_eq!(spacing_mark('a'), None);
+}
+
+/// The dot ạ adds to a in `set`.
+fn dot_below(set: &GlyphSet<'_>) -> GlyphRows {
+    let (dotted, plain) = (set.lookup('\u{1EA1}').unwrap(), set.lookup('a').unwrap());
+    core::array::from_fn(|row| dotted[row] & !plain[row])
+}
+
+/// REQ-RND-014, TODO-1110: a letter with the dot below and no precomposed
+/// form, such as q, has the dot drawn under it, below the baseline where
+/// ạ has it, and not the full stop, which stands on the baseline beside
+/// the letter's foot.
+#[test]
+fn the_dot_below_is_drawn_under_the_letter() {
+    const DOT_BELOW: u8 = 9;
+    const BASELINE: usize = 16;
+    let set = GlyphSet::noto_teletext();
+    let latin = CharSet::G0(G0 { set: G0Set::Latin, national: None });
+    let character = CharRef { diacritic: DOT_BELOW, ..CharRef::new(latin, b'q') };
+    assert_eq!(compose('q', to_unicode(character).combining.unwrap()), None, "q has no precomposed dotted form");
+    let dot = dot_below(&set);
+    let dot_lines: std::vec::Vec<usize> = (0..CELL_HEIGHT).filter(|&line| dot[line] != 0).collect();
+    assert!(
+        !dot_lines.is_empty() && dot_lines.iter().all(|&line| line >= BASELINE),
+        "the dot lies below the baseline: {dot_lines:?}"
+    );
+    let base = set.lookup('q').unwrap();
+    let expected: GlyphRows = core::array::from_fn(|row| base[row] | dot[row]);
+    assert_eq!(set.glyph(character), expected);
+    let full_stop = set.lookup('.').unwrap();
+    let with_full_stop: GlyphRows = core::array::from_fn(|row| base[row] | full_stop[row]);
+    assert_ne!(set.glyph(character), with_full_stop, "not the full stop");
 }
 
 /// REQ-RND-014, decision E.26: a precomposed glyph when the set has
@@ -116,28 +149,60 @@ fn diacritics_use_the_precomposed_glyph_or_an_overlay() {
     assert_eq!(GlyphSet::from_entries(&OVERLAY_ONLY, "test").glyph(character), overlay);
 }
 
-/// REQ-FNT-005, decision E.26: a loaded font draws a character with a
-/// diacritical mark only by its precomposed form; with none, as for "q"
-/// with an acute, the font is not asked and the set's own glyphs overlay
-/// the mark. G3 characters never come from a font, and G3 has no place
-/// among the sets fonts draw (REQ-FNT-011).
+/// REQ-FNT-005, decision E.26, DEC-2005 (TODO-1166): a loaded font draws a
+/// character with a diacritical mark from its own glyphs: its precomposed
+/// form, or with none, as for "q" with an acute, its own spacing mark laid
+/// over its own letter. Only a font that lacks what that needs leaves the
+/// cell to the set's own glyphs. G3 characters never come from a font, and
+/// G3 has no place among the sets fonts draw (REQ-FNT-011).
 #[test]
-fn loaded_fonts_draw_precomposed_marks_only() {
-    const DOTS: [u16; CELL_FIELD_LINES] = [0xFFF; CELL_FIELD_LINES];
+fn loaded_fonts_draw_marks_from_their_own_glyphs() {
+    const LETTER: [u16; CELL_FIELD_LINES] = [0b1000_0000_0000; CELL_FIELD_LINES];
+    const ACUTE: [u16; CELL_FIELD_LINES] = [0b0000_0000_0001, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const E_ACUTE: [u16; CELL_FIELD_LINES] = [0xFFF; CELL_FIELD_LINES];
     static FONT: [FontGlyph; 3] = [
-        FontGlyph::small('q' as u32, DOTS),
-        FontGlyph::small('\u{B4}' as u32, DOTS),
-        FontGlyph::small('\u{E9}' as u32, DOTS),
+        FontGlyph::small('q' as u32, LETTER),
+        FontGlyph::small('\u{B4}' as u32, ACUTE),
+        FontGlyph::small('\u{E9}' as u32, E_ACUTE),
     ];
+    static NO_MARKS: [FontGlyph; 1] = [FontGlyph::small('q' as u32, LETTER)];
     let glyphs = GlyphSet::noto_teletext().with_fonts(Some(LoadedFont::new(&FONT).unwrap()), [None; FONT_SET_COUNT]);
     let latin = CharSet::G0(G0 { set: G0Set::Latin, national: None });
     // Diacritic 2 is the acute accent (Table 28, mode 10010).
     let acute = |code| CharRef { diacritic: 2, ..CharRef::new(latin, code) };
     assert_eq!(glyphs.loaded(acute(b'e')).map(|glyph| glyph.rows[0]), Some(0xFFF), "é, precomposed");
-    assert_eq!(glyphs.loaded(acute(b'q')), None, "no precomposed form");
+    let q_acute = glyphs.loaded(acute(b'q')).unwrap();
+    assert_eq!(q_acute.rows[..2], [0b1000_0000_0001, 0b1000_0000_0000], "the font's acute over the font's q");
+    let without_marks =
+        GlyphSet::noto_teletext().with_fonts(Some(LoadedFont::new(&NO_MARKS).unwrap()), [None; FONT_SET_COUNT]);
+    assert_eq!(without_marks.loaded(acute(b'q')), None, "a font without the acute leaves it to the compiled font");
     assert!(glyphs.loaded(CharRef::new(latin, b'q')).is_some());
     assert_eq!(glyphs.loaded(CharRef::new(CharSet::G3, 0x20)), None);
     assert_eq!(font_set_of(CharSet::G3), None);
+}
+
+/// DEC-2005 (TODO-1166): a tone on a dotted letter that has no precomposed
+/// form, such as Igbo's Ọ̀, is drawn under a loaded font from that font's
+/// own Ò with the dot its Ọ adds to O, not from the compiled font.
+#[test]
+fn a_loaded_font_draws_a_tone_on_a_dotted_letter_itself() {
+    const O: [u16; CELL_HEIGHT] = [0, 0, 0b0111_1110_0000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const O_GRAVE: [u16; CELL_HEIGHT] =
+        [0b0010_0000_0000, 0, 0b0111_1110_0000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const O_DOT: [u16; CELL_HEIGHT] =
+        [0, 0, 0b0111_1110_0000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b0000_1000_0000, 0];
+    static FONT: [FontGlyph; 3] = [
+        FontGlyph { code_point: 'O' as u32, rows: O, tall: true },
+        FontGlyph { code_point: '\u{D2}' as u32, rows: O_GRAVE, tall: true },
+        FontGlyph { code_point: '\u{1ECC}' as u32, rows: O_DOT, tall: true },
+    ];
+    let glyphs = GlyphSet::noto_teletext().with_fonts(Some(LoadedFont::new(&FONT).unwrap()), [None; FONT_SET_COUNT]);
+    let igbo = CharSet::G0(G0 { set: G0Set::Igbo, national: None });
+    let code = (0x20..0x7F).find(|&code| to_unicode(CharRef::new(igbo, code)).base == '\u{1ECC}').unwrap();
+    // Diacritic 1 is the grave accent (Table 28, mode 10001).
+    let glyph = glyphs.loaded(CharRef { diacritic: 1, ..CharRef::new(igbo, code) }).unwrap();
+    let expected: GlyphRows = core::array::from_fn(|line| O_GRAVE[line] | O_DOT[line]);
+    assert_eq!((glyph.rows, glyph.tall), (expected, true));
 }
 
 /// REQ-RND-020, decision E.50: the G3 glyphs are data that a set can

@@ -266,6 +266,34 @@ fn row_0_is_the_status_area_and_a_header() {
     assert_eq!(codes[8..], [SPACE; 32]);
 }
 
+/// REQ-418 (REQ-SEC-005), decision E.10: the receiver draws its status
+/// area, row 0 columns 0 to 7, in its own set, Latin with the English
+/// option, whatever the page designates, so that "P100" on a Cyrillic page
+/// is not drawn as Cyrillic letters. The page's own header, from column 8,
+/// keeps the page's set.
+#[test]
+fn the_status_area_is_drawn_in_the_receivers_set() {
+    let config = Config { default_region: 0b0100, ..Config::default() };
+    let mut header = [b' '; 40];
+    header[8..12].copy_from_slice(b"NEWS");
+    let page = page_with_rows(&[(0, &header)]);
+    let options = DisplayOptions { status: *b"P100   ", ..DisplayOptions::default() };
+    let mut grid = Grid::EMPTY;
+    build_grid(&mut grid, Some(&page), &MagazineData::default(), &config, &options);
+    let cyrillic = charset::CharSet::G0(G0 { set: charset::G0Set::Cyrillic1, national: None });
+    assert_eq!(grid.designation.g0, G0 { set: charset::G0Set::Cyrillic1, national: None }, "the page is Cyrillic");
+    let latin =
+        charset::CharSet::G0(G0 { set: charset::G0Set::Latin, national: Some(charset::NationalOption::English) });
+    let status: [Glyph; 4] = core::array::from_fn(|column| grid.cells[0][column].glyph);
+    let expected = b"P100".map(|code| Glyph::Char(charset::CharRef::new(latin, code)));
+    assert_eq!(status, expected, "the status area is in the receiver's Latin set");
+    assert_eq!(
+        grid.cells[0][8].glyph,
+        Glyph::Char(charset::CharRef::new(cyrillic, b'N')),
+        "the header keeps the page's set"
+    );
+}
+
 /// Decision E.11: on a page found, columns 32 to 39 are the latest
 /// header's clock, of any magazine, so the time keeps ticking on a page
 /// that does not change; a byte failing parity is a space. With no clock

@@ -185,6 +185,11 @@ push_steps() {
     cargo xtask check-noto
     step "the misc-fixed font: its files match their recorded SHA-256, and the conversion is the original doubled (REQ-2223)"
     cargo xtask check-misc-fixed
+    step "the Arabic-script tables are what scripts/arabic-sets.py writes, allocated append-only (REQ-2164, REQ-2166)"
+    uv run scripts/arabic-sets.py --check
+    uv run scripts/test_arabic_sets.py
+    step "the font converter's drawing rules (REQ-2165)"
+    uv run third_party/noto/test_convert.py
 }
 
 linux_steps() {

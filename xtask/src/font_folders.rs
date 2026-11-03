@@ -29,7 +29,7 @@ const INDEX_FONT_PREFIX: &str = "f\t";
 /// Noto Teletext, the compiled font (DEC-1761).
 pub const NOTO: FontFolder = FontFolder {
     folder: "third_party/noto",
-    others: &[PROVENANCE, INDEX, "OFL.txt", "convert.py", "settings.txt", "sources.txt"],
+    others: &[PROVENANCE, INDEX, "OFL.txt", "convert.py", "test_convert.py", "settings.txt", "sources.txt"],
 };
 
 /// The X11 misc-fixed 6x10 font and its 12 by 20 conversion (REQ-2223).

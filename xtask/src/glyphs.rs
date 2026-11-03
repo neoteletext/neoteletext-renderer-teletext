@@ -15,6 +15,10 @@
 //!
 //! The tests below regenerate every file in memory and compare it with the
 //! stored one, so `cargo test` fails when the data is out of date.
+//!
+//! `cargo xtask glyphs` is steps 2 and 4 of the pipeline that makes Noto
+//! Teletext; the steps and their order are written once, in
+//! `third_party/noto/PROVENANCE.md`, "How the fonts are made" (REQ-2163).
 
 mod g3_table;
 mod noto;

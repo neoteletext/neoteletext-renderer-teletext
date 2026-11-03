@@ -198,6 +198,21 @@ fn arabic_script_is_written_in_visual_order() {
     assert_eq!(shown_rtl("urdu", "خبر BBC"), " BBC ربخ");
 }
 
+/// REQ-95, DEC-2396: in an Arabic-script set the zero-width non-joiner of
+/// می‌خواهم is written as a space cell, which keeps the letters on either
+/// side unjoined; in a set that joins nothing it is refused, naming it.
+#[test]
+fn the_zero_width_non_joiner_is_a_space_in_arabic_script() {
+    assert_eq!(shown_rtl("persian", "می خواهم"), "مهاوخ یم");
+    let written = write("persian", 0x100, "می\u{200C}خواهم").unwrap();
+    let spaced = write("persian", 0x100, "می خواهم").unwrap();
+    assert_eq!(written.tti, spaced.tti, "written exactly as with a space");
+    assert_eq!(
+        write("english", 0x100, "a\u{200C}b").unwrap_err(),
+        WriteError::Missing { character: '\u{200C}', line: 1 }
+    );
+}
+
 /// A long right-to-left line breaks between words, and each row is
 /// right-aligned on the page.
 #[test]
