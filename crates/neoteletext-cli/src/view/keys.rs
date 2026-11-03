@@ -41,6 +41,8 @@ pub(super) fn map_key(key: KeyEvent) -> Option<Key> {
         KeyCode::Char('H') => Key::Hold,
         KeyCode::Char('m') => Key::Mix,
         KeyCode::Char('z') => Key::Zoom,
+        // DEC-2363: `s`, then four digits, keys a sub-page.
+        KeyCode::Char('s') => Key::SubPage,
         KeyCode::Backspace => Key::Back,
         _ => return None,
     })

@@ -144,6 +144,7 @@ At the default level, 3.5, `neottx` also keeps the enhancement pages a service s
 | `h` or Home | Initial page. |
 | Up or `+`, Down or `-` | Next and previous page. |
 | Right and Left | Next and previous sub-page. |
+| `s`, then four digits | Show that sub-page, keyed as on a television: 0001 to 3979, the third digit 0 to 7 and the first 0 to 3 (REQ-NUM-017). A digit that cannot belong is ignored, and any other key leaves the entry. |
 | Alt+Left or Backspace, Alt+Right | Back and forward through the history. |
 | `?` | Reveal concealed text. |
 | `H` | Hold the page, so that new receptions do not update it. |

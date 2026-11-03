@@ -448,3 +448,50 @@ fn the_status_area_shows_place_count_and_staleness() {
     viewer.event(ViewerEvent::PageStale);
     assert_eq!(&viewer.status(decoder.store()), b"P100?03", "a stale chosen sub-page is marked");
 }
+
+/// REQ-290, REQ-315, REQ-137, DEC-2363: the sub-page key makes the next
+/// four digits a decimal sub-code of the page shown: 0001, 0079, 0100 and
+/// 3979 are requested; a digit above 3 for S4 or above 7 for S2 is refused
+/// with the digits before it kept; 0000 cannot be completed and 3F7E cannot
+/// be keyed; any other key leaves entry, requesting nothing.
+#[test]
+fn the_sub_page_key_enters_a_decimal_sub_code() {
+    let mut slots = std::vec![StoredPage::EMPTY; 2];
+    let decoder = Decoder::new(&mut slots, Config::default());
+    let config = Config::default();
+    let links = PageLinks::default();
+    let no = |_| false;
+    let keys = context(&links, decoder.store(), &config, &no);
+    let mut viewer = displaying();
+    let enter = |viewer: &mut Viewer, digits: &[u8]| {
+        assert_eq!(viewer.key(Key::SubPage, &keys), Action::None);
+        assert_eq!(viewer.state(), ViewerState::EnteringSubPage);
+        let mut last = Action::None;
+        for &digit in digits {
+            last = viewer.key(Key::Digit(digit), &keys);
+        }
+        (last, viewer.state(), viewer.status(decoder.store()))
+    };
+    for (digits, code) in
+        [([0, 0, 0, 1], 0x0001), ([0, 0, 7, 9], 0x0079), ([0, 1, 0, 0], 0x0100), ([3, 9, 7, 9], 0x3979)]
+    {
+        let (action, state, _) = enter(&mut viewer, &digits);
+        assert_eq!(action, Action::Request(page(0x100), SubCode::new(code)), "{digits:?}");
+        assert_eq!(state, ViewerState::Displaying);
+    }
+    // S4 above 3 and S2 above 7 are refused; the digits before stay.
+    let (action, state, status) = enter(&mut viewer, &[4, 1, 2, 8]);
+    assert_eq!((action, state, &status), (Action::None, ViewerState::EnteringSubPage, b"P/12-- "));
+    assert_eq!(viewer.key(Key::Digit(5), &keys), Action::None);
+    assert_eq!(viewer.key(Key::Digit(6), &keys), Action::Request(page(0x100), SubCode::new(0x1256)));
+    // 0000 is not a decimal sub-code: the fourth 0 is refused.
+    let (action, _, status) = enter(&mut viewer, &[0, 0, 0, 0]);
+    assert_eq!((action, &status), (Action::None, b"P/000- "));
+    assert_eq!(viewer.key(Key::Digit(2), &keys), Action::Request(page(0x100), SubCode::new(0x0002)));
+    // 3F7E has hexadecimal digits, which no key gives; any other key leaves.
+    let (action, _, _) = enter(&mut viewer, &[3]);
+    assert_eq!(action, Action::None);
+    assert_eq!(viewer.key(Key::NextPage, &keys), Action::None, "leaves entry and requests nothing");
+    assert_eq!(viewer.state(), ViewerState::Displaying);
+    assert_eq!(viewer.requested(), (page(0x100), SubCode::new(0x0002)));
+}

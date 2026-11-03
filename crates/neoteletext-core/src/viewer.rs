@@ -6,7 +6,7 @@ use crate::acq::{EnhancementLookup, MagazineData, PageStore};
 use crate::config::Config;
 use crate::consts::{FASTEXT_KEYS, HEADER_DISPLAY_BYTES};
 use crate::level1::Zoom;
-use crate::nav::{History, HistoryEntry, LinkTarget, PageEntry, PageLinks};
+use crate::nav::{History, HistoryEntry, LinkTarget, PageEntry, PageLinks, SubPageEntry};
 use crate::types::{Instant, PageAddress, SubCode};
 
 mod keys;
@@ -48,6 +48,9 @@ pub enum Key {
     Mix,
     /// Page zoom.
     Zoom,
+    /// Sub-page entry: the next four digits are a sub-code (REQ-NAV-005,
+    /// REQ-NUM-017, DEC-2363).
+    SubPage,
     /// Back in history.
     Back,
     /// Forward in history.
@@ -63,6 +66,9 @@ pub enum ViewerState {
     Entering1,
     /// Two digits entered.
     Entering2,
+    /// Sub-page digits are being entered for the page shown (REQ-NAV-005,
+    /// DEC-2363).
+    EnteringSubPage,
     /// The requested page is not yet stored.
     Searching,
     /// The requested page is shown.
@@ -160,6 +166,9 @@ pub struct Viewer {
     requested: PageAddress,
     subcode: SubCode,
     entry: PageEntry,
+    subpage_entry: SubPageEntry,
+    /// The state sub-page entry returns to: Displaying or Searching.
+    before_subpage_entry: ViewerState,
     history: History<HISTORY_ENTRIES>,
     reveal: bool,
     reveal_until: Option<Instant>,
@@ -179,6 +188,8 @@ impl Viewer {
             requested: initial,
             subcode: SubCode::ANY,
             entry: PageEntry::default(),
+            subpage_entry: SubPageEntry::default(),
+            before_subpage_entry: ViewerState::Displaying,
             history: History::new(),
             reveal: false,
             reveal_until: None,

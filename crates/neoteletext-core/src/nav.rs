@@ -249,14 +249,32 @@ impl SubPageEntry {
         if let Some(slot) = self.digits.get_mut(position) {
             *slot = digit;
         }
-        self.count = self.count.saturating_add(1);
-        if usize::from(self.count) < SUBCODE_DIGITS {
+        let count = self.count.saturating_add(1);
+        if usize::from(count) < SUBCODE_DIGITS {
+            self.count = count;
             return SubPageEntryResult::Partial;
         }
-        let digits = self.digits;
-        self.clear();
-        decimal_sub_code(digits)
-            .map_or(SubPageEntryResult::Rejected, |code| SubPageEntryResult::Complete(SubCode::new(code)))
+        // The fourth digit completes a sub-code, or is refused with the
+        // three before it kept, as for 0000, which is not a decimal
+        // sub-code (REQ-NUM-017).
+        match decimal_sub_code(self.digits) {
+            Some(code) => {
+                self.clear();
+                SubPageEntryResult::Complete(SubCode::new(code))
+            }
+            None => SubPageEntryResult::Rejected,
+        }
+    }
+
+    /// The digits entered so far, for the status area, with `-` for each
+    /// still to come.
+    #[must_use]
+    pub fn display(&self) -> [u8; SUBCODE_DIGITS] {
+        let mut out = [b'-'; SUBCODE_DIGITS];
+        for (slot, &digit) in out.iter_mut().zip(self.digits.iter()).take(usize::from(self.count)) {
+            *slot = b'0'.saturating_add(digit);
+        }
+        out
     }
 }
 

@@ -293,3 +293,12 @@ fn after_leaving_keys_stop_and_focus_goes() {
     );
     assert_eq!(typing.stamp(), None, "no key goes");
 }
+
+/// REQ-290, DEC-2363: `s` is the sub-page key, and digits stay page digits.
+#[test]
+fn s_is_the_sub_page_key() {
+    use neoteletext_core::viewer::Key;
+    let key = |code| super::keys::map_key(KeyEvent::new(code, KeyModifiers::NONE));
+    assert_eq!(key(KeyCode::Char('s')), Some(Key::SubPage));
+    assert_eq!(key(KeyCode::Char('7')), Some(Key::Digit(7)));
+}

@@ -41,6 +41,13 @@ impl Viewer {
                 *slot = byte;
             }
         };
+        if self.state == ViewerState::EnteringSubPage {
+            // "P/01--": the sub-code's digits as entered (DEC-2363), in the
+            // form a four-digit place takes (DEC-2349).
+            write(&mut status, 0, b"P/");
+            write(&mut status, 2, &self.subpage_entry.display());
+            return status;
+        }
         if self.confirming() {
             write(&mut status, 0, &[ALPHA_YELLOW]);
             write(&mut status, 1, b"LEAVE?");

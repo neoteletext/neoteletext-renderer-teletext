@@ -6,7 +6,7 @@ use super::{Action, Key, KeyContext, Viewer, ViewerState};
 use crate::acq::PageStore;
 use crate::config::{RevealStyle, StepOrder};
 use crate::level1::Zoom;
-use crate::nav::{EntryResult, PageLinks, next_page, previous_page, step_stored};
+use crate::nav::{EntryResult, PageLinks, SubPageEntryResult, next_page, previous_page, step_stored};
 use crate::types::{Instant, SubCode};
 
 impl Viewer {
@@ -17,6 +17,9 @@ impl Viewer {
         let KeyContext { links, store, initial, config, now, confirmed, prompts_shown } = *context;
         if let ViewerState::ConfirmingLink(waiting) = self.state {
             return self.answer_confirmation(key, waiting, links);
+        }
+        if self.state == ViewerState::EnteringSubPage {
+            return self.subpage_digit(key);
         }
         match key {
             Key::Digit(digit) if self.state != ViewerState::Holding => self.digit(digit),
@@ -51,6 +54,12 @@ impl Viewer {
                 Action::None
             }
             _ if !matches!(self.state, ViewerState::Displaying | ViewerState::Searching) => Action::None,
+            Key::SubPage => {
+                self.before_subpage_entry = self.state;
+                self.subpage_entry.clear();
+                self.state = ViewerState::EnteringSubPage;
+                Action::None
+            }
             // REQ-SEC-024: a link may be followed only while its prompt is
             // shown whole in row 24.
             Key::Red | Key::Green | Key::Yellow | Key::Cyan => {
@@ -76,6 +85,24 @@ impl Viewer {
                 Some(entry) => self.select(entry.address, entry.subcode, false),
                 None => Action::None,
             },
+        }
+    }
+
+    /// A key during sub-page entry (DEC-2363): a digit the entry accepts is
+    /// kept and one it refuses is ignored, the fourth completes the
+    /// sub-code and shows that sub-page, and any other key leaves entry
+    /// with nothing requested.
+    fn subpage_digit(&mut self, key: Key) -> Action {
+        let Key::Digit(digit) = key else {
+            self.state = self.before_subpage_entry;
+            return Action::None;
+        };
+        match self.subpage_entry.push(digit) {
+            SubPageEntryResult::Rejected | SubPageEntryResult::Partial => Action::None,
+            SubPageEntryResult::Complete(subcode) => {
+                self.state = self.before_subpage_entry;
+                self.show_subpage(subcode)
+            }
         }
     }
 
