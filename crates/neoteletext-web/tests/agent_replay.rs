@@ -2450,3 +2450,69 @@ fn a_set_cookie_record_stays_in_its_channel_folder() {
     assert_eq!(request_path(&last), "/a/b/100.tti");
     assert_eq!(header_value(&last, "Cookie"), None, "not sent to another channel's folder");
 }
+
+// Verifies REQ-1462 item 3: packet 1/30 among good packets is discarded and
+// counted alone, the good ones delivered in order, the connection kept.
+#[test]
+#[cfg(feature = "push")]
+fn packet_30_of_magazine_1_is_discarded_and_counted() {
+    let mut harness = push_service("ws://tt.example/push");
+    let (first, second) = (packet_at(1, 1), packet_at(1, 2));
+    let message = [first, packet_at(1, 30), second].concat();
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    assert_eq!(events(&records).iter().filter(|event| event.starts_with("InvalidPackets")).count(), 1);
+    assert!(has_event(&records, "InvalidPackets { total: 1 }"), "{records:?}");
+    let delivered = pages(&records);
+    assert_eq!(delivered.len(), 1);
+    assert!(matches!(delivered[0], Rec::Page { bytes, .. } if *bytes == [first, second].concat()));
+    assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+// Verifies REQ-1462 item 3, DOC-1952: a channel record that breaks its
+// layout, arriving among page packets, is discarded and each of its
+// fragments counted; the page packets are delivered and the connection
+// kept.
+#[test]
+#[cfg(feature = "push")]
+fn a_malformed_record_among_page_packets_counts_its_fragments() {
+    use neoteletext_web::records::{TYPE_SUBPAGES, fragments};
+    let mut harness = push_service("ws://tt.example/push");
+    // A SUBPAGES body whose count is 0: the frame is whole, the layout not.
+    let mut body = Vec::new();
+    for field in [0x100_u16, 1, 0, 1, 0] {
+        body.extend_from_slice(&field.to_be_bytes());
+    }
+    body.extend_from_slice(&[0, 1, 0]);
+    let record = packets_of(|out| {
+        write_packets(TYPE_SUBPAGES, &body, 3, 1, out).unwrap();
+    });
+    let page = packet_at(1, 1);
+    let message = [page.as_slice(), &record, &page].concat();
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    let expected = format!("InvalidPackets {{ total: {} }}", fragments(body.len()));
+    assert!(has_event(&records, &expected), "{records:?}");
+    assert!(!has_event(&records, "SubPageList"), "{records:?}");
+    assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+// Verifies REQ-1462 item 4's count, since the push connection opened: after
+// the connection is lost and opened again, the total starts again from the
+// new connection's packets.
+#[test]
+#[cfg(feature = "push")]
+fn the_invalid_count_restarts_when_the_connection_reopens() {
+    let mut harness = push_service("ws://tt.example/push");
+    let mut first = server_frame(0x2, &[packet_at(8, 31), packet_at(8, 31)].concat());
+    first.extend(server_frame(0x8, &1000u16.to_be_bytes()));
+    harness.replay().reply("tt.example:80", Reply::WebSocket(first));
+    let records = harness.open("http://tt.example/service.json");
+    assert!(has_event(&records, "InvalidPackets { total: 2 }"), "{records:?}");
+    assert!(has_event(&records, "PushLost"), "{records:?}");
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &packet_at(8, 31))));
+    harness.advance(SECOND);
+    let records = harness.take();
+    assert!(has_event(&records, "PushConnected"), "{records:?}");
+    assert!(has_event(&records, "InvalidPackets { total: 1 }"), "{records:?}");
+}
