@@ -43,7 +43,8 @@ pub enum Input<'a> {
     OpenChannel(&'a str),
     /// Fetch the open channel's `contents.txt` (REQ-WEB-025), answered by
     /// [`Event::Contents`], [`Event::ContentsMissing`] or
-    /// [`Event::ContentsFailed`].
+    /// [`Event::ContentsFailed`]. Interface for ports: a receiver with a
+    /// contents view of a static channel asks for it (DEC-2377).
     FetchContents,
     /// Follow a link to a page of another service named in the current
     /// descriptor (Appendix E). The request is a cross-service navigation
@@ -188,8 +189,13 @@ pub enum Failure {
     BadRedirect,
     /// An address failed the strict parser.
     Address(UrlError),
-    /// A media type outside the profile (REQ-WEB-014).
-    MediaType,
+    /// An address given as a channel's breaks a rule of a channel's
+    /// address, named here (REQ-WEB-023, REQ-1693).
+    ChannelAddress(crate::map::MapError),
+    /// A media type outside the profile (REQ-WEB-014), or one the file
+    /// asked for may not have (REQ-WEB-027): the type the response gave,
+    /// named so that a diagnostic says which.
+    MediaType(MediaType),
     /// A blocked local-network address (REQ-SEC-006).
     Blocked,
     /// A downgrade from HTTPS to plain HTTP (REQ-SEC-007).
@@ -365,6 +371,17 @@ pub enum Event<'a> {
     /// the links held for that page and sub-code; later parts add to
     /// them. A sub-page sent again without one has no such links.
     Links(LinksRecord<'a>),
+    /// A LINKS record broke its sending (DOC-1958): a part out of turn, or
+    /// links past a total over the sending's parts. The port drops every
+    /// Link Extension link it held for the sub-page, as for any LINKS
+    /// record refused (DOC-1952); the packets are counted in
+    /// [`Event::InvalidPackets`].
+    LinksRefused {
+        /// The sub-page's page.
+        page: PageAddress,
+        /// Its sub-code.
+        subcode: SubCode,
+    },
     /// A part of a page's list of sub-pages from a SUBPAGES record on the
     /// push connection (DOC-1959, REQ-1503), for the
     /// sub-page list, its count, the view's place and stepping; never the
@@ -372,6 +389,25 @@ pub enum Event<'a> {
     /// begins a new list; a list is whole when every part has arrived,
     /// and a partial one removes nothing.
     SubPageList(SubPagesRecord<'a>),
+    /// Every part of a SUBPAGES sending has arrived, its entries number
+    /// its count and ascend over the whole list (DOC-1959): the parts
+    /// given as [`Event::SubPageList`] since its part 0 are the page's
+    /// whole list, and replace the list held.
+    SubPageListComplete {
+        /// The page.
+        page: PageAddress,
+        /// The list's version.
+        version: u16,
+    },
+    /// A SUBPAGES record broke its sending (DOC-1959): the parts of that
+    /// version given so far are discarded, and the page keeps the list it
+    /// had; the packets are counted in [`Event::InvalidPackets`].
+    SubPageListRefused {
+        /// The page.
+        page: PageAddress,
+        /// The version refused.
+        version: u16,
+    },
     /// The channel's program sent the viewer elsewhere with a REDIRECT
     /// record (DOC-1960, REQ-1688), to a page of the channel
     /// or to an address. The application moves the viewer: it alone can

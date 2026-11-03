@@ -722,3 +722,20 @@ fn only_the_allowed_kinds_of_packet_are_valid_on_a_stream() {
     undecodable.bytes[0] ^= 0b11;
     assert!(!is_valid_stream_packet(&undecodable));
 }
+
+// REQ-1462: an address with one bit in error in either byte is corrected by
+// Hamming 8/4 (EN 300 706 clause 8.2), so it is judged by the kind it decodes
+// to: a corrected X/1 is valid and a corrected 1/30 is not.
+#[test]
+fn an_address_with_one_bit_in_error_is_judged_by_its_kind() {
+    for byte in 0..2 {
+        for bit in 0..8 {
+            let mut valid = encode::address(mag(1), 1);
+            valid.bytes[byte] ^= 1 << bit;
+            assert!(is_valid_stream_packet(&valid), "1/1 with byte {byte} bit {bit} in error");
+            let mut invalid = encode::address(mag(1), 30);
+            invalid.bytes[byte] ^= 1 << bit;
+            assert!(!is_valid_stream_packet(&invalid), "1/30 with byte {byte} bit {bit} in error");
+        }
+    }
+}

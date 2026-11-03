@@ -32,7 +32,7 @@ pub(super) fn channel_file_media(t42: bool, media: MediaType, body: &[u8]) -> Re
         )
     };
     if !accepted {
-        return Err(Failure::MediaType);
+        return Err(Failure::MediaType(media));
     }
     if !content {
         return Err(Failure::Content);
@@ -162,7 +162,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 } else if status != STATUS_OK {
                     event(sink, Event::ContentsFailed(Failure::Status(status)));
                 } else if !matches!(head.media, MediaType::TextPlain | MediaType::OctetStream) {
-                    event(sink, Event::ContentsFailed(Failure::MediaType));
+                    event(sink, Event::ContentsFailed(Failure::MediaType(head.media)));
                 } else {
                     event(sink, Event::Contents(body));
                 }

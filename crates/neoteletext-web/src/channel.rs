@@ -336,6 +336,27 @@ pub fn is_channel_address(text: &str) -> bool {
     crate::map::MapAddress::read_opened(location(text)).is_ok()
 }
 
+/// The rule an address breaks when it is a channel's in form, a folder
+/// ending in `/` or a channel's entry file, and yet not a channel's address
+/// (REQ-WEB-023): it is refused with that rule, never fetched as a
+/// descriptor. `None` for a channel's address, and for an address that is
+/// not a channel's in form, such as a descriptor's, or that no parser reads.
+#[must_use]
+pub fn broken_channel_rule(text: &str) -> Option<ChannelError> {
+    let location = location(text);
+    let in_form = location.ends_with('/') || location.ends_with(SETTINGS_FILE);
+    match crate::map::MapAddress::read_opened(location) {
+        // An address no parser reads, or of a scheme that leads to no
+        // channel, is refused as it always was, by whatever opens it.
+        Err(crate::map::MapError::Channel(rule))
+            if in_form && !matches!(rule, ChannelError::Address(_) | ChannelError::Scheme) =>
+        {
+            Some(rule)
+        }
+        _ => None,
+    }
+}
+
 /// An address without its query and its fragment.
 #[must_use]
 pub fn location(text: &str) -> &str {

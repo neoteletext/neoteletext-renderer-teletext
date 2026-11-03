@@ -141,3 +141,6 @@ impl SetCookie<'_> {
         write_packets(TYPE_SET_COOKIE, line, service, record_id, out).ok_or(RecordFault::Length)
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -336,6 +336,10 @@ pub struct UserAgent<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES
     records: crate::records::RecordReader,
     /// The index sending in progress (DOC-1955).
     index: crate::records::index::Progress,
+    /// The LINKS sending in progress, held to its totals (DOC-1958).
+    links: crate::records::links::Sending,
+    /// The SUBPAGES sending in progress, held to its totals (DOC-1959).
+    subpage_list: crate::records::subpages::Sending,
     /// The open channel is live: its `channel.ttx` names a push
     /// connection, so nothing is fetched but its settings (REQ-WEB-018).
     live: bool,
@@ -459,6 +463,8 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
             },
             records: crate::records::RecordReader::new(),
             index: crate::records::index::Progress::new(),
+            links: crate::records::links::Sending::new(),
+            subpage_list: crate::records::subpages::Sending::new(),
             live: false,
             connecting: false,
             subscribe_all: true,

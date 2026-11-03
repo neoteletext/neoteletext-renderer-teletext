@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::panic
+)]
 //! The LINKS record at the bound of REQ-1661 and DEC-1668.
 
 use neoteletext_core::consts::PACKET_BYTES;
@@ -10,7 +16,7 @@ use neoteletext_formats::page::{
 use neoteletext_formats::text::Text;
 use neoteletext_formats::tti::link_destination;
 
-use super::{MAX_LABEL, MAX_OTHER_LABEL, MAX_PARTS, SubPageLinks, encode};
+use super::{MAX_LABEL, MAX_OTHER_LABEL, MAX_PARTS, Sending, Step, SubPageLinks, encode, read};
 use crate::records::{ChannelRecord, Read, RecordFault, RecordReader};
 use std::string::String;
 use std::vec::Vec;
@@ -236,4 +242,160 @@ fn short_links_stay_in_one_record() {
     let keys = [key(LinkKey::Red, link_destination(b"https://a.example/", &mut addresses).unwrap())];
     let packets = write(SubPageLinks { keys: &keys, numbers: &[], texts: &[], addresses: &addresses }).unwrap();
     assert_eq!(packets.len(), 2);
+}
+
+/// A LINKS record's body written by hand, so that each part of a sending
+/// can be valid alone: `keys` as key letters with page targets, `numbers`
+/// as page numbers with page targets, and `texts` text links on rows from
+/// 1.
+fn body(subcode: u16, part: u8, parts: u8, keys: &[u8], numbers: &[u16], texts: u8) -> Vec<u8> {
+    let target = b"150";
+    let mut body = Vec::new();
+    body.extend_from_slice(&0x100_u16.to_be_bytes());
+    body.extend_from_slice(&subcode.to_be_bytes());
+    body.extend_from_slice(&[part, parts, u8::try_from(keys.len()).unwrap()]);
+    for &letter in keys {
+        body.push(letter);
+        body.extend_from_slice(&u16::try_from(target.len()).unwrap().to_be_bytes());
+        body.extend_from_slice(target);
+        body.push(0);
+    }
+    body.push(u8::try_from(numbers.len()).unwrap());
+    for &number in numbers {
+        body.extend_from_slice(&number.to_be_bytes());
+        body.extend_from_slice(&u16::try_from(target.len()).unwrap().to_be_bytes());
+        body.extend_from_slice(target);
+    }
+    body.push(texts);
+    for row in 1..=texts {
+        body.extend_from_slice(&[row, 0, 1]);
+        body.extend_from_slice(&u16::try_from(target.len()).unwrap().to_be_bytes());
+        body.extend_from_slice(target);
+    }
+    body
+}
+
+/// What the tracker makes of each body in turn, each taking one packet more
+/// than the one before so that the counts tell them apart.
+fn steps(bodies: &[Vec<u8>]) -> Vec<Step> {
+    let mut sending = Sending::new();
+    bodies
+        .iter()
+        .enumerate()
+        .map(|(index, body)| sending.note(&read(body).expect("each part is valid alone"), index + 1))
+        .collect()
+}
+
+/// DOC-1958, REQ-1494: a sending within its totals is taken part by part,
+/// and complete at its last part; a new part 0 begins again.
+#[test]
+fn a_sending_within_its_totals_is_taken() {
+    let bodies = [
+        body(0, 0, 3, b"RG", &[0x101], 1),
+        body(0, 1, 3, b"YC", &[0x102], 1),
+        body(0, 2, 3, b"I", &[0x103], 1),
+        body(0, 0, 1, b"R", &[], 0),
+    ];
+    assert_eq!(steps(&bodies), [Step::Partial, Step::Partial, Step::Complete, Step::Complete]);
+}
+
+/// DOC-1958 (bounds across the parts), REQ-1462: a key given in two parts,
+/// a page number given in two parts, a ninth page-number link and a ninth
+/// text link each break the sending, every packet of it counted.
+#[test]
+fn a_sending_that_breaks_a_total_across_parts_is_refused() {
+    let numbers: Vec<u16> = (0x101..=0x108).collect();
+    for (what, second) in [
+        ("a key twice", body(0, 1, 2, b"R", &[], 0)),
+        ("a page number twice", body(0, 1, 2, b"", &[0x101], 0)),
+        ("a ninth page-number link", body(0, 1, 2, b"", &[0x109], 0)),
+        ("a ninth text link", body(0, 1, 2, b"", &[], 1)),
+    ] {
+        let first = if what.starts_with("a ninth") {
+            body(0, 0, 2, b"R", &numbers, 8)
+        } else {
+            body(0, 0, 2, b"R", &[0x101], 0)
+        };
+        assert_eq!(steps(&[first, second]), [Step::Partial, Step::Refused { packets: 3 }], "{what}");
+    }
+}
+
+/// DOC-1958, DOC-1952: a part out of turn breaks its sending: a later part
+/// with no part 0, a part skipped, a part of another sub-page, a part
+/// again, and a part that names other parts than its part 0.
+#[test]
+fn a_part_out_of_turn_is_refused() {
+    let first = body(0, 0, 3, b"R", &[], 0);
+    assert_eq!(steps(&[body(0, 1, 3, b"G", &[], 0)]), [Step::Refused { packets: 1 }], "no part 0");
+    for (what, later) in [
+        ("a part skipped", body(0, 2, 3, b"G", &[], 0)),
+        ("another sub-page", body(1, 1, 3, b"G", &[], 0)),
+        ("other parts", body(0, 1, 4, b"G", &[], 0)),
+    ] {
+        assert_eq!(steps(&[first.clone(), later]), [Step::Partial, Step::Refused { packets: 2 }], "{what}");
+    }
+    let again = steps(&[first.clone(), body(0, 1, 3, b"G", &[], 0), body(0, 1, 3, b"Y", &[], 0)]);
+    assert_eq!(again, [Step::Partial, Step::Partial, Step::Refused { packets: 3 }], "a part again");
+}
+
+/// The one page of a TTI file, as the TTI reader gives it.
+fn page_file(tti: &[u8]) -> neoteletext_formats::page::PageFile {
+    let mut pages = Vec::new();
+    let mut reader = neoteletext_formats::tti::TtiReader::new();
+    let mut keep = |item: neoteletext_formats::Item<'_>| {
+        if let neoteletext_formats::Item::Page(page) = item {
+            pages.push(page.clone());
+        }
+    };
+    neoteletext_formats::Reader::feed(&mut reader, tti, &mut keep);
+    neoteletext_formats::Reader::finish(&mut reader, &mut keep);
+    pages.remove(0)
+}
+
+/// REQ-1494 verification item 1: a record built from a TTI page decodes to
+/// the same links as the TTI reader gives for that page, key links,
+/// page-number links and text links, with their addresses.
+#[test]
+fn a_record_from_a_page_gives_the_pages_links() {
+    let page = page_file(
+        b"PN,10000\nOL,1,NEWS INDEX\nLN,R,101,News\nLN,G,sport:140,Sport\nLN,Y,https://w.example/,Web\n\
+LN,I,100,\nLK,300,https://weather.example/300.t42\nLK,400,sport:100\nLT,4,0,7,http://w.example/\nLT,5,2,3,150\n",
+    );
+    assert!(page.links_valid, "the page's key links are valid");
+    let mut packets = Vec::new();
+    super::encode_page(&page, SERVICE, 0, &mut |packet| packets.push(packet)).unwrap();
+    let mut reader = RecordReader::new();
+    let mut seen = 0;
+    for packet in &packets {
+        if let Read::Record(ChannelRecord::Links(record)) = reader.push(packet) {
+            seen += 1;
+            let keys: Vec<_> = record.key_links().collect();
+            assert_eq!(keys.len(), page.links.as_slice().len());
+            for (sent, held) in keys.iter().zip(page.links.as_slice()) {
+                assert_eq!(
+                    (sent.key, sent.service, sent.address, sent.subcode),
+                    (held.key, held.service, held.address, held.subcode)
+                );
+                assert_eq!(sent.label.as_bytes(), held.label.as_bytes());
+                assert_eq!(record.address(sent.url), page.link_text.address(held.url));
+            }
+            let numbers: Vec<_> = record.number_links().collect();
+            assert_eq!(numbers.len(), page.number_links.as_slice().len());
+            for (sent, held) in numbers.iter().zip(page.number_links.as_slice()) {
+                assert_eq!(sent.number, held.number);
+                assert_eq!(
+                    (sent.destination.service, sent.destination.address, sent.destination.subcode),
+                    (held.destination.service, held.destination.address, held.destination.subcode)
+                );
+                assert_eq!(record.address(sent.destination.url), page.link_text.address(held.destination.url));
+            }
+            let texts: Vec<_> = record.text_links().collect();
+            assert_eq!(texts.len(), page.text_links.as_slice().len());
+            for (sent, held) in texts.iter().zip(page.text_links.as_slice()) {
+                assert_eq!((sent.row, sent.column, sent.length), (held.row, held.column, held.length));
+                assert_eq!(record.address(sent.destination.url), page.link_text.address(held.destination.url));
+            }
+        }
+    }
+    assert_eq!(seen, 1, "the links fit one record");
 }

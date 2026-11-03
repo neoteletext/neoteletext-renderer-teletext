@@ -452,3 +452,6 @@ impl Progress {
         if self.count == self.parts { Step::Complete } else { Step::Partial }
     }
 }
+
+#[cfg(test)]
+mod tests;

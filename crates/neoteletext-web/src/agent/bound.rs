@@ -345,6 +345,32 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
         self.device_keys = Some(keys);
     }
 
+    /// Writes the device-bound sessions for the port to keep beside its
+    /// cookies across runs (TODO-1207), in the format of
+    /// [`Sessions::export`]; the keys stay in the port's storage. `None`
+    /// when the agent has no wall clock, without which a session's time
+    /// means nothing in another run, or when `out` is too small.
+    pub fn export_bound_sessions(&self, now: Instant, out: &mut Writer<'_>) -> Option<usize> {
+        let (seconds, calendar) = self.seconds(now);
+        calendar.then(|| self.bound.sessions.export(seconds, out).ok()).flatten()
+    }
+
+    /// Restores device-bound sessions saved by
+    /// [`Self::export_bound_sessions`], in place of those held, reading the
+    /// data as untrusted ([`Sessions::import`]). A session whose key the
+    /// port no longer holds is kept, and ends as section 8.8 says when its
+    /// next refresh, carrying no proof, is refused.
+    ///
+    /// # Errors
+    /// No wall clock, or data the format refuses; nothing is restored then.
+    pub fn import_bound_sessions(&mut self, now: Instant, data: &[u8]) -> Result<usize, dbsc::ImportError> {
+        let (seconds, calendar) = self.seconds(now);
+        if !calendar {
+            return Err(dbsc::ImportError::NoWallClock);
+        }
+        self.bound.sessions.import(data, seconds)
+    }
+
     /// The device-bound sessions kept, for a port to list.
     #[must_use]
     pub const fn bound_sessions(&self) -> &Sessions {

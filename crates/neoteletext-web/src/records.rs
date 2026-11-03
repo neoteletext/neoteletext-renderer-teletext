@@ -139,27 +139,35 @@ impl RecordReader {
 
     /// Reads one packet of the stream.
     pub fn push(&mut self, packet: &Packet) -> Read<'_> {
-        let Some(result) = fragment(packet) else { return Read::Nothing };
-        let Ok(fragment) = result else { return Read::Invalid(1) };
+        self.push_counted(packet).0
+    }
+
+    /// Reads one packet of the stream, and gives with a whole record the
+    /// packets it took, so that a receiver that refuses a sending across
+    /// its records can count each of them invalid (REQ-1462). The count is
+    /// 0 for anything but [`Read::Record`].
+    pub fn push_counted(&mut self, packet: &Packet) -> (Read<'_>, usize) {
+        let Some(result) = fragment(packet) else { return (Read::Nothing, 0) };
+        let Ok(fragment) = result else { return (Read::Invalid(1), 0) };
         if fragment.index == 0 {
             let kind = fragment.data.get(1).copied().unwrap_or(0);
             if !matches!(
                 kind,
                 TYPE_INDEX | TYPE_LOG | TYPE_SET_COOKIE | TYPE_LINKS | TYPE_SUBPAGES | TYPE_REDIRECT | TYPE_DENIED
             ) {
-                return Read::Nothing;
+                return (Read::Nothing, 0);
             }
             self.reassembler.clear();
             self.following = Some((fragment.service, fragment.record));
         } else if self.following != Some((fragment.service, fragment.record)) {
-            return Read::Nothing;
+            return (Read::Nothing, 0);
         }
-        let Some((_, bytes)) = self.reassembler.push(&fragment) else { return Read::Nothing };
+        let Some((_, bytes)) = self.reassembler.push(&fragment) else { return (Read::Nothing, 0) };
         self.following = None;
         let packets = bytes.len().div_ceil(FRAGMENT_DATA);
         match read_record(bytes) {
-            Ok(record) => Read::Record(record),
-            Err(_) => Read::Invalid(packets),
+            Ok(record) => (Read::Record(record), packets),
+            Err(_) => (Read::Invalid(packets), 0),
         }
     }
 }
@@ -182,3 +190,6 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
         _ => Err(RecordFault::BadValue("record type")),
     }
 }
+
+#[cfg(test)]
+mod tests;

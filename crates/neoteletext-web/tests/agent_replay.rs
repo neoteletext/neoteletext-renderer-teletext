@@ -219,7 +219,9 @@ fn tti_response(headers: &[&str]) -> Reply {
 /// REQ-WEB-014: every request carries only the permitted headers, never
 /// `Referer`, always `Accept-Encoding: identity`.
 fn assert_profile_headers(replay: &Replay) {
-    const PERMITTED: [&str; 15] = [
+    // REQ-503's table of request headers, exactly: no request sends
+    // Content-Type, and the agent offers no WebSocket extension.
+    const PERMITTED: [&str; 13] = [
         "host",
         "user-agent",
         "accept",
@@ -227,13 +229,11 @@ fn assert_profile_headers(replay: &Replay) {
         "cookie",
         "if-none-match",
         "if-modified-since",
-        "content-type",
         "content-length",
         "upgrade",
         "connection",
         "sec-websocket-key",
         "sec-websocket-version",
-        "sec-websocket-extensions",
         "sec-websocket-protocol",
     ];
     assert_ne!(replay.requests.len(), 0);
@@ -254,7 +254,6 @@ fn assert_profile_headers(replay: &Replay) {
         if !names.contains(&"upgrade".to_string()) {
             assert_eq!(header_value(request, "Accept-Encoding").as_deref(), Some("identity"));
         }
-        assert!(!names.contains(&"content-type".to_string()), "no request has a body to type");
     }
 }
 
@@ -358,7 +357,7 @@ fn not_found_and_failures_leave_pages_alone() {
     harness.advance(SECOND);
     assert!(has_event(
         &harness.fetch(0x103),
-        "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(3) }, subcode: None, failure: MediaType"
+        "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(3) }, subcode: None, failure: MediaType(Html)"
     ));
 }
 
@@ -646,7 +645,7 @@ fn descriptor_rejections() {
     let mut harness = Harness::new(Config::default(), replay);
     assert!(has_event(&harness.open("http://tt.example/a.json"), "DescriptorRejected(Placeholder)"));
     harness.advance(SECOND);
-    assert!(has_event(&harness.open("http://tt.example/b.json"), "DescriptorFailed(MediaType)"));
+    assert!(has_event(&harness.open("http://tt.example/b.json"), "DescriptorFailed(MediaType(Html))"));
     harness.advance(SECOND);
     assert!(has_event(&harness.open("https://secure.example/c.json"), "DescriptorRejected(Downgrade(PageTemplate))"));
     assert!(has_event(&harness.open("ftp://x.example/"), "DescriptorFailed(Address(Scheme))"));
@@ -1361,7 +1360,7 @@ fn a_channels_entry_file_opens_whatever_type_a_host_gives_it() {
     let mut harness = site_harness(Config::default());
     harness.replay().reply("site.example:80", ok("text/html; charset=utf-8", settings));
     let records = harness.open_channel("http://site.example/news/");
-    assert!(has_event(&records, "DescriptorFailed(MediaType)"), "{records:?}");
+    assert!(has_event(&records, "DescriptorFailed(MediaType(Html))"), "{records:?}");
     // A generic type gives no pass to what is not the channel's settings.
     let mut harness = site_harness(Config::default());
     harness.replay().reply("site.example:80", ok("application/octet-stream", b"<html></html>"));
@@ -1376,7 +1375,7 @@ fn a_channels_entry_file_opens_whatever_type_a_host_gives_it() {
 fn a_channels_old_entry_file_is_not_read() {
     let mut harness = site_harness(Config::default());
     let records = harness.open_channel("http://site.example/news/channel.json");
-    assert!(has_event(&records, "DescriptorFailed(Address(Path))"), "{records:?}");
+    assert!(has_event(&records, "DescriptorFailed(ChannelAddress(Channel(NotChannelFile)))"), "{records:?}");
     assert_eq!(harness.replay().requests.len(), 0);
 }
 
@@ -1423,7 +1422,7 @@ fn a_broken_settings_file_is_not_replaced_by_the_defaults() {
     let cases: [(Reply, &str); 3] = [
         (Reply::Bytes(response("500 Oops", &["Content-Type: text/plain"], b"")), "DescriptorFailed(Status(500))"),
         (json_response(br#"{"page_template":"/{mpp}.t42"}"#), "DescriptorRejected(NotForChannels(PageTemplate))"),
-        (ok("text/html", br#"{"name":"Test"}"#), "DescriptorFailed(MediaType)"),
+        (ok("text/html", br#"{"name":"Test"}"#), "DescriptorFailed(MediaType(Html))"),
     ];
     for (reply, expected) in cases {
         let mut harness = site_harness(Config::default());
@@ -1473,7 +1472,7 @@ fn page_files_must_be_what_their_names_say() {
     assert!(
         has_event(
             &records,
-            "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(16) }, subcode: None, failure: MediaType }"
+            "FetchFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(16) }, subcode: None, failure: MediaType(Html) }"
         ),
         "{records:?}"
     );
@@ -1566,7 +1565,7 @@ fn contents_are_fetched_on_request() {
     assert!(has_event(&harness.take(), "ContentsMissing"));
     harness.replay().reply("site.example:80", ok("text/html", b"p\t100\tIndex\n"));
     harness.input(Input::FetchContents);
-    assert!(has_event(&harness.take(), "ContentsFailed(MediaType)"));
+    assert!(has_event(&harness.take(), "ContentsFailed(MediaType(Html))"));
 }
 
 /// Whether a file is a part of a page's list.
@@ -1815,7 +1814,7 @@ fn a_part_of_a_list_must_be_text() {
     harness.advance(neoteletext_web::consts::DEFAULT_FETCH_INTERVAL_US);
     assert!(has_event(
         &harness.take(),
-        "SubPagesFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(0) }, part: PartNumber(0), failure: MediaType }"
+        "SubPagesFailed { page: PageAddress { magazine: Magazine(1), page: PageNumber(0) }, part: PartNumber(0), failure: MediaType(Html) }"
     ));
     harness.replay().reply("site.example:80", tti_response(&[]));
     harness.input(Input::FetchPage { page, subcode: Some(SubCode::new(1)) });
@@ -1969,7 +1968,7 @@ fn push_target(address: &str) -> String {
 fn an_address_with_a_refused_fragment_opens_nothing() {
     for address in ["http://site.example/a/#302", "http://site.example/a/302.tti#303", "http://site.example/a/#wall"] {
         let mut harness = site_harness(Config::default());
-        assert!(has_event(&harness.open_channel(address), "DescriptorFailed(Address(Fragment))"), "{address}");
+        assert!(has_event(&harness.open_channel(address), "DescriptorFailed(ChannelAddress(Place))"), "{address}");
         assert!(harness.replay().requests_to("site.example:80").is_empty(), "{address}");
     }
 }
@@ -2290,4 +2289,356 @@ fn a_ragged_message_leaves_the_connection_open() {
     assert!(has_event(&records, "InvalidPackets { total: 2 }"), "{records:?}");
     assert_eq!(pages(&records).len(), 1, "{records:?}");
     assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+/// The packets `write` gives, joined as one message's bytes.
+#[cfg(feature = "push")]
+fn packets_of(write: impl FnOnce(&mut dyn FnMut(neoteletext_core::packet::Packet))) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write(&mut |packet| bytes.extend_from_slice(&packet.bytes));
+    bytes
+}
+
+/// A LINKS record's body for sub-page 100/0000: part `part` of `parts`,
+/// with one red key link to page 150.
+#[cfg(feature = "push")]
+fn links_body(part: u8, parts: u8, key: u8) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&0x100_u16.to_be_bytes());
+    body.extend_from_slice(&0_u16.to_be_bytes());
+    body.extend_from_slice(&[part, parts, 1, key, 0, 3]);
+    body.extend_from_slice(b"150");
+    body.extend_from_slice(&[0, 0, 0]);
+    body
+}
+
+// Verifies DOC-1958's bounds across the parts (REQ-1494) and REQ-1462: a
+// LINKS sending whose second part repeats the first part's key is refused
+// in the agent; the port is told to drop the sub-page's links, and both
+// records' packets are counted invalid.
+#[test]
+#[cfg(feature = "push")]
+fn a_links_sending_that_breaks_its_totals_is_refused() {
+    use neoteletext_web::records::{TYPE_LINKS, fragments};
+    let mut harness = push_service("ws://tt.example/push");
+    let (first, second) = (links_body(0, 2, b'R'), links_body(1, 2, b'R'));
+    let message = packets_of(|out| {
+        write_packets(TYPE_LINKS, &first, 3, 1, out).unwrap();
+        write_packets(TYPE_LINKS, &second, 3, 2, out).unwrap();
+    });
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    assert_eq!(events(&records).iter().filter(|event| event.starts_with("Links(")).count(), 1, "{records:?}");
+    assert!(has_event(&records, "LinksRefused { page: PageAddress"), "{records:?}");
+    let total = fragments(first.len()) + fragments(second.len());
+    assert!(has_event(&records, &format!("InvalidPackets {{ total: {total} }}")), "{records:?}");
+    assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+/// A SUBPAGES record's body for page 100, version 1.
+#[cfg(feature = "push")]
+fn subpages_body(part: u16, parts: u16, count: u16, codes: &[u16]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for field in [0x100_u16, 1, part, parts, count] {
+        body.extend_from_slice(&field.to_be_bytes());
+    }
+    for code in codes {
+        body.extend_from_slice(&code.to_be_bytes());
+        body.push(0);
+    }
+    body
+}
+
+// Verifies REQ-1503 and DOC-1959 through the agent: a whole sending's parts
+// reach the port and then its completion; a sending whose sub-codes repeat
+// across parts is refused, the port told, and its packets counted.
+#[test]
+#[cfg(feature = "push")]
+fn the_agent_reassembles_a_list_of_sub_pages() {
+    use neoteletext_web::records::{TYPE_SUBPAGES, fragments};
+    let mut harness = push_service("ws://tt.example/push");
+    let whole = [subpages_body(0, 2, 4, &[1, 2]), subpages_body(1, 2, 4, &[3, 4])];
+    let broken = [subpages_body(0, 2, 4, &[1, 2]), subpages_body(1, 2, 4, &[2, 3])];
+    let message = packets_of(|out| {
+        for (id, body) in whole.iter().enumerate() {
+            write_packets(TYPE_SUBPAGES, body, 3, id as u8, out).unwrap();
+        }
+    });
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    let names: Vec<&str> = events(&records)
+        .into_iter()
+        .filter(|event| event.starts_with("SubPageList"))
+        .map(|event| event.split([' ', '(']).next().unwrap())
+        .collect();
+    assert_eq!(names, ["SubPageList", "SubPageList", "SubPageListComplete"], "{records:?}");
+    assert!(!has_event(&records, "InvalidPackets"), "{records:?}");
+
+    let mut harness = push_service("ws://tt.example/push");
+    let message = packets_of(|out| {
+        for (id, body) in broken.iter().enumerate() {
+            write_packets(TYPE_SUBPAGES, body, 3, id as u8, out).unwrap();
+        }
+    });
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    assert!(has_event(&records, "SubPageListRefused { page: PageAddress"), "{records:?}");
+    assert!(!has_event(&records, "SubPageListComplete"), "{records:?}");
+    let total = fragments(broken[0].len()) + fragments(broken[1].len());
+    assert!(has_event(&records, &format!("InvalidPackets {{ total: {total} }}")), "{records:?}");
+}
+
+// Verifies REQ-INP-026 and DOC-1956 through the agent: at most 16 LOG lines
+// reach the port before the first page frame, and 16 for each page frame.
+#[test]
+#[cfg(feature = "push")]
+fn log_lines_are_limited_for_each_page_frame() {
+    use neoteletext_formats::log::{LogLevel, MAX_LOG_LINES_PER_PAGE};
+    use neoteletext_web::records::log;
+    let mut harness = push_service("ws://tt.example/push");
+    let lines = |first_id: u8| {
+        packets_of(|out| {
+            for index in 0..MAX_LOG_LINES_PER_PAGE + 4 {
+                let id = first_id.wrapping_add(index as u8);
+                log::encode(LogLevel::Information, None, "line", 3, id, out).unwrap();
+            }
+        })
+    };
+    let header = packet_at(1, 0);
+    let message = [lines(0).as_slice(), &header, &lines(100)].concat();
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    let logged = events(&records).iter().filter(|event| event.starts_with("Log {")).count();
+    assert_eq!(logged, 2 * MAX_LOG_LINES_PER_PAGE, "{records:?}");
+}
+
+// Verifies REQ-WEB-006, REQ-515 and DOC-1957 through the agent: a SET_COOKIE
+// record on a live channel's connection is kept in the channel's folder, as
+// the push handshake's cookies are, and so is sent to that channel's pages
+// and never another's.
+#[test]
+#[cfg(all(feature = "push", feature = "cookies"))]
+fn a_set_cookie_record_stays_in_its_channel_folder() {
+    use neoteletext_web::records::cookie::SetCookie;
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", json_response(br#"{"push":{}}"#));
+    let cookie = SetCookie {
+        name: "s",
+        value: "1",
+        path: Some("/"),
+        max_age: None,
+        same_site: neoteletext_web::cookie::SameSite::Default,
+        secure: false,
+        http_only: false,
+    };
+    let message = packets_of(|out| {
+        cookie.encode(3, 1, out).unwrap();
+    });
+    harness.replay().reply("site.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open_channel("http://site.example/a/");
+    assert!(!has_event(&records, "CookieRejected"), "{records:?}");
+    assert_eq!(harness.agent.cookies().len(), 1, "the record's cookie is kept");
+    harness.replay().reply("site.example:80", not_found());
+    harness.replay().reply("site.example:80", not_found());
+    // A channel in a folder inside the first is another channel, whose
+    // requests the cookie's path alone would match.
+    harness.open_channel("http://site.example/a/b/");
+    harness.replay().reply("site.example:80", tti_response(&[]));
+    harness.fetch(0x100);
+    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
+    assert_eq!(request_path(&last), "/a/b/100.tti");
+    assert_eq!(header_value(&last, "Cookie"), None, "not sent to another channel's folder");
+}
+
+// Verifies REQ-1462 item 3: packet 1/30 among good packets is discarded and
+// counted alone, the good ones delivered in order, the connection kept.
+#[test]
+#[cfg(feature = "push")]
+fn packet_30_of_magazine_1_is_discarded_and_counted() {
+    let mut harness = push_service("ws://tt.example/push");
+    let (first, second) = (packet_at(1, 1), packet_at(1, 2));
+    let message = [first, packet_at(1, 30), second].concat();
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    assert_eq!(events(&records).iter().filter(|event| event.starts_with("InvalidPackets")).count(), 1);
+    assert!(has_event(&records, "InvalidPackets { total: 1 }"), "{records:?}");
+    let delivered = pages(&records);
+    assert_eq!(delivered.len(), 1);
+    assert!(matches!(delivered[0], Rec::Page { bytes, .. } if *bytes == [first, second].concat()));
+    assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+// Verifies REQ-1462 item 3, DOC-1952: a channel record that breaks its
+// layout, arriving among page packets, is discarded and each of its
+// fragments counted; the page packets are delivered and the connection
+// kept.
+#[test]
+#[cfg(feature = "push")]
+fn a_malformed_record_among_page_packets_counts_its_fragments() {
+    use neoteletext_web::records::{TYPE_SUBPAGES, fragments};
+    let mut harness = push_service("ws://tt.example/push");
+    // A SUBPAGES body whose count is 0: the frame is whole, the layout not.
+    let mut body = Vec::new();
+    for field in [0x100_u16, 1, 0, 1, 0] {
+        body.extend_from_slice(&field.to_be_bytes());
+    }
+    body.extend_from_slice(&[0, 1, 0]);
+    let record = packets_of(|out| {
+        write_packets(TYPE_SUBPAGES, &body, 3, 1, out).unwrap();
+    });
+    let page = packet_at(1, 1);
+    let message = [page.as_slice(), &record, &page].concat();
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    let expected = format!("InvalidPackets {{ total: {} }}", fragments(body.len()));
+    assert!(has_event(&records, &expected), "{records:?}");
+    assert!(!has_event(&records, "SubPageList"), "{records:?}");
+    assert!(!has_event(&records, "PushLost"), "{records:?}");
+}
+
+// Verifies REQ-1462 item 4's count, since the push connection opened: after
+// the connection is lost and opened again, the total starts again from the
+// new connection's packets.
+#[test]
+#[cfg(feature = "push")]
+fn the_invalid_count_restarts_when_the_connection_reopens() {
+    let mut harness = push_service("ws://tt.example/push");
+    let mut first = server_frame(0x2, &[packet_at(8, 31), packet_at(8, 31)].concat());
+    first.extend(server_frame(0x8, &1000u16.to_be_bytes()));
+    harness.replay().reply("tt.example:80", Reply::WebSocket(first));
+    let records = harness.open("http://tt.example/service.json");
+    assert!(has_event(&records, "InvalidPackets { total: 2 }"), "{records:?}");
+    assert!(has_event(&records, "PushLost"), "{records:?}");
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &packet_at(8, 31))));
+    harness.advance(SECOND);
+    let records = harness.take();
+    assert!(has_event(&records, "PushConnected"), "{records:?}");
+    assert!(has_event(&records, "InvalidPackets { total: 1 }"), "{records:?}");
+}
+
+/// The live channel `site_harness` serves at `/live/`: its settings name a
+/// push connection, and the connection sends `frames`.
+#[cfg(feature = "push")]
+fn live_channel(frames: Vec<u8>) -> (Harness, Vec<Rec>) {
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", json_response(br#"{"push":{}}"#));
+    harness.replay().reply("site.example:80", Reply::WebSocket(frames));
+    let records = harness.open_channel("http://site.example/live/");
+    (harness, records)
+}
+
+// Verifies REQ-WEB-018 (REQ-507), TODO-1528 items 1 and 2: a live channel
+// makes no request after its entry file but its push connection, even when
+// the port asks for its initial page, a part of a page's list of sub-pages
+// and its contents; it reports connecting at once and never a page not
+// found, and is live when the first page frame arrives.
+#[test]
+#[cfg(feature = "push")]
+fn a_live_channel_opens_by_its_connection_alone() {
+    let (mut harness, records) = live_channel(Vec::new());
+    assert!(has_event(&records, "ChannelConnecting"), "{records:?}");
+    assert!(has_event(&records, "PushConnected"), "{records:?}");
+    let page = PageAddress::from_mpp(0x100).unwrap();
+    harness.input(Input::FetchPage { page, subcode: None });
+    harness.input(Input::FetchSubPages { page, part: PartNumber::FIRST });
+    harness.input(Input::FetchContents);
+    harness.advance(10 * SECOND);
+    let later = harness.take();
+    let paths = paths(&mut harness, "site.example:80");
+    assert_eq!(paths, ["/live/channel.ttx", "/live/push"], "the entry file, then the push connection's handshake");
+    assert!(!has_event(&later, "PageNotInService") && !has_event(&records, "PageNotInService"), "{later:?}");
+    assert!(!has_event(&later, "ChannelLive"), "no page yet: {later:?}");
+    // The first page frame makes it live.
+    harness.replay().inject(ConnectionId::Push, &server_frame(0x2, &packet_at(1, 0)));
+    harness.settle();
+    let live = harness.take();
+    assert!(has_event(&live, "ChannelLive"), "{live:?}");
+}
+
+// Verifies REQ-WEB-018, DOC-1955, TODO-1528 item 3: index records on a live
+// channel's connection reach the port as `Index`, and `IndexComplete`
+// follows the last part only.
+#[test]
+#[cfg(feature = "push")]
+fn a_live_channels_index_reaches_the_port() {
+    use neoteletext_web::records::index::{IndexMagazine, IndexPage, encode};
+    let pages = [IndexPage { page: 0x100, subpages: 1, title: "Index", section: "" }];
+    let other = [IndexPage { page: 0x200, subpages: 2, title: "Sport", section: "Sport" }];
+    let magazines = [
+        IndexMagazine { magazine: 1, name: "One", pages: &pages },
+        IndexMagazine { magazine: 2, name: "", pages: &other },
+    ];
+    let message = packets_of(|out| {
+        encode(4, &magazines, 3, 1, out).unwrap();
+    });
+    let (_, records) = live_channel(server_frame(0x2, &message));
+    let order: Vec<&str> = events(&records)
+        .into_iter()
+        .filter(|event| event.starts_with("Index"))
+        .map(|event| event.split([' ', '(']).next().unwrap())
+        .collect();
+    assert_eq!(order, ["Index", "Index", "IndexComplete"], "{records:?}");
+    assert!(has_event(&records, "IndexComplete { generation: 4 }"), "{records:?}");
+}
+
+// Verifies REQ-WEB-018, TODO-1528 items 4 and 5: a static channel still asks
+// for its entry file, then its bundle, and then the page asked for; and a
+// channel opened after a live one is fetched again.
+#[test]
+#[cfg(feature = "push")]
+fn a_static_channel_after_a_live_one_makes_its_requests() {
+    let (mut harness, _) = live_channel(Vec::new());
+    harness.replay().reply("site.example:80", json_response(br#"{"name":"Static"}"#));
+    harness.replay().reply("site.example:80", not_found());
+    let records = harness.open_channel("http://site.example/news/");
+    assert!(!has_event(&records, "ChannelConnecting"), "{records:?}");
+    harness.replay().reply("site.example:80", tti_response(&[]));
+    harness.fetch(0x100);
+    let paths = paths(&mut harness, "site.example:80");
+    assert_eq!(&paths[2..], ["/news/channel.ttx", "/news/index.t42", "/news/100.tti"]);
+}
+
+// Verifies REQ-508 (REQ-WEB-019) and RFC 9110 section 8.8: when the file a
+// page answered from has gone and the other is tried, the request for the
+// other file carries none of the first file's validators.
+#[test]
+fn the_second_file_of_a_page_carries_no_validators_of_the_first() {
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", not_found());
+    harness.replay().reply("site.example:80", not_found());
+    harness.open_channel("http://site.example/news/");
+    harness
+        .replay()
+        .reply("site.example:80", tti_response(&["ETag: \"tti-1\"", "Last-Modified: Mon, 02 Nov 2026 10:00:00 GMT"]));
+    harness.fetch(0x100);
+    harness.replay().reply("site.example:80", not_found());
+    harness.replay().reply("site.example:80", ok("application/x-teletext-t42", &packet()));
+    harness.advance(60 * SECOND);
+    harness.fetch(0x100);
+    let requests = harness.replay().requests_to("site.example:80");
+    let [.., tti_again, t42] = requests.as_slice() else { panic!("{} requests", requests.len()) };
+    assert_eq!(request_path(tti_again), "/news/100.tti");
+    assert_eq!(header_value(tti_again, "If-None-Match").as_deref(), Some("\"tti-1\""), "the file's own validator");
+    assert_eq!(request_path(t42), "/news/100.t42");
+    assert_eq!(header_value(t42, "If-None-Match"), None);
+    assert_eq!(header_value(t42, "If-Modified-Since"), None);
+}
+
+// Verifies REQ-512 (REQ-WEB-023): a channel's address that breaks a rule is
+// refused with the rule it breaks, and nothing is fetched.
+#[test]
+fn a_channel_address_that_breaks_a_rule_names_it() {
+    for (address, rule) in [
+        ("http://site.example/a//", "EmptySegment"),
+        ("http://site.example/a/%41/", "Character"),
+        ("ws://site.example/a/", "Scheme"),
+    ] {
+        let mut harness = site_harness(Config::default());
+        let records = harness.open_channel(address);
+        assert!(
+            has_event(&records, &format!("DescriptorFailed(ChannelAddress(Channel({rule})))")),
+            "{address}: {records:?}"
+        );
+        assert!(harness.replay().requests_to("site.example:80").is_empty(), "{address}");
+    }
 }

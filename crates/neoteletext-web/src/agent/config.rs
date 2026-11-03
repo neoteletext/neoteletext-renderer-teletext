@@ -106,15 +106,22 @@ pub struct Buffers<'m> {
 const BODY_BYTES: usize = DEFAULT_PAGE_LIMIT;
 const _: () = assert!(crate::subpages::MAX_BYTES <= BODY_BYTES, "a part of a list fits the body buffer");
 
+/// The push connection's default buffers: none in a build without push
+/// (decision E.61), whose agent never opens the connection, so that such a
+/// build does not carry them.
+const PUSH_HEAD_BYTES: usize = if cfg!(feature = "push") { DEFAULT_HEADER_LIMIT } else { 0 };
+const PUSH_REQUEST_BYTES: usize = if cfg!(feature = "push") { crate::consts::DEFAULT_REQUEST_LIMIT } else { 0 };
+const PUSH_MESSAGE_BYTES: usize = if cfg!(feature = "push") { DEFAULT_PUSH_LIMIT } else { 0 };
+
 /// Buffers of the default sizes, for callers that do not need to choose.
 #[derive(Debug)]
 pub struct Storage {
     fetch_head: [u8; DEFAULT_HEADER_LIMIT],
     fetch_request: [u8; crate::consts::DEFAULT_REQUEST_LIMIT],
     body: [u8; BODY_BYTES],
-    push_head: [u8; DEFAULT_HEADER_LIMIT],
-    push_request: [u8; crate::consts::DEFAULT_REQUEST_LIMIT],
-    push_message: [u8; DEFAULT_PUSH_LIMIT],
+    push_head: [u8; PUSH_HEAD_BYTES],
+    push_request: [u8; PUSH_REQUEST_BYTES],
+    push_message: [u8; PUSH_MESSAGE_BYTES],
 }
 
 impl Default for Storage {
@@ -134,9 +141,9 @@ impl Storage {
             fetch_head: [0; DEFAULT_HEADER_LIMIT],
             fetch_request: [0; crate::consts::DEFAULT_REQUEST_LIMIT],
             body: [0; BODY_BYTES],
-            push_head: [0; DEFAULT_HEADER_LIMIT],
-            push_request: [0; crate::consts::DEFAULT_REQUEST_LIMIT],
-            push_message: [0; DEFAULT_PUSH_LIMIT],
+            push_head: [0; PUSH_HEAD_BYTES],
+            push_request: [0; PUSH_REQUEST_BYTES],
+            push_message: [0; PUSH_MESSAGE_BYTES],
         }
     }
 
@@ -150,5 +157,22 @@ impl Storage {
             push_request: &mut self.push_request,
             push_message: &mut self.push_message,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BODY_BYTES, DEFAULT_HEADER_LIMIT, DEFAULT_PUSH_LIMIT, Storage};
+    use crate::consts::DEFAULT_REQUEST_LIMIT;
+
+    // Decision E.61 (TODO-1106): the default buffers follow the features: a
+    // build without push carries the fetch connection's buffers alone, and
+    // one with push the push connection's as well.
+    #[test]
+    fn the_default_buffers_follow_the_push_feature() {
+        let fetch = DEFAULT_HEADER_LIMIT + DEFAULT_REQUEST_LIMIT + BODY_BYTES;
+        let push = DEFAULT_HEADER_LIMIT + DEFAULT_REQUEST_LIMIT + DEFAULT_PUSH_LIMIT;
+        let expected = if cfg!(feature = "push") { fetch + push } else { fetch };
+        assert_eq!(size_of::<Storage>(), expected);
     }
 }

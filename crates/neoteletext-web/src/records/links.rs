@@ -463,5 +463,134 @@ pub fn encode_page(
     encode(page.address, page.subcode, links, service, first_record_id, out)
 }
 
+/// What one LINKS record meant for its sub-page's sending (DOC-1958).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Step {
+    /// Its links are taken: part 0 replaces every link held for the
+    /// sub-page, a later part adds to them. More parts are to come.
+    Partial,
+    /// As [`Step::Partial`], and it was the sending's last part: the
+    /// sub-page's links are whole.
+    Complete,
+    /// It breaks its sending: a part out of turn, or links that pass a
+    /// total over the sending's parts. The sub-page is left with no Link
+    /// Extension links, as for any LINKS record refused (DOC-1952), and
+    /// this many packets, the sending's records so far and this one, are
+    /// invalid (REQ-1462).
+    Refused {
+        /// The packets of the sending's records, this one included.
+        packets: usize,
+    },
+}
+
+/// The sending in progress for one sub-page.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Current {
+    page: PageAddress,
+    subcode: SubCode,
+    parts: u8,
+    /// The part expected next.
+    next: u8,
+    keys: [Option<LinkKey>; LINK_LINES],
+    numbers: [Option<PageAddress>; NUMBER_LINKS],
+    texts: usize,
+    /// The packets of the sending's records so far.
+    packets: usize,
+}
+
+/// A receiver's LINKS sending in progress (DOC-1958), which holds a
+/// sending's links to the bounds across its parts: at most five key links,
+/// each key once and at most four coloured, at most eight page-number
+/// links, each number once, and at most eight text links. The records of
+/// one sending arrive in order on one connection, part 0 first, as
+/// [`encode`] writes them, so a part out of turn breaks its sending.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Sending {
+    current: Option<Current>,
+}
+
+impl Sending {
+    /// Nothing in progress.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { current: None }
+    }
+
+    /// Notes a record the reader accepted, which took `packets` packets.
+    pub fn note(&mut self, record: &LinksRecord<'_>, packets: usize) -> Step {
+        let held = if record.part == 0 {
+            Current {
+                page: record.page,
+                subcode: record.subcode,
+                parts: record.parts,
+                next: 0,
+                keys: [None; LINK_LINES],
+                numbers: [None; NUMBER_LINKS],
+                texts: 0,
+                packets: 0,
+            }
+        } else {
+            match self.current.take() {
+                Some(current)
+                    if current.page == record.page
+                        && current.subcode == record.subcode
+                        && current.parts == record.parts
+                        && current.next == record.part =>
+                {
+                    current
+                }
+                // A part of another sending, or one skipped: its own
+                // packets are what is refused.
+                _ => return Step::Refused { packets },
+            }
+        };
+        let mut held = held;
+        held.packets = held.packets.saturating_add(packets);
+        if add_links(&mut held, record).is_none() {
+            self.current = None;
+            return Step::Refused { packets: held.packets };
+        }
+        held.next = held.next.saturating_add(1);
+        if held.next >= held.parts {
+            self.current = None;
+            Step::Complete
+        } else {
+            self.current = Some(held);
+            Step::Partial
+        }
+    }
+}
+
+/// Adds a record's links to its sending's totals; `None` when one passes
+/// its bound.
+fn add_links(held: &mut Current, record: &LinksRecord<'_>) -> Option<()> {
+    for link in record.links() {
+        match link {
+            Link::Key(link) => {
+                if held.keys.contains(&Some(link.key)) {
+                    return None;
+                }
+                *held.keys.iter_mut().find(|slot| slot.is_none())? = Some(link.key);
+                if held.keys.iter().flatten().filter(|key| key.is_coloured()).count() > MAX_COLOURED {
+                    return None;
+                }
+            }
+            Link::Number(link) => {
+                if held.numbers.contains(&Some(link.number)) {
+                    return None;
+                }
+                *held.numbers.iter_mut().find(|slot| slot.is_none())? = Some(link.number);
+            }
+            Link::Text(_) => {
+                held.texts = held.texts.saturating_add(1);
+                if held.texts > TEXT_LINKS {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(())
+}
+
 #[cfg(test)]
 mod tests;

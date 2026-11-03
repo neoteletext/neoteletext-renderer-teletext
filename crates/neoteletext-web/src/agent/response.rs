@@ -70,7 +70,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 if status != STATUS_OK {
                     event(sink, Event::DescriptorFailed(Failure::Status(status)));
                 } else if !media_accepted {
-                    event(sink, Event::DescriptorFailed(Failure::MediaType));
+                    event(sink, Event::DescriptorFailed(Failure::MediaType(head.media)));
                 } else {
                     let parsed = if channel {
                         Descriptor::parse_channel(body, &exchange.url)

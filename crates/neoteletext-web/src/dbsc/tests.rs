@@ -288,3 +288,90 @@ fn instructions_naming_a_member_twice_are_refused() {
         assert_eq!(read_instructions(body.as_bytes()), Err(InstructionsError::Malformed), "{body}");
     }
 }
+
+mod persistence {
+    use super::super::{ImportError, KeyHandle, MAX_EXPORT_BYTES, ScopeRule, Session, Sessions};
+    use crate::bytes::{TextBuf, Writer};
+    use crate::url::Url;
+
+    const NOW: u64 = 1_000;
+
+    fn session(id: &str, key: u32, expires: u64) -> Session {
+        let url = Url::parse("https://news.example/dbsc/refresh").unwrap();
+        let mut session = Session {
+            id: TextBuf::from_bytes(id.as_bytes()).unwrap(),
+            key: KeyHandle(key),
+            refresh_url: TextBuf::from_bytes(url.as_str().as_bytes()).unwrap(),
+            origin: url.origin(),
+            include_site: false,
+            rules: [None; super::super::MAX_SCOPE_RULES],
+            credentials: [None; super::super::MAX_CREDENTIALS],
+            challenge: Some(TextBuf::from_bytes(b"c 2").unwrap()),
+            expires,
+        };
+        session.credentials[0] = TextBuf::from_bytes(b"auth");
+        session.credentials[1] = TextBuf::from_bytes(b"id");
+        session.rules[0] = Some(ScopeRule {
+            include: false,
+            domain: TextBuf::from_bytes(b"*").unwrap(),
+            path: TextBuf::from_bytes(b"/static").unwrap(),
+        });
+        session
+    }
+
+    fn export(sessions: &Sessions) -> std::vec::Vec<u8> {
+        let mut out = std::vec![0_u8; MAX_EXPORT_BYTES];
+        let mut writer = Writer::new(&mut out);
+        sessions.export(NOW, &mut writer).unwrap();
+        let length = writer.len();
+        out.truncate(length);
+        out
+    }
+
+    // REQ-WEB-017 (TODO-1207): sessions written and read again are the same,
+    // key handle, scope rules, credentials and challenge included; one lapsed
+    // by the time of reading is not kept.
+    #[test]
+    fn sessions_round_trip_and_a_lapsed_one_is_dropped() {
+        let mut sessions = Sessions::new();
+        sessions.insert(session("s1", 7, NOW + 500)).unwrap();
+        sessions.insert(session("s2", 9, NOW + 10)).unwrap();
+        let saved = export(&sessions);
+        let mut read = Sessions::new();
+        assert_eq!(read.import(&saved, NOW), Ok(2));
+        assert_eq!(read, sessions);
+        assert_eq!(read.import(&saved, NOW + 10), Ok(1), "s2 has lapsed");
+        assert_eq!(read.iter().map(|(_, session)| session.id.as_str()).collect::<std::vec::Vec<_>>(), ["s1"]);
+    }
+
+    // REQ-WEB-017, REQ-SEC-013: saved data is untrusted: data cut short,
+    // longer than the bound, of another version, with a length past its
+    // bound, or with a session no registration could make is refused whole,
+    // and the sessions held stay as they were.
+    #[test]
+    fn saved_sessions_that_break_the_format_are_refused_whole() {
+        let mut held = Sessions::new();
+        held.insert(session("kept", 1, NOW + 500)).unwrap();
+        let mut sessions = Sessions::new();
+        sessions.insert(session("s1", 7, NOW + 500)).unwrap();
+        let saved = export(&sessions);
+        let text = std::string::String::from_utf8(saved.clone()).unwrap();
+        let cases: [(&str, std::vec::Vec<u8>, ImportError); 6] = [
+            ("cut short", saved[..saved.len() - 3].to_vec(), ImportError::Malformed),
+            ("too large", std::vec![b'0'; MAX_EXPORT_BYTES + 1], ImportError::TooLarge),
+            ("another version", text.replacen("sessions 1", "sessions 9", 1).into_bytes(), ImportError::Version),
+            (
+                "an identifier past its bound",
+                text.replacen(" 2 1 2 33 ", " 2 1 99 33 ", 1).into_bytes(),
+                ImportError::Malformed,
+            ),
+            ("plain HTTP", text.replacen("https://", "http://x", 1).into_bytes(), ImportError::Refused),
+            ("too many credentials", text.replacen(" 1500 2 1 ", " 1500 9 1 ", 1).into_bytes(), ImportError::Refused),
+        ];
+        for (what, data, error) in cases {
+            let mut store = held;
+            assert_eq!(store.import(&data, NOW), Err(error), "{what}: {}", std::string::String::from_utf8_lossy(&data));
+            assert_eq!(store, held, "{what}: nothing kept");
+        }
+    }
+}

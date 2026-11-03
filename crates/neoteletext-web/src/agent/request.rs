@@ -258,15 +258,26 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         http::write_header(&mut writer, header::USER_AGENT, self.named_as.as_bytes())?;
         http::write_header(&mut writer, header::ACCEPT, ACCEPT_PAGES)?;
         http::write_header(&mut writer, header::ACCEPT_ENCODING, IDENTITY)?;
+        // A channel's page or sub-page is a TTI or a T42 file, and validators
+        // are a file's own (RFC 9110 section 8.8): the other file's never go
+        // with a request, as they would when the file that answered before
+        // has gone and the other is tried (REQ-WEB-019).
         let validated = match exchange.purpose {
-            Purpose::Page { page, subcode, file } => Some((page, subcode, cached_as(file))),
-            Purpose::SubPages { page, part } => Some((page, None, Cached::SubPages(part))),
+            Purpose::Page { page, subcode, file } => {
+                let t42 = match file {
+                    PageFile::Channel { t42, .. } | PageFile::SubPage { t42, .. } => Some(t42),
+                    PageFile::Template => None,
+                };
+                Some((page, subcode, cached_as(file), t42))
+            }
+            Purpose::SubPages { page, part } => Some((page, None, Cached::SubPages(part), None)),
             _ => None,
         };
-        if let Some((page, subcode, file)) = validated
+        if let Some((page, subcode, file, t42)) = validated
             && exchange.redirects == 0
-            && let Some(entry) =
-                self.cache.iter().flatten().find(|e| e.page == page && e.subcode == subcode && e.file == file)
+            && let Some(entry) = self.cache.iter().flatten().find(|e| {
+                e.page == page && e.subcode == subcode && e.file == file && t42.is_none_or(|t42| e.t42 == t42)
+            })
         {
             if let Some(etag) = &entry.etag {
                 http::write_header(&mut writer, header::IF_NONE_MATCH, etag.as_bytes())?;

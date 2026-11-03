@@ -232,6 +232,9 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         self.push.invalid = 0;
         self.push.log_lines = 0;
         self.records.clear();
+        // A sending never continues on another connection (DOC-1952).
+        self.links = crate::records::links::Sending::new();
+        self.subpage_list = crate::records::subpages::Sending::new();
         event(sink, Event::PushConnected);
         self.send_subscribe(sink);
         true

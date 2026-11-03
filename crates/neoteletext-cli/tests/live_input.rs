@@ -69,3 +69,17 @@ fn a_program_may_be_named() {
     let output = neottx(&["list", page.to_str().unwrap(), "--program", "2"]);
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
 }
+
+// Verifies REQ-512 (REQ-WEB-023): an address that is a channel's in form
+// and breaks a rule is refused, naming the rule, and nothing is fetched: it
+// is not read as a descriptor instead.
+#[test]
+fn a_broken_channel_address_names_its_rule_and_fetches_nothing() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+    listener.set_nonblocking(true).expect("non-blocking");
+    let port = listener.local_addr().expect("its address").port();
+    let address = format!("http://127.0.0.1:{port}/tap//");
+    let said = listing(&address);
+    assert!(said.contains("not a channel's address: EmptySegment"), "{said}");
+    assert!(listener.accept().is_err(), "no connection was made");
+}

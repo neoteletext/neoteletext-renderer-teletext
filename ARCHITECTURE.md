@@ -204,6 +204,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
   - the contents file's reader (`contents`, REQ-WEB-025);
   - a page's list of sub-pages in parts, `NNN/P.sub` (`subpages`, REQ-1888): its bounded reader and its writer, the validator of a file and a page's version, and, with the feature `std`, the layout of a channel's pages as files (`NNN.t42`, and in the page's folder `NNN/SSSS.t42` and the parts `NNN/P.sub`, with an `index.t42` of first sub-pages); the agent asks for a part of a page's list when the port asks, and then for a sub-page's own file only when that sub-page is asked for (REQ-WEB-019);
   - push subscriptions;
+  - the channel's records on the push connection (`records`, DOC-1951): the index, LOG, `SET_COOKIE`, LINKS, SUBPAGES, REDIRECT and DENIED records' encoders and readers, the reassembly of a record from its fragments (`RecordReader`), and the one reassembly of each kind of sending that spans records, which every receiver uses in place of its own: `index::Progress`, `links::Sending`, held to a sub-page's totals of links over its parts (DOC-1958), and `subpages::Sending`, held to a page's list's count and order over its parts (DOC-1959); a sending that breaks its totals is refused and its packets counted invalid (REQ-1462);
   - the return channel on the push WebSocket (REQ-WEB-035, decision E.133): the frames of one input written together as one send, a contact's move held in its slot while the port reports the socket's unsent bytes at or over `PUSH_UNSENT_BOUND`, and the round trip by ping and pong (`Input::MeasureRoundTrip`, `Event::RoundTrip`);
   - Device Bound Session Credentials (`dbsc`, and the agent's `agent::bound`, feature `dbsc`, REQ-WEB-017): the registration and challenge headers, the session instructions, the proofs and the session store; the keys are the port's;
   - the zxnet live feed.
@@ -496,10 +497,10 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `url/`: the strict address parser's lexical pass, host grammar and path grammar.
 - `proxy/`: the HTTP `CONNECT` and SOCKS5 handshakes, and the blocking tunnel over `std::io` (feature `std`).
 - `cookie/`: the cookie store's `Set-Cookie` algorithm, the `Cookie` header, the date algorithm and the persistence format.
-- `dbsc/`: Device Bound Session Credentials: structured fields, the two headers, the session instructions, the proof and the session store.
+- `dbsc/`: Device Bound Session Credentials: structured fields, the two headers, the session instructions, the proof, the session store and its saved form, which a port keeps beside its cookies across runs (`Sessions::export` and `import`, the agent's `export_bound_sessions` and `import_bound_sessions`).
 - `descriptor/`: the descriptor's member grammar, its page address template and its links to other sites.
 - `subpages/`: a channel's pages laid out as files (feature `std`).
-- `records/`: a channel's records on its push connection (DOC-1951), each with its encoder and its bounded reader: `index`, `log`, `cookie` (SET_COOKIE), `links`, `subpages`, `redirect` and `denied`; `RecordReader` reassembles a push stream's fragments and reads the records they carry.
+- `records/`: a channel's records on its push connection (DOC-1951), one file a record type, each with its encoder and its bounded reader: `index`, `log`, `cookie` (SET_COOKIE), `links`, `subpages`, `redirect` and `denied`, and for the index, LINKS and SUBPAGES records the progress of a sending; `RecordReader` reassembles a push stream's fragments and reads the records they carry.
 - `zxnet/`: the live feed's channel, vocabulary, messages, page walk and connection.
 - `agent/`: the user agent's parts: configuration, vocabulary, entry point, service opening, requests, responses, pages, cookies, the fetch and push connections, and the agent's side of `dbsc`.
 
