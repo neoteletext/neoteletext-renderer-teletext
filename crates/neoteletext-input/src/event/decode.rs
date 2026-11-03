@@ -255,7 +255,7 @@ fn read_select(payload: &[u8]) -> Result<Event<'_>, InputError> {
     }
     let (selection, parameters) = match text.as_bytes().iter().position(|&byte| byte == QUERY_MARK) {
         Some(at) => {
-            let (selection, rest) = text.split_at(at);
+            let (selection, rest) = text.split_at_checked(at).ok_or(refused)?;
             let parameters = rest.get(1..).ok_or(refused)?;
             if parameters.is_empty() {
                 return Err(refused);
@@ -266,7 +266,7 @@ fn read_select(payload: &[u8]) -> Result<Event<'_>, InputError> {
     };
     let (page, sub) = match selection.as_bytes().iter().position(|&byte| byte == SUB_MARK) {
         Some(at) => {
-            let (page, rest) = selection.split_at(at);
+            let (page, rest) = selection.split_at_checked(at).ok_or(refused)?;
             (page, hex::<SUB_DIGITS>(rest.get(1..).ok_or(refused)?).filter(|&sub| sub != SUBCODE_ANY).ok_or(refused)?)
         }
         None => (selection, SUBCODE_ANY),

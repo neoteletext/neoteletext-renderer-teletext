@@ -291,7 +291,11 @@ impl RawReader {
             let take = wanted.min(rest.len());
             let (head, tail) = rest.split_at(take);
             if let Some(target) = self.line.get_mut(self.fill..self.fill.saturating_add(take)) {
-                target.copy_from_slice(head);
+                // Byte by byte: `copy_from_slice` links a panic path for
+                // unequal lengths, which REQ-GEN-019 forbids.
+                for (to, &from) in target.iter_mut().zip(head) {
+                    *to = from;
+                }
             }
             self.fill = self.fill.saturating_add(take);
             rest = tail;

@@ -62,7 +62,16 @@ impl<const KEPT: usize> SessionOf<KEPT> {
     fn drop_oldest(&mut self) {
         let Some(&(after, length)) = self.sent.get(self.sent_first) else { return };
         let length = usize::from(length).min(self.kept_length);
-        self.kept.copy_within(length..self.kept_length, 0);
+        // Move the bytes after the forgotten message to the front, one by
+        // one through checked accesses: `copy_within` panics on a range it
+        // cannot prove in bounds, which REQ-GEN-019 forbids linking.
+        for to in 0..self.kept_length.saturating_sub(length) {
+            if let Some(byte) = self.kept.get(to.saturating_add(length)).copied()
+                && let Some(slot) = self.kept.get_mut(to)
+            {
+                *slot = byte;
+            }
+        }
         self.kept_length = self.kept_length.saturating_sub(length);
         self.kept_from = after;
         self.sent_first = self.sent_first.saturating_add(1).checked_rem(REMEMBERED).unwrap_or(0);
