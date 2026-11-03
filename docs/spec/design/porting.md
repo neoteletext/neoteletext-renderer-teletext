@@ -73,7 +73,7 @@ All state lives in memory you provide (REQ-GEN-003):
 
 ## Aspect ratio
 
-Teletext pixels are about 1.2 times taller than wide on a 4:3 television (REQ-RND-004). The library always renders 480 by 500 (or 480 by 250); scale in the port, for example with `neoteletext_image::scale::scale_indices(..., aspect: true)`, or the picture will look squashed.
+Teletext pixels are wider than tall on a 4:3 television: measured against the picture's width, a half-dot of the 12-by-20 cell is 1/624 of it and a line 1/768 of it, so each pixel is 768/624 = 16/13 (about 1.23) times wider than tall (REQ-RND-004, REQ-RND-024; the core's `ASPECT_NUMERATOR` and `ASPECT_DENOMINATOR`). The library always renders 480 by 500 (or 480 by 250); to show a page in a 4:3 picture, stretch the width in the port, for example with `neoteletext_image::scale::scale_indices(..., aspect: true)`, which maps each output column back through the stretch. Do not stretch the height: that makes the picture too tall.
 
 ## What the library will not do
 
