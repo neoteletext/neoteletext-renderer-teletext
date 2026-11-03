@@ -27,7 +27,9 @@ pub enum Target {
 
 /// Converts the input to `to`, written to `output`; with a filter, only
 /// that page, and with a sub-code other than `SubCode::ANY` only that
-/// sub-page (REQ-INP-014, REQ-INP-018).
+/// sub-page (REQ-INP-014, REQ-INP-018). The output and the input are
+/// opened, then the sandbox is applied, before the input is parsed
+/// (REQ-SEC-017).
 pub fn convert(
     options: &Options,
     output: &Path,
@@ -44,6 +46,8 @@ pub fn convert(
             };
             let mut writer = neoteletext_formats::write::T42Writer::with_filter(std::io::BufWriter::new(file), filter);
             let mut input = input::open(options)?;
+            // REQ-SEC-017: the input and the output are open; nothing else is.
+            input::sandbox(options, None)?;
             let mut reader = input::reader(options, true);
             let mut failure = None;
             input::pump(input.as_mut(), reader.as_mut(), &mut |item| {
@@ -59,7 +63,7 @@ pub fn convert(
             writer.into_inner().flush().map_err(|error| (exit::INPUT, error.to_string()))
         }
         Target::Tti => {
-            let session = input::load(options)?;
+            let session = input::load_sandboxed(options, None, || input::sandbox(options, None))?;
             let pages = session_page_files(&session, filter);
             let references: Vec<&PageFile> = pages.iter().collect();
             let mut out = std::io::BufWriter::new(file);

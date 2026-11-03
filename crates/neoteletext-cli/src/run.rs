@@ -38,7 +38,7 @@ pub fn run() -> ExitCode {
         Command::Slice { common, output, preset } => commands::slice(&common.options(), &output, &preset),
         Command::Services { common } => commands::services(&common.options()),
         Command::ServiceInfo { common } => commands::service_info(&common.options()),
-        Command::Check { files, descriptor } => commands::check(&files, descriptor.as_deref()),
+        Command::Check { files, descriptor, no_sandbox } => commands::check(&files, descriptor.as_deref(), no_sandbox),
         Command::Font { action: FontCommand::Convert { input, output, map, no_sandbox } } => {
             commands::convert_font(&input, &output, map.as_deref(), no_sandbox)
         }

@@ -10,8 +10,7 @@ use std::io::Write;
 
 /// `neottx list`.
 pub fn list(options: &Options) -> Result<(), Failure> {
-    let mut session = input::load(options)?;
-    sandbox_closed(options.no_sandbox)?;
+    let mut session = input::load_sandboxed(options, None, || sandbox_closed(options.no_sandbox))?;
     let mut out = std::io::stdout().lock();
     let pages = session.pages();
     let page_count = pages.len();

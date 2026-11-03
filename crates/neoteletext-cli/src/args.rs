@@ -328,6 +328,9 @@ pub(crate) enum Command {
         /// link targets against.
         #[arg(long)]
         descriptor: Option<PathBuf>,
+        /// Run without the operating-system sandbox (REQ-SEC-017).
+        #[arg(long)]
+        no_sandbox: bool,
     },
     /// Write a TTI page from a UTF-8 text file in one of neoteletext's own
     /// character sets (REQ-CLI-010, REQ-CHR-012).

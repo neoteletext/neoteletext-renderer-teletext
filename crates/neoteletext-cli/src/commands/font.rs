@@ -59,14 +59,19 @@ pub fn convert_font(input: &Path, output: &Path, map: Option<&Path>, no_sandbox:
     Ok(())
 }
 
-/// Reads a loaded font for drawing pages (`--font`, REQ-FNT-008): its glyph
-/// table, checked by the reader of REQ-FNT-002 and for shape. Called before
-/// the sandbox closes the file system.
-pub(super) fn read_table(path: &Path) -> Result<Vec<FontGlyph>, Failure> {
-    let bytes = read_bounded(path, FONT_MAX_FILE_BYTES)?;
+/// Reads the file of a loaded font for drawing pages (`--font`,
+/// REQ-FNT-008), within its bound, before the sandbox closes the file system;
+/// `parse_table` reads it after.
+pub(super) fn read_table_file(path: &Path) -> Result<Vec<u8>, Failure> {
+    read_bounded(path, FONT_MAX_FILE_BYTES)
+}
+
+/// The glyph table of a font file `read_table_file` read, checked by the
+/// reader of REQ-FNT-002 and for shape; `path` names it in messages.
+pub(super) fn parse_table(path: &Path, bytes: &[u8]) -> Result<Vec<FontGlyph>, Failure> {
     let name = path.display();
     let mut glyphs = vec![FontGlyph::EMPTY; FONT_MAX_CHARACTERS];
-    let font = read(&bytes, &mut glyphs)
+    let font = read(bytes, &mut glyphs)
         .map_err(|error| (exit::INPUT, format!("{name}:{}: {:?} (REQ-FNT-002)", error.line, error.kind)))?;
     glyphs.truncate(font.characters);
     LoadedFont::new(&glyphs).map_err(|error| (exit::INPUT, format!("{name}: {error:?}")))?;

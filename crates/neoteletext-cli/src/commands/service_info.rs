@@ -7,8 +7,7 @@ use neoteletext_app::{Failure, exit};
 
 /// `neottx service-info`.
 pub fn service_info(options: &Options) -> Result<(), Failure> {
-    let session = input::load(options)?;
-    sandbox_closed(options.no_sandbox)?;
+    let session = input::load_sandboxed(options, None, || sandbox_closed(options.no_sandbox))?;
     let Some(info) = session.service() else {
         return Err((exit::NOT_FOUND, "no packet 8/30 in the input".into()));
     };

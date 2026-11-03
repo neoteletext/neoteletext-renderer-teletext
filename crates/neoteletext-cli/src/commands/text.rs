@@ -9,8 +9,7 @@ use std::io::Write;
 /// `neottx text`.
 pub fn text(options: &Options, page: &str, reveal: bool, legacy_mosaics: bool) -> Result<(), Failure> {
     let selection = parse_selection(page)?;
-    let mut session = input::load_for(options, selection.page())?;
-    sandbox_closed(options.no_sandbox)?;
+    let mut session = input::load_sandboxed(options, selection.page(), || sandbox_closed(options.no_sandbox))?;
     let mut out = std::io::stdout().lock();
     for key in selected(&session, selection)? {
         let grid = grid_of(&mut session, key)?;
