@@ -650,3 +650,21 @@ fn a_boxed_page_shows_the_status_area_while_an_indicator_is_on() {
         assert!(grid.cells[0].iter().all(|cell| foreground_index(cell, &grid, false) == PALETTE_TRANSPARENT));
     }
 }
+
+/// REQ-SEC-024, DEC-2464: at Level 3.5 a page may redefine CLUT 0 (X/28/4,
+/// M/29/4). A prompt on the page's own row 24 whose colour the page has
+/// made black, or the same as its background, cannot be read, so its key
+/// does nothing; a receiver-drawn row 24 is drawn in the receiver's fixed
+/// colours, so the page's Colour Map does not touch it. Before, the test
+/// compared colour indices only and found the hidden prompt shown.
+#[test]
+fn a_prompt_recoloured_by_the_page_is_not_shown() {
+    use crate::consts::COLOUR_RED_BIT;
+    let red = usize::from(COLOUR_RED_BIT);
+    let mut grid = hostile_row(COLOUR_RED_BIT, |_| {});
+    assert_eq!(grid.prompts_shown(), [true, false, false, false]);
+    grid.colour_map.entries[red] = grid.colour_map.entries[usize::from(COLOUR_BLACK)];
+    assert_eq!(grid.prompts_shown(), [false; 4], "red made black on black");
+    grid.receiver_row_24 = true;
+    assert_eq!(grid.prompts_shown(), [true, false, false, false], "the receiver's row keeps its colours");
+}

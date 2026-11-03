@@ -185,7 +185,13 @@ fn resolved_mode_matches_palette_mode_on_level1_pages() {
                     fill_palette(&mut palette, &identity, shown, reveal);
                     let expected: Vec<u8> = indices.iter().map(|&index| palette[usize::from(index)]).collect();
                     let colour = ColourMode::Resolved(FlashPhase::STEADY.with_level_1(shown));
-                    let resolved = screen(&grid, RenderOptions { colour, ..palette_options });
+                    // The status area is drawn in the receiver's own
+                    // indices (DEC-2464), which are Table 30's CLUT 0 as the
+                    // palette mode's are: compare the colours they stand for.
+                    let resolved: Vec<u8> = screen(&grid, RenderOptions { colour, ..palette_options })
+                        .iter()
+                        .map(|&index| index.checked_sub(crate::consts::RECEIVER_COLOUR_BASE).unwrap_or(index))
+                        .collect();
                     assert!(expected == resolved, "boxed {boxed_mode}, {mode:?}, reveal {reveal}, shown {shown}");
                 }
             }

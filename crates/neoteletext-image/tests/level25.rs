@@ -27,7 +27,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// Raise when Level 2.5 and 3.5 rendering changes on purpose (REQ-TST-030).
-const FORMAT_VERSION: u32 = 8;
+const FORMAT_VERSION: u32 = 9;
 
 const BLACK: u8 = 0;
 const RED: u8 = 1;
@@ -327,7 +327,8 @@ fn level25_golden_rasters_match() {
 }
 
 /// REQ-RND-007, REQ-RND-030: a page gives a 480 by 500 PNG with the 32
-/// colours of its Colour Map, index 8 transparent; scaling and aspect
+/// colours of its Colour Map and the receiver's eight (DEC-2464), index 8
+/// transparent; scaling and aspect
 /// correction keep the width; the PPM has the same size.
 /// REQ-378: the PNG's index 8 is transparent.
 #[test]
@@ -336,7 +337,7 @@ fn images_of_a_page() {
     grid.colour_map.entries[17] = neoteletext_core::types::Rgb12::new(1, 2, 3);
     let (width, height, indices) = render(&grid, options(CellMode::Saa5050, 0, false));
     assert_eq!((width, height), (PAGE_WIDTH, ROWS * CELL_HEIGHT));
-    assert!(indices.iter().all(|&index| index < 32));
+    assert!(indices.iter().all(|&index| usize::from(index) < neoteletext_core::consts::RESOLVED_COLOURS));
     let palette = colour_map_palette(&grid.colour_map, Rgba::TRANSPARENT);
     let file = png(width, height, &indices, &palette);
     let chunks = chunks(&file);
@@ -346,7 +347,8 @@ fn images_of_a_page() {
     assert_eq!(u32::from_be_bytes(header[4..8].try_into().unwrap()), 500);
     let plte = &chunks.iter().find(|(kind, _)| kind == b"PLTE").unwrap().1;
     let trns = &chunks.iter().find(|(kind, _)| kind == b"tRNS").unwrap().1;
-    assert_eq!((plte.len(), trns.len()), (32 * 3, 32));
+    let entries = neoteletext_core::consts::RESOLVED_COLOURS;
+    assert_eq!((plte.len(), trns.len()), (entries * 3, entries));
     assert_eq!(&plte[17 * 3..18 * 3], &[17, 34, 51], "the page's own colour, times 17");
     assert_eq!(trns[8], 0, "CLUT 1 entry 0 is transparent");
     assert!(trns.iter().enumerate().all(|(index, &alpha)| index == 8 || alpha == 255));

@@ -70,3 +70,11 @@ fn packet_layouts_fit_together() {
     assert_eq!(MOT_LINK_DEFAULT_SECOND + 2, MOT_OBJECT_LINK_BYTES);
     assert_eq!(DATA_FIRST_BYTE_NUMBER, 6);
 }
+
+/// DEC-2464: the receiver's colour indices start on a CLUT boundary, so a
+/// receiver index is its base with the CLUT 0 entry in the low bits.
+#[test]
+fn receiver_colours_follow_the_colour_map() {
+    const { assert!(RECEIVER_COLOUR_BASE & CLUT_ENTRY_MASK == 0) };
+    assert_eq!(usize::from(RECEIVER_COLOUR_BASE) + COLOURS, RESOLVED_COLOURS);
+}

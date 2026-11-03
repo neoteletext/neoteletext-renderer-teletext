@@ -5,6 +5,7 @@
 use neoteletext_core::colour::ColourMap;
 use neoteletext_core::consts::{
     COLOUR_BLUE_BIT, COLOUR_GREEN_BIT, COLOUR_MAP_ENTRIES, COLOUR_RED_BIT, COLOURS, PALETTE_SIZE, PRIMARY_FULL,
+    RESOLVED_COLOURS,
 };
 use neoteletext_core::render::fill_palette;
 
@@ -70,9 +71,17 @@ pub fn palette(colours: &[Rgba; COLOURS], picture: Rgba, flash_visible: bool, re
 /// 4-bit primary times 17, and index 8, CLUT 1 entry 0, the picture:
 /// transparent by default, or a fill colour for formats without alpha
 /// (REQ-RND-006).
+///
+/// Indices 32 to 39 follow: the receiver's own colours, the eight of
+/// [`CLUT0`] whatever the page's Colour Map holds, in which the renderer
+/// draws the status area and a receiver-drawn row 24 (REQ-SEC-005,
+/// REQ-SEC-024, DEC-2464).
 #[must_use]
-pub fn colour_map_palette(map: &ColourMap, picture: Rgba) -> [Rgba; COLOUR_MAP_ENTRIES] {
+pub fn colour_map_palette(map: &ColourMap, picture: Rgba) -> [Rgba; RESOLVED_COLOURS] {
     core::array::from_fn(|index| {
+        if let Some(&receiver) = index.checked_sub(COLOUR_MAP_ENTRIES).and_then(|entry| CLUT0.get(entry)) {
+            return receiver;
+        }
         let index = index as u8;
         if ColourMap::is_transparent(index) {
             return picture;
@@ -107,7 +116,7 @@ mod tests {
     fn colour_map_palette_follows_table_30() {
         let fill = Rgba::opaque(1, 2, 3);
         let palette = colour_map_palette(&ColourMap::DEFAULT, fill);
-        for (index, colour) in palette.iter().enumerate() {
+        for (index, colour) in palette.iter().enumerate().take(COLOUR_MAP_ENTRIES) {
             let entry = ColourMap::DEFAULT.entry(index as u8);
             let expected =
                 if index == 8 { fill } else { Rgba::opaque(entry.red() * 17, entry.green() * 17, entry.blue() * 17) };
@@ -124,6 +133,9 @@ mod tests {
         assert_eq!(palette[3], Rgba::opaque(255, 51, 0));
         assert_eq!(palette[8], Rgba::TRANSPARENT, "CLUT 1 entry 0 stays the picture");
         assert_eq!(palette[16 + 15], Rgba::opaque(255, 255, 0));
+        // REQ-SEC-005, DEC-2464: the receiver's colours follow the Colour
+        // Map's 32 and stay Table 30's CLUT 0 whatever the page redefined.
+        assert_eq!(&palette[COLOUR_MAP_ENTRIES..], &CLUT0[..]);
     }
 
     /// REQ-230, REQ-377: colour number n has red if bit 0 is set, green if

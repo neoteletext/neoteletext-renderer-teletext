@@ -90,14 +90,18 @@ mod tests {
     use super::*;
     use neoteletext_core::config::{Config, PresentationLevel};
 
-    /// REQ-RND-030: at Level 2.5 the palette is the page's 32 colours; at
-    /// Level 1.5 the 144-entry palette of the palette mode.
+    /// REQ-RND-030: at Level 2.5 the palette is the page's 32 colours and
+    /// the receiver's eight (DEC-2464); at Level 1.5 the 144-entry palette of
+    /// the palette mode.
     #[test]
     fn rasters_follow_the_level() {
         let scale = Scale { x: 2, y: 1, aspect: false };
         let enhanced = Config { level: PresentationLevel::Level25, ..Config::default() };
         let image = raster(&Grid::EMPTY, Frame::still(&enhanced, false), scale, Rgba::TRANSPARENT);
-        assert_eq!((image.width, image.height, image.palette.len()), (960, 500, 32));
+        assert_eq!(
+            (image.width, image.height, image.palette.len()),
+            (960, 500, neoteletext_core::consts::RESOLVED_COLOURS)
+        );
         let level15 = Config { level: PresentationLevel::Level15, ..Config::default() };
         let image = raster(&Grid::EMPTY, Frame::still(&level15, false), scale, Rgba::TRANSPARENT);
         assert_eq!((image.width, image.palette.len()), (960, 144));
