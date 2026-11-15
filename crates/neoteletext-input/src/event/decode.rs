@@ -4,12 +4,12 @@
 use super::LOST;
 use super::encode::RESUME_PAYLOAD;
 use super::{
-    ACTION, Action, COMPOSE, CORE_LAST_TYPE, DEVICE_MASK, DEVICE_SHIFT, Device, EVENT, Event, FIRST_EXTENSION,
-    FOCUS_IN, FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO, HOVER, HOVER_LEAVE, InputError,
-    Item, KEY, KEY_RESERVED, Key, KeyCode, LAST_CORE, LAST_EXTENSION, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE,
-    MOUSE_RESERVED, Mouse, MouseAction, NEVER_UTF8, NEVER_UTF8_FROM, PASTE, PICK, Pick, Point, RESIZE, RESUME, Resume,
-    SELECT, Select, Stamp, TOUCH, TOUCH_RESERVED, Touch, WHEEL, WHEEL_RESERVED, Wheel, check_text, is_page_parameters,
-    printable,
+    ACTION, Action, COMPOSE, CORE_LAST_TYPE, DEVICE_MASK, DEVICE_SHIFT, DRAWING_HOVER, DRAWING_HOVER_LEAVE, Device,
+    EVENT, Event, FIRST_EXTENSION, FOCUS_IN, FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO,
+    HOVER, HOVER_LEAVE, InputError, Item, KEY, KEY_RESERVED, Key, KeyCode, LAST_CORE, LAST_EXTENSION, MAX_PICK_OFFSET,
+    MAX_PICK_POSITION, MOUSE, MOUSE_RESERVED, Mouse, MouseAction, NEVER_UTF8, NEVER_UTF8_FROM, PASTE, PICK, Pick,
+    Point, RESIZE, RESUME, Resume, SELECT, Select, Stamp, TOUCH, TOUCH_RESERVED, Touch, WHEEL, WHEEL_RESERVED, Wheel,
+    check_text, is_page_parameters, printable,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::{AGENT, RETIRED_PAGE_BIT};
@@ -197,6 +197,7 @@ fn read_extension<'a>(kind: u8, reader: &mut Reader<'a>) -> Result<Event<'a>, In
     Ok(match kind {
         HOVER => read_hover(payload).map_err(whole)?,
         PICK => read_pick(payload).map_err(whole)?,
+        DRAWING_HOVER => read_drawing_hover(payload).map_err(whole)?,
         TOUCH => read_touch(payload).map_err(whole)?,
         RESUME => read_resume(payload).map_err(whole)?,
         SELECT => read_select(payload).map_err(whole)?,
@@ -240,6 +241,23 @@ fn read_pick(payload: &[u8]) -> Result<Event<'static>, InputError> {
         return Err(InputError::BadValue("pick"));
     }
     Ok(Event::Pick(Pick { on, drawing, x, y, picture_x, picture_y, commits: u32::from_be_bytes(commits) }))
+}
+
+/// `DRAWING_HOVER`'s payload (REQ-6369): the stamp, `flags` u8, `drawing` uv
+/// of 1 to 65,535, the commit count in four bytes, big-endian, and nothing
+/// after.
+fn read_drawing_hover(payload: &[u8]) -> Result<Event<'static>, InputError> {
+    let mut reader = Reader::new(payload);
+    let on = read_stamp(&mut reader)?;
+    let flags = reader.byte()?;
+    let drawing = u16::try_from(reader.uv()?).map_err(|_| InputError::BadValue("drawing hover drawing"))?;
+    let commits: [u8; 4] = reader.take(4)?.try_into().map_err(|_| InputError::BadValue("drawing hover"))?;
+    // There is no event for being over no drawing.
+    if flags & !DRAWING_HOVER_LEAVE != 0 || drawing == 0 || reader.used() != payload.len() {
+        return Err(InputError::BadValue("drawing hover"));
+    }
+    let leave = flags & DRAWING_HOVER_LEAVE != 0;
+    Ok(Event::DrawingHover { on, leave, drawing, commits: u32::from_be_bytes(commits) })
 }
 
 /// TOUCH's payload (REQ-RCH-043): the stamp, `flags` u8, `id` u8 of 1 to

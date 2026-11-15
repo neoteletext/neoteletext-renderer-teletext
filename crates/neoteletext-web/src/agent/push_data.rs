@@ -172,7 +172,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             ChannelRecord::Denied(denied) => event(sink, Event::Denied(denied)),
             // The agent passes every packet on; the ReGIS renderer of the
             // program that draws pages reads these (DEC-6335).
-            ChannelRecord::Regis(_) => {}
+            ChannelRecord::Regis(_) | ChannelRecord::DrawingLinks(_) | ChannelRecord::RegisCursor(_) => {}
             ChannelRecord::SetCookie(line) => {
                 if !cfg!(feature = "cookies") {
                     event(sink, Event::CookieRejected(CookieRejected::NotCompiledIn));

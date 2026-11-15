@@ -415,6 +415,48 @@ fn pick_round_trips_and_is_checked() {
     }
 }
 
+/// REQ-6369: `DRAWING_HOVER` is the extension `0x47`: the stamp, the flags,
+/// the drawing and the commit count. It reads back, counts nothing in the
+/// input count and needs no capability; a bad flag, no drawing, a drawing
+/// above 65,535, a cut payload or bytes after are refused.
+#[test]
+fn drawing_hover_round_trips_and_is_checked() {
+    let enter = Event::DrawingHover { on: ON, leave: false, drawing: 12, commits: 7 };
+    for event in [
+        enter,
+        Event::DrawingHover { on: ON, leave: true, drawing: 12, commits: 7 },
+        Event::DrawingHover { on: ON, leave: true, drawing: 65_535, commits: u32::MAX },
+    ] {
+        let mut out = [0_u8; 40];
+        let length = write(&Item::Event(event), &mut out).unwrap();
+        let mut back = Vec::new();
+        read_message(&out[..length], &mut |item| back.push(item)).unwrap();
+        assert_eq!(back, [Item::Event(event)]);
+        assert_eq!(units(&Item::Event(event)), 0);
+        assert_eq!(needs(&event), 0);
+    }
+    let mut written = [0_u8; 40];
+    let length = write(&Item::Event(enter), &mut written).unwrap();
+    assert_eq!(
+        &written[..length],
+        &[0xFF, 0x47, 9, 0x80, 0x02, 0, 0, 12, 0, 0, 0, 7],
+        "the type, the length, then the stamp, the flags, the drawing, the commits"
+    );
+    let none = Event::DrawingHover { on: ON, leave: false, drawing: 0, commits: 7 };
+    assert!(write(&Item::Event(none), &mut written).is_err(), "there is no event for no drawing");
+    for bad in [
+        // A flag bit other than leave; no drawing; a drawing above 65,535;
+        // the commit count cut short; a byte after it.
+        [0xFF, 0x47, 9, 0x80, 0x02, 0, 2, 12, 0, 0, 0, 7].as_slice(),
+        &[0xFF, 0x47, 9, 0x80, 0x02, 0, 0, 0, 0, 0, 0, 7],
+        &[0xFF, 0x47, 11, 0x80, 0x02, 0, 0, 0x80, 0x80, 0x04, 0, 0, 0, 7],
+        &[0xFF, 0x47, 8, 0x80, 0x02, 0, 0, 12, 0, 0, 0],
+        &[0xFF, 0x47, 10, 0x80, 0x02, 0, 0, 12, 0, 0, 0, 7, 0],
+    ] {
+        assert!(read_message(bad, &mut |_| {}).is_err(), "{bad:?}");
+    }
+}
+
 /// REQ-INT-121, decision E.129: HOVER is the extension `0x43`, `flags`, `col` and `row`;
 /// it reads back, and a bad flag, a cell off the page or bytes after are
 /// refused. A receiver that does not know `0x43` skips it as any extension.

@@ -89,6 +89,14 @@ pub const MAX_PICK_OFFSET: i32 = 1 << 20;
 /// is never wider or taller than a 16-bit coordinate.
 pub const MAX_PICK_POSITION: u32 = 1 << 16;
 
+/// `DRAWING_HOVER`'s type, an extension (REQ-6369): on a page drawn by the
+/// ReGIS renderer, the pointer entered or left a detectable numbered
+/// drawing; a channel that does not know it skips it. It is to such a page
+/// what HOVER is to a teletext page's controls.
+pub const DRAWING_HOVER: u8 = 0x47;
+/// `DRAWING_HOVER`'s flag: the pointer left the drawing; clear, it entered.
+pub const DRAWING_HOVER_LEAVE: u8 = 1;
+
 /// KEY's flag bits (DOC-1935).
 const ACTION: u8 = 0b11;
 const FUNCTIONAL: u8 = 1 << 2;
@@ -411,6 +419,19 @@ pub enum Event<'a> {
     /// The numbered drawing under a pointer, on a page the ReGIS renderer
     /// draws (DEC-6335 item 1).
     Pick(Pick),
+    /// The pointer entered or left a detectable numbered drawing of a page
+    /// the ReGIS renderer draws (REQ-6369).
+    DrawingHover {
+        /// The page on screen.
+        on: Stamp,
+        /// It left; false when it entered.
+        leave: bool,
+        /// The numbered drawing, 1 to 65,535.
+        drawing: u16,
+        /// How many commits the renderer had applied to the picture on
+        /// screen; it wraps to 0.
+        commits: u32,
+    },
     /// A contact after the first (REQ-RCH-043).
     Touch(Touch),
     /// The session a reconnection asks to resume, after HELLO
@@ -503,7 +524,8 @@ fn check_text(text: &str) -> Result<(), InputError> {
 /// How much of the input count an item is (DOC-1943): a
 /// character of text counts one, and every event counts one, but those
 /// that are never acknowledged (REQ-RCH-012, REQ-RCH-054): a move and gone,
-/// MOUSE's and TOUCH's, HOVER, PICK, COMPOSE, RESUME and SELECT count none.
+/// MOUSE's and TOUCH's, HOVER, PICK, `DRAWING_HOVER`, COMPOSE, RESUME and SELECT
+/// count none.
 #[must_use]
 pub fn units(item: &Item<'_>) -> u32 {
     match item {
@@ -518,7 +540,12 @@ fn uncounted(event: &Event<'_>) -> bool {
     match event {
         Event::Mouse(mouse) => unacknowledged(mouse.action),
         Event::Touch(touch) => unacknowledged(touch.action),
-        Event::Hover { .. } | Event::Pick(_) | Event::Compose { .. } | Event::Resume(_) | Event::Select(..) => true,
+        Event::Hover { .. }
+        | Event::Pick(_)
+        | Event::DrawingHover { .. }
+        | Event::Compose { .. }
+        | Event::Resume(_)
+        | Event::Select(..) => true,
         _ => false,
     }
 }

@@ -17,15 +17,18 @@ use neoteletext_core::packet::Packet;
 
 pub mod cookie;
 pub mod denied;
+pub mod drawing_links;
 pub mod index;
 pub mod links;
 pub mod log;
 pub mod redirect;
 pub mod regis;
+pub mod regis_cursor;
 pub mod subpages;
 
 pub use neoteletext_audio::record::{
-    TYPE_DENIED, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_REDIRECT, TYPE_REGIS, TYPE_SET_COOKIE, TYPE_SUBPAGES,
+    TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_REDIRECT, TYPE_REGIS, TYPE_REGIS_CURSOR,
+    TYPE_SET_COOKIE, TYPE_SUBPAGES,
 };
 
 /// Why a record was refused: it is discarded whole, and its packets are
@@ -95,6 +98,11 @@ pub enum ChannelRecord<'a> {
     Denied(denied::DeniedRecord<'a>),
     /// Bytes of a sub-page's ReGIS (DEC-6335).
     Regis(regis::RegisRecord<'a>),
+    /// The numbered drawings of a sub-page's ReGIS picture that are links
+    /// (REQ-6370).
+    DrawingLinks(drawing_links::DrawingLinksRecord<'a>),
+    /// The numbered drawing that is a ReGIS sub-page's cursor (REQ-6371).
+    RegisCursor(regis_cursor::RegisCursorRecord),
 }
 
 /// What one packet gave the reader.
@@ -164,6 +172,8 @@ impl RecordReader {
                     | TYPE_REDIRECT
                     | TYPE_DENIED
                     | TYPE_REGIS
+                    | TYPE_DRAWING_LINKS
+                    | TYPE_REGIS_CURSOR
             ) {
                 return (Read::Nothing, 0);
             }
@@ -198,6 +208,8 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
         TYPE_REDIRECT => redirect::read(body).map(ChannelRecord::Redirect),
         TYPE_DENIED => denied::read(body).map(ChannelRecord::Denied),
         TYPE_REGIS => regis::read(body).map(ChannelRecord::Regis),
+        TYPE_DRAWING_LINKS => drawing_links::read(body).map(ChannelRecord::DrawingLinks),
+        TYPE_REGIS_CURSOR => regis_cursor::read(body).map(ChannelRecord::RegisCursor),
         _ => Err(RecordFault::BadValue("record type")),
     }
 }

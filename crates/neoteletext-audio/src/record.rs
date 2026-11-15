@@ -60,6 +60,16 @@ pub const TYPE_DENIED: u8 = 12;
 /// alone. Type 13 is kept for the CHANNEL record (REQ-3581).
 pub const TYPE_REGIS: u8 = 14;
 
+/// Record type: the numbered drawings of a sub-page's ReGIS picture that
+/// are links, and where each leads (REQ-6370), read by the web agent's
+/// record reader; this receiver leaves it alone.
+pub const TYPE_DRAWING_LINKS: u8 = 15;
+
+/// Record type: the numbered drawing of a sub-page's ReGIS picture that is
+/// its cursor (REQ-6371), read by the web agent's record reader; this
+/// receiver leaves it alone.
+pub const TYPE_REGIS_CURSOR: u8 = 16;
+
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
 #[must_use]
@@ -82,6 +92,8 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_REDIRECT
         || kind == TYPE_DENIED
         || kind == TYPE_REGIS
+        || kind == TYPE_DRAWING_LINKS
+        || kind == TYPE_REGIS_CURSOR
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,

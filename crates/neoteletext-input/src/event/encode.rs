@@ -2,10 +2,10 @@
 
 use super::decode::read;
 use super::{
-    Action, COMPOSE, DEVICE_SHIFT, Device, EVENT, Event, FIRST_EXTENSION, FOCUS_IN, FOCUS_OUT, FUNCTIONAL, HAS_BASE,
-    HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO, HOVER, HOVER_LEAVE, InputError, Item, KEY, Key, KeyCode, LAST_EXTENSION,
-    LOST, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE, MouseAction, PASTE, PICK, Point, RESIZE, RESUME, SELECT,
-    STAMP_BYTES, Select, Stamp, TOUCH, Touch, WHEEL, check_text, is_page_parameters,
+    Action, COMPOSE, DEVICE_SHIFT, DRAWING_HOVER, DRAWING_HOVER_LEAVE, Device, EVENT, Event, FIRST_EXTENSION, FOCUS_IN,
+    FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO, HOVER, HOVER_LEAVE, InputError, Item, KEY,
+    Key, KeyCode, LAST_EXTENSION, LOST, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE, MouseAction, PASTE, PICK, Point,
+    RESIZE, RESUME, SELECT, STAMP_BYTES, Select, Stamp, TOUCH, Touch, WHEEL, check_text, is_page_parameters,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SELECT_PLACE, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::AGENT;
@@ -17,6 +17,9 @@ const HOVER_PAYLOAD: usize = STAMP_BYTES + 1 + 2 * MAX_VARINT;
 /// PICK's payload at its longest: the stamp, five varints and the commit
 /// count's four bytes.
 const PICK_PAYLOAD: usize = STAMP_BYTES + 5 * MAX_VARINT + 4;
+/// `DRAWING_HOVER`'s payload at its longest: the stamp, the flags, a varint
+/// and the commit count's four bytes.
+const DRAWING_HOVER_PAYLOAD: usize = STAMP_BYTES + 1 + MAX_VARINT + 4;
 /// TOUCH's payload at its longest: the stamp, the flags, the id and four
 /// varints.
 pub(super) const TOUCH_PAYLOAD: usize = STAMP_BYTES + 2 + 4 * MAX_VARINT;
@@ -220,6 +223,28 @@ fn write_key(key: &Key<'_>, writer: &mut Writer<'_>) -> Result<(), InputError> {
     Ok(())
 }
 
+/// `DRAWING_HOVER` (REQ-6369): the stamp, the flags, the drawing and the
+/// commit count.
+fn write_drawing_hover(
+    on: Stamp,
+    leave: bool,
+    drawing: u16,
+    commits: u32,
+    writer: &mut Writer<'_>,
+) -> Result<(), InputError> {
+    // There is no event for being over no drawing.
+    if drawing == 0 {
+        return Err(InputError::BadValue("drawing hover"));
+    }
+    write_extension::<DRAWING_HOVER_PAYLOAD>(DRAWING_HOVER, writer, |inner| {
+        write_stamp(on, inner)?;
+        inner.byte(if leave { DRAWING_HOVER_LEAVE } else { 0 })?;
+        inner.uv(u32::from(drawing))?;
+        inner.bytes(&commits.to_be_bytes())?;
+        Ok(())
+    })
+}
+
 fn write_event(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputError> {
     match event {
         Event::Key(key) => write_key(key, writer)?,
@@ -294,6 +319,9 @@ fn write_event(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputEr
                 inner.bytes(&pick.commits.to_be_bytes())?;
                 Ok(())
             })?;
+        }
+        Event::DrawingHover { on, leave, drawing, commits } => {
+            write_drawing_hover(*on, *leave, *drawing, *commits, writer)?;
         }
         Event::Touch(touch) => write_touch(touch, writer)?,
         Event::Resume(resume) => write_extension::<RESUME_PAYLOAD>(RESUME, writer, |inner| {
