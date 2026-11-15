@@ -6,9 +6,10 @@ use super::encode::RESUME_PAYLOAD;
 use super::{
     ACTION, Action, COMPOSE, CORE_LAST_TYPE, DEVICE_MASK, DEVICE_SHIFT, Device, EVENT, Event, FIRST_EXTENSION,
     FOCUS_IN, FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO, HOVER, HOVER_LEAVE, InputError,
-    Item, KEY, KEY_RESERVED, Key, KeyCode, LAST_CORE, LAST_EXTENSION, MOUSE, MOUSE_RESERVED, Mouse, MouseAction,
-    NEVER_UTF8, NEVER_UTF8_FROM, PASTE, Point, RESIZE, RESUME, Resume, SELECT, Select, Stamp, TOUCH, TOUCH_RESERVED,
-    Touch, WHEEL, WHEEL_RESERVED, Wheel, check_text, is_page_parameters, printable,
+    Item, KEY, KEY_RESERVED, Key, KeyCode, LAST_CORE, LAST_EXTENSION, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE,
+    MOUSE_RESERVED, Mouse, MouseAction, NEVER_UTF8, NEVER_UTF8_FROM, PASTE, PICK, Pick, Point, RESIZE, RESUME, Resume,
+    SELECT, Select, Stamp, TOUCH, TOUCH_RESERVED, Touch, WHEEL, WHEEL_RESERVED, Wheel, check_text, is_page_parameters,
+    printable,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::{AGENT, RETIRED_PAGE_BIT};
@@ -195,6 +196,7 @@ fn read_extension<'a>(kind: u8, reader: &mut Reader<'a>) -> Result<Event<'a>, In
     };
     Ok(match kind {
         HOVER => read_hover(payload).map_err(whole)?,
+        PICK => read_pick(payload).map_err(whole)?,
         TOUCH => read_touch(payload).map_err(whole)?,
         RESUME => read_resume(payload).map_err(whole)?,
         SELECT => read_select(payload).map_err(whole)?,
@@ -216,6 +218,28 @@ fn read_hover(payload: &[u8]) -> Result<Event<'static>, InputError> {
         return Err(InputError::BadValue("hover"));
     }
     Ok(Event::Hover { on, leave: flags & HOVER_LEAVE != 0, column, row })
+}
+
+/// PICK's payload (DEC-6335 item 1): the stamp, `drawing` uv of 0 to
+/// 65,535, `x` sv and `y` sv within the drawing, `px` uv and `py` uv in the
+/// picture, the commit count in four bytes, big-endian, and nothing after.
+fn read_pick(payload: &[u8]) -> Result<Event<'static>, InputError> {
+    let mut reader = Reader::new(payload);
+    let on = read_stamp(&mut reader)?;
+    let drawing = u16::try_from(reader.uv()?).map_err(|_| InputError::BadValue("pick drawing"))?;
+    let (x, y) = (reader.sv()?, reader.sv()?);
+    let (picture_x, picture_y) = (reader.uv()?, reader.uv()?);
+    let commits: [u8; 4] = reader.take(4)?.try_into().map_err(|_| InputError::BadValue("pick"))?;
+    let within = x.checked_abs().is_some_and(|x| x <= MAX_PICK_OFFSET)
+        && y.checked_abs().is_some_and(|y| y <= MAX_PICK_OFFSET)
+        && picture_x < MAX_PICK_POSITION
+        && picture_y < MAX_PICK_POSITION;
+    // No drawing has no place within it.
+    let placed = drawing != 0 || (x, y) == (0, 0);
+    if !within || !placed || reader.used() != payload.len() {
+        return Err(InputError::BadValue("pick"));
+    }
+    Ok(Event::Pick(Pick { on, drawing, x, y, picture_x, picture_y, commits: u32::from_be_bytes(commits) }))
 }
 
 /// TOUCH's payload (REQ-RCH-043): the stamp, `flags` u8, `id` u8 of 1 to

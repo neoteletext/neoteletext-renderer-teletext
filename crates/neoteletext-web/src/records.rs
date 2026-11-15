@@ -21,10 +21,11 @@ pub mod index;
 pub mod links;
 pub mod log;
 pub mod redirect;
+pub mod regis;
 pub mod subpages;
 
 pub use neoteletext_audio::record::{
-    TYPE_DENIED, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_REDIRECT, TYPE_SET_COOKIE, TYPE_SUBPAGES,
+    TYPE_DENIED, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_REDIRECT, TYPE_REGIS, TYPE_SET_COOKIE, TYPE_SUBPAGES,
 };
 
 /// Why a record was refused: it is discarded whole, and its packets are
@@ -92,6 +93,8 @@ pub enum ChannelRecord<'a> {
     Redirect(redirect::RedirectRecord<'a>),
     /// A selection refused, or a program not answering (DOC-1961).
     Denied(denied::DeniedRecord<'a>),
+    /// Bytes of a sub-page's ReGIS (DEC-6335).
+    Regis(regis::RegisRecord<'a>),
 }
 
 /// What one packet gave the reader.
@@ -153,7 +156,14 @@ impl RecordReader {
             let kind = fragment.data.get(1).copied().unwrap_or(0);
             if !matches!(
                 kind,
-                TYPE_INDEX | TYPE_LOG | TYPE_SET_COOKIE | TYPE_LINKS | TYPE_SUBPAGES | TYPE_REDIRECT | TYPE_DENIED
+                TYPE_INDEX
+                    | TYPE_LOG
+                    | TYPE_SET_COOKIE
+                    | TYPE_LINKS
+                    | TYPE_SUBPAGES
+                    | TYPE_REDIRECT
+                    | TYPE_DENIED
+                    | TYPE_REGIS
             ) {
                 return (Read::Nothing, 0);
             }
@@ -187,6 +197,7 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
         TYPE_SUBPAGES => subpages::read(body).map(ChannelRecord::SubPages),
         TYPE_REDIRECT => redirect::read(body).map(ChannelRecord::Redirect),
         TYPE_DENIED => denied::read(body).map(ChannelRecord::Denied),
+        TYPE_REGIS => regis::read(body).map(ChannelRecord::Regis),
         _ => Err(RecordFault::BadValue("record type")),
     }
 }

@@ -55,6 +55,11 @@ pub const TYPE_REDIRECT: u8 = 11;
 /// leaves it alone.
 pub const TYPE_DENIED: u8 = 12;
 
+/// Record type: bytes of a sub-page's ReGIS (DEC-6335), read by the web
+/// agent's record reader for the ReGIS renderer; this receiver leaves it
+/// alone. Type 13 is kept for the CHANNEL record (REQ-3581).
+pub const TYPE_REGIS: u8 = 14;
+
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
 #[must_use]
@@ -76,6 +81,7 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_SUBPAGES
         || kind == TYPE_REDIRECT
         || kind == TYPE_DENIED
+        || kind == TYPE_REGIS
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,

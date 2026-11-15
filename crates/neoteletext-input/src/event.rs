@@ -76,6 +76,18 @@ pub const TOUCH: u8 = 0x44;
 /// HELLO in a reconnection's first message, the session to resume; a
 /// channel that does not know it skips it and starts a new session.
 pub const RESUME: u8 = 0x45;
+/// PICK's type, an extension (DEC-6335 item 1): on a page drawn by the
+/// ReGIS renderer, the numbered drawing under a pointer, sent after the
+/// MOUSE, TOUCH or WHEEL event it belongs to; a channel that does not know
+/// it skips it.
+pub const PICK: u8 = 0x46;
+/// The farthest a PICK's place within its drawing lies from the drawing's
+/// origin, either way: sixteen nested drawings, each placed by a 16-bit
+/// position, cannot be farther from a pixel of the picture.
+pub const MAX_PICK_OFFSET: i32 = 1 << 20;
+/// A PICK's position in the picture is below this on each axis: a picture
+/// is never wider or taller than a 16-bit coordinate.
+pub const MAX_PICK_POSITION: u32 = 1 << 16;
 
 /// KEY's flag bits (DOC-1935).
 const ACTION: u8 = 0b11;
@@ -396,6 +408,9 @@ pub enum Event<'a> {
         /// The control's top row.
         row: u32,
     },
+    /// The numbered drawing under a pointer, on a page the ReGIS renderer
+    /// draws (DEC-6335 item 1).
+    Pick(Pick),
     /// A contact after the first (REQ-RCH-043).
     Touch(Touch),
     /// The session a reconnection asks to resume, after HELLO
@@ -412,6 +427,31 @@ pub enum Event<'a> {
         /// Its payload.
         payload: &'a [u8],
     },
+}
+
+/// What lay under a pointer on a page the ReGIS renderer draws (DEC-6335
+/// item 1): the receiver looks it up in the picture it is showing, so the
+/// channel need not know where it drew what, nor which of its pictures the
+/// viewer was looking at.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Pick {
+    /// The page on screen.
+    pub on: Stamp,
+    /// The numbered drawing picked, 1 to 65,535, or 0 for none.
+    pub drawing: u16,
+    /// The place within that drawing, from its origin, each at most
+    /// [`MAX_PICK_OFFSET`] either way; (0, 0) when no drawing is picked.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+    /// The place in the picture, in its pixels from the top left, each
+    /// below [`MAX_PICK_POSITION`].
+    pub picture_x: u32,
+    /// See `picture_x`.
+    pub picture_y: u32,
+    /// How many commits the renderer had applied to the picture on screen;
+    /// it wraps to 0.
+    pub commits: u32,
 }
 
 /// One item of the stream.
@@ -463,7 +503,7 @@ fn check_text(text: &str) -> Result<(), InputError> {
 /// How much of the input count an item is (DOC-1943): a
 /// character of text counts one, and every event counts one, but those
 /// that are never acknowledged (REQ-RCH-012, REQ-RCH-054): a move and gone,
-/// MOUSE's and TOUCH's, HOVER, COMPOSE, RESUME and SELECT count none.
+/// MOUSE's and TOUCH's, HOVER, PICK, COMPOSE, RESUME and SELECT count none.
 #[must_use]
 pub fn units(item: &Item<'_>) -> u32 {
     match item {
@@ -478,7 +518,7 @@ fn uncounted(event: &Event<'_>) -> bool {
     match event {
         Event::Mouse(mouse) => unacknowledged(mouse.action),
         Event::Touch(touch) => unacknowledged(touch.action),
-        Event::Hover { .. } | Event::Compose { .. } | Event::Resume(_) | Event::Select(..) => true,
+        Event::Hover { .. } | Event::Pick(_) | Event::Compose { .. } | Event::Resume(_) | Event::Select(..) => true,
         _ => false,
     }
 }

@@ -4,8 +4,8 @@ use super::decode::read;
 use super::{
     Action, COMPOSE, DEVICE_SHIFT, Device, EVENT, Event, FIRST_EXTENSION, FOCUS_IN, FOCUS_OUT, FUNCTIONAL, HAS_BASE,
     HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO, HOVER, HOVER_LEAVE, InputError, Item, KEY, Key, KeyCode, LAST_EXTENSION,
-    LOST, MOUSE, MouseAction, PASTE, Point, RESIZE, RESUME, SELECT, STAMP_BYTES, Select, Stamp, TOUCH, Touch, WHEEL,
-    check_text, is_page_parameters,
+    LOST, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE, MouseAction, PASTE, PICK, Point, RESIZE, RESUME, SELECT,
+    STAMP_BYTES, Select, Stamp, TOUCH, Touch, WHEEL, check_text, is_page_parameters,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SELECT_PLACE, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::AGENT;
@@ -14,6 +14,9 @@ use crate::{MAX_AGENT, MAX_COLUMNS, MAX_COMPOSE, MAX_KEY_TEXT, MAX_PASTE, MAX_RO
 
 /// HOVER's payload at its longest: the stamp, the flags and two varints.
 const HOVER_PAYLOAD: usize = STAMP_BYTES + 1 + 2 * MAX_VARINT;
+/// PICK's payload at its longest: the stamp, five varints and the commit
+/// count's four bytes.
+const PICK_PAYLOAD: usize = STAMP_BYTES + 5 * MAX_VARINT + 4;
 /// TOUCH's payload at its longest: the stamp, the flags, the id and four
 /// varints.
 pub(super) const TOUCH_PAYLOAD: usize = STAMP_BYTES + 2 + 4 * MAX_VARINT;
@@ -273,6 +276,25 @@ fn write_event(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputEr
             inner.uv(*row)?;
             Ok(())
         })?,
+        Event::Pick(pick) => {
+            if pick.x.abs() > MAX_PICK_OFFSET
+                || pick.y.abs() > MAX_PICK_OFFSET
+                || pick.picture_x >= MAX_PICK_POSITION
+                || pick.picture_y >= MAX_PICK_POSITION
+            {
+                return Err(InputError::BadValue("pick"));
+            }
+            write_extension::<PICK_PAYLOAD>(PICK, writer, |inner| {
+                write_stamp(pick.on, inner)?;
+                inner.uv(u32::from(pick.drawing))?;
+                inner.sv(pick.x)?;
+                inner.sv(pick.y)?;
+                inner.uv(pick.picture_x)?;
+                inner.uv(pick.picture_y)?;
+                inner.bytes(&pick.commits.to_be_bytes())?;
+                Ok(())
+            })?;
+        }
         Event::Touch(touch) => write_touch(touch, writer)?,
         Event::Resume(resume) => write_extension::<RESUME_PAYLOAD>(RESUME, writer, |inner| {
             inner.bytes(&resume.token)?;

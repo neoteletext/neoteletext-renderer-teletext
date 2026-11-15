@@ -1,4 +1,5 @@
 # Words written as words in documentation, not code: the product's name,
-# and the key European layouts print on their right Alt (clippy's defaults
-# kept with "..").
-doc-valid-idents = ["NeoTeletext", "AltGr", ".."]
+# the key European layouts print on their right Alt, and DEC's graphics
+# language, whose records the web crate carries (clippy's defaults kept
+# with "..").
+doc-valid-idents = ["NeoTeletext", "AltGr", "ReGIS", ".."]

@@ -370,6 +370,51 @@ fn each_new_event_needs_its_capability() {
     assert_eq!(needs(&Event::FocusIn), 0);
 }
 
+/// DEC-6335 item 1: PICK is the extension `0x46`: the stamp, the drawing,
+/// the place within it, the place in the picture and the commit count. It
+/// reads back, counts nothing in the input count and needs no capability;
+/// a place out of range, a place within no drawing, or bytes after are
+/// refused.
+#[test]
+fn pick_round_trips_and_is_checked() {
+    let pick = Pick { on: ON, drawing: 12, x: 20, y: -6, picture_x: 412, picture_y: 180, commits: 7 };
+    for event in [
+        Event::Pick(pick),
+        Event::Pick(Pick { drawing: 0, x: 0, y: 0, ..pick }),
+        Event::Pick(Pick { drawing: 65_535, x: -MAX_PICK_OFFSET, y: MAX_PICK_OFFSET, commits: u32::MAX, ..pick }),
+    ] {
+        let mut out = [0_u8; 40];
+        let length = write(&Item::Event(event), &mut out).unwrap();
+        let mut back = Vec::new();
+        read_message(&out[..length], &mut |item| back.push(item)).unwrap();
+        assert_eq!(back, [Item::Event(event)]);
+        assert_eq!(units(&Item::Event(event)), 0);
+        assert_eq!(needs(&event), 0);
+    }
+    let mut written = [0_u8; 40];
+    let length = write(&Item::Event(Event::Pick(pick)), &mut written).unwrap();
+    assert_eq!(
+        &written[..length],
+        &[0xFF, 0x46, 14, 0x80, 0x02, 0, 12, 40, 11, 0x9C, 0x03, 0xB4, 0x01, 0, 0, 0, 7],
+        "the type, the length, then the stamp, the drawing, x, y, the picture's x and y, the commits"
+    );
+    for bad in [
+        Pick { x: MAX_PICK_OFFSET + 1, ..pick },
+        Pick { y: -MAX_PICK_OFFSET - 1, ..pick },
+        Pick { picture_x: MAX_PICK_POSITION, ..pick },
+        Pick { drawing: 0, ..pick },
+    ] {
+        assert!(write(&Item::Event(Event::Pick(bad)), &mut written).is_err(), "{bad:?}");
+    }
+    // A drawing above 65,535, and a byte after the commit count.
+    for bad in [
+        [0xFF, 0x46, 16, 0x80, 0x02, 0, 0x80, 0x80, 0x04, 40, 11, 0x9C, 0x03, 0xB4, 0x01, 0, 0, 0, 7].as_slice(),
+        &[0xFF, 0x46, 15, 0x80, 0x02, 0, 12, 40, 11, 0x9C, 0x03, 0xB4, 0x01, 0, 0, 0, 7, 0],
+    ] {
+        assert!(read_message(bad, &mut |_| {}).is_err(), "{bad:?}");
+    }
+}
+
 /// REQ-INT-121, decision E.129: HOVER is the extension `0x43`, `flags`, `col` and `row`;
 /// it reads back, and a bad flag, a cell off the page or bytes after are
 /// refused. A receiver that does not know `0x43` skips it as any extension.
