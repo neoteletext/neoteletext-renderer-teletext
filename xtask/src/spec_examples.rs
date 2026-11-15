@@ -30,7 +30,7 @@ mod wire;
 /// The version of the file's format.
 const FORMAT: u32 = 1;
 /// The repository named as the producer.
-const REPOSITORY: &str = "neoteletext-engine";
+const REPOSITORY: &str = "neoteletext-renderer-teletext";
 
 /// The packet address example's magazine, an example value.
 const EXAMPLE_MAGAZINE: u8 = 3;

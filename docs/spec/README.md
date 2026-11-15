@@ -65,7 +65,7 @@ Each requirement carries a **verification method**, which is how compliance will
 
 ### Citation conventions
 
-**Where the sources are.** The standards and datasheets cited in this document are not kept in the project directory (`~/devel/neoteletext-engine`), because they must not be redistributed (see "Legal basis" below). They are in `~/devel/teletext-reference/`. Every folder path in this document, such as `teletext-standards/`, or `teletext-fonts/manufacturers/philips/datasheets/saa5050/`, is relative to that directory.
+**Where the sources are.** The standards and datasheets cited in this document are not kept in the project directory (`~/devel/neoteletext-renderer-teletext`), because they must not be redistributed (see "Legal basis" below). They are in `~/devel/teletext-reference/`. Every folder path in this document, such as `teletext-standards/`, or `teletext-fonts/manufacturers/philips/datasheets/saa5050/`, is relative to that directory.
 
 The research notes behind Parts A to E are in `research/` in the project directory, with a citation for each fact.
 
