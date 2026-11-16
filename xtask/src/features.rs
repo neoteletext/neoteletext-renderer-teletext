@@ -11,6 +11,9 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 /// One build: the package and its features ("" for none).
 struct Build {
@@ -116,23 +119,66 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-cli", features: "additional-flash-functions" },
 ];
 
-/// `cargo xtask features`: lints and tests each build of [`BUILDS`].
+/// How many builds run at once, each with its own target directory. The
+/// builds are small, so one cargo invocation uses a few processors at most
+/// and the rest wait: run one after another on 20 processors, the 76
+/// builds took 9m09s and kept the machine 18% busy (16 November 2026).
+/// More directories cost disk (a few gigabytes each) and share less work.
+const PARALLEL_BUILDS: usize = 4;
+
+/// `cargo xtask features`: lints and tests each build of [`BUILDS`],
+/// [`PARALLEL_BUILDS`] at a time. Each build's output is printed whole when
+/// it ends, so builds running together do not interleave.
 pub fn run(root: &Path) -> Result<(), String> {
-    let mut failures = Vec::new();
-    for build in BUILDS {
-        let label = format!("{} [{}]", build.package, build.features);
-        let base = ["--quiet", "-p", build.package, "--no-default-features", "--features", build.features];
-        let lint = cargo(root, &[&["clippy", "--all-targets"][..], &base, &["--", "-D", "warnings"]].concat());
-        let test = lint && cargo(root, &[&["test"][..], &base].concat());
-        println!("{label:<40} {}", if test { "ok" } else { "FAILED" });
-        if !test {
-            failures.push(label);
+    let next = AtomicUsize::new(0);
+    let failures = Mutex::new(Vec::new());
+    let print = Mutex::new(());
+    thread::scope(|scope| {
+        for worker in 0..PARALLEL_BUILDS {
+            let (next, failures, print) = (&next, &failures, &print);
+            scope.spawn(move || {
+                let target_dir = root.join("target").join("features").join(worker.to_string());
+                while let Some(build) = BUILDS.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let label = format!("{} [{}]", build.package, build.features);
+                    let base = ["--quiet", "-p", build.package, "--no-default-features", "--features", build.features];
+                    let mut output = Vec::new();
+                    let lint = cargo(
+                        root,
+                        &target_dir,
+                        &[&["clippy", "--all-targets"][..], &base, &["--", "-D", "warnings"]].concat(),
+                        &mut output,
+                    );
+                    let test = lint && cargo(root, &target_dir, &[&["test"][..], &base].concat(), &mut output);
+                    let _printing = print.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if !test {
+                        print!("{}", String::from_utf8_lossy(&output));
+                        failures.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(label.clone());
+                    }
+                    println!("{label:<40} {}", if test { "ok" } else { "FAILED" });
+                }
+            });
         }
-    }
+    });
+    let mut failures = failures.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // In the list's order, whichever worker found them.
+    failures.sort_by_key(|label| {
+        BUILDS.iter().position(|build| format!("{} [{}]", build.package, build.features) == *label)
+    });
     if failures.is_empty() { Ok(()) } else { Err(format!("failed: {}", failures.join(", "))) }
 }
 
-/// Runs cargo with `args`, its output shown; true on success.
-fn cargo(root: &Path, args: &[&str]) -> bool {
-    Command::new("cargo").current_dir(root).args(args).status().is_ok_and(|status| status.success())
+/// Runs cargo with `args` in `target_dir`, adding its output to `output`;
+/// true on success.
+fn cargo(root: &Path, target_dir: &Path, args: &[&str], output: &mut Vec<u8>) -> bool {
+    match Command::new("cargo").current_dir(root).env("CARGO_TARGET_DIR", target_dir).args(args).output() {
+        Ok(result) => {
+            output.extend_from_slice(&result.stdout);
+            output.extend_from_slice(&result.stderr);
+            result.status.success()
+        }
+        Err(error) => {
+            output.extend_from_slice(format!("cargo did not start: {error}\n").as_bytes());
+            false
+        }
+    }
 }
