@@ -207,14 +207,19 @@ const CUTOFF_BEND_COEFFICIENT: u32 =
 /// The 8580's cutoff at the bottom of the register, in hertz (data sheet:
 /// "ranges from 30 Hz to 12 kHz").
 const CUTOFF_FLOOR_8580_HZ: u32 = 30;
-/// The 8580's rise: 12,500 Hz over the 2,048 steps of the register, as a
-/// fraction in lowest terms.
+/// The 8580's rise: 6.75 Hz a register step, as a multiplier and a shift,
+/// which puts the top of the register at 13.8 kHz.
 ///
-/// Source: the 8580's cutoff "is a straight line on a linear scale, and is
-/// closer to the designers' actual specifications" (retroisle.com), which
-/// are the data sheet's 12 kHz; the requirement's "about 12.5 kHz" is the
-/// figure taken.
-const CUTOFF_SLOPE_8580: (u32, u32) = (3_125, 9);
+/// Source: that the line is straight is public: the 8580's cutoff "is a
+/// straight line on a linear scale, and is closer to the designers'
+/// actual specifications" (retroisle.com), which are the data sheet's
+/// 12 kHz. Its slope is fitted to the output of reSIDfp's default 8580,
+/// measured 17 November 2026 as the corner of its low-pass for noise at
+/// the highest resonance: 1,733 Hz at register $100, 3,496 at $200, 7,057
+/// at $400, 10,689 at $600 and 13,803 at $7FF, where this line has 1,758,
+/// 3,486, 6,942, 10,398 and 13,847. The slope before, 12,500 Hz over the
+/// register, lay a tenth lower (TODO-6427 fault 6).
+const CUTOFF_SLOPE_8580: (u32, u32) = (27, 2);
 
 /// The damping (the reciprocal of Q) with no resonance: the square root of
 /// two, a filter with no peak at all, in [`DAMPING_BITS`] fraction bits.
@@ -222,29 +227,36 @@ const CUTOFF_SLOPE_8580: (u32, u32) = (3_125, 9);
 /// Source: own choice. Data sheet, register $17: "16 resonance settings
 /// ranging linearly from no resonance (0) to maximum resonance (15)".
 const DAMPING_NONE: u32 = 46_341;
-/// The damping at the highest resonance: a Q of 2.4 (a peak of 7.6 dB) on
-/// a 6581 and of 4 (12 dB) on an 8580.
+/// The 6581's damping at the highest resonance: a Q of 2.4, a peak of
+/// 7.6 dB (1 / 2.4 = 5 / 12). Between none and the highest the damping
+/// falls in equal steps, as a ladder of weighted resistors feeding back a
+/// share of the output would make it (Yannes interview).
 ///
-/// Source: the 8580's is an own choice of a round figure; the 6581's is
-/// fitted to the output of reSIDfp's default 6581, measured 17 November
-/// 2026: noise through its low-pass at the highest resonance fits a
-/// two-pole response with a Q of 2.0 to 2.5 for cutoff registers from
-/// $400 up, and 1.0 to 1.1 at resonance 8, where equal steps of damping
-/// from none give 1.13. That the older chip has the less is public: the
-/// designer could not get high resonance from the 6581 ("It would also
-/// have greatly improved the filter, particularly in achieving high
-/// resonance", Yannes interview), and the 8580 "can achieve higher
-/// resonances" (Wikipedia, "MOS Technology 6581", "Revisions"). The
-/// damping falls in equal steps between, as a ladder of weighted
-/// resistors feeding back a share of the output would make it (Yannes
-/// interview).
-const fn damping_highest(model: ChipModel) -> u32 {
-    match model {
-        // 1 / 2.4 = 5 / 12.
-        ChipModel::Mos6581 => (5 << DAMPING_BITS) / 12,
-        ChipModel::Mos8580 => 1 << (DAMPING_BITS - 2),
-    }
-}
+/// Source: fitted to the output of reSIDfp's default 6581, measured 17
+/// November 2026: noise through its low-pass at the highest resonance
+/// fits a two-pole response with a Q of 2.0 to 2.5 for cutoff registers
+/// from $400 up, and 1.0 to 1.1 at resonance 8, where equal steps of
+/// damping from none give 1.13. That the older chip has the less is
+/// public: the designer could not get high resonance from the 6581 ("It
+/// would also have greatly improved the filter, particularly in achieving
+/// high resonance", Yannes interview), and the 8580 "can achieve higher
+/// resonances" (Wikipedia, "MOS Technology 6581", "Revisions").
+const DAMPING_HIGHEST_6581: u32 = (5 << DAMPING_BITS) / 12;
+/// What each step of the 8580's resonance multiplies its damping by, in
+/// [`COEFFICIENT_BITS`] fraction bits: 0.9192, the fifteenth root of
+/// 0.2828, so that the highest resonance is a Q of 2.5 (a peak of 8 dB;
+/// 1 / 2.5 = 0.2828 * √2).
+///
+/// Source: fitted to the output of reSIDfp's default 8580, measured 17
+/// November 2026: noise through its low-pass fits a two-pole response
+/// with a Q of 0.67 to 0.72 with no resonance, 1.36 to 1.44 at resonance
+/// 8 and 2.42 to 2.65 at resonance 15, at every cutoff from $0C0 to $780.
+/// Equal ratios from 0.707 to 2.5 give 1.39 at resonance 8; equal steps
+/// of damping, as on the 6581, would give 1.14. The Q of 4 before was an
+/// own round figure and peaked 4 dB above the reference (TODO-6427 fault
+/// 6). The test `the_8580s_highest_resonance_is_the_one_fitted` works the
+/// fifteen steps out again.
+const DAMPING_RATIO_8580: u32 = 60_241;
 /// Resonance settings above none.
 const RESONANCE_STEPS: u32 = 15;
 
@@ -423,9 +435,7 @@ impl Analogue {
     pub(super) fn write_resonance_routing(&mut self, value: u8) {
         self.resonance = value >> 4;
         self.routing = value & 0x0F;
-        let span = DAMPING_NONE.saturating_sub(damping_highest(self.model));
-        let fall = span.saturating_mul(u32::from(self.resonance)) / RESONANCE_STEPS;
-        self.damping = DAMPING_NONE.saturating_sub(fall);
+        self.damping = damping(self.model, self.resonance);
         let rise = FILTER_GAIN_6581.1.saturating_sub(FILTER_GAIN_6581.0);
         self.filter_gain =
             FILTER_GAIN_6581.0.saturating_add(rise.saturating_mul(u32::from(self.resonance)) / RESONANCE_STEPS);
@@ -537,6 +547,26 @@ const fn saturate(value: i32) -> i32 {
     if value < 0 { bent.wrapping_neg() } else { bent }
 }
 
+/// The damping, the reciprocal of Q, for a resonance setting of 0 to 15.
+/// It is worked out when the register is written, not for each sample.
+const fn damping(model: ChipModel, resonance: u8) -> u32 {
+    match model {
+        ChipModel::Mos6581 => {
+            let span = DAMPING_NONE.saturating_sub(DAMPING_HIGHEST_6581);
+            DAMPING_NONE.saturating_sub(span.saturating_mul(resonance as u32) / RESONANCE_STEPS)
+        }
+        ChipModel::Mos8580 => {
+            let mut damping = DAMPING_NONE.cast_signed();
+            let mut step = 0;
+            while step < resonance {
+                damping = scale(damping, DAMPING_RATIO_8580);
+                step = step.saturating_add(1);
+            }
+            damping.cast_unsigned()
+        }
+    }
+}
+
 /// The cutoff in hertz for a value of the cutoff register.
 pub(super) const fn cutoff_hz(model: ChipModel, register: u32) -> u32 {
     let register = if register > CUTOFF_MAX { CUTOFF_MAX } else { register };
@@ -581,9 +611,9 @@ const fn coefficient(model: ChipModel, clock: ChipClock, register: u32) -> u32 {
 )]
 mod tests {
     use super::{
-        Analogue, CUTOFF_BEND_COEFFICIENT, CUTOFF_MAX, ChipClock, ChipModel, FULL_SWING, Levels, MIX_LIMIT,
-        SATURATION_FLAT, SATURATION_START, STATE_LIMIT, coefficient, curve_6581, cutoff_hz, cutoff_scale,
-        output_low_pass, saturate, scale,
+        Analogue, CUTOFF_BEND_COEFFICIENT, CUTOFF_MAX, ChipClock, ChipModel, DAMPING_BITS, DAMPING_NONE, FULL_SWING,
+        Levels, MIX_LIMIT, SATURATION_FLAT, SATURATION_START, STATE_LIMIT, coefficient, curve_6581, cutoff_hz,
+        cutoff_scale, damping, output_low_pass, saturate, scale,
     };
 
     /// A small generator of test values (a 64-bit linear congruential
@@ -642,6 +672,24 @@ mod tests {
         assert_eq!(levels.mixer_offset, 804_034);
         let levels = Levels::of(ChipModel::Mos8580);
         assert_eq!((levels.waveform_zero, levels.voice_offset, levels.mixer_offset), (2048, 73_094, 73_094));
+    }
+
+    #[test]
+    fn the_8580s_highest_resonance_is_the_one_fitted() {
+        // No resonance is a Q of 1 / √2 on both chips, and the damping
+        // falls with every step.
+        for model in [ChipModel::Mos6581, ChipModel::Mos8580] {
+            assert_eq!(damping(model, 0), DAMPING_NONE);
+            for resonance in 1..16 {
+                assert!(damping(model, resonance) < damping(model, resonance - 1), "{model:?} {resonance}");
+            }
+        }
+        // The highest: 1 / 2.4 on the 6581 and 1 / 2.5 on the 8580, in 15
+        // fraction bits, the 8580's within a half per cent for the
+        // rounding of its fifteen steps; and its middle, 1 / 1.39.
+        assert_eq!(damping(ChipModel::Mos6581, 15), 13_653);
+        assert!(damping(ChipModel::Mos8580, 15).abs_diff((1 << DAMPING_BITS) * 2 / 5) < 66);
+        assert!(damping(ChipModel::Mos8580, 8).abs_diff((1 << DAMPING_BITS) * 100 / 139) < 240);
     }
 
     #[test]
@@ -723,8 +771,15 @@ mod tests {
     #[test]
     fn the_8580_curve_is_a_straight_line() {
         assert_eq!(cutoff_hz(ChipModel::Mos8580, 0), 30);
-        assert_eq!(cutoff_hz(ChipModel::Mos8580, 1024), 30 + 6_250);
-        assert_eq!(cutoff_hz(ChipModel::Mos8580, CUTOFF_MAX), 30 + 12_493);
+        assert_eq!(cutoff_hz(ChipModel::Mos8580, 1024), 30 + 6_912);
+        assert_eq!(cutoff_hz(ChipModel::Mos8580, CUTOFF_MAX), 30 + 13_817);
+        // The corners of the reference program's low-pass, measured from
+        // its output on 17 November 2026 (CUTOFF_SLOPE_8580): the line
+        // passes within a twentieth of each.
+        for (register, hz) in [(0x100, 1_733), (0x200, 3_496), (0x400, 7_057), (0x600, 10_689), (0x7FF, 13_803)] {
+            let found = cutoff_hz(ChipModel::Mos8580, register);
+            assert!(found.abs_diff(hz) * 20 < hz, "${register:03X}: {found} Hz for {hz}");
+        }
     }
 
     #[test]

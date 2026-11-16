@@ -49,10 +49,10 @@ fn through(model: ChipModel, hz: f64, cutoff: u16, resonance: u8, mode: u8) -> f
     amplitude(&render(&mut sid, 0.5), pitch(register, clock))
 }
 
-/// The 8580's cutoff register for a cutoff in hertz: 30 Hz and 12,500 Hz
-/// over 2,048 steps.
+/// The 8580's cutoff register for a cutoff in hertz: 30 Hz and 6.75 Hz a
+/// step.
 fn register_8580(hz: f64) -> u16 {
-    ((hz - 30.0) * 2048.0 / 12_500.0).round() as u16
+    ((hz - 30.0) / 6.75).round() as u16
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn the_8580_cutoff_is_a_straight_line_and_the_6581_is_not() {
     let straight = register_reaching(ChipModel::Mos8580, 2000.0);
     assert!(straight.abs_diff(register_8580(2000.0)) <= 16, "8580: {straight}");
     // The 6581 lies at its floor first, and reaches 500 Hz far later than
-    // the 8580 does: at register 234 by its curve, against 77.
+    // the 8580 does: at register 234 by its curve, against 70.
     let (bent, line) = (register_reaching(ChipModel::Mos6581, 500.0), register_reaching(ChipModel::Mos8580, 500.0));
     assert!(bent > 2 * line && bent.abs_diff(234) <= 16, "6581: {bent} against {line}");
 }
@@ -177,10 +177,11 @@ fn resonance_raises_the_cutoff_and_the_8580_has_more_of_it() {
         }
     }
     // No resonance is -3 dB at the cutoff; the highest is +7.6 dB on a
-    // 6581 and +12 dB on an 8580. The 6581's filter input is multiplied by 0.67
+    // 6581 and +8 dB on an 8580 (TODO-6427 fault 6: +12 dB before, 4 dB
+    // above the reference program's). The 6581's filter input is multiplied by 0.67
     // with no resonance (-3.5 dB) and by 0.80 with the highest (-1.9 dB).
     assert!((decibels(peak(ChipModel::Mos8580, 0)) + 3.0).abs() < 0.5);
-    assert!((decibels(peak(ChipModel::Mos8580, 15)) - 12.0).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos8580, 15)));
+    assert!((decibels(peak(ChipModel::Mos8580, 15)) - 8.0).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos8580, 15)));
     assert!((decibels(peak(ChipModel::Mos6581, 0)) + 6.5).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 0)));
     assert!((decibels(peak(ChipModel::Mos6581, 15)) - 5.7).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 15)));
 }
