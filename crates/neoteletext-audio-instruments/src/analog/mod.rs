@@ -26,6 +26,7 @@ pub mod decimator;
 pub mod envelope;
 pub mod filter;
 pub mod fixed;
+pub mod lfo;
 pub mod oscillator;
 pub mod tables;
 

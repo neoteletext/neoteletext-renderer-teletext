@@ -512,4 +512,9 @@ impl Noise {
     pub const fn tick(&mut self) -> i32 {
         self.word().cast_signed() >> NOISE_SHIFT
     }
+    /// The next word as a control level: uniform between -2³⁰ and 2³⁰.
+    #[inline]
+    pub const fn tick_level(&mut self) -> i32 {
+        self.word().cast_signed() >> 1
+    }
 }
