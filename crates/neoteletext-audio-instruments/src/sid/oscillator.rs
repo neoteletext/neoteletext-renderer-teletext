@@ -252,16 +252,23 @@ impl Oscillator {
     }
 
     /// The pulse: every bit set while the accumulator's upper twelve bits
-    /// are below the pulse width.
+    /// are at or above the pulse width.
     ///
-    /// Source: data sheet, registers 2 and 3: "`PWout` = (`PWn`/40.95) %", so
-    /// the pulse is high for the width's share of the period, and a width
-    /// of zero is a constant level. The test bit holds the pulse "at a DC
-    /// level" (register 4); that the level is the high one whatever the
+    /// Source: data sheet, registers 2 and 3: "`PWout` = (`PWn`/40.95) %",
+    /// the share of the period the pulse is high at the output, and a width
+    /// of zero is a constant level. The waveform reaches the output
+    /// inverted, a higher value a lower level ([`super::Voice::level`]), so
+    /// the bits are set for the rest of the period: the share at or above
+    /// the width. Which share is set matters only when the pulse is
+    /// combined with another waveform, whose bits it masks; measured
+    /// against reSIDfp on 17 November 2026, this way gives triangle and
+    /// pulse at width $200 within 1 dB of it, and the other way 17 dB
+    /// below (TODO-6427 fault 1). The test bit holds the pulse "at a DC
+    /// level" (register 4); that the level is the set one whatever the
     /// width is the requirement's reading of it.
     #[inline]
     const fn pulse(&self) -> u16 {
-        if self.control & control::TEST != 0 || (self.accumulator >> SAWTOOTH_SHIFT) < self.pulse_width {
+        if self.control & control::TEST != 0 || (self.accumulator >> SAWTOOTH_SHIFT) >= self.pulse_width {
             WAVEFORM_MAX
         } else {
             0
@@ -437,15 +444,17 @@ mod tests {
     }
 
     #[test]
-    fn the_pulse_is_high_for_the_widths_share_of_the_period() {
+    fn the_pulse_is_set_for_the_share_of_the_period_past_the_width() {
         for width in [0u16, 1, 0x400, 0x800, 0xC00, 0xFFF] {
             let mut oscillator = oscillator(0x1000, control::PULSE);
             oscillator.write_pulse_low(width as u8);
             oscillator.write_pulse_high((width >> 8) as u8);
             let wave = run(&mut oscillator, 4096, ChipModel::Mos6581);
             assert!(wave.iter().all(|&value| value == 0 || value == WAVEFORM_MAX));
-            let high = wave.iter().filter(|&&value| value == WAVEFORM_MAX).count();
-            assert_eq!(high, usize::from(width), "width {width:#x}");
+            // Set past the width, so low at the inverted output for the
+            // width's share of the period.
+            let set = wave.iter().filter(|&&value| value == WAVEFORM_MAX).count();
+            assert_eq!(set, 4096 - usize::from(width), "width {width:#x}");
         }
     }
 
@@ -616,8 +625,8 @@ mod tests {
 
     #[test]
     fn no_waveform_holds_the_last_value_and_lets_it_fall() {
+        // Stopped at zero with a width of zero, the pulse is set.
         let mut oscillator = oscillator(0, control::PULSE);
-        oscillator.write_pulse_low(1);
         assert_eq!(run(&mut oscillator, 10, ChipModel::Mos6581)[9], WAVEFORM_MAX);
         oscillator.write_control(0);
         // Two scan lines later the value is still there.

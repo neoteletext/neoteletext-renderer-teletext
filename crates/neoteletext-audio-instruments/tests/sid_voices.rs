@@ -313,3 +313,31 @@ fn noise_is_broadband_and_unpitched() {
         assert!(decibels(amplitude(&samples, hz) / overall) < -10.0, "{hz} Hz");
     }
 }
+
+/// Pulse combined with triangle or sawtooth sounds at about the level of
+/// the triangle alone, as the reference emulator reSIDfp gives it (+1.3 dB
+/// for triangle and pulse, +1.0 dB for sawtooth and pulse, on the 8580 at
+/// width $200), measured against it on 17 November 2026 (TODO-6427 fault
+/// 1). The pulse comparison was the wrong way round: the chip's waveform
+/// output is inverted, so the bits set by the pulse are the share of the
+/// period above the width, and combined with another waveform the wrong
+/// share all but silenced the voice (−15.6 and −21.6 dB).
+#[test]
+fn pulse_combined_with_another_waveform_keeps_its_level() {
+    const WIDTH: u16 = 0x200;
+    const LEAST_DB: f64 = -3.0;
+    let level = |control: u8| {
+        let mut sid = Sid::new(ChipModel::Mos8580, ChipClock::Pal);
+        sid.write(VOLUME_REGISTER, FULL_VOLUME);
+        sid.write(2, (WIDTH & 0xFF) as u8);
+        sid.write(3, (WIDTH >> 8) as u8);
+        start(&mut sid, 0, frequency_register(440.0, ChipClock::Pal), control);
+        let _ = render(&mut sid, 0.1);
+        support::rms(&render(&mut sid, 0.5))
+    };
+    let triangle = level(TRIANGLE);
+    for (name, control) in [("triangle and pulse", TRIANGLE | PULSE), ("sawtooth and pulse", SAWTOOTH | PULSE)] {
+        let relative = decibels(level(control) / triangle);
+        assert!(relative > LEAST_DB, "{name}: {relative:.1} dB against the triangle alone");
+    }
+}
