@@ -334,15 +334,7 @@ impl Oscillator {
             return value;
         }
         match model {
-            // Source: own model, fitted to one public fact. On a 6581 the
-            // top bit of sawtooth with triangle never rises (codebase64,
-            // "detecting sid type", the routine from "Mathematica", which
-            // waits for bit 7 of register $1B with waveform $30 and finds
-            // it only on an 8580), where the plain AND has it set for a
-            // quarter of the period with the bit below it low. So here a
-            // line is also pulled low by a low line below it: the weak
-            // drivers of the older chip lose to their neighbours.
-            ChipModel::Mos6581 => value & ((value << 1) | 1),
+            ChipModel::Mos6581 => pulled_6581(value, selected),
             // Source: the 8580's combinations "come very close to matching
             // the original SID specification (which stated that they will
             // be combined as a binary AND)" (retroisle.com, "The SID
@@ -356,6 +348,74 @@ impl Oscillator {
     pub(super) const fn read(&self) -> u8 {
         (self.held >> NOISE_WAVEFORM_SHIFT) as u8
     }
+}
+
+/// The waveform's top line.
+const WAVEFORM_TOP: u16 = 1 << (WAVEFORM_BITS - 1);
+
+/// How far a low line pulls its neighbours low on a 6581, for a selection
+/// of waveforms without the noise: the lines above it that it reaches,
+/// then the lines below it.
+///
+/// Source: own model, with its reach fitted. The model rests on one
+/// public fact: on a 6581 the top bit of sawtooth with triangle never
+/// rises (codebase64, "detecting sid type", the routine from
+/// "Mathematica", which waits for bit 7 of register $1B with waveform $30
+/// and finds it only on an 8580), where the plain AND has it set for a
+/// quarter of the period with the bit below it low. So a line is also
+/// pulled low by a low line near it: the weak drivers of the older chip
+/// lose to their neighbours ("In reality, the final output isn't exactly
+/// a binary AND of the selected waveforms, especially on the 6581",
+/// retroisle.com). How far the pull reaches is fitted, for each
+/// selection, to the output of reSIDfp's default 6581, measured 17
+/// November 2026 as each selection's level against the triangle's, in
+/// decibels, at pulse widths $800, $200 and $C00; the level this model
+/// gives follows each:
+///
+/// - sawtooth and triangle: -19.7 (here -19.7);
+/// - pulse and triangle: -5.7, -2.9 and -21.4 (-4.9, -2.1 and -23.1);
+/// - pulse and sawtooth: -25.3, -11.3 and -25.1 (-26.0, -25.7 and -26.0:
+///   no reach gives the louder middle one along with the other two);
+/// - all three: -25.3, -24.9 and -25.3 (silent, -19.7 and silent).
+///
+/// A reach of one line upwards alone, the model before, gave -10.6 for
+/// sawtooth and triangle and +0.4 for pulse and sawtooth at width $800
+/// (TODO-6427 fault 3). No table of a chip's samples is used.
+const fn pull_reach_6581(selected: u8) -> (u32, u32) {
+    match selected & (control::TRIANGLE | control::SAWTOOTH | control::PULSE) {
+        PULSE_TRIANGLE => (2, 1),
+        PULSE_SAWTOOTH => (8, 0),
+        _ => (1, 1),
+    }
+}
+const PULSE_TRIANGLE: u8 = control::PULSE | control::TRIANGLE;
+const PULSE_SAWTOOTH: u8 = control::PULSE | control::SAWTOOTH;
+/// The furthest any 6581 pull reaches either way, which bounds the work
+/// of a cycle; the test `the_6581s_pull_is_bounded` holds
+/// [`pull_reach_6581`] to it.
+#[cfg(test)]
+const PULL_REACH_MAX: u32 = 8;
+
+/// The AND of the selected waveforms as a 6581 puts it out: each line is
+/// low if a line within the selection's reach of it is low.
+#[inline]
+const fn pulled_6581(and: u16, selected: u8) -> u16 {
+    let (above, below) = pull_reach_6581(selected);
+    let mut value = and;
+    let mut step = 0;
+    while step < above {
+        // A line is pulled low by the low line below it; the bottom line
+        // has none.
+        value &= (value << 1) | 1;
+        step = step.saturating_add(1);
+    }
+    let mut step = 0;
+    while step < below {
+        // And by the low line above it; the top line has none.
+        value &= (value >> 1) | WAVEFORM_TOP;
+        step = step.saturating_add(1);
+    }
+    value & WAVEFORM_MAX
 }
 
 /// The noise waveform for a register value: the tapped bits as the upper
@@ -393,8 +453,8 @@ fn noise_keep_mask(waveform: u16) -> u32 {
 )]
 mod tests {
     use super::{
-        ChipModel, NOISE_RESET, NOISE_RESET_CYCLES, NOISE_RESET_WAVEFORM, Oscillator, WAVEFORM_MAX, control,
-        noise_waveform,
+        ChipModel, NOISE_RESET, NOISE_RESET_CYCLES, NOISE_RESET_WAVEFORM, Oscillator, PULL_REACH_MAX, WAVEFORM_MAX,
+        control, noise_waveform, pull_reach_6581, pulled_6581,
     };
     use std::collections::BTreeSet;
     use std::vec::Vec;
@@ -620,6 +680,20 @@ mod tests {
                     assert_eq!(pulled & 0x800, 0, "sawtooth with triangle never sets the top bit");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_6581s_pull_is_bounded() {
+        for selected in 0..=255u8 {
+            let (above, below) = pull_reach_6581(selected);
+            assert!(above <= PULL_REACH_MAX && below <= PULL_REACH_MAX, "{selected:#04x}");
+            // One low line reaches that many lines and no further.
+            let lone = pulled_6581(WAVEFORM_MAX & !0x100, selected);
+            let reached = (0x100u32 << (above + 1)) - (0x100u32 >> below);
+            assert_eq!(u32::from(lone), u32::from(WAVEFORM_MAX) & !reached, "{selected:#04x}");
+            assert_eq!(pulled_6581(WAVEFORM_MAX, selected), WAVEFORM_MAX);
+            assert_eq!(pulled_6581(0, selected), 0);
         }
     }
 

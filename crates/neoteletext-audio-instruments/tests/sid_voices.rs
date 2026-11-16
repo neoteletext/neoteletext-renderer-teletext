@@ -342,3 +342,56 @@ fn pulse_combined_with_another_waveform_keeps_its_level() {
         assert!(relative > LEAST_DB, "{name}: {relative:.1} dB against the triangle alone");
     }
 }
+
+/// The level of a waveform selection on voice 1 against the triangle's,
+/// in decibels, at a pulse width.
+fn level_against_the_triangle(model: ChipModel, control: u8, width: u16) -> f64 {
+    let level = |control: u8| {
+        let mut sid = Sid::new(model, ChipClock::Pal);
+        sid.write(VOLUME_REGISTER, FULL_VOLUME);
+        sid.write(2, (width & 0xFF) as u8);
+        sid.write(3, (width >> 8) as u8);
+        start(&mut sid, 0, frequency_register(240.0, ChipClock::Pal), control);
+        let _ = render(&mut sid, 0.2);
+        let samples = render(&mut sid, 0.7);
+        let mean = samples.iter().map(|&sample| f64::from(sample)).sum::<f64>() / samples.len() as f64;
+        (samples.iter().map(|&sample| (f64::from(sample) - mean).powi(2)).sum::<f64>() / samples.len() as f64).sqrt()
+    };
+    decibels(level(control).max(1e-3) / level(TRIANGLE))
+}
+
+/// TODO-6427 fault 3: the 6581's combined waveforms were far louder than
+/// the reference program's. Each selection's level against the
+/// triangle's, measured from its output on 17 November 2026, and how near
+/// this chip must come; before, sawtooth with triangle was at -10.6 dB,
+/// pulse with triangle at width $C00 at -10.3 dB and pulse with sawtooth
+/// at +0.4 dB.
+#[test]
+fn the_6581s_combined_waveforms_are_as_quiet_as_the_references() {
+    const NEAR_DB: f64 = 2.0;
+    for (control, width, measured) in [
+        (SAWTOOTH | TRIANGLE, 0x800, -19.7),
+        (PULSE | TRIANGLE, 0x800, -5.7),
+        (PULSE | TRIANGLE, 0x200, -2.9),
+        (PULSE | TRIANGLE, 0xC00, -21.4),
+        (PULSE | SAWTOOTH, 0x800, -25.3),
+        (PULSE | SAWTOOTH, 0xC00, -25.1),
+    ] {
+        let found = level_against_the_triangle(ChipModel::Mos6581, control, width);
+        assert!((found - measured).abs() < NEAR_DB, "{control:#04x} at {width:#05x}: {found:.1} dB for {measured}");
+    }
+    // Pulse with sawtooth at width $200 is -11.3 dB there, which no one
+    // reach of the pull gives along with the other two widths: here it is
+    // as quiet as they are, and no quieter.
+    let found = level_against_the_triangle(ChipModel::Mos6581, PULSE | SAWTOOTH, 0x200);
+    assert!((-27.0..-11.3).contains(&found), "pulse and sawtooth at 0x200: {found:.1} dB");
+    // All three are -25 dB there at every width: here no louder than
+    // sawtooth with triangle.
+    for width in [0x800, 0x200, 0xC00] {
+        let found = level_against_the_triangle(ChipModel::Mos6581, PULSE | SAWTOOTH | TRIANGLE, width);
+        assert!(found < -17.0, "all three at {width:#05x}: {found:.1} dB");
+    }
+    // The 8580's stay the AND: sawtooth with triangle at -2.5 dB there.
+    let found = level_against_the_triangle(ChipModel::Mos8580, SAWTOOTH | TRIANGLE, 0x800);
+    assert!((found + 2.5).abs() < 1.0, "8580: {found:.1} dB");
+}
