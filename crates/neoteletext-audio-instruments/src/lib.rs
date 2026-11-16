@@ -63,6 +63,8 @@
 #[cfg(test)]
 extern crate std;
 
+#[cfg(feature = "analog")]
+pub mod analog;
 #[cfg(feature = "dx7")]
 pub mod dx7;
 #[cfg(feature = "sid")]

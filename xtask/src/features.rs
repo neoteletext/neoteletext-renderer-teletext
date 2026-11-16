@@ -90,6 +90,8 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio-instruments", features: "" },
     Build { package: "neoteletext-audio-instruments", features: "sid" },
     Build { package: "neoteletext-audio-instruments", features: "dx7" },
+    // The analogue building blocks (DEC-6429), which no codec uses yet.
+    Build { package: "neoteletext-audio-instruments", features: "analog" },
     Build { package: "neoteletext-opus", features: "" },
     Build { package: "neoteletext-opus", features: "error-trait" },
     Build { package: "neoteletext-audio-mix", features: "" },

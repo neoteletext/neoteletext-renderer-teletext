@@ -21,6 +21,10 @@ default = ["sid", "dx7"]
 sid = []
 # The Yamaha DX7 (codecs 4 and 5, REQ-6412 items 5 and 6).
 dx7 = []
+# The building blocks of the analogue synthesizers (DEC-6429): oscillators,
+# filters, envelopes, the chorus and the voice allocator. Not a codec by
+# itself, so it is not on by default.
+analog = []
 
 # Each example plays or builds one instrument, so it is built only with it.
 [[example]]
@@ -34,6 +38,10 @@ required-features = ["sid"]
 [[example]]
 name = "dx7_demo"
 required-features = ["dx7"]
+
+[[example]]
+name = "analog_tables"
+required-features = ["analog"]
 
 [lints]
 workspace = true
