@@ -64,7 +64,7 @@
 //!
 //! Each integrator carries the fraction of a unit its products leave, so
 //! what it adds up is exact however low the cutoff
-//! ([`integrate`](super::fixed::integrate)).
+//! ([`integrate`]).
 
 use super::fixed::{amplify, integrate, limit, mul_high, mul_high_unsigned, ratio, scale};
 use super::tables::{EXCESS, EXCESS_RANGE_SHIFT, EXCESS_STEPS_SHIFT, WARP, WARP_STEPS_SHIFT};

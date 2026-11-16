@@ -9,9 +9,9 @@
 //! falls between two samples, and what a low-pass filter would have made
 //! of it is added around it: the difference between a step seen through
 //! the filter and the step itself, read from a table
-//! ([`BLEP`](super::tables::BLEP)) at the edge's position. A triangle's
+//! ([`BLEP`]) at the edge's position. A triangle's
 //! corners get the same from the table's integral
-//! ([`BLAMP`](super::tables::BLAMP)).
+//! ([`BLAMP`]).
 //!
 //! Source: the method is the band-limited step of Stilson and Smith,
 //! "Alias-free digital synthesis of classic analog waveforms" (ICMC 1996),

@@ -12,6 +12,11 @@
 //! buffer has a size fixed by its type. No input makes a block cost more
 //! than the bound of its instrument (REQ-6412 item 7).
 //!
+//! Behind the feature `analog`, which is not on by default, are the
+//! building blocks the analogue synthesizers of DEC-6429 are to be made
+//! from ([`analog`]): oscillators, filters, envelopes, a chorus and a
+//! voice allocator. They are no codec yet.
+//!
 //! # Whose code this is
 //!
 //! Only permissively licensed code is the basis of anything here
@@ -20,7 +25,8 @@
 //! The DX7's parameter layer, under `dx7::msfa`, is translated from
 //! Google's music-synthesizer-for-android and stays under Apache-2.0, each
 //! file carrying its notice; the DX7's sound kernel and rack are this
-//! crate's own. Every constant names its source where it is defined
+//! crate's own. The analogue building blocks are written from public
+//! documents alone, under the clean-room procedure of DEC-6428. Every constant names its source where it is defined
 //! (REQ-6412 item 3).
 //!
 //! # Threads and shared state
