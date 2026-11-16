@@ -95,7 +95,7 @@ const DAMPING_BITS: u32 = 15;
 /// registers hold.
 const STATE_LIMIT: i32 = 1 << 25;
 /// The largest magnitude of the mixer's sum: with the volume's four bits
-/// it stays inside 32 bits.
+/// it stays below 2³⁰, which [`scale`] takes.
 const MIX_LIMIT: i32 = 1 << 26;
 
 /// The cutoff register's width (data sheet, registers $15 and $16: "an
@@ -214,12 +214,26 @@ const SATURATION_POST_SHIFT: u32 = SATURATION_WIDTH_BITS + 1 - 2 * SATURATION_PR
 /// full envelope moves the cutoff by an eighth either way.
 const CUTOFF_MOVEMENT: (u32, i32, i32) = (6, -(1 << 15), 1 << 15);
 
-/// Shift from the mixer's sum times the volume's sixteen steps to output
-/// units: one voice alone peaks near 7,600 of the 32,767 of a sample, and
-/// three with every offset stay inside it.
+/// What the mixer's sum times the volume's sixteen steps is multiplied by
+/// to give output units, in [`COEFFICIENT_BITS`] fraction bits, for each
+/// chip.
 ///
-/// Source: own choice of scale.
-const OUTPUT_SHIFT: u32 = 10;
+/// Source: own choice of scale, fitted to the output of reSIDfp's default
+/// 6581 and 8580 (sidplayfp 2.16.0, run as a separate program), measured 17
+/// November 2026: one triangle at full envelope and full volume spans
+/// 9,530 output units from trough to peak there on a 6581 and 7,437 on an
+/// 8580, and with these gains 9,417 and 7,533 here, each within 0.15 dB.
+/// Three pulses in step at full volume, the loudest three voices can be
+/// with no filter, then peak at 14,100 of a sample's 32,767 on a 6581 and
+/// 11,300 on an 8580: 7 dB and 9 dB of headroom for the filter's resonance
+/// and the volume register's steps (TODO-6427 fault 5; a gain of 64 for
+/// both chips before it clipped three of nine tunes).
+const fn output_gain(model: ChipModel) -> u32 {
+    match model {
+        ChipModel::Mos6581 => 40,
+        ChipModel::Mos8580 => 32,
+    }
+}
 
 /// The share of the difference that the output stage's low-pass follows
 /// in each intermediate sample, in [`COEFFICIENT_BITS`] fraction bits, for
@@ -395,8 +409,8 @@ impl Analogue {
             });
         }
         let volume = i32::from(self.mode_volume & mode::VOLUME);
-        let level =
-            (mix.clamp(-MIX_LIMIT, MIX_LIMIT).wrapping_mul(volume) >> OUTPUT_SHIFT).clamp(-OUTPUT_LIMIT, OUTPUT_LIMIT);
+        let level = scale(mix.clamp(-MIX_LIMIT, MIX_LIMIT).wrapping_mul(volume), output_gain(self.model))
+            .clamp(-OUTPUT_LIMIT, OUTPUT_LIMIT);
 
         // The board: a low-pass, then the coupling capacitor.
         let step = scale(level.wrapping_sub(self.output), output_low_pass(self.clock));

@@ -199,9 +199,10 @@ fn the_volume_register_plays_samples_on_a_6581_and_barely_on_an_8580() {
     let (old, new) = (played(ChipModel::Mos6581), played(ChipModel::Mos8580));
     // "The C64 Digi": the 6581's output rises 0.72 V from volume 0 to 15,
     // against 1.05 V for a voice's full swing: here 0.72 / 1.05 of 4,095 *
-    // 255 * 15 / 1,024 samples, and a square wave of that has 2/π of it at
-    // its fundamental. The offsets used are 3 * 0.26 - 0.04 = 0.74 V.
-    let expected = 0.74 / 1.05 * 4095.0 * 255.0 * 15.0 / 1024.0 * 2.0 / std::f64::consts::PI;
+    // 255 * 15 * 40 / 65,536 samples, the 6581's output gain, and a square
+    // wave of that has 2/π of it at its fundamental. The offsets used are
+    // 3 * 0.26 - 0.04 = 0.74 V.
+    let expected = 0.74 / 1.05 * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((old / expected - 1.0).abs() < 0.05, "6581: {old} for {expected}");
     assert!(new < old / 10.0 && new > old / 100.0, "8580: {new} against {old}");
 }
