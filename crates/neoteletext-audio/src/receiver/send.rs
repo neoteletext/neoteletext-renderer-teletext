@@ -36,7 +36,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         expect(unused_variables, reason = "only PCM16 and IMA ADPCM send the blocks that arrived")
     )]
     #[cfg_attr(
-        not(any(feature = "pcm16", feature = "ima", feature = "opus")),
+        not(any(feature = "pcm16", feature = "ima", feature = "opus", feature = "sid", feature = "dx7")),
         expect(clippy::unused_self, reason = "a build with no decoder holds no sound to send")
     )]
     pub(super) fn send_blocks(&mut self, entry: &Entry, first: u16, count: u16, sink: &mut dyn VoiceSink) {
@@ -69,7 +69,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// sent as silence, or concealed by an Opus decoder, so a lost block
     /// never stops the sound.
     #[cfg_attr(
-        not(any(feature = "pcm16", feature = "ima", feature = "opus")),
+        not(any(feature = "pcm16", feature = "ima", feature = "opus", feature = "sid", feature = "dx7")),
         expect(unused_variables, reason = "a build with no decoder holds no sound to send")
     )]
     pub(super) fn send_live(&mut self, sound: SoundId, sink: &mut dyn VoiceSink) {

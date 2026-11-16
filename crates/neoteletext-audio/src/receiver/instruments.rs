@@ -204,7 +204,11 @@ impl Lane {
     /// the bank its sound names.
     #[cfg_attr(
         not(feature = "dx7"),
-        expect(unused_variables, clippy::unused_self, reason = "only a DX7 sound reads its bank from the store")
+        expect(unused_variables, reason = "only a DX7 sound reads its bank from the store")
+    )]
+    #[cfg_attr(
+        not(any(feature = "sid", feature = "dx7")),
+        expect(clippy::unused_self, reason = "a build with no instrument prepares nothing")
     )]
     fn prepare<const OBJECTS: usize>(&mut self, store: &Store<'_, OBJECTS>, entry: &Entry) {
         match entry.codec {
@@ -231,9 +235,10 @@ impl Lane {
     }
 
     /// Plays one block into the lane's instrument and renders its 20 ms.
+    #[cfg_attr(not(feature = "dx7"), expect(unused_variables, reason = "only a DX7 block counts what it passes over"))]
     #[cfg_attr(
         not(any(feature = "sid", feature = "dx7")),
-        expect(unused_variables, clippy::unused_self, reason = "a build with no instrument renders nothing")
+        expect(clippy::unused_self, reason = "a build with no instrument renders nothing")
     )]
     fn render(&mut self, block: &[u8], pcm: &mut [i16; BLOCK], statistics: &mut Statistics) {
         match self.codec {
