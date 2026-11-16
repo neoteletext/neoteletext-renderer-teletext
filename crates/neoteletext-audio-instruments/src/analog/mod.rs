@@ -23,6 +23,7 @@
 //! parameter may divide, and says so.
 
 pub mod decimator;
+pub mod envelope;
 pub mod filter;
 pub mod fixed;
 pub mod oscillator;

@@ -108,15 +108,29 @@ pub const fn scale(value: i32, coefficient: i32) -> i32 {
     mul_high(value, coefficient) << 1
 }
 
+/// `value * coefficient / 2^bits`, for `bits` of 30 or 31, added to what
+/// `fraction` holds of a unit in as many bits. Gives the whole units,
+/// rounded down, and leaves the rest in `fraction` for the next sample:
+/// what is added up over time is exact, and only what is added in one
+/// sample is cut to a unit.
+#[inline]
+#[must_use]
+pub const fn accumulate(value: i32, coefficient: i32, bits: u32, fraction: &mut u32) -> i32 {
+    let mask = (1u32 << bits).wrapping_sub(1);
+    let high = mul_high(value, coefficient);
+    let low = value.cast_unsigned().wrapping_mul(coefficient.cast_unsigned());
+    let sum = (*fraction & mask).wrapping_add(low & mask);
+    *fraction = sum & mask;
+    (high << (u32::BITS.wrapping_sub(bits)))
+        .wrapping_add((low >> bits).cast_signed())
+        .wrapping_add((sum >> bits).cast_signed())
+}
+
 /// Bits of the fraction a trapezoidal integrator keeps below its state.
-const FRACTION_BITS: u32 = 30;
-/// The mask of that fraction.
-const FRACTION_MASK: u32 = (1 << FRACTION_BITS) - 1;
+const INTEGRATOR_BITS: u32 = 30;
 
 /// A trapezoidal integrator's step: `2 * difference * gain` for a gain in
-/// Q31, added to what `fraction` holds of a unit, in Q30. Gives the whole
-/// units, rounded down, and leaves the rest in `fraction` for the next
-/// sample.
+/// Q31, with the fraction of a unit carried in `fraction` in Q30.
 ///
 /// A product cut to a whole unit would leave the integrator deaf to any
 /// difference below 1 / gain units, and biased; with the remainders
@@ -125,13 +139,7 @@ const FRACTION_MASK: u32 = (1 << FRACTION_BITS) - 1;
 #[inline]
 #[must_use]
 pub const fn integrate(difference: i32, gain: i32, fraction: &mut u32) -> i32 {
-    let high = mul_high(difference, gain);
-    let low = difference.cast_unsigned().wrapping_mul(gain.cast_unsigned());
-    let sum = (*fraction & FRACTION_MASK).wrapping_add(low & FRACTION_MASK);
-    *fraction = sum & FRACTION_MASK;
-    (high << (32 - FRACTION_BITS))
-        .wrapping_add((low >> FRACTION_BITS).cast_signed())
-        .wrapping_add((sum >> FRACTION_BITS).cast_signed())
+    accumulate(difference, gain, INTEGRATOR_BITS, fraction)
 }
 
 /// `value * gain` for a gain in Q28, below eight in magnitude, held to
