@@ -24,6 +24,7 @@
 
 pub mod chorus;
 pub mod decimator;
+pub mod drift;
 pub mod envelope;
 pub mod filter;
 pub mod fixed;
