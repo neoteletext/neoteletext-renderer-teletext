@@ -101,7 +101,7 @@ fn addresses_above_the_registers_are_ignored() {
     let _ = render(&mut sid, 0.05);
     let before = sid.clone();
     for address in REGISTERS as u8..=255 {
-        for value in [0x00, 0x55, 0xFF] {
+        for value in [0x00, 0b0101_0101, 0xFF] {
             sid.write(address, value);
         }
     }
