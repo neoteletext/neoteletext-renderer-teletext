@@ -23,35 +23,56 @@ const FULL_SWING: i32 = WAVEFORM_MAX as i32 * 255;
 const FULL_SWING_MILLIVOLTS: i32 = 6_340 - 5_290;
 
 /// The waveform value at which a 6581's envelope has no effect on the
-/// voice's level, and what each voice and the mixer add whatever the
-/// envelopes, in voice units.
+/// voice's level, and what each voice adds to the mixer whatever its
+/// envelope, in voice units.
 ///
 /// Source: "The C64 Digi", "Tests and results". A voice with its envelope
 /// closed puts the output at 5.70 V, between the 6.34 V of waveform 0 and
 /// the 5.29 V of waveform $FFF at an open envelope: a higher waveform
 /// value is a lower voltage, and the envelope has no effect at (6.34 -
 /// 5.70) / (6.34 - 5.29) of the waveform's range. Each voice with a closed
-/// envelope raises the output by 0.26 V ("5.69 - 5.43 = 0.26 volts"), and
-/// the mixer with nothing connected sits 0.04 V below the level at volume
-/// zero (5.39 V against 5.43 V). These offsets are what the volume
-/// register multiplies when it is used to play samples (Yannes interview:
-/// "By stopping an Oscillator, it was possible to apply a DC voltage to
-/// this D/A").
+/// envelope raises the output by 0.26 V ("5.69 - 5.43 = 0.26 volts").
+/// These offsets are what the volume register multiplies when it is used
+/// to play samples (Yannes interview: "By stopping an Oscillator, it was
+/// possible to apply a DC voltage to this D/A"). The reference program's
+/// 6581 agrees on the voices: measured from its output on 17 November
+/// 2026, taking each silent voice out of the mixer lowers the volume
+/// register's step by 0.22 to 0.26 of a voice's full swing, against the
+/// 0.26 / 1.05 here.
 const WAVEFORM_ZERO_6581: i32 = (6_340 - 5_700) * WAVEFORM_MAX as i32 / FULL_SWING_MILLIVOLTS;
 const VOICE_OFFSET_6581: i32 = 260 * FULL_SWING / FULL_SWING_MILLIVOLTS;
-const MIXER_OFFSET_6581: i32 = -40 * FULL_SWING / FULL_SWING_MILLIVOLTS;
-
-/// The same for an 8580.
+/// What a 6581's mixer adds by itself, in voice units: 0.77 of a voice's
+/// full swing.
 ///
-/// Source: own choice. "There is no (or no significant) DC offset on the
-/// master volume D/A in the 8580" ("The C64 Digi", "The 8580"), and
-/// samples played by the volume register are "very quiet" on it
-/// (retroisle.com). The waveform is taken to swing about its middle, the
-/// voices to add nothing, and the mixer to keep a sixteenth of the offset
-/// three idle voices give a 6581.
+/// Source: fitted to the output of reSIDfp's default 6581, measured 17
+/// November 2026: with the chip silent, the step heard when the volume
+/// goes from 0 to 15 is 1.59 times the span of a triangle at full volume,
+/// and 0.77 times it with all three voices taken out of the mixer; with
+/// this offset the two are 1.57 and 0.80 here. The chip of "The C64 Digi"
+/// measured far less, 0.72 V from volume 0 to 15 against the 1.05 V of a
+/// voice, and its mixer alone 0.04 V the other way; chips differ in how
+/// loudly they play samples, and the offset before, taken from that
+/// article, gave a step of 0.73 (TODO-6427 fault 4).
+const MIXER_OFFSET_6581: i32 = FULL_SWING / 100 * 77;
+
+/// The same for an 8580: the waveform swings about its middle, and each
+/// voice and the mixer add 0.07 of a voice's full swing.
+///
+/// Source: fitted to the output of reSIDfp's default 8580, measured 17
+/// November 2026: with the chip silent, the step heard when the volume
+/// goes from 0 to 15 is 0.28 times the span of a triangle at full volume,
+/// and it falls by 0.07 for each voice taken out of the mixer, to 0.07.
+/// A voice held at waveform $FFF and at 0 with its envelope open moves
+/// the step by 0.46 one way and 0.57 the other: the middle of the
+/// waveform, less the voice's 0.07. That is five times quieter than the
+/// 6581, as public accounts have it: "There is no (or no significant) DC
+/// offset on the master volume D/A in the 8580" ("The C64 Digi", "The
+/// 8580"), and samples played by the volume register are "very quiet" on
+/// it (retroisle.com). (TODO-6427 fault 4: the offsets before, the
+/// mixer's alone at 0.05, gave a step of 0.05.)
 const WAVEFORM_ZERO_8580: i32 = (WAVEFORM_MAX as i32 + 1) / 2;
-const VOICE_OFFSET_8580: i32 = 0;
-const MIXER_OFFSET_8580: i32 = 3 * VOICE_OFFSET_6581 / 16;
+const VOICE_OFFSET_8580: i32 = FULL_SWING / 100 * 7;
+const MIXER_OFFSET_8580: i32 = FULL_SWING / 100 * 7;
 
 /// The levels of a chip model's converters.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -612,14 +633,15 @@ mod tests {
     }
 
     #[test]
-    fn levels_are_the_measured_voltages() {
+    fn levels_are_the_measured_ones() {
         let levels = Levels::of(ChipModel::Mos6581);
         assert_eq!(levels.waveform_zero, 2496);
-        // 0.26 V and -0.04 V of the 1.05 V that 4095 * 255 units are.
+        // 0.26 V of the 1.05 V that 4095 * 255 units are, and 0.77 of
+        // those units.
         assert_eq!(levels.voice_offset, 258_570);
-        assert_eq!(levels.mixer_offset, -39_780);
+        assert_eq!(levels.mixer_offset, 804_034);
         let levels = Levels::of(ChipModel::Mos8580);
-        assert_eq!((levels.waveform_zero, levels.voice_offset), (2048, 0));
+        assert_eq!((levels.waveform_zero, levels.voice_offset, levels.mixer_offset), (2048, 73_094, 73_094));
     }
 
     #[test]

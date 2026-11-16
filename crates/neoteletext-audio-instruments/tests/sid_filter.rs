@@ -209,7 +209,7 @@ fn a_voice_reaches_the_output_by_one_path_only() {
 }
 
 #[test]
-fn the_volume_register_plays_samples_on_a_6581_and_barely_on_an_8580() {
+fn the_volume_register_plays_samples_on_a_6581_and_quietly_on_an_8580() {
     let played = |model: ChipModel| {
         let mut sid = Sid::new(model, ChipClock::Pal);
         let mut samples = Vec::new();
@@ -223,14 +223,54 @@ fn the_volume_register_plays_samples_on_a_6581_and_barely_on_an_8580() {
         amplitude(&samples[4800..], 1000.0)
     };
     let (old, new) = (played(ChipModel::Mos6581), played(ChipModel::Mos8580));
-    // "The C64 Digi": the 6581's output rises 0.72 V from volume 0 to 15,
-    // against 1.05 V for a voice's full swing: here 0.72 / 1.05 of 4,095 *
-    // 255 * 15 * 40 / 65,536 samples, the 6581's output gain, and a square
-    // wave of that has 2/π of it at its fundamental. The offsets used are
-    // 3 * 0.26 - 0.04 = 0.74 V.
-    let expected = 0.74 / 1.05 * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    // The 6581's three silent voices and its mixer add 3 * 0.26 / 1.05 +
+    // 0.77 of a voice's full swing, 4,095 * 255 units, which the volume's
+    // fifteen steps and the 6581's output gain, 40 / 65,536, bring to
+    // samples; a square wave of that has 2/π of it at its fundamental.
+    let expected = (3.0 * 0.26 / 1.05 + 0.77) * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((old / expected - 1.0).abs() < 0.05, "6581: {old} for {expected}");
-    assert!(new < old / 10.0 && new > old / 100.0, "8580: {new} against {old}");
+    // The 8580's add 4 * 0.07 of it, at an output gain of 32 / 65,536.
+    let expected = 0.28 * 4095.0 * 255.0 * 15.0 * 32.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    assert!((new / expected - 1.0).abs() < 0.05, "8580: {new} for {expected}");
+}
+
+/// The largest change over eight samples of what `sid` plays next: the
+/// height of a step.
+fn step(sid: &mut Sid) -> f64 {
+    let samples = render(sid, 0.01);
+    samples.windows(9).map(|window| f64::from(i32::from(window[8]) - i32::from(window[0])).abs()).fold(0.0, f64::max)
+}
+
+#[test]
+fn the_volume_registers_step_is_as_loud_as_the_references() {
+    // TODO-6427 fault 4: the step heard when only the volume changes, as
+    // a share of the span of one triangle at full volume, was 0.73 on the
+    // 6581 and 0.05 on the 8580. Measured from the reference program's
+    // output on 17 November 2026 the same way, it is 1.59 and 0.28; with
+    // its voices out of the mixer, 0.77 and 0.07.
+    for (model, silent, mixer) in [(ChipModel::Mos6581, 1.59, 0.77), (ChipModel::Mos8580, 0.28, 0.07)] {
+        let clock = ChipClock::Pal;
+        let mut sid = Sid::new(model, clock);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        start(&mut sid, 0, frequency_register(440.0, clock), TRIANGLE);
+        let _ = render(&mut sid, 0.5);
+        let triangle = render(&mut sid, 0.5);
+        let span = f64::from(i32::from(*triangle.iter().max().unwrap()) - i32::from(*triangle.iter().min().unwrap()));
+
+        let mut sid = Sid::new(model, clock);
+        let _ = render(&mut sid, 0.5);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        let found = step(&mut sid) / span;
+        assert!((found / silent - 1.0).abs() < 0.1, "{model:?}: a step of {found} for {silent}");
+
+        // The three voices sent to the filter, and no output of it heard.
+        let mut sid = Sid::new(model, clock);
+        sid.write(RESONANCE_ROUTING, 0x07);
+        let _ = render(&mut sid, 0.5);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        let found = step(&mut sid) / span;
+        assert!((found / mixer - 1.0).abs() < 0.1, "{model:?}: the mixer's step of {found} for {mixer}");
+    }
 }
 
 #[test]
