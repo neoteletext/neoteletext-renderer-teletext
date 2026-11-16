@@ -71,10 +71,16 @@
 //! # What is not the chip
 //!
 //! No two 6581s sound alike, and this is one plausible chip, not a
-//! measured one. The filter's cutoff curve, its resonance and its
-//! distortion are own models; so is what a 6581 does to combined
-//! waveforms beyond the logical AND. The external audio input, the two
-//! potentiometer registers and the chip's noise floor are not modelled.
+//! measured one. The 6581 filter's cutoff curve, its highest resonance
+//! and its level are fitted to the output of a reference program run
+//! beside this one (DEC-6425), and so is the output level of both chips;
+//! each such figure says so where it is defined. The 6581 filter's
+//! distortion is an own model; so is what a 6581 does to combined
+//! waveforms beyond the logical AND. That the 6581's cutoff rises with
+//! the level of the signal in the filter is not modelled: its curve is
+//! the one for a signal of middling level. The external audio input, the
+//! two potentiometer registers and the chip's noise floor are not
+//! modelled.
 
 mod analogue;
 mod decimator;

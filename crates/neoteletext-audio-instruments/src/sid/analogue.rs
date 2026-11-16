@@ -102,43 +102,86 @@ const MIX_LIMIT: i32 = 1 << 26;
 /// 11-bit number").
 const CUTOFF_MAX: u32 = (1 << 11) - 1;
 
-/// The 6581's cutoff at the bottom of the register, in hertz.
-///
-/// Source: own choice from two public figures. The data sheet gives 30 Hz
-/// for the bottom of the range with 2,200 pF capacitors and a cutoff
-/// inversely proportional to them (maximum cutoff "= 2.6E-5/C"); the Commodore 64
-/// fits 470 pF (c64-wiki.com, "SID", pins 1 to 4). 30 Hz * 2200 / 470.
-const CUTOFF_FLOOR_6581_HZ: u32 = 30 * 2_200 / 470;
-/// The 6581's cutoff at the top of the register, in hertz.
-///
-/// Source: own choice: the data sheet's nominal top, 12 kHz. Real chips
-/// differ by octaves ("one probably won't find two identical 6581 chips",
-/// "The C64 Digi"; csdb.dk forum, "6581 filter curves").
-const CUTOFF_TOP_6581_HZ: u32 = 12_000;
-/// Where the 6581's cutoff starts and stops bending upwards, in register
-/// steps.
-///
-/// Source: own model of one typical chip, from the designer's account
-/// that the cutoff is set by "FETs as voltage-controlled resistors"
-/// (Yannes interview): a transistor does not conduct below its threshold,
-/// so the bottom of the register leaves the cutoff at its floor; above it
-/// the conductance, and with it the cutoff, rises in proportion. The bend
-/// between is a parabola that meets both lines with their slopes. The
-/// threshold at a quarter of the register and the bend's width of an
-/// eighth are own choices; that the 6581's curve is far from the straight
-/// line of the data sheet is public ("SID filter measurements", Michiel
-/// Boland: "On the old SID this did not really work").
-const CUTOFF_BEND_6581: (u32, u32) = (384, 640);
-/// The middle of the bend: where the straight rise would meet the floor.
-const CUTOFF_THRESHOLD_6581: u32 = u32::midpoint(CUTOFF_BEND_6581.0, CUTOFF_BEND_6581.1);
-/// Twice the bend's width: what divides the square of the distance into
-/// the bend, times the slope, to give the parabola.
-const CUTOFF_BEND_DIVISOR: u32 = 2 * (CUTOFF_BEND_6581.1 - CUTOFF_BEND_6581.0);
-/// Fraction bits of the 6581's rise in hertz for each register step.
+/// Fraction bits of the 6581's rise in hertz for each register step, and
+/// of the bend's coefficient below that: as many as keep the square of
+/// the bend's width times the coefficient inside 32 bits.
 const CUTOFF_SLOPE_BITS: u32 = 8;
-/// The 6581's rise above the bend, in hertz a step.
-const CUTOFF_SLOPE_6581: u32 =
-    ((CUTOFF_TOP_6581_HZ - CUTOFF_FLOOR_6581_HZ) << CUTOFF_SLOPE_BITS) / (CUTOFF_MAX - CUTOFF_THRESHOLD_6581);
+const CUTOFF_BEND_BITS: u32 = 12;
+
+/// The 6581's cutoff curve: one typical chip's, in four parts. From the
+/// bottom of the register the cutoff lies at a floor; it bends upwards to
+/// a straight rise; the rise slackens at a knee; and it stops at a top.
+///
+/// Source: the shape of its foot is an own model of the designer's
+/// account that the cutoff is set by "FETs as voltage-controlled
+/// resistors" (Yannes interview): a transistor does not conduct below its
+/// threshold, so the bottom of the register leaves the cutoff at its
+/// floor; above it the conductance, and with it the cutoff, rises in
+/// proportion; the bend between is a parabola that meets both lines with
+/// their slopes. That the 6581's curve is far from the straight line of
+/// the data sheet, and that no two chips share one, is public ("SID
+/// filter measurements", Michiel Boland: "On the old SID this did not
+/// really work"; "one probably won't find two identical 6581 chips", "The
+/// C64 Digi"; csdb.dk forum, "6581 filter curves"). The data sheet's own
+/// figures give a floor of 140 Hz (30 Hz with 2,200 pF capacitors, a
+/// cutoff inversely proportional to them, and the Commodore 64's 470 pF)
+/// and a top of 12 kHz.
+///
+/// The figures are fitted to the output of reSIDfp's default 6581,
+/// measured 17 November 2026: the corner of its low-pass for noise on one
+/// voice, at full level and at a fifth of it, with no resonance and with
+/// the highest. Its cutoff rises with the signal's level where the curve
+/// bends (at register $100, 390 to 404 Hz for the quiet noise and 752 to
+/// 1,122 Hz for the loud), and this curve runs between the two. In hertz,
+/// measured and then this curve:
+///
+/// | Register | Measured | Here |
+/// |---|---|---|
+/// | $000 | 261 to 365 | 320 |
+/// | $080 | 256 to 571 | 320 |
+/// | $100 | 390 to 1,122 | 577 |
+/// | $180 | 1,113 to 2,067 | 1,291 |
+/// | $200 | 1,964 to 2,948 | 2,462 |
+/// | $280 | 3,652 to 4,378 | 4,090 |
+/// | $300 | 5,549 to 6,331 | 5,946 |
+/// | $380 | 7,470 to 8,404 | 7,802 |
+/// | $400 | 8,308 to 9,628 | 9,210 |
+/// | $480 | 10,020 to 12,252 | 10,618 |
+/// | $580 | 13,065 to 16,822 | 13,434 |
+/// | $680 | 15,571 to 17,463 | 16,250 |
+/// | $7FF | 16,706 to 18,794 | 17,000 |
+///
+/// The test `the_6581_curve_is_the_one_fitted` holds the curve to them.
+/// (TODO-6427 fault 2: the curve before, with a floor of 140 Hz to
+/// register 384 and a top of 12 kHz, lay two to five times lower between
+/// $080 and $400.)
+mod curve_6581 {
+    use super::CUTOFF_SLOPE_BITS;
+
+    /// The floor, in hertz.
+    pub(super) const FLOOR_HZ: u32 = 320;
+    /// Where the bend from the floor to the rise starts and stops, in
+    /// register steps.
+    pub(super) const BEND: (u32, u32) = (120, 640);
+    /// The middle of the bend: where the straight rise would meet the
+    /// floor.
+    pub(super) const THRESHOLD: u32 = u32::midpoint(BEND.0, BEND.1);
+    /// The rise above the bend: 14.5 Hz a register step.
+    pub(super) const SLOPE: u32 = 29 << (CUTOFF_SLOPE_BITS - 1);
+    /// The register step at which the rise slackens.
+    pub(super) const KNEE: u32 = 896;
+    /// The rise above the knee: 11 Hz a register step.
+    pub(super) const UPPER_SLOPE: u32 = 11 << CUTOFF_SLOPE_BITS;
+    /// The top, in hertz.
+    pub(super) const TOP_HZ: u32 = 17_000;
+}
+/// What a squared distance into the 6581's bend is multiplied by, in
+/// [`CUTOFF_BEND_BITS`] fraction bits more than the slope's: the slope
+/// over twice the bend's width, so that the slope grows from nothing to
+/// all of itself across the bend. Worked out here, once, so that setting
+/// the cutoff does not divide.
+const CUTOFF_BEND_COEFFICIENT: u32 =
+    (curve_6581::SLOPE << CUTOFF_BEND_BITS) / (2 * (curve_6581::BEND.1 - curve_6581::BEND.0));
 
 /// The 8580's cutoff at the bottom of the register, in hertz (data sheet:
 /// "ranges from 30 Hz to 12 kHz").
@@ -158,19 +201,26 @@ const CUTOFF_SLOPE_8580: (u32, u32) = (3_125, 9);
 /// Source: own choice. Data sheet, register $17: "16 resonance settings
 /// ranging linearly from no resonance (0) to maximum resonance (15)".
 const DAMPING_NONE: u32 = 46_341;
-/// The damping at the highest resonance: a peak of 6 dB (Q of 2) on a
-/// 6581 and of 12 dB (Q of 4) on an 8580.
+/// The damping at the highest resonance: a Q of 2.4 (a peak of 7.6 dB) on
+/// a 6581 and of 4 (12 dB) on an 8580.
 ///
-/// Source: own choice of two round figures. The designer could not get
-/// high resonance from the 6581 ("It would also have greatly improved the
-/// filter, particularly in achieving high resonance", Yannes interview),
-/// and the 8580 "can achieve higher resonances" (Wikipedia, "MOS
-/// Technology 6581", "Revisions"). The damping falls in equal steps
-/// between, as a ladder of weighted resistors feeding back a share of the
-/// output would make it (Yannes interview).
+/// Source: the 8580's is an own choice of a round figure; the 6581's is
+/// fitted to the output of reSIDfp's default 6581, measured 17 November
+/// 2026: noise through its low-pass at the highest resonance fits a
+/// two-pole response with a Q of 2.0 to 2.5 for cutoff registers from
+/// $400 up, and 1.0 to 1.1 at resonance 8, where equal steps of damping
+/// from none give 1.13. That the older chip has the less is public: the
+/// designer could not get high resonance from the 6581 ("It would also
+/// have greatly improved the filter, particularly in achieving high
+/// resonance", Yannes interview), and the 8580 "can achieve higher
+/// resonances" (Wikipedia, "MOS Technology 6581", "Revisions"). The
+/// damping falls in equal steps between, as a ladder of weighted
+/// resistors feeding back a share of the output would make it (Yannes
+/// interview).
 const fn damping_highest(model: ChipModel) -> u32 {
     match model {
-        ChipModel::Mos6581 => 1 << (DAMPING_BITS - 1),
+        // 1 / 2.4 = 5 / 12.
+        ChipModel::Mos6581 => (5 << DAMPING_BITS) / 12,
         ChipModel::Mos8580 => 1 << (DAMPING_BITS - 2),
     }
 }
@@ -204,15 +254,16 @@ const SATURATION_PRE_SHIFT: u32 = 6;
 /// Shift from that square to distance² / (2 * width), the parabola's fall.
 const SATURATION_POST_SHIFT: u32 = SATURATION_WIDTH_BITS + 1 - 2 * SATURATION_PRE_SHIFT;
 
-/// Shift from the low-pass state to the share by which it moves the
-/// 6581's cutoff, in [`COEFFICIENT_BITS`] fraction bits, and the bounds of
-/// that share (a half either way).
+/// What the 6581's filter input is multiplied by with no resonance and
+/// with the highest, in [`COEFFICIENT_BITS`] fraction bits: 0.67 and
+/// 0.80, with equal steps between.
 ///
-/// Source: own model. "The cutoff curve changes with signal amplitude"
-/// ("The C64 Digi", "The 8580"): the resistance of the transistors that
-/// set the cutoff depends on the signal across them. Here one voice at
-/// full envelope moves the cutoff by an eighth either way.
-const CUTOFF_MOVEMENT: (u32, i32, i32) = (6, -(1 << 15), 1 << 15);
+/// Source: fitted to the output of reSIDfp's default 6581, measured 17
+/// November 2026: noise through its low-pass is 3.5 dB below the same
+/// noise sent past the filter in the pass band with no resonance, 2.9 dB
+/// at resonance 8 and 1.9 dB at resonance 15, at a fifth of full level as
+/// at full level.
+const FILTER_GAIN_6581: (u32, u32) = (43_909, 52_429);
 
 /// What the mixer's sum times the volume's sixteen steps is multiplied by
 /// to give output units, in [`COEFFICIENT_BITS`] fraction bits, for each
@@ -301,9 +352,12 @@ pub(super) struct Analogue {
     resonance: u8,
     routing: u8,
     mode_volume: u8,
-    /// The integrators' coefficient for the cutoff register.
+    /// The integrators' coefficient for the cutoff register: the 8580's,
+    /// and the 6581's with no signal in the filter.
     coefficient: u32,
     damping: u32,
+    /// What the 6581's filter input is multiplied by at this resonance.
+    filter_gain: u32,
     low: i32,
     band: i32,
     /// The output stage's low-pass.
@@ -324,6 +378,7 @@ impl Analogue {
             mode_volume: 0,
             coefficient: coefficient(model, clock, 0),
             damping: DAMPING_NONE,
+            filter_gain: FILTER_GAIN_6581.0,
             low: 0,
             band: 0,
             output: 0,
@@ -350,6 +405,9 @@ impl Analogue {
         let span = DAMPING_NONE.saturating_sub(damping_highest(self.model));
         let fall = span.saturating_mul(u32::from(self.resonance)) / RESONANCE_STEPS;
         self.damping = DAMPING_NONE.saturating_sub(fall);
+        let rise = FILTER_GAIN_6581.1.saturating_sub(FILTER_GAIN_6581.0);
+        self.filter_gain =
+            FILTER_GAIN_6581.0.saturating_add(rise.saturating_mul(u32::from(self.resonance)) / RESONANCE_STEPS);
     }
 
     /// Writes the filter's mode and the volume (register $18).
@@ -372,21 +430,17 @@ impl Analogue {
     /// and of those sent past it, in voice units, to one output sample.
     #[inline]
     pub(super) fn process(&mut self, filtered: i32, direct: i32) -> i16 {
-        let (input, coefficient) = match self.model {
-            ChipModel::Mos6581 => {
-                let movement = (self.low >> CUTOFF_MOVEMENT.0).clamp(CUTOFF_MOVEMENT.1, CUTOFF_MOVEMENT.2);
-                let moved = self.coefficient.cast_signed().wrapping_mul(movement) >> COEFFICIENT_BITS;
-                (saturate(filtered), self.coefficient.wrapping_add_signed(moved))
-            }
-            ChipModel::Mos8580 => (filtered, self.coefficient),
+        let input = match self.model {
+            ChipModel::Mos6581 => scale(saturate(filtered), self.filter_gain),
+            ChipModel::Mos8580 => filtered,
         };
+        let coefficient = self.coefficient;
         // The two-integrator loop (Yannes interview: "a classic multi-mode
         // (state variable) VCF design"), in Chamberlin's digital form. Its
         // poles are inside the unit circle while the coefficient f and the
         // damping q keep f * q < 2 and f² + 2 f q < 4; the largest f here
-        // is 0.5 and the largest q 1.42. The bounds on the states are for
-        // the saturating input and the moving cutoff, which no such
-        // condition covers.
+        // is 0.42 and the largest q 1.42. The bounds on the states are for
+        // the 6581's saturating input, which no such condition covers.
         let damped = scale(self.band, self.damping).wrapping_mul(1 << (COEFFICIENT_BITS - DAMPING_BITS));
         let high = input.wrapping_sub(self.low).wrapping_sub(damped);
         self.band = self.band.wrapping_add(scale(high, coefficient)).clamp(-STATE_LIMIT, STATE_LIMIT);
@@ -467,17 +521,21 @@ pub(super) const fn cutoff_hz(model: ChipModel, register: u32) -> u32 {
     let register = if register > CUTOFF_MAX { CUTOFF_MAX } else { register };
     match model {
         ChipModel::Mos6581 => {
-            let rise = if register <= CUTOFF_BEND_6581.0 {
+            let rise = if register <= curve_6581::BEND.0 {
                 0
-            } else if register < CUTOFF_BEND_6581.1 {
+            } else if register < curve_6581::BEND.1 {
                 // The parabola whose slope grows from nothing to the
                 // line's across the bend: slope * d² / (2 * width).
-                let into = register.saturating_sub(CUTOFF_BEND_6581.0);
-                CUTOFF_SLOPE_6581.saturating_mul(into).saturating_mul(into) / CUTOFF_BEND_DIVISOR
+                let into = register.saturating_sub(curve_6581::BEND.0);
+                into.saturating_mul(into).saturating_mul(CUTOFF_BEND_COEFFICIENT) >> CUTOFF_BEND_BITS
+            } else if register <= curve_6581::KNEE {
+                curve_6581::SLOPE.saturating_mul(register.saturating_sub(curve_6581::THRESHOLD))
             } else {
-                CUTOFF_SLOPE_6581.saturating_mul(register.saturating_sub(CUTOFF_THRESHOLD_6581))
+                let knee = curve_6581::SLOPE.saturating_mul(curve_6581::KNEE.saturating_sub(curve_6581::THRESHOLD));
+                knee.saturating_add(curve_6581::UPPER_SLOPE.saturating_mul(register.saturating_sub(curve_6581::KNEE)))
             };
-            CUTOFF_FLOOR_6581_HZ.saturating_add(rise >> CUTOFF_SLOPE_BITS)
+            let hz = curve_6581::FLOOR_HZ.saturating_add(rise >> CUTOFF_SLOPE_BITS);
+            if hz > curve_6581::TOP_HZ { curve_6581::TOP_HZ } else { hz }
         }
         ChipModel::Mos8580 => {
             CUTOFF_FLOOR_8580_HZ.saturating_add(register.saturating_mul(CUTOFF_SLOPE_8580.0) >> CUTOFF_SLOPE_8580.1)
@@ -502,8 +560,8 @@ const fn coefficient(model: ChipModel, clock: ChipClock, register: u32) -> u32 {
 )]
 mod tests {
     use super::{
-        Analogue, CUTOFF_FLOOR_6581_HZ, CUTOFF_MAX, CUTOFF_TOP_6581_HZ, ChipClock, ChipModel, FULL_SWING, Levels,
-        MIX_LIMIT, SATURATION_FLAT, SATURATION_START, STATE_LIMIT, coefficient, cutoff_hz, cutoff_scale,
+        Analogue, CUTOFF_BEND_COEFFICIENT, CUTOFF_MAX, ChipClock, ChipModel, FULL_SWING, Levels, MIX_LIMIT,
+        SATURATION_FLAT, SATURATION_START, STATE_LIMIT, coefficient, curve_6581, cutoff_hz, cutoff_scale,
         output_low_pass, saturate, scale,
     };
 
@@ -589,18 +647,55 @@ mod tests {
     }
 
     #[test]
-    fn the_6581_curve_has_a_floor_a_bend_and_a_straight_rise() {
-        assert_eq!(CUTOFF_FLOOR_6581_HZ, 140);
-        assert_eq!(cutoff_hz(ChipModel::Mos6581, 0), 140);
-        assert_eq!(cutoff_hz(ChipModel::Mos6581, 384), 140);
-        // The bend meets the line where it ends, to the hertz.
-        // The bend meets the line where it ends, at the line's slope of
-        // under 8 Hz a step.
-        assert!(cutoff_hz(ChipModel::Mos6581, 640) - cutoff_hz(ChipModel::Mos6581, 639) <= 8);
-        assert_eq!(cutoff_hz(ChipModel::Mos6581, 640), 140 + 988);
-        assert!(cutoff_hz(ChipModel::Mos6581, 641) - cutoff_hz(ChipModel::Mos6581, 640) <= 8);
-        // The slope's eight fraction bits leave the top a few hertz short.
-        assert!(cutoff_hz(ChipModel::Mos6581, CUTOFF_MAX).abs_diff(CUTOFF_TOP_6581_HZ) < 8);
+    fn the_6581_curve_has_a_floor_a_bend_two_rises_and_a_top() {
+        use curve_6581::{BEND, FLOOR_HZ, KNEE, THRESHOLD, TOP_HZ};
+        let hz = |register: u32| cutoff_hz(ChipModel::Mos6581, register);
+        assert_eq!((hz(0), hz(BEND.0)), (FLOOR_HZ, FLOOR_HZ));
+        // The straight rise: 14.5 Hz a step from where it would meet the
+        // floor, half way along the bend; then 11 Hz a step from the knee.
+        for register in [BEND.1, 768, KNEE] {
+            assert_eq!(hz(register), FLOOR_HZ + (register - THRESHOLD) * 29 / 2, "{register}");
+        }
+        assert_eq!(hz(KNEE + 100), hz(KNEE) + 1_100);
+        // The bend leaves the floor level and meets the line at the
+        // line's slope, and its arithmetic stays inside 32 bits.
+        assert!(hz(BEND.0 + 1) - hz(BEND.0) <= 1);
+        assert!((14..=15).contains(&(hz(BEND.1) - hz(BEND.1 - 1))), "{}", hz(BEND.1) - hz(BEND.1 - 1));
+        assert!((14..=15).contains(&(hz(BEND.1 + 1) - hz(BEND.1))));
+        let width = u64::from(BEND.1 - BEND.0);
+        assert!(u32::try_from(width * width * u64::from(CUTOFF_BEND_COEFFICIENT)).is_ok());
+        // The top is reached inside the register and held.
+        assert!(hz(CUTOFF_MAX - 256) == TOP_HZ && hz(CUTOFF_MAX) == TOP_HZ);
+        assert!(hz(KNEE) < TOP_HZ / 2);
+    }
+
+    #[test]
+    fn the_6581_curve_is_the_one_fitted() {
+        // The corners of the reference program's low-pass, measured from
+        // its output on 17 November 2026 for noise at two levels and two
+        // resonances (the table at `curve_6581`): lowest and highest, in
+        // hertz. The curve passes between them, or within a tenth.
+        // TODO-6427 fault 2: the curve before lay two to five times lower
+        // between $080 and $400.
+        let measured = [
+            (0x000, 261, 365),
+            (0x080, 256, 571),
+            (0x100, 390, 1_122),
+            (0x180, 1_113, 2_067),
+            (0x200, 1_964, 2_948),
+            (0x280, 3_652, 4_378),
+            (0x300, 5_549, 6_331),
+            (0x380, 7_470, 8_404),
+            (0x400, 8_308, 9_628),
+            (0x480, 10_020, 12_252),
+            (0x580, 13_065, 16_822),
+            (0x680, 15_571, 17_463),
+            (0x7FF, 16_706, 18_794),
+        ];
+        for (register, lowest, highest) in measured {
+            let found = cutoff_hz(ChipModel::Mos6581, register);
+            assert!(found * 10 >= lowest * 9 && found * 10 <= highest * 11, "${register:03X}: {found} Hz");
+        }
     }
 
     #[test]
@@ -612,12 +707,19 @@ mod tests {
 
     #[test]
     fn the_coefficient_stays_inside_the_stable_range() {
-        // f * q < 2 and f² + 2 f q < 4 with q at most √2 hold for f up to
-        // 0.5, even with the 6581's cutoff moved up by a half.
+        // f * q < 2 and f² + 2 f q < 4 with the damping q at most √2: in
+        // 16 fraction bits, with q rounded up to 1.4143.
+        const ONE: u64 = 1 << 16;
+        const DAMPING: u64 = 92_688;
         for model in [ChipModel::Mos6581, ChipModel::Mos8580] {
             for clock in [ChipClock::Pal, ChipClock::Ntsc] {
-                let highest = coefficient(model, clock, CUTOFF_MAX);
-                assert!(highest * 3 / 2 < 1 << 15, "{model:?} {clock:?}: {highest}");
+                let highest =
+                    u64::from((0..=CUTOFF_MAX).map(|register| coefficient(model, clock, register)).max().unwrap());
+                assert!(highest * DAMPING < 2 * ONE * ONE, "{model:?} {clock:?}: {highest}");
+                assert!(highest * highest + 2 * highest * DAMPING < 4 * ONE * ONE, "{model:?} {clock:?}: {highest}");
+                // And 2π f / rate stands for 2 sin(π f / rate) within one
+                // per cent: the coefficient is below a half.
+                assert!(highest < ONE / 2, "{model:?} {clock:?}: {highest}");
                 assert!(coefficient(model, clock, 0) > 0);
             }
         }
