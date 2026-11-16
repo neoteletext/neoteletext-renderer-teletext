@@ -36,7 +36,7 @@ readonly MSRV_TOOLCHAIN
 # WebAssembly, and the std crates for operating systems without a terminal.
 # The audio profile's PCM16 and IMA ADPCM are named, though in its default,
 # because microcontroller ports keep them (decision E.131).
-readonly BARE="-p neoteletext-core -p neoteletext-formats -p neoteletext-slicer -p neoteletext-web -p neoteletext-image -p neoteletext-audio -p neoteletext-audio-mix -p neoteletext-opus -p neoteletext-input --features neoteletext-audio/pcm16,neoteletext-audio/ima"
+readonly BARE="-p neoteletext-core -p neoteletext-formats -p neoteletext-slicer -p neoteletext-web -p neoteletext-image -p neoteletext-audio -p neoteletext-audio-mix -p neoteletext-audio-instruments -p neoteletext-opus -p neoteletext-input --features neoteletext-audio/pcm16,neoteletext-audio/ima"
 # The audio profile as the desktops build it: Opus alone, PCM16 and IMA
 # ADPCM compiled out (decision E.131).
 readonly AUDIO_DESKTOP="-p neoteletext-audio --no-default-features --features idl,opus"

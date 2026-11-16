@@ -1,0 +1,39 @@
+[package]
+name = "neoteletext-audio-instruments"
+description = "The audio profile's instruments (area AUD): the SID chip and the Yamaha DX7, rendered to samples in integers, no_std, no allocation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# The crate is MIT, as the workspace is, except the files under
+# `src/dx7/msfa/`, which are translated from Google's
+# music-synthesizer-for-android and stay under Apache-2.0 (DEC-6420).
+license = "MIT AND Apache-2.0"
+publish.workspace = true
+
+# REQ-GEN-017 and REQ-6412 item 1: no dependencies, inside the workspace or
+# outside it.
+[dependencies]
+
+[features]
+# Decision E.61: each optional area is a feature, all on by default.
+default = ["sid", "dx7"]
+# The SID chip, MOS 6581 and 8580 (codec 3, REQ-6412 item 4).
+sid = []
+# The Yamaha DX7 (codecs 4 and 5, REQ-6412 items 5 and 6).
+dx7 = []
+
+# Each example plays or builds one instrument, so it is built only with it.
+[[example]]
+name = "sid_demo"
+required-features = ["sid"]
+
+[[example]]
+name = "sid_fir_table"
+required-features = ["sid"]
+
+[[example]]
+name = "dx7_demo"
+required-features = ["dx7"]
+
+[lints]
+workspace = true

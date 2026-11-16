@@ -23,6 +23,9 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         // Sent whole: an Opus sound is decoded again from its first block.
         #[cfg(feature = "opus")]
         self.opus.release(entry.sound);
+        // And an instrument's sound is rendered again from its first.
+        #[cfg(any(feature = "sid", feature = "dx7"))]
+        self.instruments.release(entry.sound);
         self.send_blocks(entry, 0, entry.blocks, sink);
     }
 
@@ -51,6 +54,13 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Opus => {}
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
+            #[cfg(any(feature = "sid", feature = "dx7"))]
+            Codec::Sid | Codec::Dx7 => self.instruments.send_stored(&self.store, entry, &mut self.statistics, sink),
+            // A codec the build leaves out: none is stored. A bank is
+            // patches, never samples (REQ-6411 item 4).
+            #[cfg(not(any(feature = "sid", feature = "dx7")))]
+            Codec::Sid | Codec::Dx7 => {}
+            Codec::Dx7Bank => {}
         }
     }
 
@@ -77,6 +87,14 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Opus => {}
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
+            #[cfg(any(feature = "sid", feature = "dx7"))]
+            Codec::Sid | Codec::Dx7 => {
+                let next = self.instruments.send_live(&self.store, &entry, &mut self.statistics, sink);
+                self.store.set_live_cursor(sound, next, entry.arrived_ms);
+            }
+            #[cfg(not(any(feature = "sid", feature = "dx7")))]
+            Codec::Sid | Codec::Dx7 => {}
+            Codec::Dx7Bank => {}
         }
     }
 }
@@ -281,8 +299,9 @@ fn decode(codec: Codec, block: &[u8], pcm: &mut [i16; MAX_BLOCK_SAMPLES]) -> Opt
         Codec::Pcm16 => None,
         #[cfg(not(feature = "ima"))]
         Codec::ImaAdpcm => None,
-        // An Opus packet cannot be decoded alone: the decoders of
-        // `receiver::opus` take them in order.
-        Codec::Opus => None,
+        // Neither decodes alone: an Opus packet and an instrument's block
+        // are taken in order, by `receiver::opus` and
+        // `receiver::instruments`; a bank is patches, never samples.
+        Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => None,
     }
 }

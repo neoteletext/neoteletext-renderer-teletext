@@ -22,6 +22,8 @@ fn object(handle: u8, generation: u16, samples: u32) -> Object<'static> {
         blocks: u16::try_from(samples.div_ceil(50)).unwrap(),
         label: None,
         language: None,
+        chip: None,
+        bank: None,
     }
 }
 

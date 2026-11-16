@@ -55,6 +55,11 @@ pub const PROGRESSIVE_BUFFER_MS: u32 = 40;
 /// every block is decoded.
 pub const OPUS_DECODERS: usize = 2;
 
+/// The instruments a receiver keeps (REQ-6411): one for each channel, since
+/// each channel may play an instrument's sound and a live one keeps its
+/// instrument for as long as it plays.
+pub const INSTRUMENT_LANES: usize = CHANNELS as usize;
+
 /// A kibibyte: the audio design's "KB" and "MB" of receiver memory are
 /// binary multiples (DEC-2372), as a port's buffers are.
 const KIB: usize = 1024;

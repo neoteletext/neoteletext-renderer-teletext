@@ -118,6 +118,19 @@ pub const MAX_LANGUAGE: usize = 16;
 pub const TAG_LABEL: u8 = 1;
 /// Extension tag of a language.
 pub const TAG_LANGUAGE: u8 = 2;
+/// Extension tag of a SID sound's chip and clock, one byte (REQ-6411 item
+/// 2): bit 0 is 0 for the 6581 and 1 for the 8580; bit 1 is 0 for the PAL
+/// clock and 1 for the NTSC clock; the rest are 0.
+pub const TAG_SID_CHIP: u8 = 3;
+/// Extension tag of a DX7 sound's bank, one byte: the handle of the sound
+/// that holds its patches (REQ-6411 item 3).
+pub const TAG_DX7_BANK: u8 = 4;
+/// [`TAG_SID_CHIP`]'s bit for the 8580.
+pub const SID_CHIP_8580: u8 = 1;
+/// [`TAG_SID_CHIP`]'s bit for the NTSC clock.
+pub const SID_CLOCK_NTSC: u8 = 2;
+/// The bits of [`TAG_SID_CHIP`] that mean something.
+const SID_CHIP_BITS: u8 = SID_CHIP_8580 | SID_CLOCK_NTSC;
 
 /// Command flag: start before the whole sound has arrived (REQ-AUD-013).
 pub const FLAG_PROGRESSIVE: u8 = 1;
@@ -155,6 +168,11 @@ pub struct Object<'a> {
     pub label: Option<&'a [u8]>,
     /// The BCP 47 language tag, as sent.
     pub language: Option<&'a [u8]>,
+    /// A SID sound's chip and clock ([`TAG_SID_CHIP`]); `None` is a 6581 on
+    /// the PAL clock.
+    pub chip: Option<u8>,
+    /// The handle of a DX7 sound's bank ([`TAG_DX7_BANK`]).
+    pub bank: Option<u8>,
 }
 
 /// A DATA record: whole blocks of a sound (REQ-AUD-005).
@@ -261,8 +279,20 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
     let block_bytes = fields.u16()?;
     let samples = fields.u32()?;
     let blocks = fields.u16()?;
-    let mut object =
-        Object { handle, generation, id, codec, rate_hz, block_bytes, samples, blocks, label: None, language: None };
+    let mut object = Object {
+        handle,
+        generation,
+        id,
+        codec,
+        rate_hz,
+        block_bytes,
+        samples,
+        blocks,
+        label: None,
+        language: None,
+        chip: None,
+        bank: None,
+    };
     if let Some(codec) = codec {
         if !codec.allows_block(block_bytes) {
             return Err(RecordError::BadValue("block size"));
@@ -291,8 +321,27 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
             TAG_LABEL if length <= MAX_LABEL => object.label = Some(value),
             TAG_LANGUAGE if length <= MAX_LANGUAGE => object.language = Some(value),
             TAG_LABEL | TAG_LANGUAGE => return Err(RecordError::BadValue("extension too long")),
+            // The instruments' tags mean something only on their own codec
+            // (REQ-6411 items 2 and 3); on another they are skipped, as any
+            // unknown tag is.
+            TAG_SID_CHIP if codec == Some(Codec::Sid) => match value {
+                [chip] if chip & !SID_CHIP_BITS == 0 => object.chip = Some(*chip),
+                _ => return Err(RecordError::BadValue("chip")),
+            },
+            TAG_DX7_BANK if codec == Some(Codec::Dx7) => match value {
+                [bank] => object.bank = Some(*bank),
+                _ => return Err(RecordError::BadValue("bank")),
+            },
             _ => {}
         }
+    }
+    // A DX7 sound plays the patches of the bank it names (REQ-6411 item 3).
+    if codec == Some(Codec::Dx7) && object.bank.is_none() {
+        return Err(RecordError::BadValue("bank"));
+    }
+    // A bank holds 1 to 32 patches and is never live (REQ-6411 item 4).
+    if codec == Some(Codec::Dx7Bank) && (samples == 0 || samples > crate::DX7_BANK_PATCHES) {
+        return Err(RecordError::BadValue("patches"));
     }
     Ok(object)
 }

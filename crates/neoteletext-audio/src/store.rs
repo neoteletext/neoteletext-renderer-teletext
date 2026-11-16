@@ -28,6 +28,9 @@ pub struct Entry {
     pub samples: u32,
     /// Blocks in the whole sound.
     pub blocks: u16,
+    /// What its codec needs to know of it (REQ-6411): a SID sound's chip
+    /// and clock byte, a DX7 sound's bank handle, and 0 for every other.
+    pub param: u8,
     /// Blocks received so far.
     pub received: u16,
     /// A block arrived twice with different bytes: the sound is not played

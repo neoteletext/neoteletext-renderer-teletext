@@ -79,6 +79,14 @@ const BUILDS: &[Build] = &[
     // The desktop build (Windows, macOS, Linux): PCM16 and IMA ADPCM
     // compiled out, Opus alone (decision E.131).
     Build { package: "neoteletext-audio", features: "idl,opus" },
+    // The instruments, each alone and both with the desktop build
+    // (REQ-6411, REQ-6412).
+    Build { package: "neoteletext-audio", features: "sid" },
+    Build { package: "neoteletext-audio", features: "dx7" },
+    Build { package: "neoteletext-audio", features: "idl,opus,sid,dx7" },
+    Build { package: "neoteletext-audio-instruments", features: "" },
+    Build { package: "neoteletext-audio-instruments", features: "sid" },
+    Build { package: "neoteletext-audio-instruments", features: "dx7" },
     Build { package: "neoteletext-opus", features: "" },
     Build { package: "neoteletext-opus", features: "error-trait" },
     Build { package: "neoteletext-audio-mix", features: "" },

@@ -20,6 +20,7 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
             block_bytes: object.block_bytes,
             samples: object.samples,
             blocks: if live { crate::LIVE_RING_BLOCKS } else { object.blocks },
+            param: object.chip.or(object.bank).unwrap_or(0),
             received: 0,
             conflict: false,
             at_sink: false,
@@ -43,7 +44,8 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
                         && existing.codec == fresh.codec
                         && existing.rate_hz == fresh.rate_hz
                         && existing.block_bytes == fresh.block_bytes
-                        && existing.samples == fresh.samples;
+                        && existing.samples == fresh.samples
+                        && existing.param == fresh.param;
                     return if same { Defined::Repeat } else { Defined::Conflict };
                 }
                 if !crate::serial_newer(object.generation, existing.sound.generation) {

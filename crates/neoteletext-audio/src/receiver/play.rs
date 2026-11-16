@@ -6,7 +6,7 @@ use super::{MS_PER_SECOND, Receiver, duration_ms};
 use crate::control::Play;
 use crate::port::{Start, VoiceSink};
 use crate::store::{Entry, LiveEdge};
-use crate::{CHANNELS, PROGRESSIVE_BUFFER_MS};
+use crate::{CHANNELS, Codec, PROGRESSIVE_BUFFER_MS};
 
 impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// Starts a play now if its sound is ready, or keeps it waiting.
@@ -16,6 +16,9 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             .entry(play.sound.handle)
             .copied()
             .filter(|entry| entry.sound == play.sound && !entry.conflict)
+            // A DX7 sound plays the patches of its bank, so it waits for
+            // them (REQ-6411 item 5).
+            .filter(|entry| entry.codec != Codec::Dx7 || self.bank_ready(entry.param))
             .filter(|entry| {
                 if entry.live {
                     // A live sound plays while its blocks keep coming.
@@ -25,6 +28,10 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                 entry.complete()
                     || (play.progressive && self.buffered_ms(entry) >= PROGRESSIVE_BUFFER_MS.min(duration_ms(entry)))
             });
+        // A bank is patches and is never played (REQ-6411 item 4).
+        if self.store.entry(play.sound.handle).is_some_and(|entry| entry.codec == Codec::Dx7Bank) {
+            return;
+        }
         let Some(channel) = self.channels.get_mut(usize::from(index)) else { return };
         let Some(entry) = ready else {
             channel.waiting = Some(play);
@@ -80,6 +87,12 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                 self.try_start(index, play, sink);
             }
         }
+    }
+
+    /// Whether the bank at `handle` is held whole: every patch of it has
+    /// arrived and none arrived twice with different bytes.
+    fn bank_ready(&self, handle: u8) -> bool {
+        self.store.entry(handle).is_some_and(|bank| bank.codec == Codec::Dx7Bank && bank.complete() && !bank.conflict)
     }
 
     /// Milliseconds of sound received contiguously from the start.

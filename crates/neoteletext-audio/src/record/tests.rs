@@ -58,7 +58,8 @@ fn a_wrong_block_count_is_refused() {
 #[test]
 fn a_reserved_codec_is_read_and_left_for_the_receiver_to_ignore() {
     let mut body = object_body();
-    body[7] = 3;
+    // Codes 0 to 5 are taken: the first reserved one (REQ-6411).
+    body[7] = 6;
     let bytes = frame(TYPE_OBJECT, &body);
     let Record::Object(object) = parse(&bytes).unwrap() else { panic!("not an object") };
     assert_eq!(object.codec, None);

@@ -10,6 +10,7 @@ members = [
     "crates/neoteletext-picture-cli",
     "crates/neoteletext-audio",
     "crates/neoteletext-audio-mix",
+    "crates/neoteletext-audio-instruments",
     "crates/neoteletext-opus",
     "crates/neoteletext-input",
     "crates/neoteletext-transport",
@@ -40,6 +41,7 @@ neoteletext-image = { path = "crates/neoteletext-image" }
 neoteletext-picture = { path = "crates/neoteletext-picture" }
 neoteletext-audio = { path = "crates/neoteletext-audio", default-features = false }
 neoteletext-audio-mix = { path = "crates/neoteletext-audio-mix" }
+neoteletext-audio-instruments = { path = "crates/neoteletext-audio-instruments", default-features = false }
 neoteletext-opus = { path = "crates/neoteletext-opus" }
 neoteletext-input = { path = "crates/neoteletext-input" }
 neoteletext-transport = { path = "crates/neoteletext-transport" }

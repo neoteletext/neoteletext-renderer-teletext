@@ -13,6 +13,9 @@ publish.workspace = true
 [dependencies]
 neoteletext-core.workspace = true
 neoteletext-opus = { workspace = true, optional = true }
+# The workspace's own instruments, codecs 3 to 5 (DEC-6410): no_std,
+# integer-only and allocation-free, as this crate is.
+neoteletext-audio-instruments = { workspace = true, optional = true }
 
 [features]
 # Decision E.61: each optional area is a feature, all on by default.
@@ -38,12 +41,23 @@ pcm16 = []
 # The Opus decoder (codec 2, decision E.124): one constant-rate packet a block,
 # decoded in order by a few decoders the receiver keeps, each about 28 KB.
 opus = ["dep:neoteletext-opus"]
+# The SID chip (codec 3, REQ-6411): a block is 20 ms of register images,
+# rendered by the workspace's own emulator. Not a default: a microcontroller
+# port names it when it has the room for a chip.
+sid = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/sid"]
+# The Yamaha DX7 (codecs 4 and 5, REQ-6411): a block is 20 ms of MIDI
+# messages, and a bank is a sound whose blocks are patches. Not a default.
+dx7 = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/dx7"]
 # Writing sounds: the IMA ADPCM encoder, records and broadcast packets, for
 # publishing tools (REQ-AUD-020). It allocates, so it is not a default.
 encode = ["ima", "idl"]
 # REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types,
 # which needs `core::fmt`.
 error-trait = []
+
+[dev-dependencies]
+# The instruments' own types, for tests that build a patch.
+neoteletext-audio-instruments = { workspace = true, features = ["sid", "dx7"] }
 
 [lints]
 workspace = true

@@ -83,6 +83,8 @@ const LIBRARY_CRATES: &[&str] = &[
     "neoteletext-image",
     "neoteletext-audio",
     "neoteletext-audio-mix",
+    // The audio profile's instruments (REQ-6412).
+    "neoteletext-audio-instruments",
     "neoteletext-opus",
     "neoteletext-input",
     // The picture converter (DEC-2325 item 1, REQ-2327).

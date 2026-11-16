@@ -55,6 +55,7 @@ readonly PCM16_OUT_TEST="without_pcm16_a_pcm_sound_is_unsupported_and_skipped"
 readonly NO_PANIC_ROOTS=(crates/neoteletext-core/src/lib.rs crates/neoteletext-formats/src/lib.rs
     crates/neoteletext-slicer/src/lib.rs crates/neoteletext-web/src/lib.rs crates/neoteletext-image/src/lib.rs
     crates/neoteletext-audio/src/lib.rs crates/neoteletext-audio-mix/src/lib.rs crates/neoteletext-opus/src/lib.rs
+    crates/neoteletext-audio-instruments/src/lib.rs
     crates/neoteletext-input/src/lib.rs
     crates/neoteletext-transport/src/lib.rs crates/neoteletext-qrkeyboard/src/lib.rs
     crates/neoteletext-app/src/lib.rs crates/neoteletext-cli/src/lib.rs
@@ -242,7 +243,8 @@ full_steps() {
     step "no_std crates on the amd64 bare-metal target (REQ-GEN-002)"
     cargo build --quiet --target x86_64-unknown-none \
         -p neoteletext-core -p neoteletext-formats -p neoteletext-slicer -p neoteletext-web -p neoteletext-image \
-        -p neoteletext-audio -p neoteletext-audio-mix -p neoteletext-opus -p neoteletext-input
+        -p neoteletext-audio -p neoteletext-audio-mix -p neoteletext-opus -p neoteletext-input \
+        -p neoteletext-audio-instruments
 
     step "each crate with no optional area and with each area alone (decision E.61)"
     cargo xtask features

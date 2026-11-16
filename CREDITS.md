@@ -67,6 +67,32 @@ and Fredrik Lundh, <https://python-pillow.org/>
   must appear in the documentation of any binary distribution.
 - *Effect on neoteletext's licence:* none; the notice is kept as the licence asks.
 
+**music-synthesizer-for-android** — Google Inc.; Raph Levien,
+<https://github.com/google/music-synthesizer-for-android>, commit `f67d41d`
+- *What it solved:* how a Yamaha DX7 turns a patch's settings into sound over time: the operator
+  envelopes with their rates and attack law, the pitch envelope, the LFO, keyboard and velocity
+  scaling, output levels and operator frequencies, all measured from the instrument. They are
+  translated to Rust as `crates/neoteletext-audio-instruments/src/dx7/msfa/` (DEC-6420). The sound
+  kernel, the rack and the patch reader beside them are neoteletext's own.
+- *Licence:* Apache-2.0. Its notice heads each translated file, which says what was changed, and
+  its text is `crates/neoteletext-audio-instruments/LICENSE-APACHE-2.0`; both must ship with every
+  binary that contains the crate.
+
+## Read to write our own (no code taken)
+
+**mos6581 0.3.0** — Enzo Lombardi, <https://github.com/aovestdipaperino/mos6581>
+- *What it gave:* its record of which public document supports which fact about the SID chip,
+  read as a reading list for the SID emulator in `crates/neoteletext-audio-instruments/src/sid/`,
+  which is written from those documents and keeps the same practice of naming a source at every
+  constant (DEC-6418).
+- *Licence:* MIT or Apache-2.0. None of its code or constants is used.
+
+**dx7 0.0.4** — Tyler Neely, <https://github.com/spacejam/dx7>, a port of the FM engine of
+**Plaits** — Emilie Gillet, <https://github.com/pichenettes/eurorack>
+- *What it gave:* a second reading of the DX7's packed patch layout and of the routing of its 32
+  algorithms, against which neoteletext's own were checked (DEC-6410).
+- *Licence:* MIT. None of its code is used.
+
 ## Used at test time only (never copied, never linked into a release)
 
 These programs are run as separate programs or test oracles, in containers with no network access

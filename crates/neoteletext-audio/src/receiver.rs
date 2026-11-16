@@ -16,6 +16,8 @@ mod carriage;
 #[cfg(any(feature = "pcm16", feature = "ima", feature = "opus"))]
 mod fade;
 mod file;
+#[cfg(any(feature = "sid", feature = "dx7"))]
+mod instruments;
 mod loss;
 #[cfg(feature = "opus")]
 mod opus;
@@ -57,6 +59,9 @@ pub struct Statistics {
     /// WebSocket messages refused whole: not a whole number of packets
     /// (REQ-AUD-008).
     pub messages_refused: u32,
+    /// Slots of a DX7 block passed over: not empty, and not a message the
+    /// codec takes (REQ-6411 item 3).
+    pub slots_passed_over: u32,
 }
 
 /// The receiver of one audio service.
@@ -74,6 +79,9 @@ pub struct Receiver<'a, const OBJECTS: usize, const SLOTS: usize> {
     /// Opus sounds' decoders (decision E.124).
     #[cfg(feature = "opus")]
     opus: opus::Lanes,
+    /// Instrument sounds' instruments (REQ-6411).
+    #[cfg(any(feature = "sid", feature = "dx7"))]
+    instruments: instruments::Lanes,
     /// Each channel's stored-sound play, followed for the `concealed`
     /// report (REQ-AUD-013).
     progress: [Option<loss::Progress>; CHANNELS as usize],
@@ -95,6 +103,8 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             now_ms: 0,
             #[cfg(feature = "opus")]
             opus: opus::Lanes::new(),
+            #[cfg(any(feature = "sid", feature = "dx7"))]
+            instruments: instruments::Lanes::new(),
             progress: [None; CHANNELS as usize],
         }
     }
@@ -125,8 +135,24 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             self.store.set_at_sink(entry.sound, false);
             #[cfg(feature = "opus")]
             self.opus.release(entry.sound);
+            #[cfg(any(feature = "sid", feature = "dx7"))]
+            self.instruments.release(entry.sound);
         }
+        #[cfg(any(feature = "sid", feature = "dx7"))]
+        self.render_waiting(sink);
         self.judge(sink);
+    }
+
+    /// Goes on rendering the stored instrument sounds whose blocks wait, a
+    /// budget's worth each (REQ-6411): a long sound is rendered over several
+    /// ticks, well ahead of the voice that plays it.
+    #[cfg(any(feature = "sid", feature = "dx7"))]
+    fn render_waiting(&mut self, sink: &mut dyn VoiceSink) {
+        for sound in self.instruments.waiting(&self.store).into_iter().flatten() {
+            if let Some(entry) = self.store.entries().find(|entry| entry.sound == sound).copied() {
+                self.instruments.send_stored(&self.store, &entry, &mut self.statistics, sink);
+            }
+        }
     }
 
     /// When the receiver next needs [`Receiver::tick`], in its milliseconds:
@@ -144,7 +170,13 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             .filter(|entry| entry.live && entry.at_sink)
             .map(|entry| entry.arrived_ms.saturating_add(crate::LIVE_STALL_MS))
             .min();
-        [stall, self.next_due_ms()].into_iter().flatten().min()
+        // A stored instrument sound with blocks still to render wants its
+        // next tick at once (REQ-6411).
+        #[cfg(any(feature = "sid", feature = "dx7"))]
+        let rendering = self.instruments.pending(&self.store).then_some(self.now_ms);
+        #[cfg(not(any(feature = "sid", feature = "dx7")))]
+        let rendering = None;
+        [stall, self.next_due_ms(), rendering].into_iter().flatten().min()
     }
 
     /// What the receiver has met.
@@ -190,6 +222,8 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.reassembler.clear();
         #[cfg(feature = "opus")]
         self.opus.clear();
+        #[cfg(any(feature = "sid", feature = "dx7"))]
+        self.instruments.clear();
         self.channels = [Channel::default(); CHANNELS as usize];
         self.progress = [None; CHANNELS as usize];
     }
@@ -201,6 +235,8 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.store.sink_lost();
         #[cfg(feature = "opus")]
         self.opus.clear();
+        #[cfg(any(feature = "sid", feature = "dx7"))]
+        self.instruments.clear();
         for channel in &mut self.channels {
             channel.playing_page = None;
             channel.playing = None;
@@ -231,6 +267,8 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                             sink.forget(sound);
                             #[cfg(feature = "opus")]
                             self.opus.release(sound);
+                            #[cfg(any(feature = "sid", feature = "dx7"))]
+                            self.instruments.release(sound);
                         }
                     }
                     Defined::Repeat => {}

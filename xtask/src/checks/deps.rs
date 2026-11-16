@@ -20,7 +20,10 @@ const PERMITTED: &[(&str, &[&str])] = &[
     ("neoteletext-web", &["neoteletext-core", "embedded-io", "neoteletext-audio", "neoteletext-formats"]),
     ("neoteletext-image", &["neoteletext-core"]),
     // Decision E.124 item 5: the Opus decoder, behind the `opus` feature.
-    ("neoteletext-audio", &["neoteletext-core", "neoteletext-opus"]),
+    // And the instruments, behind the `sid` and `dx7` features (REQ-6411).
+    ("neoteletext-audio", &["neoteletext-core", "neoteletext-opus", "neoteletext-audio-instruments"]),
+    // REQ-6412 item 1: the instruments depend on nothing.
+    ("neoteletext-audio-instruments", &[]),
     ("neoteletext-audio-mix", &[]),
     // Decision E.123: an integer Opus decoder written here, with no dependency.
     ("neoteletext-opus", &[]),

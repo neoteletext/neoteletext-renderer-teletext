@@ -33,6 +33,10 @@ pub struct Sound {
     pub data: Vec<u8>,
     /// A label, at most [`crate::record::MAX_LABEL`] bytes.
     pub label: Option<Vec<u8>>,
+    /// A SID sound's chip and clock byte ([`crate::record::TAG_SID_CHIP`]).
+    pub chip: Option<u8>,
+    /// The handle of a DX7 sound's bank ([`crate::record::TAG_DX7_BANK`]).
+    pub bank: Option<u8>,
 }
 
 /// Why a sound could not be written.
@@ -85,9 +89,23 @@ impl Sound {
                 ima_blocks(&mut State { predictor: 0, index: 0 }, pcm, per_block, &mut out);
                 out
             }
-            Codec::Opus => return Err(EncodeError::Encoder),
+            // Neither is encoded from samples: Opus comes as packets and an
+            // instrument's sound as its own blocks.
+            Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => return Err(EncodeError::Encoder),
         };
-        Ok(Self { handle, generation, id: u32::from(handle), codec, rate_hz, block_bytes, samples, data, label: None })
+        Ok(Self {
+            handle,
+            generation,
+            id: u32::from(handle),
+            codec,
+            rate_hz,
+            block_bytes,
+            samples,
+            data,
+            label: None,
+            chip: None,
+            bank: None,
+        })
     }
 
     /// A live sound (REQ-AUD-014): announced with no samples, its blocks
@@ -116,6 +134,8 @@ impl Sound {
             samples: 0,
             data: Vec::new(),
             label: None,
+            chip: None,
+            bank: None,
         })
     }
 
@@ -160,6 +180,55 @@ impl Sound {
             samples,
             data: packets.to_vec(),
             label: None,
+            chip: None,
+            bank: None,
+        })
+    }
+
+    /// A stored sound of an instrument codec from its blocks, `block_bytes`
+    /// each, back to back in `blocks` (REQ-6411): a SID sound's register
+    /// images, a DX7 sound's slots, or a bank's patches. A SID sound's chip
+    /// and a DX7 sound's bank are set afterwards, in the fields `chip` and
+    /// `bank`.
+    ///
+    /// # Errors
+    /// A codec that is not an instrument's, a block size it does not allow,
+    /// blocks that are not all that length, none, or more than a sound (or
+    /// a bank) may have.
+    pub fn instrument(
+        handle: u8,
+        generation: u16,
+        codec: Codec,
+        block_bytes: u16,
+        blocks: &[u8],
+    ) -> Result<Self, EncodeError> {
+        if !matches!(codec, Codec::Sid | Codec::Dx7 | Codec::Dx7Bank) {
+            return Err(EncodeError::Encoder);
+        }
+        if !codec.allows_block(block_bytes) {
+            return Err(EncodeError::BlockSize(block_bytes));
+        }
+        if !blocks.len().is_multiple_of(usize::from(block_bytes)) {
+            return Err(EncodeError::PacketLength);
+        }
+        let count = blocks.len().checked_div(usize::from(block_bytes)).unwrap_or(0);
+        let count = u16::try_from(count).map_err(|_| EncodeError::Length)?;
+        let samples = u32::from(count).saturating_mul(codec.samples_per_block(block_bytes));
+        if count == 0 || (codec == Codec::Dx7Bank && samples > crate::DX7_BANK_PATCHES) {
+            return Err(EncodeError::Length);
+        }
+        Ok(Self {
+            handle,
+            generation,
+            id: u32::from(handle),
+            codec,
+            rate_hz: crate::INSTRUMENT_RATE,
+            block_bytes,
+            samples,
+            data: blocks.to_vec(),
+            label: None,
+            chip: None,
+            bank: None,
         })
     }
 
@@ -170,7 +239,9 @@ impl Sound {
     /// # Errors
     /// Not an Opus sound, or packets that are not all its length.
     pub fn packet_records(&self, first: u16, packets: &[u8]) -> Result<Vec<Vec<u8>>, EncodeError> {
-        if self.codec != Codec::Opus {
+        // An instrument's blocks are carried as Opus packets are: whole,
+        // of one length, as they come (REQ-6411).
+        if !matches!(self.codec, Codec::Opus | Codec::Sid | Codec::Dx7) {
             return Err(EncodeError::Encoder);
         }
         if !packets.len().is_multiple_of(usize::from(self.block_bytes)) {
@@ -214,6 +285,11 @@ impl Sound {
             body.push(TAG_LABEL);
             body.push(u8::try_from(label.len()).map_err(|_| EncodeError::Label)?);
             body.extend_from_slice(label);
+        }
+        for (tag, value) in [(crate::record::TAG_SID_CHIP, self.chip), (crate::record::TAG_DX7_BANK, self.bank)] {
+            if let Some(value) = value {
+                body.extend_from_slice(&[tag, 1, value]);
+            }
         }
         Ok(frame(TYPE_OBJECT, &body))
     }
@@ -331,7 +407,8 @@ impl LiveEncoder {
         match self.sound.codec {
             Codec::Pcm16 => data.extend(samples.iter().flat_map(|sample| sample.to_le_bytes())),
             Codec::ImaAdpcm => ima_blocks(&mut self.state, samples, self.per_block, &mut data),
-            Codec::Opus => {}
+            // Neither is encoded from samples (`Sound::new` refuses both).
+            Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => {}
         }
         let records = self.sound.records_of(&data, self.next, 1);
         let blocks = u16::try_from(records.len()).unwrap_or(u16::MAX);

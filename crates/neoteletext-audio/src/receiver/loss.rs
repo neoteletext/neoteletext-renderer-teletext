@@ -55,10 +55,10 @@ impl Progress {
 
 impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// Whether block `index` of a stored sound is at the sink: a PCM or IMA
-    /// ADPCM block once it has arrived, an Opus block once every block before
-    /// it has too, since they are decoded in order.
+    /// ADPCM block once it has arrived, an Opus block or an instrument's once
+    /// every block before it has too, since they are taken in order.
     fn at_sink(&self, entry: &Entry, index: u16) -> bool {
-        if entry.codec == Codec::Opus {
+        if entry.codec == Codec::Opus || entry.codec.is_instrument() {
             return index < self.store.contiguous(entry.sound);
         }
         self.store.block(entry.sound, index).is_some()

@@ -49,6 +49,11 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
     let source = match codec {
         Codec::Opus => Source::Opus(read_ogg_opus(&bytes).map_err(|error| refused(ogg_refusal(error)))?),
         Codec::ImaAdpcm | Codec::Pcm16 => Source::Wave(read_wave(&bytes).map_err(refused)?),
+        // The command's codecs are IMA ADPCM, PCM and Opus (REQ-CLI-011):
+        // an instrument's sound is its own blocks, which no audio file holds.
+        Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => {
+            return Err(refused(String::from("an instrument's sound is not written from an audio file")));
+        }
     };
     let rate_refused =
         |error| refused(format!("{error:?}; the rate must be one of {:?}", neoteletext_audio::SAMPLE_RATES));
@@ -66,7 +71,10 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
                 // exists.
                 let block = match codec {
                     Codec::ImaAdpcm => neoteletext_audio::IMA_BLOCK_SMALL,
-                    Codec::Pcm16 | Codec::Opus => neoteletext_audio::MAX_PCM_BLOCK,
+                    // Only a wave's codecs reach here: the rest returned above.
+                    Codec::Pcm16 | Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => {
+                        neoteletext_audio::MAX_PCM_BLOCK
+                    }
                 };
                 let sound = Sound::live(options.handle, 1, codec, wave.rate_hz(), block).map_err(rate_refused)?;
                 let blocks = wave_live_blocks(&sound, wave.samples(), options.repeat).map_err(refused)?;
@@ -99,7 +107,10 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
         Source::Wave(wave) => {
             let block = match codec {
                 Codec::ImaAdpcm => neoteletext_audio::IMA_BLOCK_LARGE,
-                Codec::Pcm16 | Codec::Opus => neoteletext_audio::MAX_PCM_BLOCK,
+                // Only a wave's codecs reach here: the rest returned above.
+                Codec::Pcm16 | Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => {
+                    neoteletext_audio::MAX_PCM_BLOCK
+                }
             };
             Sound::new(options.handle, 1, codec, wave.rate_hz(), block, wave.samples()).map_err(rate_refused)?
         }
