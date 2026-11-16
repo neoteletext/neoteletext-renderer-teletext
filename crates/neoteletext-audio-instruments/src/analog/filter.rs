@@ -137,7 +137,8 @@ const MAGNITUDE_SHIFT: u32 = 31 - SATURATION.trailing_zeros() - EXCESS_RANGE_SHI
 const _: () = assert!(SATURATION.count_ones() == 1 && EXCESS_END == 1 << (32 - MAGNITUDE_SHIFT));
 
 /// What the curve takes off a signal: `value - SATURATION * tanh(value /
-/// SATURATION)`, within 0.0001 of itself at every level
+/// SATURATION)`, within 0.04% of itself at every level where it is more
+/// than a few units, which leaves the curve within 0.0001 of the tangent
 /// (`tests/analog_filter.rs`). For a signal x = t `SATURATION` it is x
 /// times 1 - tanh(t) / t, which is t² times the table's entry.
 #[inline]
