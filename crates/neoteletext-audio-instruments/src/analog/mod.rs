@@ -22,6 +22,7 @@
 //! product in anything that runs for each sample ([`fixed`]); what sets a
 //! parameter may divide, and says so.
 
+pub mod allocator;
 pub mod chorus;
 pub mod decimator;
 pub mod drift;
