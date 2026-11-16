@@ -1,8 +1,9 @@
 # Credits
 
-neoteletext is written from the teletext standards (ETSI EN 300 706 and the documents cited in
-REQUIREMENTS.md). These outside works are part of it, or shaped it. Each is credited for what it
-contributes, with its licence and how neoteletext uses it.
+neoteletext is written from the teletext standards (ETSI EN 300 706 and the documents its
+requirements cite). The works below are credited because something of them is in neoteletext:
+bundled, ported or translated, or read as the owner asked to credit. Each entry says what it
+contributes, its licence and how neoteletext uses it.
 
 ## Bundled
 
@@ -95,32 +96,12 @@ and Fredrik Lundh, <https://python-pillow.org/>
 
 ## Used at test time only (never copied, never linked into a release)
 
-These programs are run as separate programs or test oracles, in containers with no network access
-(REQ-TST-001). Their code and test files are never copied into this repository.
-
 **libopus 1.5.2, fixed-point build** — <https://opus-codec.org/>
-- *What it provides:* the oracle of REQ-AUD-023. `tests/oracles/run_opus.sh` downloads its source,
-  checks it against its pinned SHA-256 and builds it; its `opus_demo` encodes the test streams and
-  `tests/oracles/opus_decode.c`, neoteletext's own, decodes them with it, for a byte-for-byte
-  comparison with `neoteletext-opus`.
+- *What it provides:* the oracle of REQ-AUD-023. `tests/oracles/run_opus.sh` downloads its source
+  over HTTPS, checks it against its pinned SHA-256 and builds it in portable C (DEC-6424); its
+  `opus_demo` encodes the test streams and `tests/oracles/opus_decode.c`, neoteletext's own, decodes
+  them with it, as separate programs, for a sample-for-sample comparison with `neoteletext-opus`.
 - *Licence:* BSD-3-Clause; nothing of the build is kept in the repository.
-
-**vbit2** — Peter Kwan and contributors, <https://github.com/peterkvt80/vbit2>
-**QTeletextMaker** — gkthemac, <https://github.com/gkthemac/QTeletextMaker>
-- *What they provide:* independent test oracles and fuzzing inputs (REQ-TST-001).
-- *Licence:* QTeletextMaker is GPL-3.0; vbit2's repository states no licence identifier. Both are
-  run as external programs only.
-
-## Formats and services neoteletext reads
-
-**zxnet** — <https://zxnet.co.uk/teletext/viewer/>
-- *What it provides:* the live teletext feeds neoteletext can show (REQ-INP-022), and the page
-  formats its editor exports. neoteletext implements the feed protocol and the formats from their
-  observed behaviour; no zxnet code is used.
-
-**edit.tf** — <https://edit.tf/>
-- *What it provides:* the URL encoding of teletext pages that neoteletext reads and writes.
-  Implemented from the encoding itself; no edit.tf code is used.
 
 ## Fonts loaded at run time
 
