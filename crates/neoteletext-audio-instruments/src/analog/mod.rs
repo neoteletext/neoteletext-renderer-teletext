@@ -24,6 +24,7 @@
 
 pub mod decimator;
 pub mod fixed;
+pub mod oscillator;
 pub mod tables;
 
 use crate::SAMPLE_RATE;
