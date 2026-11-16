@@ -51,10 +51,15 @@ fi
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/opus-oracle.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
-# The fixed-point build the decoder was ported from, with nothing the profile lacks.
+# The fixed-point build the decoder was ported from, with nothing the profile lacks, and in
+# portable C alone (no processor intrinsics, no choice of routine at run time): that C is what
+# was ported, and libopus's own x86 routines do not agree with it to the bit. Built with them on
+# x86_64 Linux on 16 November 2026, two of the 40 hostile streams differed by about ten in one
+# sample's value (hostile-023 at sample 36488, hostile-024 at sample 166087); built without, on
+# the same machine, none of the 238 decodes differs.
 tar -xzf "$tarball" -C "$work"
-(cd "$work/$LIBOPUS" && ./configure --quiet --enable-fixed-point --disable-shared --disable-doc \
-    --disable-dred --disable-osce --disable-deep-plc >/dev/null && make --quiet -j4 opus_demo libopus.la >/dev/null)
+(cd "$work/$LIBOPUS" && ./configure --quiet --enable-fixed-point --disable-intrinsics --disable-rtcd \
+    --disable-shared --disable-doc --disable-dred --disable-osce --disable-deep-plc >/dev/null && make --quiet -j4 opus_demo libopus.la >/dev/null)
 build="$work/build"
 mkdir -p "$build"
 cp "$work/$LIBOPUS/opus_demo" "$work/$LIBOPUS/.libs/libopus.a" "$build/"
