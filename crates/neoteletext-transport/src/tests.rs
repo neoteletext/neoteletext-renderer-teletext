@@ -99,15 +99,19 @@ fn a_wait_ends_when_bytes_arrive() {
 #[test]
 fn the_end_of_the_socket_closes_the_connection_and_wakes_its_owner() {
     let (socket, peer) = socket_pair();
-    let wakes = Arc::new(AtomicUsize::new(0));
-    let counted = Arc::clone(&wakes);
+    let (woke, woken) = std::sync::mpsc::channel();
     let mut connection = Connection::start(socket, None, Vec::new(), READ_BYTES, move || {
-        counted.fetch_add(1, Ordering::SeqCst);
+        // The owner may be gone by the time a late wake comes.
+        let _ = woke.send(());
     })
     .unwrap();
     drop(peer);
     assert_eq!(connection.take(&mut [0_u8; 8], Some(Instant::now() + LIMIT), write_records).unwrap(), Received::Closed);
-    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    // The reader thread releases the channel before it wakes its owner
+    // (DEC-630), so an owner already waiting in `take` can see the end a
+    // moment before the wake is made: the wake is waited for, not assumed.
+    woken.recv_timeout(LIMIT).expect("the end of the socket wakes the owner");
+    assert!(woken.try_recv().is_err(), "once");
 }
 
 // REQ-199 (REQ-INT-009), decisions DEC-630 and DEC-621: an owner woken by the
