@@ -22,7 +22,7 @@ use neoteletext_core::limits::LAST_SUBPAGE_CODE;
 use neoteletext_core::packet::Packet;
 use neoteletext_core::types::{PageAddress, SubCode};
 
-use super::{RecordFault, TYPE_REGIS, take_u16, write_packets};
+use super::{RecordFault, TYPE_NAPLPS, TYPE_REGIS, take_u16, write_packets};
 
 /// The fixed fields: page, sub-code, generation and offset.
 const FIXED: usize = 2 + 2 + 2 + 4;
@@ -78,6 +78,33 @@ pub fn encode(
     record_id: u8,
     out: &mut dyn FnMut(Packet),
 ) -> Result<usize, RecordFault> {
+    encode_as(TYPE_REGIS, record, service, record_id, out)
+}
+
+/// Writes a NAPLPS record (REQ-6408 item 2), whose body is the REGIS
+/// record's with a sub-page's NAPLPS for its data, as packets 4/31 of
+/// audio service `service`, record id `record_id`. Returns the packets
+/// written.
+///
+/// # Errors
+/// What the reader would refuse, and data over [`MAX_DATA`].
+pub fn encode_naplps(
+    record: RegisRecord<'_>,
+    service: u8,
+    record_id: u8,
+    out: &mut dyn FnMut(Packet),
+) -> Result<usize, RecordFault> {
+    encode_as(TYPE_NAPLPS, record, service, record_id, out)
+}
+
+/// Writes a stream record of type `kind`.
+fn encode_as(
+    kind: u8,
+    record: RegisRecord<'_>,
+    service: u8,
+    record_id: u8,
+    out: &mut dyn FnMut(Packet),
+) -> Result<usize, RecordFault> {
     let mut body = [0_u8; MAX_BODY];
     let length = FIXED.checked_add(record.data.len()).filter(|&length| length <= MAX_BODY);
     let length = length.ok_or(RecordFault::Length)?;
@@ -100,7 +127,7 @@ pub fn encode(
     if read(body)? != record {
         return Err(RecordFault::BadValue("does not read back"));
     }
-    write_packets(TYPE_REGIS, body, service, record_id, out).ok_or(RecordFault::Length)
+    write_packets(kind, body, service, record_id, out).ok_or(RecordFault::Length)
 }
 
 #[cfg(test)]
@@ -135,6 +162,35 @@ mod tests {
             .unwrap();
             assert_eq!(seen, Some((0x123, 0x0002, 7, 0x0001_0203, data.len())));
         }
+    }
+
+    /// REQ-6408 item 2: a NAPLPS record is the same body under its own
+    /// type, so a receiver's reader tells the two apart and neither is
+    /// read as the other.
+    #[test]
+    fn a_naplps_record_reaches_a_receiver_as_naplps() {
+        let data = b"\x1b\x22\x46 hello".as_slice();
+        let mut reader = RecordReader::new();
+        let mut seen = None;
+        let mut others = 0;
+        encode_naplps(record(data), 3, 7, &mut |packet| match reader.push(&packet) {
+            Read::Record(ChannelRecord::Naplps(read)) => {
+                seen = Some((read.page.mpp(), read.generation, read.offset, read.data.to_vec()));
+            }
+            Read::Record(_) => others += 1,
+            _ => {}
+        })
+        .unwrap();
+        assert_eq!(others, 0, "read as nothing else");
+        assert_eq!(seen, Some((0x123, 7, 0x0001_0203, data.to_vec())));
+        let mut regis = RecordReader::new();
+        encode(record(data), 3, 8, &mut |packet| {
+            assert!(
+                !matches!(regis.push(&packet), Read::Record(ChannelRecord::Naplps(_))),
+                "a REGIS record is not NAPLPS"
+            );
+        })
+        .unwrap();
     }
 
     /// The body's layout, byte for byte.

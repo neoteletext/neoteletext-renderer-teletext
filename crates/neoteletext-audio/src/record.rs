@@ -70,6 +70,11 @@ pub const TYPE_DRAWING_LINKS: u8 = 15;
 /// receiver leaves it alone.
 pub const TYPE_REGIS_CURSOR: u8 = 16;
 
+/// Record type: bytes of a sub-page's NAPLPS (REQ-6408 item 2), read by
+/// the web agent's record reader for the NAPLPS renderer; this receiver
+/// leaves it alone.
+pub const TYPE_NAPLPS: u8 = 17;
+
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
 #[must_use]
@@ -94,6 +99,7 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_REGIS
         || kind == TYPE_DRAWING_LINKS
         || kind == TYPE_REGIS_CURSOR
+        || kind == TYPE_NAPLPS
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,
