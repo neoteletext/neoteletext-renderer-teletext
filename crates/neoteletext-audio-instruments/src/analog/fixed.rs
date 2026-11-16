@@ -1,7 +1,14 @@
-//! The arithmetic the blocks share: products of two 32-bit numbers taken
-//! in 16-bit halves, so that a processor with no 64-bit product does not
-//! need one (REQ-GEN-016), and the bounds that keep every sum inside 32
-//! bits.
+//! The arithmetic the blocks share: products of two 32-bit numbers, a
+//! quotient without a division, and the bounds that keep every sum inside
+//! 32 bits.
+//!
+//! A product's upper word is taken in 16-bit halves, four 32-bit
+//! products, so that a processor with no 64-bit product does not need
+//! one (REQ-GEN-016); a processor whose own word is 64 bits takes the
+//! product whole, which is the same number. On the 64-bit machine the
+//! blocks were measured on, eight voices render 5.7 times faster than
+//! real time by halves and 14.4 times whole (`tests/analog_voice.rs`,
+//! `rendering_speed`).
 
 use super::LIMIT;
 
@@ -11,10 +18,40 @@ const HALF_MASK: u32 = 0xFFFF;
 const HALF_BITS: u32 = 16;
 
 /// `a * b / 2³²`, rounded down, exactly: the upper word of the 64-bit
-/// product, from four 32-bit products of the halves.
+/// product. Where the processor's own word is 64 bits it is that
+/// product; elsewhere it is [`mul_high_halves`].
 #[inline]
 #[must_use]
 pub const fn mul_high(a: i32, b: i32) -> i32 {
+    #[cfg(target_pointer_width = "64")]
+    {
+        (((a as i64).wrapping_mul(b as i64)) >> 32) as i32
+    }
+    #[cfg(not(target_pointer_width = "64"))]
+    {
+        mul_high_halves(a, b)
+    }
+}
+
+/// `a * b / 2³²`, rounded down, exactly, for unsigned words; as
+/// [`mul_high`].
+#[inline]
+#[must_use]
+pub const fn mul_high_unsigned(a: u32, b: u32) -> u32 {
+    #[cfg(target_pointer_width = "64")]
+    {
+        (((a as u64).wrapping_mul(b as u64)) >> 32) as u32
+    }
+    #[cfg(not(target_pointer_width = "64"))]
+    {
+        mul_high_unsigned_halves(a, b)
+    }
+}
+
+/// [`mul_high`] from four 32-bit products of the halves.
+#[inline]
+#[must_use]
+pub const fn mul_high_halves(a: i32, b: i32) -> i32 {
     let (a_high, a_low) = (a >> HALF_BITS, a.cast_unsigned() & HALF_MASK);
     let (b_high, b_low) = (b >> HALF_BITS, b.cast_unsigned() & HALF_MASK);
     // A signed half is at most 2¹⁵ in magnitude and an unsigned one below
@@ -32,10 +69,10 @@ pub const fn mul_high(a: i32, b: i32) -> i32 {
         .wrapping_add(carry.cast_signed())
 }
 
-/// `a * b / 2³²`, rounded down, exactly, for unsigned words.
+/// [`mul_high_unsigned`] from four 32-bit products of the halves.
 #[inline]
 #[must_use]
-pub const fn mul_high_unsigned(a: u32, b: u32) -> u32 {
+pub const fn mul_high_unsigned_halves(a: u32, b: u32) -> u32 {
     let (a_high, a_low) = (a >> HALF_BITS, a & HALF_MASK);
     let (b_high, b_low) = (b >> HALF_BITS, b & HALF_MASK);
     let middle_a = a_high.wrapping_mul(b_low);
@@ -177,7 +214,10 @@ pub const fn limit(value: i32) -> i32 {
 #[cfg(test)]
 #[allow(clippy::arithmetic_side_effects, clippy::cast_possible_wrap, reason = "a test")]
 mod tests {
-    use super::{amplify, integrate, limit, mul_high, mul_high_unsigned, ratio, reciprocal, scale};
+    use super::{
+        amplify, integrate, limit, mul_high, mul_high_halves, mul_high_unsigned, mul_high_unsigned_halves, ratio,
+        reciprocal, scale,
+    };
     use crate::analog::LIMIT;
 
     /// A 64-bit linear congruential generator with Knuth's MMIX constants.
@@ -194,10 +234,14 @@ mod tests {
     fn the_products_are_the_64_bit_products() {
         let mut random = Random(1);
         let edges = [0, 1, -1, i32::MAX, i32::MIN, 0xFFFF, 0x1_0000, -0x1_0000, -0xFFFF];
+        // Both ways of taking the product, whichever this processor uses.
         let check = |a: i32, b: i32| {
-            assert_eq!(i64::from(mul_high(a, b)), (i64::from(a) * i64::from(b)) >> 32, "{a} * {b}");
+            let exact = (i64::from(a) * i64::from(b)) >> 32;
+            assert_eq!((i64::from(mul_high(a, b)), i64::from(mul_high_halves(a, b))), (exact, exact), "{a} * {b}");
             let (a, b) = (a.cast_unsigned(), b.cast_unsigned());
-            assert_eq!(u64::from(mul_high_unsigned(a, b)), (u64::from(a) * u64::from(b)) >> 32, "{a} * {b}");
+            let exact = (u64::from(a) * u64::from(b)) >> 32;
+            let found = (u64::from(mul_high_unsigned(a, b)), u64::from(mul_high_unsigned_halves(a, b)));
+            assert_eq!(found, (exact, exact), "{a} * {b}");
         };
         for a in edges {
             for b in edges {
