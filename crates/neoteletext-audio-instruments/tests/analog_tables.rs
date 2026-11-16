@@ -21,8 +21,8 @@ use std::f64::consts::PI;
 
 use neoteletext_audio_instruments::analog::decimator::Decimator;
 use neoteletext_audio_instruments::analog::tables::{
-    BLAMP, BLEP, BLEP_PHASES_SHIFT, BLEP_TAPS, HALF_BAND_SHARP, HALF_BAND_WIDE, TANH, TANH_STEPS_SHIFT, WARP,
-    WARP_STEPS_SHIFT,
+    BLAMP, BLEP, BLEP_PHASES_SHIFT, BLEP_TAPS, EXCESS, EXCESS_RANGE_SHIFT, EXCESS_STEPS_SHIFT, HALF_BAND_SHARP,
+    HALF_BAND_WIDE, WARP, WARP_STEPS_SHIFT,
 };
 use neoteletext_audio_instruments::analog::{LEVEL, LIMIT};
 use support::{amplitude, decibels, float};
@@ -35,10 +35,11 @@ fn close<A: Copy + Into<i64>, B: Copy + Into<i64>>(made: &[A], kept: &[B]) -> bo
 
 #[test]
 fn the_tables_are_what_their_generator_writes() {
-    assert_eq!(1usize << TANH_STEPS_SHIFT, generator::TANH_STEPS);
+    assert_eq!(1usize << EXCESS_STEPS_SHIFT, generator::EXCESS_STEPS);
+    assert_eq!(1usize << EXCESS_RANGE_SHIFT, generator::EXCESS_RANGE);
     assert_eq!(1usize << WARP_STEPS_SHIFT, generator::WARP_STEPS);
     assert_eq!((BLEP_TAPS, 1usize << BLEP_PHASES_SHIFT), (generator::BLEP_TAPS, generator::BLEP_PHASES));
-    assert!(close(&generator::tanh_table(), &TANH));
+    assert!(close(&generator::excess_table(), &EXCESS));
     assert!(close(&generator::warp_table(), &WARP));
     for (made, kept) in generator::blep_table().iter().zip(&BLEP) {
         assert!(close(made, kept));
@@ -52,18 +53,22 @@ fn the_tables_are_what_their_generator_writes() {
 }
 
 #[test]
-fn the_tangent_read_with_straight_lines_is_within_a_ten_thousandth() {
-    let steps = f64::from(1u32 << TANH_STEPS_SHIFT);
+fn the_excess_read_with_straight_lines_is_within_a_ten_thousandth() {
+    let steps = f64::from(1u32 << EXCESS_STEPS_SHIFT);
     let mut worst = 0.0f64;
-    for point in 0..(TANH.len() - 1) * 64 {
-        let argument = point as f64 / 64.0 / steps;
+    for point in 1..(EXCESS.len() - 1) * 64 {
+        let t = point as f64 / 64.0 / steps;
         let (index, weight) = (point / 64, (point % 64) as f64 / 64.0);
-        let read = (f64::from(TANH[index]) * (1.0 - weight) + f64::from(TANH[index + 1]) * weight) / 65_536.0;
-        worst = worst.max((read - argument.tanh()).abs());
+        let read =
+            (f64::from(EXCESS[index]) * (1.0 - weight) + f64::from(EXCESS[index + 1]) * weight) / 4_294_967_296.0;
+        // As a share of what the curve takes off, at every level.
+        worst = worst.max((read * t.powi(3) / (t - t.tanh()) - 1.0).abs());
     }
     assert!(worst < 1.0e-4, "{worst}");
-    // Beyond the table the curve is held at its last value, which is one.
-    assert_eq!(TANH[TANH.len() - 1], u16::MAX);
+    // Where the table ends the tangent is one to seven places.
+    let end = f64::from(1u32 << EXCESS_RANGE_SHIFT);
+    assert!((1.0 - end.tanh()).abs() < 1.0e-6);
+    assert_eq!(EXCESS.len(), ((1usize << EXCESS_RANGE_SHIFT) << EXCESS_STEPS_SHIFT) + 1);
 }
 
 #[test]

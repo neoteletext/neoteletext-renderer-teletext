@@ -23,6 +23,7 @@
 //! parameter may divide, and says so.
 
 pub mod decimator;
+pub mod filter;
 pub mod fixed;
 pub mod oscillator;
 pub mod tables;
@@ -89,17 +90,23 @@ impl Oversampling {
     }
 }
 
-/// The largest frequency step: a quarter of the sampling rate. An
-/// oscillator's edges are then at least four samples apart, and a
-/// filter's cutoff stays where its warping is tabulated.
+/// The largest frequency step of an oscillator and of the state-variable
+/// filter: a quarter of the sampling rate. An oscillator's edges are then
+/// at least four samples apart, and that filter's integrator gain stays
+/// below one.
 pub const STEP_LIMIT: u32 = 1 << 30;
+
+/// The step of half the sampling rate, beyond which a frequency means
+/// nothing.
+const HALF_RATE: u64 = 1 << 31;
 
 /// Thousandths of a hertz in a hertz.
 const MILLIHERTZ: u64 = 1_000;
 
 /// The step of a frequency given in thousandths of a hertz, at a rate in
 /// hertz: 2³² times the frequency over the rate, rounded, and held to
-/// [`STEP_LIMIT`]. A rate of zero gives a step of zero.
+/// half the rate; each block holds it to its own bound besides. A rate of
+/// zero gives a step of zero.
 ///
 /// It divides, so it belongs where a note or a control changes, not in
 /// the loop that renders samples.
@@ -108,8 +115,8 @@ pub const fn frequency(millihertz: u32, rate: u32) -> u32 {
     let divisor = (rate as u64).saturating_mul(MILLIHERTZ);
     let rounded = ((millihertz as u64) << 32).saturating_add(divisor >> 1);
     match rounded.checked_div(divisor) {
-        Some(step) if step <= STEP_LIMIT as u64 => step as u32,
-        Some(_) => STEP_LIMIT,
+        Some(step) if step <= HALF_RATE => step as u32,
+        Some(_) => HALF_RATE as u32,
         None => 0,
     }
 }

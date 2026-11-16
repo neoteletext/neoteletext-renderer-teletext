@@ -108,6 +108,32 @@ pub const fn scale(value: i32, coefficient: i32) -> i32 {
     mul_high(value, coefficient) << 1
 }
 
+/// Bits of the fraction a trapezoidal integrator keeps below its state.
+const FRACTION_BITS: u32 = 30;
+/// The mask of that fraction.
+const FRACTION_MASK: u32 = (1 << FRACTION_BITS) - 1;
+
+/// A trapezoidal integrator's step: `2 * difference * gain` for a gain in
+/// Q31, added to what `fraction` holds of a unit, in Q30. Gives the whole
+/// units, rounded down, and leaves the rest in `fraction` for the next
+/// sample.
+///
+/// A product cut to a whole unit would leave the integrator deaf to any
+/// difference below 1 / gain units, and biased; with the remainders
+/// carried, what it adds up over time is exact, and only what it follows
+/// from one sample to the next is cut.
+#[inline]
+#[must_use]
+pub const fn integrate(difference: i32, gain: i32, fraction: &mut u32) -> i32 {
+    let high = mul_high(difference, gain);
+    let low = difference.cast_unsigned().wrapping_mul(gain.cast_unsigned());
+    let sum = (*fraction & FRACTION_MASK).wrapping_add(low & FRACTION_MASK);
+    *fraction = sum & FRACTION_MASK;
+    (high << (32 - FRACTION_BITS))
+        .wrapping_add((low >> FRACTION_BITS).cast_signed())
+        .wrapping_add((sum >> FRACTION_BITS).cast_signed())
+}
+
 /// `value * gain` for a gain in Q28, below eight in magnitude, held to
 /// [`LIMIT`] either way.
 #[inline]
@@ -143,7 +169,7 @@ pub const fn limit(value: i32) -> i32 {
 #[cfg(test)]
 #[allow(clippy::arithmetic_side_effects, clippy::cast_possible_wrap, reason = "a test")]
 mod tests {
-    use super::{amplify, limit, mul_high, mul_high_unsigned, ratio, reciprocal, scale};
+    use super::{amplify, integrate, limit, mul_high, mul_high_unsigned, ratio, reciprocal, scale};
     use crate::analog::LIMIT;
 
     /// A 64-bit linear congruential generator with Knuth's MMIX constants.
@@ -198,6 +224,23 @@ mod tests {
         // The reciprocal of the smallest divisor is two, held to the
         // largest word, and of the largest, one.
         assert!(reciprocal(1 << 31) >= u32::MAX - 4 && reciprocal(u32::MAX).abs_diff(1 << 31) <= 4);
+    }
+
+    #[test]
+    fn an_integrator_adds_up_exactly_what_it_is_given() {
+        let mut random = Random(4);
+        for _ in 0..2_000 {
+            let gain = (random.next() >> 1) as i32 >> (random.next() % 24);
+            let mut fraction = 0u32;
+            let (mut found, mut exact) = (0i64, 0i128);
+            for _ in 0..200 {
+                let difference = (random.next() as i32) >> 2;
+                found += i64::from(integrate(difference, gain, &mut fraction));
+                exact += i128::from(difference) * i128::from(gain);
+                // The whole units and the fraction are the exact sum.
+                assert_eq!((i128::from(found) << 30) + i128::from(fraction), exact);
+            }
+        }
     }
 
     #[test]

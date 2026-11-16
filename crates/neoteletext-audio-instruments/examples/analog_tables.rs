@@ -19,11 +19,11 @@
 use core::f64::consts::PI;
 
 /// Steps of the saturation table for each unit of its argument.
-pub const TANH_STEPS: usize = 32;
+pub const EXCESS_STEPS: usize = 32;
 /// The saturation table's last argument: tanh(8) is 1 to seven places.
-pub const TANH_RANGE: usize = 8;
-/// Unity of the saturation table: Q16, with the value 1 held to 65,535.
-pub const TANH_ONE: f64 = 65_536.0;
+pub const EXCESS_RANGE: usize = 8;
+/// Unity of the saturation table: Q32.
+pub const EXCESS_ONE: f64 = 4_294_967_296.0;
 
 /// Steps of the warping table over a quarter turn.
 pub const WARP_STEPS: usize = 256;
@@ -86,12 +86,26 @@ fn sinc(x: f64) -> f64 {
     if x.abs() < 1e-12 { 1.0 } else { (PI * x).sin() / (PI * x) }
 }
 
-/// The saturation curve: tanh at every 1 / [`TANH_STEPS`] from 0 to
-/// [`TANH_RANGE`], in Q16.
+/// The saturation curve, as what it takes off a straight line: for t at
+/// every 1 / [`EXCESS_STEPS`] from 0 to [`EXCESS_RANGE`], (t - tanh(t)) /
+/// t³ in Q32. It is a third at zero and falls slowly, so a straight line
+/// between entries follows it closely however small t is, which the
+/// tangent itself in a table would not: t - tanh(t) is then a small
+/// difference of two large numbers.
 #[must_use]
-pub fn tanh_table() -> Vec<u16> {
-    (0..=TANH_RANGE * TANH_STEPS)
-        .map(|index| ((index as f64 / TANH_STEPS as f64).tanh() * TANH_ONE).round().min(65_535.0) as u16)
+pub fn excess_table() -> Vec<u32> {
+    (0..=EXCESS_RANGE * EXCESS_STEPS)
+        .map(|index| {
+            let t = index as f64 / EXCESS_STEPS as f64;
+            // Below a twentieth the difference loses digits; the series
+            // of the tangent does not.
+            let ratio = if t < 0.05 {
+                1.0 / 3.0 - 2.0 * t * t / 15.0 + 17.0 * t.powi(4) / 315.0
+            } else {
+                (t - t.tanh()) / t.powi(3)
+            };
+            (ratio * EXCESS_ONE).round() as u32
+        })
         .collect()
 }
 
@@ -241,14 +255,18 @@ fn main() {
     println!("//! Source: own design throughout. The window is Kaiser's (1974), as in");
     println!("//! Oppenheim and Schafer, \"Discrete-Time Signal Processing\", section 7.5.");
     println!();
-    println!("/// Steps of [`TANH`] for each unit of its argument.");
-    println!("pub const TANH_STEPS_SHIFT: u32 = {};", TANH_STEPS.trailing_zeros());
-    println!("/// The hyperbolic tangent at every 1 / {TANH_STEPS} from 0 to {TANH_RANGE}, in Q16, with 1");
-    println!("/// held to 65,535. Read with a straight line between entries it is within");
-    println!("/// 0.0001 of the function (`tests/analog_tables.rs`).");
+    println!("/// Steps of [`EXCESS`] for each unit of its argument, as a shift.");
+    println!("pub const EXCESS_STEPS_SHIFT: u32 = {};", EXCESS_STEPS.trailing_zeros());
+    println!("/// The argument at which [`EXCESS`] ends, as a shift: beyond it the");
+    println!("/// hyperbolic tangent is one.");
+    println!("pub const EXCESS_RANGE_SHIFT: u32 = {};", EXCESS_RANGE.trailing_zeros());
+    println!("/// What the hyperbolic tangent takes off a straight line: (t - tanh(t)) / t³");
+    println!("/// in Q32, for t at every 1 / {EXCESS_STEPS} from 0 to {EXCESS_RANGE}. It is a third at zero and");
+    println!("/// falls slowly, so that a straight line between entries is within 0.0001 of");
+    println!("/// it at every level (`tests/analog_tables.rs`).");
     println!("#[rustfmt::skip]");
-    println!("pub const TANH: [u16; {}] = [", TANH_RANGE * TANH_STEPS + 1);
-    print_numbers(&tanh_table(), 16);
+    println!("pub const EXCESS: [u32; {}] = [", EXCESS_RANGE * EXCESS_STEPS + 1);
+    print_numbers(&excess_table(), 8);
     println!("];");
     println!();
     println!("/// Steps of [`WARP`] over a quarter turn, as a shift.");
