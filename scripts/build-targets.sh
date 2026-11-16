@@ -20,6 +20,10 @@ readonly RUST="1.99.0"
 # release builds (esp-rs/rust#277), so 1.93 is used, below the workspace's
 # rust-version (IMPLEMENTATION-LOG.md decision 38).
 readonly ESP="esp"
+# Xtensa has no prebuilt standard library, so its bare-metal rows build their
+# own: core, and alloc for neoteletext-audio-mix, which holds its sounds in
+# allocated memory and is in BARE since edf57c5. The Arm and RISC-V rows take
+# both from rustup's prebuilt targets.
 # The fork espup installed, pinned (REQ-SEC-014, REQ-GEN-001): its version
 # names the source commit, and its compiler driver's SHA-256 the build. A
 # different one fails every Xtensa row, before anything is built with it.
@@ -53,8 +57,8 @@ thumbv8m.main-none-eabihf|$BARE|build|$RUST|
 riscv32imc-unknown-none-elf|$BARE|build|$RUST|
 riscv32imac-unknown-none-elf|$BARE|build|$RUST|
 riscv32imafc-unknown-none-elf|$BARE|build|$RUST|
-xtensa-esp32-none-elf|$BARE|build|$ESP|-Zbuild-std=core --ignore-rust-version
-xtensa-esp32s3-none-elf|$BARE|build|$ESP|-Zbuild-std=core --ignore-rust-version
+xtensa-esp32-none-elf|$BARE|build|$ESP|-Zbuild-std=core,alloc --ignore-rust-version
+xtensa-esp32s3-none-elf|$BARE|build|$ESP|-Zbuild-std=core,alloc --ignore-rust-version
 xtensa-esp32-espidf|$LIBRARIES_STD|check|$ESP|-Zbuild-std=std,panic_abort --ignore-rust-version
 xtensa-esp32s3-espidf|$LIBRARIES_STD|check|$ESP|-Zbuild-std=std,panic_abort --ignore-rust-version
 x86_64-unknown-none|$BARE|build|$RUST|
