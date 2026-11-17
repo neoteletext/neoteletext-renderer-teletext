@@ -399,43 +399,163 @@ fn the_ring_modulators_envelope_speeds_it_up_and_lets_it_fall_back() {
     assert!(first > 120.0 && first < 6.85 * 31.0);
 }
 
+/// The effect's parts, from the service manual's pages 55 to 58: the dry
+/// sound's share with the effect on, the delayed sound's at low
+/// frequencies, the cutoff in hertz of the low-pass filter the delayed
+/// sound goes through, and the lines' delay in seconds.
+const EFFECT: (f64, f64, f64, f64) = (68.0 / 168.0, 100.0 / 168.0 * 2.2365, 499.1, 2.56e-3);
+
+/// What the effect makes of a frequency, as a share of what comes out
+/// with the effect off, for a delay in seconds: the dry sound's share
+/// less the delayed sound's, which has been through the low-pass filter.
+fn comb(hertz: f64, delay: f64) -> f64 {
+    let (dry, wet, cutoff, _) = EFFECT;
+    // 1 / (1 + j f / fc) turned by the delay.
+    let ratio = hertz / cutoff;
+    let size = wet / ratio.hypot(1.0);
+    let angle = -std::f64::consts::TAU * hertz * delay - ratio.atan();
+    (dry - size * angle.cos()).hypot(size * angle.sin())
+}
+
 #[test]
-fn the_tremolo_and_the_chorus_are_what_the_mono_output_has_of_them() {
-    // Adjustment procedure, page 21: the tremolo's fastest cycle is 56
-    // ms, the chorus's 0.5 s; the four amplifiers' gains of 0.65 and 0.58
-    // leave 2.85% of each oscillator's swing in the sum of the outputs.
-    let run = |tremolo: u8, chorus: u8, depth: u8| {
+fn the_effect_is_the_comb_the_drawings_make() {
+    // Service manual, page 55: the dry sound stays in through 100 kΩ and
+    // the delayed sound joins it inverted through 68 kΩ; pages 57 and 58:
+    // the delayed sound is 2.56 ms late and has been through a low-pass
+    // filter of 499 Hz. Noise through the open filters, the same noise
+    // with the effect on and off, shows what it does to each frequency.
+    let noise = |effect: u8| {
+        let mut patch = panel(&[(Control::Sawtooth, 0), (Control::Noise, 127)]);
+        patch.set(Global::Effect, effect);
+        play(&patch, 60, 100, 5.0, 0.0)[48_000..].to_vec()
+    };
+    let (on, off) = (noise(1), noise(0));
+    let grid: Vec<f64> = (2..=160).map(|step| f64::from(step) * 12.5).collect();
+    let measured: Vec<f64> = grid.iter().map(|&hertz| component(&on, hertz) / component(&off, hertz)).collect();
+    // The delay that fits best: the lines' own, and a little for the
+    // filters about them.
+    let misfit = |delay: f64| {
+        grid.iter()
+            .zip(&measured)
+            .map(|(&hertz, &found)| decibels(found / comb(hertz, delay)).abs())
+            .fold(0.0f64, f64::max)
+    };
+    let (delay, worst) = (2_400..2_800)
+        .map(|microseconds| f64::from(microseconds) * 1.0e-6)
+        .map(|delay| (delay, misfit(delay)))
+        .fold((0.0, f64::MAX), |best, tried| if tried.1 < best.1 { tried } else { best });
+    // The deepest notch and the highest crest, and where they are.
+    let at = |pick: fn(f64, f64) -> bool| {
+        grid.iter().zip(&measured).fold(
+            (0.0, measured[0]),
+            |best, (&hertz, &found)| {
+                if pick(found, best.1) { (hertz, found) } else { best }
+            },
+        )
+    };
+    let (notch, crest) = (at(|found, best| found < best), at(|found, best| found > best));
+    println!(
+        "the effect's comb: delay {:.0} µs, worst misfit {worst:.2} dB of 25 Hz to 2 kHz; crest {:+.2} dB at {:.1} Hz, notch {:+.2} dB at {:.1} Hz; 25 Hz {:+.2} dB, 2 kHz {:+.2} dB",
+        delay * 1.0e6,
+        decibels(crest.1),
+        crest.0,
+        decibels(notch.1),
+        notch.0,
+        decibels(measured[0]),
+        decibels(measured[measured.len() - 1])
+    );
+    // The filters about the lines add some tens of microseconds.
+    assert!(delay >= EFFECT.3 && delay < EFFECT.3 + 0.12e-3, "{delay}");
+    assert!(worst < 0.6, "{worst}");
+    // The crests are a delay apart in frequency: the first is where the
+    // inverted, delayed sound is back in step, half that from nothing,
+    // pulled down a little by the filter's own delay.
+    assert!((crest.0 - 175.0).abs() <= 12.5 && (decibels(crest.1) - decibels(comb(crest.0, delay))).abs() < 0.3);
+    // At the bottom the delayed sound all but takes the dry sound's
+    // place, at about the level the sound has with the effect off; at
+    // the top the dry sound's share is what is left.
+    assert!((decibels(measured[0]) - decibels(comb(25.0, delay))).abs() < 0.3 && decibels(measured[0]) > -1.5);
+    let top = |effect: u8| {
+        let mut patch = panel(&SINE);
+        patch.set(Global::Effect, effect);
+        let signal = play(&patch, 120, 100, 1.5, 0.0);
+        component(&signal[24_000..], 8_372.0)
+    };
+    let left = decibels(top(1) / top(0));
+    println!("the effect on a sine of 8,372 Hz: {left:+.2} dB (the dry share alone is {:+.2} dB)", decibels(EFFECT.0));
+    assert!((left - decibels(EFFECT.0)).abs() < 1.0, "{left}");
+}
+
+/// The strongest frequency between two bounds in how a tone's level
+/// moves, in hertz, and its size as a share of the level.
+fn swing(signal: &[f64], low: f64, high: f64) -> (f64, f64) {
+    // The level over two cycles of the 880 Hz the tests play, taken a
+    // hundred times a second.
+    const STEP: usize = 480;
+    let levels: Vec<f64> = signal.as_chunks::<STEP>().0.iter().map(|chunk| rms(chunk)).collect();
+    let mean = levels.iter().sum::<f64>() / levels.len() as f64;
+    let size = |hertz: f64| {
+        let (mut real, mut imaginary) = (0.0, 0.0);
+        for (index, &level) in levels.iter().enumerate() {
+            let window = 0.5 - 0.5 * (std::f64::consts::TAU * index as f64 / levels.len() as f64).cos();
+            let angle = std::f64::consts::TAU * hertz * index as f64 * STEP as f64 / RATE_HZ;
+            real += (level - mean) * window * angle.cos();
+            imaginary += (level - mean) * window * angle.sin();
+        }
+        4.0 * real.hypot(imaginary) / levels.len() as f64 / mean
+    };
+    (0..=400)
+        .map(|step| low + (high - low) * f64::from(step) / 400.0)
+        .map(|hertz| (hertz, size(hertz)))
+        .fold((0.0, 0.0), |best, tried| if tried.1 > best.1 { tried } else { best })
+}
+
+#[test]
+fn both_of_the_effects_oscillators_run_under_either_tab() {
+    // Adjustment procedure, page 21: with SPEED at its top and the
+    // TREMOLO tab down the two oscillators' cycles are 56 ms and 0.5 s.
+    // Service manual, pages 55 and 66: the CHORUS tab gives the same two
+    // oscillators 1.2 / 9.4 of the knob's voltage where TREMOLO gives
+    // them 100 / 122, which is 6.17 octaves slower at the knob's top; and
+    // TREMOLO has their outputs through 150 kΩ, 333 / 483 of the depth.
+    let run = |tremolo: u8, chorus: u8, speed: u8, depth: u8, seconds: f64| {
         let mut patch = panel(&SINE);
         patch.set(Global::Effect, 1);
         patch.set(Global::Tremolo, tremolo);
         patch.set(Global::Chorus, chorus);
-        patch.set(Global::EffectSpeed, 127);
+        patch.set(Global::EffectSpeed, speed);
         patch.set(Global::EffectDepth, depth);
-        play(&patch, 81, 100, 6.0, 0.0)
+        play(&patch, 81, 100, seconds, 0.0)[48_000..].to_vec()
     };
-    let side =
-        |signal: &[f64], hertz: f64| component(&signal[48_000..], 880.0 + hertz) / component(&signal[48_000..], 880.0);
-    let tremolo = run(1, 0, 127);
-    let chorus = run(0, 1, 127);
+    let tremolo = run(1, 0, 127, 127, 13.0);
+    let (fast, slow) = (swing(&tremolo, 15.0, 21.0), swing(&tremolo, 1.6, 2.4));
     println!(
-        "the effect in mono: tremolo sidebands at 17.86 Hz {:.4}, chorus sidebands at 2 Hz {:.4} of the note",
-        side(&tremolo, 17.857),
-        side(&chorus, 2.0)
+        "TREMOLO, SPEED at its top: the level moves at {:.3} Hz by {:.4} and at {:.3} Hz by {:.4} of itself",
+        fast.0, fast.1, slow.0, slow.1
     );
-    // A swing of m is two sidebands of m / 2; the mean level is the full
-    // level less the swing.
-    let expected = (7.0 / 246.0) / (1.0 - 14.0 / 246.0) / 2.0;
-    assert!(
-        (side(&tremolo, 17.857) / expected - 1.0).abs() < 0.05
-            && (side(&tremolo, -17.857) / expected - 1.0).abs() < 0.05
-    );
-    assert!((side(&chorus, 2.0) / expected - 1.0).abs() < 0.05 && side(&chorus, 17.857) < 1.0e-4);
-    assert!(side(&run(1, 1, 0), 17.857) < 1.0e-4 && side(&run(0, 0, 127), 17.857) < 1.0e-4);
-    // The level drops slightly, and the lines' filters take the top.
-    let plain = play(&panel(&SINE), 81, 100, 2.0, 0.0);
-    let drop = decibels(component(&run(0, 0, 0)[48_000..], 880.0) / component(&plain[48_000..], 880.0));
-    println!("the effect on: the level {drop:.2} dB");
-    assert!(drop < -0.5 && drop > -2.0);
+    assert!((fast.0 / 17.857 - 1.0).abs() < 0.01 && (slow.0 / 2.0 - 1.0).abs() < 0.01);
+    // Each oscillator moves the delayed sound's level by the same share.
+    assert!(fast.1 > 0.005 && (fast.1 / slow.1 - 1.0).abs() < 0.1);
+    // Both tabs down are the tremolo.
+    let both = run(1, 1, 127, 127, 13.0);
+    assert!((swing(&both, 15.0, 21.0).1 / fast.1 - 1.0).abs() < 0.01);
+    // CHORUS: the first oscillator's cycle is 4.03 s, and nothing moves
+    // at the tremolo's speeds.
+    let chorus = run(0, 1, 127, 127, 61.0);
+    let first = swing(&chorus, 0.2, 0.3);
+    println!("CHORUS, SPEED at its top: the level moves at {:.4} Hz by {:.4} of itself", first.0, first.1);
+    assert!((first.0 / 0.2483 - 1.0).abs() < 0.02, "{}", first.0);
+    assert!((first.1 / fast.1 / (483.0 / 333.0) - 1.0).abs() < 0.1, "{}", first.1 / fast.1);
+    assert!(swing(&chorus, 15.0, 21.0).1 < 1.0e-4 && swing(&chorus, 1.6, 2.4).1 < 3.0e-4);
+    // The knob at its middle, loaded by the two dividers, gives 4.15 V of
+    // its 10.6 V, and the tremolo 4.44 octaves below its fastest.
+    let middle = swing(&run(1, 0, 64, 127, 25.0), 0.7, 0.95);
+    println!("TREMOLO, SPEED at its middle: the level moves at {:.4} Hz", middle.0);
+    assert!((middle.0 / 0.8203 - 1.0).abs() < 0.02, "{}", middle.0);
+    // With no depth, or with neither tab, the comb stands still.
+    for still in [run(1, 0, 127, 0, 13.0), run(0, 0, 127, 127, 13.0)] {
+        assert!(swing(&still, 15.0, 21.0).1 < 1.0e-4 && swing(&still, 1.6, 2.4).1 < 1.0e-4);
+    }
 }
 
 #[test]
@@ -456,4 +576,102 @@ fn the_effect_switched_on_in_silence_lets_nothing_out() {
     let after = render(&mut cs80, 0.05);
     let peak = after.iter().fold(0.0f64, |peak, &value| peak.max(value.abs()));
     assert!(peak < 1.0e-4, "{peak}");
+}
+
+/// The level in decibels of each octave band of a signal, from the band
+/// centred on 125 Hz to the one on 8 kHz, and of the whole: the mean
+/// square of the samples, by a discrete Fourier transform of 32,768 of
+/// them under a Hann window.
+fn bands(signal: &[f64]) -> ([f64; 7], f64) {
+    const SIZE: usize = 1 << 15;
+    let (mut real, mut imaginary) = (vec![0.0; SIZE], vec![0.0; SIZE]);
+    for (index, value) in signal.iter().take(SIZE).enumerate() {
+        real[index] = value * (0.5 - 0.5 * (std::f64::consts::TAU * index as f64 / SIZE as f64).cos());
+    }
+    // Cooley and Tukey's transform, in place.
+    let mut swapped = 0;
+    for index in 1..SIZE {
+        let mut bit = SIZE >> 1;
+        while swapped & bit != 0 {
+            swapped ^= bit;
+            bit >>= 1;
+        }
+        swapped |= bit;
+        if index < swapped {
+            real.swap(index, swapped);
+        }
+    }
+    let mut length = 2;
+    while length <= SIZE {
+        let angle = -std::f64::consts::TAU / length as f64;
+        for start in (0..SIZE).step_by(length) {
+            for offset in 0..length / 2 {
+                let (sine, cosine) = (angle * offset as f64).sin_cos();
+                let (low, high) = (start + offset, start + offset + length / 2);
+                let (turned_real, turned_imaginary) =
+                    (real[high] * cosine - imaginary[high] * sine, real[high] * sine + imaginary[high] * cosine);
+                (real[high], imaginary[high]) = (real[low] - turned_real, imaginary[low] - turned_imaginary);
+                (real[low], imaginary[low]) = (real[low] + turned_real, imaginary[low] + turned_imaginary);
+            }
+        }
+        length <<= 1;
+    }
+    let mut levels = [0.0; 7];
+    let mut whole = 0.0;
+    for bin in 1..SIZE / 2 {
+        let hertz = bin as f64 * RATE_HZ / SIZE as f64;
+        let power = real[bin] * real[bin] + imaginary[bin] * imaginary[bin];
+        whole += power;
+        let band = (hertz / 125.0).log2() + 0.5;
+        if (0.0..7.0).contains(&band) {
+            levels[band as usize] += power;
+        }
+    }
+    (levels.map(|power: f64| 10.0 * power.max(1.0e-30).log10()), 10.0 * whole.max(1.0e-30).log10())
+}
+
+/// The output rate in hertz.
+const RATE_HZ: f64 = 48_000.0;
+
+/// What the effect does to a held chord of STRING 1, in figures: each
+/// octave band's level and the whole's with the effect on, against off,
+/// and how far the level swings.
+#[test]
+fn the_effect_on_a_held_string_chord_in_figures() {
+    use neoteletext_audio_instruments::cs80::presets::PRESETS;
+    assert_eq!(PRESETS[0].0, "STRING 1");
+    let chord = |effect: u8, tremolo: u8, chorus: u8| {
+        let mut patch = Patch::with_tones(PRESETS[0].1, PRESETS[0].1);
+        patch.set(Global::Mix, 64);
+        patch.set(Global::Effect, effect);
+        patch.set(Global::Tremolo, tremolo);
+        patch.set(Global::Chorus, chorus);
+        patch.set(Global::EffectSpeed, 127);
+        patch.set(Global::EffectDepth, 127);
+        let mut cs80 = instrument(&patch);
+        for key in [48u8, 52, 55, 60] {
+            cs80.event(NOTE_ON, key, 100);
+        }
+        render(&mut cs80, 8.0)[96_000..].to_vec()
+    };
+    let off = chord(0, 0, 0);
+    let (off_bands, off_whole) = bands(&off);
+    let spread = |signal: &[f64]| {
+        let levels: Vec<f64> = signal.chunks(4_800).map(rms).collect();
+        let (least, most) =
+            levels.iter().fold((f64::MAX, 0.0f64), |(least, most), &level| (least.min(level), most.max(level)));
+        decibels(most / least)
+    };
+    println!("STRING 1 chord, effect off: the level over tenths of a second swings {:.2} dB", spread(&off));
+    for (name, signal) in [("neither tab", chord(1, 0, 0)), ("TREMOLO", chord(1, 1, 0)), ("CHORUS", chord(1, 0, 1))] {
+        let (on_bands, on_whole) = bands(&signal);
+        let differences: Vec<String> =
+            on_bands.iter().zip(&off_bands).map(|(on, off)| format!("{:+.1}", on - off)).collect();
+        println!(
+            "STRING 1 chord, effect on with {name}: whole {:+.2} dB; octave bands 125 Hz to 8 kHz {} dB; the level over tenths of a second swings {:.2} dB",
+            on_whole - off_whole,
+            differences.join(" "),
+            spread(&signal)
+        );
+    }
 }
