@@ -152,10 +152,17 @@
 //!   procedure's trimming figures (`EFFECT_WET`); and how many octaves
 //!   a volt is at the oscillators' chip is taken from the pulse width's
 //!   oscillator, which is the same chip behind another pair of resistors
-//!   (`EFFECT_OCTAVES_A_VOLT`). The drawings also carry later changes
-//!   by hand (the delayed sound's coupling capacitors of 1 µF made 0.01
-//!   µF, among others) that the boards as printed do not have; the
-//!   boards as printed are what is built.
+//!   (`EFFECT_OCTAVES_A_VOLT`). The drawings also carry changes by
+//!   hand. The OE1 board as printed (page 56) has one of them, 150 kΩ in
+//!   place of 39 kΩ at its two output amplifiers, which makes the board
+//!   louder with the effect on and off alike and is nothing here; it
+//!   does not have the others: the delayed sound's coupling capacitors
+//!   are 1 µF on it where a hand has written 0.01 µF, which with their
+//!   10 kΩ would keep the delayed sound to what is above 1.6 kHz and
+//!   leave almost nothing of the comb below it. No page says which
+//!   instruments have that change, and the one bulletin filed (E-46,
+//!   January 1978) is about the pitch: the board as printed is what is
+//!   built, and an instrument with the change would sound otherwise.
 //! - **The filters do not distort**, and the loss of resonance at high
 //!   frequencies that Haible finds (180 pF across the damping) is left
 //!   out.
@@ -418,11 +425,23 @@ const EFFECT_DRY: i32 = (ENVELOPE_ONE as i64 * 68 / 168) as i32;
 /// C1 is the lowest key, so 987.8 Hz at 8') the four amplifiers are
 /// trimmed to ".65", ".58", ".58" and ".65 Vp-p" at the OE2 board's
 /// outputs; each side sums one of 0.65 V and one of 0.58 V (page 58, the
-/// wiring to I2 to I5), times 82 / 100, 1.009 Vp-p. The sine at 10 is
-/// trimmed to "1.00 ± .02 Vp-p" at a voice's amplifier (page 15, VCA,
-/// step 1), and the delayed sound is taken to be trimmed to stand as
-/// large as the dry at that key: that the tone enters the board at that
-/// 1 V is not printed anywhere. At that key the amplifiers' low-pass
+/// wiring to I2 to I5), times 82 / 100, 1.009 Vp-p. The delayed sound is
+/// taken to be trimmed to stand as large as the dry at that key, which
+/// is to say that the tone enters the board at 1 Vp-p: no page prints
+/// the level there, and the documents do not settle it. The "1.00 ± .02
+/// Vp-p" of the same tone (page 15, VCA, step 1) is at CP4, behind the
+/// first of a voice's amplifiers; two amplifiers on, the voice leaves
+/// its board at "80 ± 5 mVp-p" (step 4, terminal O), and the amplifier
+/// that brings the mixed voices on to the effect (service manual, page
+/// 53, PRA, IC7) is drawn without its feedback resistor. For 1 Vp-p:
+/// the effect on is then as loud as off at the trimmed key, 68 / 168 +
+/// 100 / 168 × 1.009 = 1.005, which reads as what the 0.65 and 0.58 are
+/// for; and the wah's output, which is the board's input when the wah
+/// is on, is trimmed to "1.0 ± .1 Vp-p" (adjustment procedure, page 29).
+/// Against it: the board as printed has a 27 kΩ beside IC7 that the
+/// drawing does not place (page 54); were that the feedback of its two
+/// 10 kΩ inputs, the tone would enter at 0.22 Vp-p, and the delayed
+/// sound would be 4.7 times the dry at that key. At that key the amplifiers' low-pass
 /// filter ([`EFFECT_WET_FILTER`]) has taken the delayed sound down by
 /// √(1 + (987.8 / 499.1)²), 2.2176, which low frequencies are spared:
 /// 1.0086 × 2.2176 = 2.2365 (`tests/cs80_modulation.rs` works it out).
