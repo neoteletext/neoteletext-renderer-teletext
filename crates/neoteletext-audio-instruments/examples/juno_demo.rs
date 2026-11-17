@@ -1,15 +1,18 @@
-//! Renders a short piece on the Juno-106 and then the Juno-60 to a WAV
-//! file, for listening:
+//! Renders a short piece on the Juno-106 or the Juno-60 to a WAV file,
+//! for listening:
 //!
-//! `cargo run --release -p neoteletext-audio-instruments --features juno --example juno_demo -- out.wav`
+//! `cargo run --release -p neoteletext-audio-instruments --features juno --example juno_demo -- 106 out.wav`
 //!
-//! The file is 48 kHz, 16 bits, mono, about 16 seconds. The piece is
-//! written here. On the Juno-106: a pad of four chords through chorus I
-//! with a bass under it, the pad's cutoff swept open by hand over the
-//! last two chords. On the Juno-60: the same chords as a plucked
-//! arpeggio whose filter the envelope opens, through chorus II, over a
-//! pulse bass with its width swept, and a last chord with both chorus
-//! buttons down. It prints each half's peak and RMS level.
+//! The first argument is the model, `106` or `60`. The file is 48 kHz, 16
+//! bits, mono, about 16 seconds. The piece is written here: a pad of
+//! four chords through chorus I with a bass under it, the pad's cutoff
+//! swept open by hand over the last two chords; then the same chords as
+//! a plucked arpeggio whose filter the envelope opens, through chorus
+//! II, over a pulse bass with its width swept, and a last chord with
+//! both chorus buttons down (on the Juno-106, which has no such
+//! setting, chorus II). The cutoffs are given in hertz and each model's
+//! slider is set from its own law, so both play the same piece. It
+//! prints each half's peak and RMS level.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -33,6 +36,18 @@ const TAIL: f64 = 0.8;
 
 /// The chords, as keys: A minor, F major, C major, each with a bass note.
 const CHORDS: [([u8; 4], u8); BARS] = [([57, 60, 64, 69], 33), ([57, 60, 65, 69], 29), ([55, 60, 64, 67], 36)];
+
+/// The position of a model's cutoff slider that puts the cutoff at so
+/// many hertz at middle C, by the model's law (`juno::law`): the
+/// Juno-106's 248 Hz at step 80 and 50 kHz at 127, the Juno-60's 6.94 Hz
+/// at 0 and 17.2 octaves to 127.
+fn slider(model: Model, hertz: f64) -> u8 {
+    let position = match model {
+        Model::Juno106 => 80.0 + 47.0 * (hertz / 248.0).log2() / (50_000.0f64 / 248.0).log2(),
+        Model::Juno60 => 127.0 * (hertz / 6.94).log2() / 17.2,
+    };
+    position.round().clamp(0.0, 127.0) as u8
+}
 
 /// What happens at an instant: a MIDI message or a new patch.
 enum Change {
@@ -69,11 +84,11 @@ fn pad(cutoff: u8) -> Patch {
 
 /// The pluck: a pulse whose width the oscillator sweeps and a sawtooth,
 /// the filter opened by a short envelope, chorus II.
-fn pluck(chorus: ChorusMode) -> Patch {
+fn pluck(model: Model, chorus: ChorusMode) -> Patch {
     let mut patch = Patch::DEFAULT
         .with(Slider::DcoPwm, 90)
         .with(Slider::LfoRate, 55)
-        .with(Slider::VcfFrequency, 28)
+        .with(Slider::VcfFrequency, slider(model, PLUCK_CUTOFF))
         .with(Slider::VcfResonance, 70)
         .with(Slider::VcfEnvelope, 60)
         .with(Slider::VcfKeyboard, 100)
@@ -87,12 +102,15 @@ fn pluck(chorus: ChorusMode) -> Patch {
     patch
 }
 
+/// The pad's cutoff at middle C before the sweep and after it, and the
+/// pluck's before its envelope opens it, in hertz.
+const PAD_CUTOFF: (f64, f64) = (390.0, 14_500.0);
+const PLUCK_CUTOFF: f64 = 96.0;
+
 /// The first half: the pad and its bass, the cutoff opened by hand over
 /// the last two bars.
-fn first_half() -> Vec<Timed> {
-    // The Juno-106's slider at 84 is near 390 Hz at middle C, and at 116
-    // near 14.5 kHz.
-    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pad(84))))];
+fn first_half(model: Model) -> Vec<Timed> {
+    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pad(slider(model, PAD_CUTOFF.0)))))];
     let bar = BEAT * BEATS as f64;
     for (index, (chord, bass)) in CHORDS.iter().enumerate() {
         let start = index as f64 * bar;
@@ -107,14 +125,16 @@ fn first_half() -> Vec<Timed> {
     let steps = ((to - from) * 30.0) as usize;
     for step in 0..steps {
         let share = step as f64 / steps as f64;
-        score.push(Timed(from + (to - from) * share, Change::Patch(Box::new(pad(84 + (share * 32.0) as u8)))));
+        // Octaves in proportion to the time, as a hand on the slider.
+        let hertz = PAD_CUTOFF.0 * (PAD_CUTOFF.1 / PAD_CUTOFF.0).powf(share);
+        score.push(Timed(from + (to - from) * share, Change::Patch(Box::new(pad(slider(model, hertz))))));
     }
     score
 }
 
 /// The second half: the arpeggio over held bass notes, and a last chord.
-fn second_half() -> Vec<Timed> {
-    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pluck(ChorusMode::Two))))];
+fn second_half(model: Model) -> Vec<Timed> {
+    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pluck(model, ChorusMode::Two))))];
     let bar = BEAT * BEATS as f64;
     for (index, (chord, bass)) in CHORDS.iter().enumerate().take(BARS - 1) {
         let start = index as f64 * bar;
@@ -125,7 +145,7 @@ fn second_half() -> Vec<Timed> {
         }
     }
     let last = (BARS - 1) as f64 * bar;
-    score.push(Timed(last, Change::Patch(Box::new(pluck(ChorusMode::Both)))));
+    score.push(Timed(last, Change::Patch(Box::new(pluck(model, ChorusMode::Both)))));
     for &key in &CHORDS[0].0 {
         note(&mut score, key, last, bar * 0.8);
     }
@@ -160,11 +180,19 @@ fn levels(name: &str, samples: &[i16]) {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: juno_demo OUTPUT.wav");
-    let first = render(Model::Juno106, first_half());
-    let second = render(Model::Juno60, second_half());
-    levels("Juno-106", &first);
-    levels("Juno-60", &second);
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    let (model, path) = match arguments.as_slice() {
+        [model, path] if model == "106" => (Model::Juno106, path.clone()),
+        [model, path] if model == "60" => (Model::Juno60, path.clone()),
+        _ => {
+            eprintln!("usage: juno_demo 106|60 OUTPUT.wav");
+            std::process::exit(2);
+        }
+    };
+    let first = render(model, first_half(model));
+    let second = render(model, second_half(model));
+    levels("the pad", &first);
+    levels("the pluck", &second);
     let samples: Vec<i16> = first.into_iter().chain(second).collect();
 
     let bytes = u32::try_from(samples.len() * 2).expect("a short file");
