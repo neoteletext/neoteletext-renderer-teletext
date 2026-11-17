@@ -51,7 +51,7 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
         Codec::ImaAdpcm | Codec::Pcm16 => Source::Wave(read_wave(&bytes).map_err(refused)?),
         // The command's codecs are IMA ADPCM, PCM and Opus (REQ-CLI-011):
         // an instrument's sound is its own blocks, which no audio file holds.
-        Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => {
+        _ => {
             return Err(refused(String::from("an instrument's sound is not written from an audio file")));
         }
     };
@@ -72,9 +72,7 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
                 let block = match codec {
                     Codec::ImaAdpcm => neoteletext_audio::IMA_BLOCK_SMALL,
                     // Only a wave's codecs reach here: the rest returned above.
-                    Codec::Pcm16 | Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => {
-                        neoteletext_audio::MAX_PCM_BLOCK
-                    }
+                    _ => neoteletext_audio::MAX_PCM_BLOCK,
                 };
                 let sound = Sound::live(options.handle, 1, codec, wave.rate_hz(), block).map_err(rate_refused)?;
                 let blocks = wave_live_blocks(&sound, wave.samples(), options.repeat).map_err(refused)?;
@@ -108,9 +106,7 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
             let block = match codec {
                 Codec::ImaAdpcm => neoteletext_audio::IMA_BLOCK_LARGE,
                 // Only a wave's codecs reach here: the rest returned above.
-                Codec::Pcm16 | Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => {
-                    neoteletext_audio::MAX_PCM_BLOCK
-                }
+                _ => neoteletext_audio::MAX_PCM_BLOCK,
             };
             Sound::new(options.handle, 1, codec, wave.rate_hz(), block, wave.samples()).map_err(rate_refused)?
         }

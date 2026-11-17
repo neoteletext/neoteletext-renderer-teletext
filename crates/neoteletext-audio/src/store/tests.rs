@@ -24,6 +24,9 @@ fn object(handle: u8, generation: u16, samples: u32) -> Object<'static> {
         language: None,
         chip: None,
         bank: None,
+        model: None,
+        family: None,
+        keys: None,
     }
 }
 

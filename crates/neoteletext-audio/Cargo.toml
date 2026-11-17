@@ -13,7 +13,7 @@ publish.workspace = true
 [dependencies]
 neoteletext-core.workspace = true
 neoteletext-opus = { workspace = true, optional = true }
-# The workspace's own instruments, codecs 3 to 5 (DEC-6410): no_std,
+# The workspace's own instruments, codecs 3 to 11 (DEC-6410, DEC-6429): no_std,
 # integer-only and allocation-free, as this crate is.
 neoteletext-audio-instruments = { workspace = true, optional = true }
 
@@ -48,6 +48,22 @@ sid = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/sid"]
 # The Yamaha DX7 (codecs 4 and 5, REQ-6411): a block is 20 ms of MIDI
 # messages, and a bank is a sound whose blocks are patches. Not a default.
 dx7 = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/dx7"]
+# What the analogue synthesizers share (DEC-6429 foundations item 4): their
+# notes are the DX7's block under a codec each (codecs 6 to 10), and their
+# patches travel as a patch bank (codec 11). Alone it plays nothing: each
+# instrument below names it. None is a default, so a build that names none
+# is unchanged.
+analog = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/analog"]
+# Roland's Juno-106 and Juno-60 (codec 6).
+juno = ["analog", "neoteletext-audio-instruments/juno"]
+# Moog's Minimoog Model D (codec 7).
+minimoog = ["analog", "neoteletext-audio-instruments/minimoog"]
+# Sequential Circuits' Prophet-5 (codec 8).
+prophet5 = ["analog", "neoteletext-audio-instruments/prophet5"]
+# Roland's Jupiter-8 (codec 9).
+jupiter8 = ["analog", "neoteletext-audio-instruments/jupiter8"]
+# Yamaha's CS-80 (codec 10).
+cs80 = ["analog", "neoteletext-audio-instruments/cs80"]
 # Writing sounds: the IMA ADPCM encoder, records and broadcast packets, for
 # publishing tools (REQ-AUD-020). It allocates, so it is not a default.
 encode = ["ima", "idl"]
@@ -57,7 +73,15 @@ error-trait = []
 
 [dev-dependencies]
 # The instruments' own types, for tests that build a patch.
-neoteletext-audio-instruments = { workspace = true, features = ["sid", "dx7"] }
+neoteletext-audio-instruments = { workspace = true, features = [
+    "sid",
+    "dx7",
+    "juno",
+    "minimoog",
+    "prophet5",
+    "jupiter8",
+    "cs80",
+] }
 
 [lints]
 workspace = true

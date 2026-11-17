@@ -8,6 +8,10 @@
 //! sound keeps its instrument, which plays on through a block that never
 //! arrived.
 //!
+//! The analogue synthesizers (DEC-6429 foundations item 4) are played as
+//! the DX7 is: their blocks are its slots, and their patches come from a
+//! bank ([`analogue`]).
+//!
 //! Rendering is work the sound's sender chose, so a call renders at most
 //! [`RENDER_BUDGET_BLOCKS`] blocks of a stored sound and says whether more
 //! wait; the receiver asks to be ticked again at once while they do
@@ -18,6 +22,9 @@
 use neoteletext_audio_instruments::dx7::{Bank, Patch, Rack};
 #[cfg(feature = "sid")]
 use neoteletext_audio_instruments::sid::{ChipClock, ChipModel, Sid};
+
+#[cfg(feature = "analog")]
+mod analogue;
 
 use super::Statistics;
 use crate::Codec;
@@ -45,6 +52,9 @@ struct Lane {
     /// The rack, for a DX7 sound.
     #[cfg(feature = "dx7")]
     rack: Rack,
+    /// The synthesizer, for a sound of an analogue one.
+    #[cfg(feature = "analog")]
+    analogue: analogue::Analogue,
 }
 
 /// The receiver's instruments.
@@ -63,6 +73,8 @@ impl Lanes {
                 sid: Sid::new(ChipModel::Mos6581, ChipClock::Pal),
                 #[cfg(feature = "dx7")]
                 rack: Rack::new(),
+                #[cfg(feature = "analog")]
+                analogue: analogue::Analogue::None,
             }),
         }
     }
@@ -201,14 +213,11 @@ impl Lanes {
 impl Lane {
     /// Makes the lane's instrument ready for `entry` from its start: the
     /// chip its sound names, reset; or a rack, reset, with the patches of
-    /// the bank its sound names.
+    /// the bank its sound names; or the synthesizer its sound names, new,
+    /// with the patches of its bank.
     #[cfg_attr(
-        not(feature = "dx7"),
-        expect(unused_variables, reason = "only a DX7 sound reads its bank from the store")
-    )]
-    #[cfg_attr(
-        not(any(feature = "sid", feature = "dx7")),
-        expect(clippy::unused_self, reason = "a build with no instrument prepares nothing")
+        not(any(feature = "dx7", feature = "analog")),
+        expect(unused_variables, reason = "only a sound that plays patches reads its bank from the store")
     )]
     fn prepare<const OBJECTS: usize>(&mut self, store: &Store<'_, OBJECTS>, entry: &Entry) {
         match entry.codec {
@@ -228,6 +237,8 @@ impl Lane {
                 self.rack.reset();
                 self.rack.set_bank(&bank(store, entry.param));
             }
+            #[cfg(feature = "analog")]
+            codec if codec.patch_bytes().is_some() => self.analogue = analogue::Analogue::of(store, entry),
             // No other codec has an instrument, and none of these is stored
             // in a build without it (`Codec::from_code`).
             _ => {}
@@ -235,17 +246,18 @@ impl Lane {
     }
 
     /// Plays one block into the lane's instrument and renders its 20 ms.
-    #[cfg_attr(not(feature = "dx7"), expect(unused_variables, reason = "only a DX7 block counts what it passes over"))]
     #[cfg_attr(
-        not(any(feature = "sid", feature = "dx7")),
-        expect(clippy::unused_self, reason = "a build with no instrument renders nothing")
+        not(any(feature = "dx7", feature = "analog")),
+        expect(unused_variables, reason = "only a block of slots counts what it passes over")
     )]
     fn render(&mut self, block: &[u8], pcm: &mut [i16; BLOCK], statistics: &mut Statistics) {
         match self.codec {
             #[cfg(feature = "sid")]
             Codec::Sid => render_sid(&mut self.sid, block, pcm),
             #[cfg(feature = "dx7")]
-            Codec::Dx7 => render_dx7(&mut self.rack, block, pcm, statistics),
+            Codec::Dx7 => render_slots(&mut self.rack, block, pcm, statistics),
+            #[cfg(feature = "analog")]
+            codec if codec.patch_bytes().is_some() => self.analogue.render(block, pcm, statistics),
             _ => pcm.fill(0),
         }
     }
@@ -262,6 +274,8 @@ impl Lane {
                 self.rack.release_all();
                 self.rack.render(pcm);
             }
+            #[cfg(feature = "analog")]
+            codec if codec.patch_bytes().is_some() => self.analogue.conceal(pcm),
             _ => pcm.fill(0),
         }
     }
@@ -306,8 +320,8 @@ fn render_sid(sid: &mut Sid, block: &[u8], pcm: &mut [i16; BLOCK]) {
     sid.render(rest);
 }
 
-/// One slot of a DX7 block that holds a message the codec takes.
-#[cfg(feature = "dx7")]
+/// One slot of a block of slots that holds a message its codec takes.
+#[cfg(any(feature = "dx7", feature = "analog"))]
 #[derive(Clone, Copy)]
 struct Slot {
     /// When, in tenths of a millisecond from the block's start.
@@ -319,51 +333,112 @@ struct Slot {
 
 /// The top bit of a MIDI byte: set on a status byte, clear on a data byte
 /// (MIDI 1.0).
-#[cfg(feature = "dx7")]
+#[cfg(any(feature = "dx7", feature = "analog"))]
 const MIDI_STATUS_BIT: u8 = 0x80;
-/// The controllers a DX7 block may carry (REQ-6411 item 3): the modulation
-/// wheel, volume, the sustain pedal, all sound off, reset all controllers
-/// and all notes off.
-#[cfg(feature = "dx7")]
+/// The bits of a MIDI status byte that say what the message is; the rest
+/// are its channel (MIDI 1.0, channel voice messages).
+#[cfg(any(feature = "dx7", feature = "analog"))]
+const MIDI_KIND: u8 = 0xF0;
+/// The MIDI 1.0 channel voice messages, by the kind bits of their status.
+#[cfg(any(feature = "dx7", feature = "analog"))]
+mod kind {
+    /// Note off.
+    pub(super) const NOTE_OFF: u8 = 0x80;
+    /// Note on.
+    pub(super) const NOTE_ON: u8 = 0x90;
+    /// Polyphonic key pressure.
+    #[cfg(feature = "cs80")]
+    pub(super) const KEY_PRESSURE: u8 = 0xA0;
+    /// Control change.
+    pub(super) const CONTROL_CHANGE: u8 = 0xB0;
+    /// Program change.
+    pub(super) const PROGRAM_CHANGE: u8 = 0xC0;
+    /// Channel pressure.
+    #[cfg(feature = "cs80")]
+    pub(super) const CHANNEL_PRESSURE: u8 = 0xD0;
+    /// Pitch bend.
+    pub(super) const PITCH_BEND: u8 = 0xE0;
+}
+/// The controllers every block of slots may carry (REQ-6411 item 3): the
+/// modulation wheel, volume, the sustain pedal, all sound off, reset all
+/// controllers and all notes off.
+#[cfg(any(feature = "dx7", feature = "analog"))]
 const CONTROLLERS: [u8; 6] = [1, 7, 64, 120, 121, 123];
 /// The highest program a part may change to: the last patch of a bank.
-#[cfg(feature = "dx7")]
+#[cfg(any(feature = "dx7", feature = "analog"))]
 const LAST_PROGRAM: u8 = (crate::DX7_BANK_PATCHES - 1) as u8;
+// A program change names a patch of either kind of bank.
+#[cfg(any(feature = "dx7", feature = "analog"))]
+const _: () = assert!(crate::PATCH_BANK_PATCHES == crate::DX7_BANK_PATCHES);
 
-/// The slot `bytes` hold, if it is a message the codec takes (REQ-6411 item
-/// 3); `None` for an empty slot or one to pass over, the second counted.
+/// Whether a message is one every codec of slots takes (REQ-6411 item 3):
+/// a note off, a note on, a pitch bend, one of [`CONTROLLERS`], or a change
+/// to a program a bank holds.
+#[cfg(any(feature = "dx7", feature = "analog"))]
+fn common(status: u8, data1: u8, data2: u8) -> bool {
+    match status & MIDI_KIND {
+        kind::NOTE_OFF | kind::NOTE_ON | kind::PITCH_BEND => true,
+        kind::CONTROL_CHANGE => CONTROLLERS.contains(&data1),
+        // A message of one data byte leaves its second 0.
+        kind::PROGRAM_CHANGE => data1 <= LAST_PROGRAM && data2 == 0,
+        _ => false,
+    }
+}
+
+/// What plays a block of slots: the DX7's rack, or an analogue synthesizer
+/// with its bank.
+#[cfg(any(feature = "dx7", feature = "analog"))]
+trait Player {
+    /// Whether the instrument's codec takes a message whose data bytes are
+    /// both data bytes.
+    fn takes(status: u8, data1: u8, data2: u8) -> bool;
+    /// Gives the instrument a message its codec takes.
+    fn event(&mut self, status: u8, data1: u8, data2: u8);
+    /// Renders the instrument's next samples.
+    fn render(&mut self, out: &mut [i16]);
+}
+
 #[cfg(feature = "dx7")]
-fn slot(bytes: [u8; crate::DX7_SLOT_BYTES as usize], statistics: &mut Statistics) -> Option<Slot> {
+impl Player for Rack {
+    fn takes(status: u8, data1: u8, data2: u8) -> bool {
+        common(status, data1, data2)
+    }
+
+    fn event(&mut self, status: u8, data1: u8, data2: u8) {
+        Rack::event(self, status, data1, data2);
+    }
+
+    fn render(&mut self, out: &mut [i16]) {
+        Rack::render(self, out);
+    }
+}
+
+/// The slot `bytes` hold, if it is a message the player's codec takes
+/// (REQ-6411 item 3); `None` for an empty slot or one to pass over, the
+/// second counted.
+#[cfg(any(feature = "dx7", feature = "analog"))]
+fn slot<P: Player>(bytes: [u8; crate::DX7_SLOT_BYTES as usize], statistics: &mut Statistics) -> Option<Slot> {
     let [time, status, data1, data2] = bytes;
     if bytes == [0; crate::DX7_SLOT_BYTES as usize] {
         return None;
     }
     let data = data1 & MIDI_STATUS_BIT == 0 && data2 & MIDI_STATUS_BIT == 0;
-    let taken = match status & 0xF0 {
-        // Note off, note on and pitch bend.
-        0x80 | 0x90 | 0xE0 => true,
-        // Control change.
-        0xB0 => CONTROLLERS.contains(&data1),
-        // Program change.
-        0xC0 => data1 <= LAST_PROGRAM && data2 == 0,
-        _ => false,
-    };
-    if time > crate::DX7_SLOT_LAST_TIME || !data || !taken {
+    if time > crate::DX7_SLOT_LAST_TIME || !data || !P::takes(status, data1, data2) {
         statistics.slots_passed_over = statistics.slots_passed_over.saturating_add(1);
         return None;
     }
     Some(Slot { time, status, data1, data2 })
 }
 
-/// A DX7 block: its messages given to the rack in order of their time, and
-/// in slot order where times are equal, each at its sample of the 20 ms
-/// (REQ-6411 item 3).
-#[cfg(feature = "dx7")]
-fn render_dx7(rack: &mut Rack, block: &[u8], pcm: &mut [i16; BLOCK], statistics: &mut Statistics) {
+/// A block of slots: its messages given to the player in order of their
+/// time, and in slot order where times are equal, each at its sample of the
+/// 20 ms (REQ-6411 item 3).
+#[cfg(any(feature = "dx7", feature = "analog"))]
+fn render_slots<P: Player>(player: &mut P, block: &[u8], pcm: &mut [i16; BLOCK], statistics: &mut Statistics) {
     let mut slots = [None; crate::DX7_MAX_SLOTS as usize];
     let (quads, _) = block.as_chunks::<{ crate::DX7_SLOT_BYTES as usize }>();
     for (place, bytes) in slots.iter_mut().zip(quads) {
-        *place = slot(*bytes, statistics);
+        *place = slot::<P>(*bytes, statistics);
     }
     // The times in order, each slot taken once: at most 16 slots, so the
     // walk is short, and it keeps slot order among equal times.
@@ -374,11 +449,11 @@ fn render_dx7(rack: &mut Rack, block: &[u8], pcm: &mut [i16; BLOCK], statistics:
             // Tenths of a millisecond to samples at 48,000 Hz: 4.8 each.
             let at = usize::from(time).saturating_mul(24) / 5;
             let (now, later) = rest.split_at_mut(at.saturating_sub(rendered).min(rest.len()));
-            rack.render(now);
+            player.render(now);
             rendered = rendered.saturating_add(now.len());
             rest = later;
-            rack.event(message.status, message.data1, message.data2);
+            player.event(message.status, message.data1, message.data2);
         }
     }
-    rack.render(rest);
+    player.render(rest);
 }
