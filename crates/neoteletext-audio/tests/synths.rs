@@ -331,6 +331,48 @@ fn each_codec_takes_its_own_messages_and_passes_over_the_rest() {
     }
 }
 
+// Verifies REQ-6411 item 3 for the Juno's codec: it takes the four mode
+// messages, controllers 124 to 127, which to a Juno-106 are each an all
+// notes off (its owner's manual, MIDI Implementation 2.1), and no other
+// codec takes them (TODO-6438: the instrument acted on them and the
+// receiver passed them over, so none ever arrived).
+#[test]
+fn a_juno_takes_the_mode_messages_as_all_notes_off_and_no_other_synthesizer_does() {
+    // A note held to the sound's end, but for the message in its fourth
+    // block: 25 blocks, half a second.
+    let held = |message: [u8; 4]| {
+        let mut blocks: Vec<u8> = slot(0x90, 57, 100).to_vec();
+        blocks.extend([[0; 4], [0; 4], message].concat());
+        blocks.extend(std::iter::repeat_n([0_u8; 4], 21).flatten());
+        blocks
+    };
+    // The sound of the last five blocks, by which a released note of the
+    // default patch has died away.
+    let tail = |pcm: &[i16]| energy(&pcm[pcm.len() - 5 * BLOCK..]);
+    for family in families() {
+        let patches = bank(family.codec, &[&family.plain]);
+        for model in 0..family.codec.models() {
+            let render = |message: [u8; 4]| {
+                let mut notes = sound(family.codec, &held(message));
+                notes.model = (family.codec.models() > 1).then_some(model);
+                rendered(&patches, &notes)
+            };
+            let (sounding, _) = render([0; 4]);
+            let (released, _) = render(slot(0xB0, 123, 0));
+            assert!(tail(&released) * 20 < tail(&sounding), "{:?}: all notes off releases the note", family.codec);
+            for controller in 124..=127 {
+                let (pcm, passed) = render(slot(0xB0, controller, 0));
+                if family.codec == Codec::Juno {
+                    assert_eq!(passed, 0, "model {model}: controller {controller} is passed over");
+                    assert_eq!(pcm, released, "model {model}: controller {controller} is not an all notes off");
+                } else {
+                    assert_eq!((pcm, passed), (sounding.clone(), 1), "{:?}: controller {controller}", family.codec);
+                }
+            }
+        }
+    }
+}
+
 // Verifies REQ-6411 item 4 as DEC-6421 item 4 built it, for the Juno's two
 // models: the default patch left in a missing patch's place is the model's
 // own. The Juno-106's, played on a Juno-60, has that model's high-pass

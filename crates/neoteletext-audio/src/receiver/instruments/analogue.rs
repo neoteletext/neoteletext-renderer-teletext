@@ -147,6 +147,14 @@ fn bank<S: Synth, const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8, 
     patches
 }
 
+/// The controllers a Juno block may carry beyond [`super::CONTROLLERS`],
+/// which its instrument takes: the four mode messages, omni off, omni on,
+/// mono on and poly on, each of which is to a Juno-106 an all notes off
+/// and nothing more (its owner's manual, MIDI Implementation 2.1: "Mode
+/// messages (123 - 127) are also recognized as ALL NOTES OFF").
+#[cfg(feature = "juno")]
+const JUNO_CONTROLLERS: [u8; 4] = [124, 125, 126, 127];
+
 #[cfg(feature = "juno")]
 impl Synth for juno::Juno {
     type Patch = juno::Patch;
@@ -161,6 +169,13 @@ impl Synth for juno::Juno {
 
     fn patch(block: &[u8]) -> Option<Self::Patch> {
         juno::Patch::from_bytes(block.try_into().ok()?).ok()
+    }
+
+    fn takes(status: u8, data1: u8, data2: u8) -> bool {
+        match status & MIDI_KIND {
+            kind::CONTROL_CHANGE => common(status, data1, data2) || JUNO_CONTROLLERS.contains(&data1),
+            _ => common(status, data1, data2),
+        }
     }
 
     fn program(&mut self, _channel: u8, patch: &Self::Patch) {
