@@ -416,3 +416,27 @@ fn the_cost_of_voices_that_linger_unheard() {
         );
     }
 }
+
+#[test]
+fn all_sound_off_leaves_the_pedal_where_it_is() {
+    // All sound off silences what sounds; the pedal has not moved. It let
+    // go of the pedal with the keys, so a note played after it under a
+    // pedal still down ended with its key (TODO-6438).
+    for model in MODELS {
+        let mut juno = instrument(model, &flat(model, Patch::DEFAULT));
+        juno.event(CONTROL, 64, 127);
+        juno.event(NOTE_ON, 60, 100);
+        render(&mut juno, 0.1);
+        juno.event(CONTROL, 120, 0);
+        render(&mut juno, 0.1);
+        assert_eq!(juno.sounding_voices(), 0, "{model:?}: silenced");
+        juno.event(NOTE_ON, 64, 100);
+        render(&mut juno, 0.1);
+        juno.event(NOTE_OFF, 64, 0);
+        render(&mut juno, 0.5);
+        assert_eq!(juno.sounding_voices(), 1, "{model:?}: the pedal no longer holds");
+        juno.event(CONTROL, 64, 0);
+        render(&mut juno, 0.5);
+        assert_eq!(juno.sounding_voices(), 0, "{model:?}: the pedal up lets go");
+    }
+}

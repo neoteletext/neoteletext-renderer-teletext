@@ -406,6 +406,8 @@ pub struct Juno {
     /// The pitch bend, less its centre.
     bend: i32,
     wheel: u8,
+    /// Whether the sustain pedal is down.
+    pedal: bool,
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
@@ -484,6 +486,7 @@ impl Juno {
             vibrato: Lfo::new(SEED),
             bend: 0,
             wheel: 0,
+            pedal: false,
             volume: DATA_MAX,
             volume_gain: VolumeGain::full(),
             tick_wait: 0,
@@ -821,7 +824,8 @@ impl Juno {
                     Model::Juno106 => PEDAL_DOWN_106,
                     Model::Juno60 => PEDAL_DOWN_60,
                 };
-                self.allocator.sustain(value >= down);
+                self.pedal = value >= down;
+                self.allocator.sustain(self.pedal);
             }
             CONTROL_ALL_SOUND_OFF => {
                 self.allocator.all_keys_up();
@@ -836,10 +840,14 @@ impl Juno {
                         voice.cut();
                     }
                 }
+                // The allocator lets go of the pedal with the keys; the
+                // pedal has not moved, and is given back.
+                self.allocator.sustain(self.pedal);
             }
             CONTROL_RESET_CONTROLLERS => {
                 self.wheel = 0;
                 self.bend = 0;
+                self.pedal = false;
                 self.allocator.sustain(false);
             }
             CONTROL_ALL_NOTES_OFF..=CONTROL_POLY_ON => {
@@ -856,6 +864,7 @@ impl Juno {
     /// Releases every voice, held by a key or by the pedal, and lifts
     /// the pedal: for when the input stops and no note off will come.
     pub fn release_all(&mut self) {
+        self.pedal = false;
         self.allocator.all_keys_up();
     }
 
