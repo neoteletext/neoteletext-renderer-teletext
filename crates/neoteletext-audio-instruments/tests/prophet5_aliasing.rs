@@ -1,7 +1,7 @@
 //! What is left of the aliasing when oscillator B moves oscillator A's
 //! frequency, its pulse width or the cutoff through Poly-Mod at audio
-//! rate: a measurement, against the 80 dB this crate asks of its
-//! oscillators (`src/analog/oscillator.rs`).
+//! rate, against the 80 dB this crate asks of its oscillators
+//! (`src/analog/oscillator.rs`): held to what was measured.
 //!
 //! Oscillator A is synchronised to oscillator B, and only A is heard, so
 //! everything the instrument would make is a harmonic of B's pitch:
@@ -115,31 +115,76 @@ fn measured(model: Model, patch: &Patch, key: u8) -> f64 {
     between_the_harmonics(&render(&mut prophet, 1.5), fundamental).0
 }
 
+/// The keys measured: the five Cs from 131 Hz to 2,093 Hz.
+const KEYS: [u8; 5] = [48, 60, 72, 84, 96];
+/// Poly-Mod's amount from oscillator B: a quarter, a half and all of it.
+const AMOUNTS: [u8; 3] = [30, 60, 120];
+
+/// What oscillator A's frequency under Poly-Mod is held below, at every
+/// amount and on every key, in decibels: the worst measured, -91 dB,
+/// and 3 dB. With one frequency for each sample, taken from oscillator
+/// B's band-limited output, the worst was -47 dB.
+const FREQUENCY: f64 = -88.0;
+/// The same for oscillator A's pulse width: at a quarter and a half of
+/// the amount (the worst measured -92 dB) and at all of it (-80 dB, on
+/// revision 3, where the width then runs into its end within a cycle).
+/// With one width for each sample the worst was -32 dB.
+const PULSE_WIDTH: [f64; 3] = [-88.0, -88.0, -77.0];
+/// The same for the cutoff, for each amount and each key: the worse of
+/// the two revisions as measured, and 3 dB. With the cutoff set from
+/// oscillator B's band-limited output these were -75 to -34 dB at a
+/// quarter, -59 to -25 dB at a half and -31 to -22 dB at all of it.
+const CUTOFF: [[f64; 5]; 3] = [
+    // Measured: -94, -92, -85, -75, -53.
+    [-90.0, -88.0, -82.0, -72.0, -50.0],
+    // Measured: -94, -90, -73, -56, -52.
+    [-90.0, -87.0, -70.0, -53.0, -49.0],
+    // Measured: -74, -65, -59, -53, -54.
+    [-71.0, -62.0, -56.0, -50.0, -51.0],
+];
+
+/// What a figure is held below, by the amount's and the key's place.
+type Bound<'a> = &'a dyn Fn(usize, usize) -> Option<f64>;
+
 #[test]
-#[ignore = "a measurement, which needs a release build: cargo test --release -- --ignored --nocapture aliasing"]
 fn aliasing_under_poly_mod_at_audio_rate() {
-    const KEYS: [u8; 5] = [48, 60, 72, 84, 96];
+    // An unoptimised build measures one amount on two keys, a release
+    // build everything.
+    let quick = cfg!(debug_assertions);
     for model in MODELS {
         // Without Poly-Mod the instrument is as clean as its oscillators,
         // which is what shows that this measurement reads aliasing.
-        for key in KEYS {
+        for key in KEYS.iter().copied().filter(|&key| !quick || key == 72) {
             let clean = measured(model, &synchronised(model), key);
             assert!(clean < -80.0, "{model:?} key {key}: {clean}");
         }
         let pulse = |patch: Patch| patch.with_switch(Switch::OscAPulse, true).with_switch(Switch::OscASawtooth, false);
-        let destinations = [
-            ("oscillator A's frequency", synchronised(model).with_switch(Switch::PolyModFrequencyA, true)),
-            ("oscillator A's pulse width", pulse(synchronised(model)).with_switch(Switch::PolyModPulseWidthA, true)),
-            // The cutoff knob at 6, no resonance.
-            ("the cutoff", synchronised(model).with(Knob::Cutoff, 72).with_switch(Switch::PolyModFilter, true)),
+        // Oscillator B's triangle in place of its sawtooth: it jumps
+        // nowhere.
+        let triangle =
+            |patch: Patch| patch.with_switch(Switch::OscBSawtooth, false).with_switch(Switch::OscBTriangle, true);
+        let frequency = synchronised(model).with_switch(Switch::PolyModFrequencyA, true);
+        let width = pulse(synchronised(model)).with_switch(Switch::PolyModPulseWidthA, true);
+        // The cutoff knob at 6, no resonance.
+        let cutoff = synchronised(model).with(Knob::Cutoff, 72).with_switch(Switch::PolyModFilter, true);
+        let bound = |row: usize, column: usize| CUTOFF.get(row).and_then(|row| row.get(column)).copied();
+        let destinations: [(&str, Patch, Bound); 5] = [
+            ("sawtooth to oscillator A's frequency", frequency, &|_, _| Some(FREQUENCY)),
+            ("triangle to oscillator A's frequency", triangle(frequency), &|_, _| Some(FREQUENCY)),
+            ("sawtooth to oscillator A's pulse width", width, &|row, _| PULSE_WIDTH.get(row).copied()),
+            ("triangle to oscillator A's pulse width", triangle(width), &|row, _| PULSE_WIDTH.get(row).copied()),
+            ("sawtooth to the cutoff", cutoff, &bound),
         ];
-        for (name, patch) in destinations {
-            for amount in [30u8, 60, 120] {
-                let found: Vec<String> = KEYS
-                    .iter()
-                    .map(|&key| format!("{:.0}", measured(model, &patch.with(Knob::PolyModOscB, amount), key)))
-                    .collect();
-                println!("{model:?}: oscillator B to {name}, amount {amount}: keys {KEYS:?}: {} dB", found.join(", "));
+        for (name, patch, bound) in destinations {
+            for (row, amount) in AMOUNTS.into_iter().enumerate().filter(|&(row, _)| !quick || row == 1) {
+                let mut found = Vec::new();
+                for (column, key) in KEYS.into_iter().enumerate().filter(|&(_, key)| !quick || key == 60 || key == 84) {
+                    let level = measured(model, &patch.with(Knob::PolyModOscB, amount), key);
+                    found.push(format!("{level:.0}"));
+                    let held = bound(row, column).unwrap_or(f64::MIN);
+                    assert!(level < held, "{model:?}: {name}, amount {amount}, key {key}: {level} dB, not {held} dB");
+                }
+                println!("{model:?}: oscillator B's {name}, amount {amount}: {} dB", found.join(", "));
             }
         }
     }

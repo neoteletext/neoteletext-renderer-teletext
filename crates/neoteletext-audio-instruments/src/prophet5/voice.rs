@@ -7,11 +7,50 @@
 //! the pitches, the cutoff, the pulse widths), and only what oscillator
 //! B does to oscillator A and to the filter through Poly-Mod, which
 //! moves at audio rate, at every sample.
+//!
+//! # Poly-Mod from oscillator B
+//!
+//! What Poly-Mod carries of oscillator B is taken from B's phase, not
+//! from B's band-limited output: the voltage in the instrument has no
+//! ripple either side of an edge, and through the exponential
+//! converters that ripple became tones of its own. Each sample is made
+//! in stretches that end where that voltage jumps or turns (B's cycle
+//! starting, its pulse falling, its triangle turning):
+//!
+//! - **Oscillator A's frequency** is given for each end of a stretch,
+//!   and the building block's oscillator puts A's edges where the
+//!   moving frequency does and rounds the corners its jumps make
+//!   ([`Oscillator::run`]).
+//! - **Oscillator A's pulse width** slides through a stretch and jumps
+//!   between two, and the pulse turns where it jumps
+//!   ([`Oscillator::jump_width`]).
+//! - **The cutoff**, which the filter takes once a sample, is its mean
+//!   over the sample.
+//!
+//! `tests/prophet5_aliasing.rs` measures what is no harmonic, below
+//! 20 kHz, against the strongest harmonic, on the five Cs from 131 Hz to
+//! 2,093 Hz, with oscillator A synchronised to B. The frequency: 91 dB
+//! down or better at every amount on every key (47 dB at worst before).
+//! The pulse width: 92 dB or better to half the amount, and 80 dB at all
+//! of it (32 dB before). The cutoff, from B's sawtooth with the knob at
+//! 6: at a quarter of the amount 94, 92, 85, 75 and 53 dB on the five
+//! keys; at a half 94, 90, 73, 56 and 52 dB; at all of it 74, 65, 59, 53
+//! and 54 dB (before: 75 to 34 dB, 59 to 25 dB and 31 to 22 dB). The
+//! cutoff is short of 80 dB from the C of 1,047 Hz up at a quarter and
+//! from the C of 523 Hz up beyond: what is left are the harmonics from
+//! 77 kHz to 92 kHz of a filter whose cutoff jumps once a cycle, folded
+//! about the voices' rate; rounding the corner the jump makes in the
+//! filter's output was tried and gained 3 dB.
+//!
+//! Five voices with everything on render 13.8 times faster than real
+//! time, 16.4 before the stretches (`tests/prophet5_instrument.rs`,
+//! `rendering_speed`, 17 November 2026, one core of a 3.7 GHz Intel Core
+//! i9-10900KF).
 
 use crate::analog::envelope::{ENVELOPE_ONE, REST_LEVEL, RcEnvelope, Stage, apply, time_constant};
 use crate::analog::filter::{ONE_Q28, OnePole, OtaCascade};
-use crate::analog::fixed::{amplify, scale};
-use crate::analog::oscillator::{Oscillator, waveform};
+use crate::analog::fixed::{amplify, mul_high_unsigned, ratio, scale};
+use crate::analog::oscillator::{Oscillator, Waves, waveform};
 use crate::analog::{LEVEL, Oversampling, frequency};
 
 use super::Model;
@@ -400,6 +439,12 @@ pub struct Voice {
     step_a: u32,
     width_a: i32,
     cutoff_step: u32,
+    /// Oscillator B's width as it was last given it.
+    width_b: u32,
+    /// What Poly-Mod had of oscillator B at the end of the last sample,
+    /// with oscillator A's step and the cutoff's under it, while no
+    /// tick has moved them since.
+    carried: Option<(i32, u32, u32)>,
     /// The mean of each oscillator's pulse at its width, which the mixer
     /// does not pass.
     mean_a: i32,
@@ -434,6 +479,8 @@ impl Voice {
             step_a: 0,
             width_a: 0,
             cutoff_step: 0,
+            width_b: 0,
+            carried: None,
             mean_a: 0,
             mean_b: 0,
             gain: 0,
@@ -488,6 +535,8 @@ impl Voice {
             step_a: 0,
             width_a: 0,
             cutoff_step: 0,
+            width_b: 0,
+            carried: None,
             mean_a: 0,
             mean_b: 0,
             gain: 0,
@@ -561,7 +610,9 @@ impl Voice {
             .saturating_add(through(settings.poly_to_width, moved(poly_envelope, poly_width).unwrap_or(0)));
         let width_b =
             settings.width_b.saturating_add(through(settings.wheel_width_b, moved(wheel, wheel_width).unwrap_or(0)));
-        self.oscillator_b.set_width(width(width_b));
+        self.width_b = width(width_b);
+        self.oscillator_b.set_width(self.width_b);
+        self.carried = None;
         self.mean_a = mean(self.width_a);
         self.mean_b = mean(width_b);
 
@@ -575,29 +626,157 @@ impl Voice {
             .saturating_add(through(settings.wheel_cutoff, amplify(wheel, WHEEL_CUTOFF)))
             .saturating_add(through(settings.poly_to_cutoff, amplify(poly_envelope, POLY_MOD_CUTOFF)));
         self.cutoff_step = law::raise(STEP_OF_A, cutoff.clamp(CUTOFF_BOUNDS.0, CUTOFF_BOUNDS.1));
-        if !settings.poly_at_audio_rate() {
+        // What oscillator B moves through Poly-Mod is set at every
+        // sample instead.
+        if settings.poly_pitch == 0 {
             self.oscillator_a.set_step(self.step_a);
+        }
+        if settings.poly_width == 0 {
             self.oscillator_a.set_width(width(self.width_a));
+        }
+        if settings.poly_cutoff == 0 {
             self.filter.set(self.cutoff_step, settings.resonance);
         }
+    }
+
+    /// What Poly-Mod has of oscillator B at a phase of B's cycle: the
+    /// sawtooth and the pulse from zero up, the triangle either side.
+    /// It is taken from the phase and not from B's band-limited output,
+    /// whose ripple either side of each edge is no part of the voltage
+    /// that the instrument's Poly-Mod carries.
+    #[inline]
+    fn source(&self, settings: &Settings, phase: u32) -> i32 {
+        let [saw, pulse, triangle] = settings.source_b;
+        let folded = if phase < HALF_CYCLE { phase } else { phase.wrapping_neg() };
+        apply((phase >> SAWTOOTH_SHIFT).cast_signed(), saw)
+            .wrapping_add(apply(if phase < self.width_b { 2 * LEVEL } else { 0 }, pulse))
+            .wrapping_add(apply((folded >> (SAWTOOTH_SHIFT - 1)).cast_signed().wrapping_sub(LEVEL), triangle))
+    }
+
+    /// What oscillator B runs from a phase of its cycle to where what
+    /// Poly-Mod has of it next jumps or turns: the start of its cycle,
+    /// where its pulse falls, and where its triangle turns down.
+    #[inline]
+    fn to_the_mark(&self, settings: &Settings, phase: u32) -> Option<u32> {
+        let [_, pulse, triangle] = settings.source_b;
+        let mut nearest = phase.wrapping_neg();
+        if pulse != 0 && phase < self.width_b {
+            nearest = self.width_b.wrapping_sub(phase);
+        } else if triangle != 0 && phase < HALF_CYCLE {
+            nearest = HALF_CYCLE.wrapping_sub(phase);
+        }
+        if triangle != 0 && phase < HALF_CYCLE {
+            nearest = nearest.min(HALF_CYCLE.wrapping_sub(phase));
+        }
+        // At the very start of its cycle the next start is a cycle away.
+        if nearest == 0 { None } else { Some(nearest) }
+    }
+
+    /// One sample of oscillator A under oscillator B's Poly-Mod, B having
+    /// run from the phase `before` in this sample; and the cutoff's step
+    /// for the sample.
+    ///
+    /// The sample is made in stretches ([`Oscillator::run`]), each to
+    /// where what Poly-Mod has of B next jumps or turns. Oscillator A's
+    /// frequency at each end of a stretch is its own under Poly-Mod's
+    /// voltage there, and its width slides to what that voltage makes
+    /// it; where the voltage jumps, the width jumps
+    /// ([`Oscillator::jump_width`]), and where B's cycle starts, A's
+    /// does if it is synchronised. The cutoff, which the filter takes
+    /// once a sample, is its mean over the sample: each stretch's for
+    /// that stretch's share.
+    #[inline]
+    fn poly_modulated(&mut self, settings: &Settings, before: u32) -> (Waves, u32) {
+        let step = self.oscillator_b.step();
+        let mut phase = before;
+        let (mut from, mut pitch_from, mut cutoff_from) = self.carried.unwrap_or_else(|| self.under(settings, before));
+        let mut cutoff = 0u32;
+        let stretches = settings.poly_pitch != 0 || settings.poly_width != 0;
+        let mut now = u32::MAX;
+        for _ in 0..STRETCHES {
+            // What B runs in what is left of the sample.
+            let left = if now == u32::MAX { step } else { mul_high_unsigned(step, now) };
+            let mark = self.to_the_mark(settings, phase).filter(|&distance| distance <= left);
+            let run = mark.unwrap_or(left);
+            let until = if run >= left { 0 } else { ratio(left.wrapping_sub(run), step) };
+            let end = phase.wrapping_add(run);
+            // Before a jump the voltage is as it was a unit of phase
+            // short of it.
+            let (to, pitch_to, cutoff_to) =
+                self.under(settings, if mark.is_some() { end.wrapping_sub(1) } else { end });
+            if stretches {
+                if settings.poly_width != 0 {
+                    self.oscillator_a.set_width(self.width_under(settings, to));
+                }
+                self.oscillator_a.run(until, pitch_from, pitch_to);
+            }
+            // The whole sample is one stretch more often than not.
+            let middle = (cutoff_from >> 1).wrapping_add(cutoff_to >> 1);
+            let span = now.wrapping_sub(until);
+            cutoff = if span == u32::MAX { middle } else { cutoff.saturating_add(mul_high_unsigned(middle, span)) };
+            phase = end;
+            (from, pitch_from, cutoff_from) = (to, pitch_to, cutoff_to);
+            if mark.is_some() {
+                if stretches && settings.sync && phase == 0 {
+                    self.oscillator_a.synchronise();
+                }
+                (from, pitch_from, cutoff_from) = self.under(settings, phase);
+                if stretches && settings.poly_width != 0 && from != to {
+                    self.oscillator_a.jump_width(self.width_under(settings, from));
+                }
+            }
+            now = until;
+            if now == 0 {
+                break;
+            }
+        }
+        self.carried = Some((from, pitch_from, cutoff_from));
+        let waves = if stretches {
+            self.oscillator_a.finish()
+        } else {
+            self.oscillator_a.tick(if settings.sync { self.oscillator_b.started() } else { None })
+        };
+        (waves, cutoff)
+    }
+
+    /// What Poly-Mod has of oscillator B at a phase, and oscillator A's
+    /// step and the cutoff's step under it.
+    #[inline]
+    fn under(&self, settings: &Settings, phase: u32) -> (i32, u32, u32) {
+        let source = self.source(settings, phase);
+        let pitch = if settings.poly_pitch == 0 {
+            self.step_a
+        } else {
+            law::bend(self.step_a, amplify(source, settings.poly_pitch))
+        };
+        let cutoff = if settings.poly_cutoff == 0 {
+            self.cutoff_step
+        } else {
+            law::bend(self.cutoff_step, amplify(source, settings.poly_cutoff))
+        };
+        (source, pitch, cutoff)
+    }
+
+    /// Oscillator A's width under what Poly-Mod has of oscillator B.
+    #[inline]
+    fn width_under(&self, settings: &Settings, source: i32) -> u32 {
+        width(self.width_a.saturating_add(amplify(source, settings.poly_width)))
     }
 
     /// One sample. `noise` is the instrument's one noise generator.
     #[inline]
     pub fn sample(&mut self, settings: &Settings, noise: i32) -> i32 {
+        let before = self.oscillator_b.phase();
         let b = self.oscillator_b.tick(None);
-        if settings.poly_at_audio_rate() {
-            // Oscillator B as Poly-Mod has it: the sawtooth and the pulse
-            // from zero up, the triangle either side.
-            let [saw, pulse, triangle] = settings.source_b;
-            let source = apply(b.sawtooth.wrapping_add(LEVEL), saw)
-                .wrapping_add(apply(b.pulse.wrapping_add(LEVEL), pulse))
-                .wrapping_add(apply(b.triangle, triangle));
-            self.oscillator_a.set_step(law::bend(self.step_a, amplify(source, settings.poly_pitch)));
-            self.oscillator_a.set_width(width(self.width_a.saturating_add(amplify(source, settings.poly_width))));
-            self.filter.set(law::bend(self.cutoff_step, amplify(source, settings.poly_cutoff)), settings.resonance);
-        }
-        let a = self.oscillator_a.tick(if settings.sync { self.oscillator_b.started() } else { None });
+        let a = if settings.poly_at_audio_rate() {
+            let (a, cutoff) = self.poly_modulated(settings, before);
+            if settings.poly_cutoff != 0 {
+                self.filter.set(cutoff, settings.resonance);
+            }
+            a
+        } else {
+            self.oscillator_a.tick(if settings.sync { self.oscillator_b.started() } else { None })
+        };
         let [a_saw, a_pulse] = settings.mix_a;
         let [b_saw, b_pulse, b_triangle] = settings.mix_b;
         let mixed = apply(a.sawtooth, a_saw)
@@ -617,6 +796,16 @@ impl Voice {
         apply(filtered, self.gain)
     }
 }
+
+/// Half a cycle of phase, where the triangle turns down.
+const HALF_CYCLE: u32 = 1 << 31;
+/// The shift from a phase to a sawtooth's rise from nothing to twice
+/// [`LEVEL`].
+const SAWTOOTH_SHIFT: u32 = 32 - LEVEL.trailing_zeros() - 1;
+/// Stretches a sample of oscillator A is made in under Poly-Mod, at
+/// most: oscillator B's pulse falls, its triangle turns, its cycle
+/// starts, and the sample ends; one to spare.
+const STRETCHES: u32 = 5;
 
 /// An oscillator's width for a share of a cycle in Q24, held between
 /// none and the whole.
