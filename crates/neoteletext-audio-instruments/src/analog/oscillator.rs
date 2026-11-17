@@ -547,8 +547,13 @@ impl Oscillator {
     /// free: when it is `Some`, this oscillator's cycle starts again at
     /// that instant, and the jump that makes in each waveform is
     /// band-limited as any other edge.
+    ///
+    /// A sample begun in stretches and not ended by
+    /// [`Oscillator::finish`] is ended here, where its stretches left
+    /// the cycle: the stretches after this sample are of a new one.
     #[inline]
     pub fn tick(&mut self, sync: Option<u32>) -> Waves {
+        self.midway = false;
         let old = self.phase;
         let mut new = old.wrapping_add(self.step);
         let wrapped = new < old;

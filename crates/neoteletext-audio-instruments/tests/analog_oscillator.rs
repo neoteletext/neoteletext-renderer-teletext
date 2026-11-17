@@ -580,6 +580,24 @@ fn every_stretch_is_valid() {
 }
 
 #[test]
+fn a_tick_ends_a_sample_left_in_stretches() {
+    // A sample run half its way in a stretch and never finished, then a
+    // tick: the stretches that follow are of a new sample and run the
+    // whole of it. Left where the half stretch stopped, they ran the
+    // half that was over and no more, until a sample was finished.
+    let step = 1 << 24;
+    let mut oscillator = Oscillator::new();
+    oscillator.set_step(step);
+    oscillator.run(1 << 31, step, step);
+    let _ = oscillator.tick(None);
+    assert_eq!(oscillator.now(), u32::MAX);
+    let before = oscillator.phase();
+    oscillator.run(0, step, step);
+    assert_eq!(oscillator.phase().wrapping_sub(before), step);
+    let _ = oscillator.finish();
+}
+
+#[test]
 fn a_synchronised_pulse_narrower_than_a_sample_falls_where_its_width_ends() {
     // A pulse of 2% at 6 kHz is high for a third of a sample of twice
     // the output rate. Started again by the leader within a sample, it
