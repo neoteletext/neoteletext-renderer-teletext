@@ -63,8 +63,7 @@
 //!   lines' filters are the building block's third-order ones at the
 //!   schematic's 10 kHz, where the instrument has fourth-order ones; the
 //!   chip's noise, which the instrument is known for, is left out.
-//! - **The Juno-60's high-pass filter's corners** were not read from its
-//!   schematic, and its low-frequency oscillator is taken as a triangle.
+//! - **The Juno-60's low-frequency oscillator** is taken as a triangle.
 //! - **The bass lift** of the Juno-106's high-pass switch at 0 is one
 //!   pole's shelf from two resistors and a capacitor of a path whose
 //!   other parts were not read.
@@ -154,6 +153,12 @@ const CONTROL_ALL_SOUND_OFF: u8 = 120;
 const CONTROL_RESET_CONTROLLERS: u8 = 121;
 /// Controller: all notes off.
 const CONTROL_ALL_NOTES_OFF: u8 = 123;
+/// Controller: the last of the mode messages (omni off, omni on, mono on,
+/// poly on), each of which is an all notes off too.
+///
+/// Source: JUNO-106 owner's manual, MIDI Implementation 2.1, Notes: "Mode
+/// messages (123 - 127) are also recognized as ALL NOTES OFF."
+const CONTROL_POLY_ON: u8 = 127;
 
 /// The seed of the instrument's noise, of its voices' tolerances and of
 /// its oscillators that hold a random level.
@@ -208,6 +213,33 @@ const CHORUS_FILTER: u32 = 10_000_000;
 /// the dry signal is whole and each line half that.
 const CHORUS_LINE_GAIN: i32 = ((47i64 << 31) / 78) as i32;
 
+/// Samples over which the lines' share of the output falls to nothing or
+/// rises from it when the chorus's switches move while a note sounds: 10
+/// ms. A line cut off or let in at once is a step as large as the line's
+/// signal at that instant, a click; so is a sweep that changes its depth
+/// or its direction at once, which moves the lines' delays in one step,
+/// and that change is made while the lines are not heard.
+///
+/// Source: own choice of the time and of the straight line. JUNO-60
+/// service notes, chorus board schematic (page 11), "MUTE": each line
+/// reaches its output amplifier through a FET (TR8, TR16) whose gate the
+/// CHORUS OFF line moves through resistors and a capacitor, so the
+/// instrument's chorus comes and goes softly too; that circuit's time
+/// was not worked out.
+const CHORUS_FADE_SAMPLES: u32 = SAMPLE_RATE / 100;
+/// Samples the lines are given to fill, and their filters to settle,
+/// after the sweep is set and before the lines are let in: 6 ms.
+///
+/// Source: own choice: just over the longest delay of the sweep, 5.35 ms
+/// ([`CHORUS_DELAY`]).
+const CHORUS_FILL_SAMPLES: u32 = SAMPLE_RATE * 6 / 1000;
+/// What one step of the fade is of the lines' whole share, in Q31.
+const CHORUS_FADE_UNIT: i32 = i32::MAX / CHORUS_FADE_SAMPLES.cast_signed();
+const _: () = assert!(
+    CHORUS_FILL_SAMPLES as u64 * 1_000_000 > (CHORUS_DELAY.0 + CHORUS_DELAY.1) as u64 * SAMPLE_RATE as u64
+        && CHORUS_FADE_SAMPLES > 0
+);
+
 /// The corner below which the voices' sum does not pass, in thousandths
 /// of a hertz: what takes away the steady part of a pulse that is not a
 /// square, which would otherwise stand in the output for as long as the
@@ -215,9 +247,9 @@ const CHORUS_LINE_GAIN: i32 = ((47i64 << 31) / 78) as i32;
 ///
 /// Source: JUNO-106 service notes, jack board schematic (page 15): the
 /// voices' sum enters the board through C14, 10 µF, across R39, 33 kΩ,
-/// before the high-pass switch IC3: 1 / (2 π R C) is 0.48 Hz. Own
-/// choice for the Juno-60, whose schematic was not read for it: the
-/// same.
+/// before the high-pass switch IC3: 1 / (2 π R C) is 0.48 Hz. JUNO-60
+/// service notes, chorus board schematic (page 11): the same parts
+/// before its high-pass switch IC5, C47, 10 µF, across R70, 33 kΩ.
 const COUPLING_CORNER: u32 = 482;
 
 /// The corner of the bass lift, in thousandths of a hertz.
@@ -240,7 +272,10 @@ const BASS_BOOST_GAIN: i32 = ((100i64 << 28) / 47) as i32;
 /// Source: own choice: the slider is marked -5 to +5 and no document
 /// gives its range.
 const VCA_LEVEL_RANGE: i32 = OCTAVE;
-/// The slider's middle.
+/// The slider's middle, where the level is one.
+///
+/// Source: own choice with [`VCA_LEVEL_RANGE`]: 64 of 0 to 127, the
+/// slider's 0 between -5 and +5, where [`Patch::DEFAULT`] has it.
 const VCA_LEVEL_CENTRE: i32 = 64;
 /// The share of the mixed output that is a sample, in Q28: 494 / 1000.
 /// One voice's sawtooth through an open filter then peaks 16.8 dB below
@@ -303,11 +338,20 @@ pub struct Juno {
     bass: OnePole,
     level: i32,
     chorus: Chorus,
+    /// The setting the lines are swept by now, which follows the patch's
+    /// at once or by way of a fade; off, the lines are not run.
+    sweep: ChorusMode,
+    /// Steps of the fade the lines' share of the output has risen, 0 to
+    /// [`CHORUS_FADE_SAMPLES`], and samples the lines still have to fill
+    /// before it rises.
+    wet: u32,
+    fill: u32,
     ignored: u64,
 }
 
 impl Juno {
-    /// An instrument at rest playing [`Patch::DEFAULT`].
+    /// An instrument at rest playing its model's plain patch
+    /// ([`Patch::default_for`]).
     #[must_use]
     pub fn new(model: Model) -> Self {
         let law = match model {
@@ -320,11 +364,12 @@ impl Juno {
             voice = voice.wrapping_add(1);
             Voice::new(model, trim)
         });
+        let patch = Patch::default_for(model);
         let mut juno = Self {
             model,
             law,
-            patch: Patch::DEFAULT,
-            settings: Settings::new(&Patch::DEFAULT, model, law),
+            patch,
+            settings: Settings::new(&patch, model, law),
             // Each key takes the next voice round the six, and a seventh
             // key the voice of the first: JUNO-60 service notes, page 14,
             // "Key assignment"; JUNO-106 service notes, page 18, the test
@@ -347,6 +392,9 @@ impl Juno {
             bass: OnePole::new(),
             level: ONE_Q28,
             chorus: Self::empty_chorus(),
+            sweep: ChorusMode::Off,
+            wet: 0,
+            fill: 0,
             ignored: 0,
         };
         juno.coupling.set_cutoff(frequency(COUPLING_CORNER, SAMPLE_RATE));
@@ -380,16 +428,12 @@ impl Juno {
 
     /// Gives the instrument a patch, which it copies. It takes effect at
     /// once, on the voices that are sounding too, as moving the panel's
-    /// controls does. A setting the model has not is taken as the
-    /// nearest it has ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
+    /// controls does; but the chorus, switched while a voice sounds,
+    /// goes and comes over a hundredth of a second, so that its lines
+    /// are not cut into the output or out of it in one step. A setting
+    /// the model has not is taken as the nearest it has
+    /// ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
     pub fn set_patch(&mut self, patch: &Patch) {
-        // While the chorus is off its lines are not run, to spare the
-        // work, and so keep what they held when it was switched off. The
-        // instrument's lines run on and have long emptied by the time
-        // they are heard again: a chorus switched on starts empty.
-        if self.patch.chorus == ChorusMode::Off && patch.chorus != ChorusMode::Off {
-            self.chorus = Self::empty_chorus();
-        }
         self.patch = *patch;
         self.apply_patch();
     }
@@ -431,23 +475,85 @@ impl Juno {
         let octaves = slider.saturating_mul(VCA_LEVEL_RANGE) / VCA_LEVEL_CENTRE;
         self.level = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
 
-        let mode = match (patch.chorus, self.model) {
+        let wanted = self.chorus_mode();
+        if self.allocator.sounding() == 0 {
+            // Nothing sounds, so nothing can click: at once.
+            self.sweep_by(wanted);
+            self.fill = 0;
+            self.wet = if wanted == ChorusMode::Off { 0 } else { CHORUS_FADE_SAMPLES };
+        } else if let (Some((_, now)), Some((_, then))) = (Self::sweep_of(self.sweep), Self::sweep_of(wanted))
+            && now == then
+        {
+            // I to II or back: the same sweep at another rate, which the
+            // lines' delays follow without a step.
+            self.sweep_by(wanted);
+        }
+        // Any other change is made in `render`, while the lines are not
+        // heard.
+    }
+
+    /// The patch's chorus setting as the model has it.
+    const fn chorus_mode(&self) -> ChorusMode {
+        match (self.patch.chorus, self.model) {
             (ChorusMode::Both, Model::Juno106) => ChorusMode::Two,
             (mode, _) => mode,
-        };
-        let (rate, percent, shape, opposite) = match mode {
-            ChorusMode::Off | ChorusMode::One => (CHORUS_RATES[0], 100, Shape::Triangle, true),
-            ChorusMode::Two => (CHORUS_RATES[1], 100, Shape::Triangle, true),
+        }
+    }
+
+    /// The sweep of a setting: its rate in thousandths of a hertz, and
+    /// its depth in hundredths of [`CHORUS_DELAY`]'s, its shape and
+    /// whether the second line is swept opposite to the first. Nothing
+    /// for off.
+    const fn sweep_of(mode: ChorusMode) -> Option<(u32, (u32, Shape, bool))> {
+        match mode {
+            ChorusMode::Off => None,
+            ChorusMode::One => Some((CHORUS_RATES[0], (100, Shape::Triangle, true))),
+            ChorusMode::Two => Some((CHORUS_RATES[1], (100, Shape::Triangle, true))),
             // With both buttons down the second line is no longer swept
             // the other way (Anwander: "In the 'fast mode' the second
             // BBD is controlled in a non inverted way"), and the sweep is
             // "sine like".
-            ChorusMode::Both => (CHORUS_RATES[2], CHORUS_BOTH_PERCENT, Shape::Sine, false),
-        };
-        self.chorus.set_delay(CHORUS_DELAY.0, CHORUS_DELAY.1.saturating_mul(percent) / 100);
-        self.chorus.set_rate(frequency(rate, SAMPLE_RATE));
-        self.chorus.set_shape(shape);
-        self.chorus.set_opposite(opposite);
+            ChorusMode::Both => Some((CHORUS_RATES[2], (CHORUS_BOTH_PERCENT, Shape::Sine, false))),
+        }
+    }
+
+    /// Sets the lines' sweep to a setting's.
+    fn sweep_by(&mut self, mode: ChorusMode) {
+        if let Some((rate, (percent, shape, opposite))) = Self::sweep_of(mode) {
+            // While the chorus is off its lines are not run, to spare
+            // the work, and so keep what they held when it was switched
+            // off. The instrument's lines run on and have long emptied
+            // by the time they are heard again: a chorus switched on
+            // starts empty.
+            if self.sweep == ChorusMode::Off {
+                self.chorus = Self::empty_chorus();
+            }
+            self.chorus.set_delay(CHORUS_DELAY.0, CHORUS_DELAY.1.saturating_mul(percent) / 100);
+            self.chorus.set_rate(frequency(rate, SAMPLE_RATE));
+            self.chorus.set_shape(shape);
+            self.chorus.set_opposite(opposite);
+        }
+        self.sweep = mode;
+    }
+
+    /// One sample of the chorus's switching: towards the patch's setting
+    /// by way of silence of the lines. Gives the lines' share of the
+    /// output in Q31, or nothing while they are heard whole.
+    #[inline]
+    fn chorus_fade(&mut self, wanted: ChorusMode) -> Option<i32> {
+        if self.sweep != wanted {
+            if self.wet == 0 {
+                self.sweep_by(wanted);
+                self.fill = CHORUS_FILL_SAMPLES;
+            } else {
+                self.wet = self.wet.saturating_sub(1);
+            }
+        } else if self.fill > 0 {
+            self.fill = self.fill.saturating_sub(1);
+        } else if self.wet < CHORUS_FADE_SAMPLES && wanted != ChorusMode::Off {
+            self.wet = self.wet.saturating_add(1);
+        }
+        (self.wet < CHORUS_FADE_SAMPLES).then(|| self.wet.cast_signed().saturating_mul(CHORUS_FADE_UNIT))
     }
 
     /// How many messages [`Juno::event`] has ignored since the
@@ -472,8 +578,10 @@ impl Juno {
     /// - Note on (0x9n); the velocity is not used.
     /// - Control change (0xBn) of the modulation wheel (1), volume (7),
     ///   the sustain pedal (64, down from 64), all sound off (120), reset
-    ///   all controllers (121, which leaves the volume) and all notes off
-    ///   (123).
+    ///   all controllers (121, which leaves the volume), all notes off
+    ///   (123) and the four mode messages (124 to 127), which are an all
+    ///   notes off and nothing more: the instrument stays one part that
+    ///   hears every channel.
     /// - Pitch bend (0xEn), 14 bits, `data1` the low seven.
     ///
     /// Anything else is ignored and counted ([`Juno::ignored_events`]):
@@ -525,7 +633,7 @@ impl Juno {
                 self.bend = 0;
                 self.allocator.sustain(false);
             }
-            CONTROL_ALL_NOTES_OFF => {
+            CONTROL_ALL_NOTES_OFF..=CONTROL_POLY_ON => {
                 // As a note off for every key: the pedal still holds.
                 let voices = *self.allocator.voices();
                 for voice in voices.iter().filter(|voice| voice.stage == Stage::Held) {
@@ -569,7 +677,7 @@ impl Juno {
                     voice.release();
                 }
                 voice.frame(&self.settings, controls);
-                if key.stage == Stage::Released && voice.silent(&self.settings) {
+                if key.stage == Stage::Released && voice.silent() {
                     self.allocator.finished(index);
                 }
             }
@@ -609,7 +717,7 @@ impl Juno {
         let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
         let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
         let boost = self.law.bass_boost && self.patch.hpf == 0;
-        let chorus = self.patch.chorus != ChorusMode::Off;
+        let chorus = self.chorus_mode();
         for sample in out {
             let earlier = self.voices_sample();
             let later = self.voices_sample();
@@ -620,9 +728,11 @@ impl Juno {
                 signal = signal.saturating_add(amplify(self.bass.low_pass(signal), BASS_BOOST_GAIN));
             }
             signal = amplify(amplify(signal, self.level), volume);
-            if chorus {
+            let fade = self.chorus_fade(chorus);
+            if self.sweep != ChorusMode::Off {
                 let [first, second] = self.chorus.process(signal);
-                signal = signal.saturating_add(scale(first.saturating_add(second), CHORUS_LINE_GAIN));
+                let lines = scale(first.saturating_add(second), CHORUS_LINE_GAIN);
+                signal = signal.saturating_add(fade.map_or(lines, |share| scale(lines, share)));
             }
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));
         }

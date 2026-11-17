@@ -210,10 +210,18 @@ pub const JUNO_60: Law = Law {
     // the Specifications say "DELAY TIME (0 - 1.5s)".
     lfo_rate: (300, octaves(6_058_894, 1_000_000)),
     lfo_delay: 2_000_000,
-    // Source: own choice, NOT read from the Juno-60's schematic or its
-    // owner's manual: position 0 is taken as flat, and the three others
-    // as the Juno-106's two corners with their geometric mean between.
-    hpf: [0, 225_800, 403_300, 720_500],
+    // Source: JUNO-60 service notes, chorus board schematic (page 11),
+    // "HPF": the switch IC5 passes the signal straight on at position 0,
+    // and at positions 1, 2 and 3 through C29, 0.022 µF, C28, 0.01 µF,
+    // or C27, 0.0047 µF (the table of HPF A and B against 0 to 3 beside
+    // it, and the numbers at the switch's outputs). After the capacitor
+    // stand R66, 470 kΩ, to ground and R69, 33 kΩ, into the amplifier
+    // IC6: 1 / (2 π R C) with R the two side by side, 30.8 kΩ, is 234.6
+    // Hz, 516.2 Hz and 1,098.2 Hz. Own reading: that IC6's input stands
+    // at ground, as the 33 kΩ at its output (R78) against the 33 kΩ at
+    // its input says it does; if it did not, the corners would be 15 Hz
+    // to 72 Hz and the switch would do nothing to hear.
+    hpf: [0, 234_600, 516_200, 1_098_200],
     bass_boost: false,
 };
 

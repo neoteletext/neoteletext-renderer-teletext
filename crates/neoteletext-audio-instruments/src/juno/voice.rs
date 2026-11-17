@@ -415,13 +415,19 @@ impl Voice {
         self.configure(settings);
     }
 
-    /// Whether the voice, its key up, has fallen silent.
-    pub fn silent(&self, settings: &Settings) -> bool {
+    /// Whether the voice, its key up, has fallen silent and its envelope
+    /// has come to rest. A voice is not run while it rests, so one let go
+    /// with its envelope part of the way down would keep that level for
+    /// its next key, where the instrument's envelope runs on whether it
+    /// is heard or not: with the amplifier on the gate the sound is gone
+    /// long before a slow release is, and the envelope still moves the
+    /// cutoff and the pulse's width of the next note.
+    pub fn silent(&self) -> bool {
         let at_rest = match self.model {
             Model::Juno106 => self.stepped.stage() == Stage::Rest,
             Model::Juno60 => self.analogue.stage() == Stage::Rest,
         };
-        !self.gate && self.level.value < REST_LEVEL && self.gain < REST_LEVEL && (settings.vca_gate || at_rest)
+        !self.gate && self.level.value < REST_LEVEL && self.gain < REST_LEVEL && at_rest
     }
 
     /// A frame: the envelope moves on, and the pitch, the pulse's width
@@ -546,6 +552,9 @@ impl Voice {
 }
 
 /// Fraction bits of a divisor before it is rounded.
+///
+/// Source: own choice: with the 16 bits of a timer's divisor they fill
+/// a word.
 const DIVISOR_BITS: u32 = 16;
 /// The A's frequency in hertz.
 const A4_HERTZ: u64 = A4.0 as u64 / MILLIHERTZ;
@@ -581,7 +590,10 @@ fn nearest(dividend: u64, divisor: u64) -> u64 {
     dividend.saturating_add(divisor / 2).checked_div(divisor).unwrap_or(DIVISOR_MAX).clamp(1, DIVISOR_MAX)
 }
 
-/// The key the cutoff's key follow turns about.
+/// The key the cutoff's key follow turns about: middle C.
+///
+/// Source: MIDI 1.0: middle C is key 60. That the key follow turns about
+/// it is the service notes', cited where it is used ([`Voice::frame`]).
 const MIDDLE_C: u8 = 60;
 
 /// The analogue attack's length in time constants, in thousandths.

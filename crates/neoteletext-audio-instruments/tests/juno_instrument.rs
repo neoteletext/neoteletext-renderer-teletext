@@ -187,6 +187,35 @@ fn the_pedal_holds_and_the_controllers_do_what_midi_says() {
 }
 
 #[test]
+fn the_mode_messages_are_all_notes_off_as_the_owners_manual_says() {
+    for model in MODELS {
+        for controller in 123..=127u8 {
+            let mut juno = instrument(model, &flat(model, square()));
+            // Seven keys, so that one voice has been taken from a key
+            // that is still down; then the pedal, and one key up.
+            for key in 60..67u8 {
+                juno.event(NOTE_ON, key, 100);
+                render(&mut juno, 0.01);
+            }
+            juno.event(CONTROL, 64, 127);
+            juno.event(NOTE_OFF, 66, 0);
+            juno.event(CONTROL | 3, controller, 0);
+            render(&mut juno, 0.1);
+            // As a note off for every key: the pedal holds them all.
+            assert_eq!((juno.sounding_voices(), juno.ignored_events()), (VOICES, 0), "{model:?}: {controller}");
+            juno.event(CONTROL, 64, 0);
+            render(&mut juno, 0.1);
+            assert_eq!(juno.sounding_voices(), 0, "{model:?}: {controller} left a note sounding");
+            // And without the pedal, at once.
+            juno.event(NOTE_ON, 60, 100);
+            juno.event(CONTROL, controller, 0);
+            render(&mut juno, 0.1);
+            assert_eq!(juno.sounding_voices(), 0, "{model:?}: {controller} left a note sounding");
+        }
+    }
+}
+
+#[test]
 fn what_is_no_message_of_the_instrument_is_counted_and_changes_nothing() {
     let mut juno = Juno::new(Model::Juno106);
     let mut same = Juno::new(Model::Juno106);

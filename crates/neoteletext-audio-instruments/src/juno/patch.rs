@@ -15,6 +15,8 @@
 //! JUNO-60 service notes, page 16, tables 3 and 4: the Juno-60's
 //! programmable switches.
 
+use super::Model;
+
 /// Bytes of a Juno-106 patch.
 ///
 /// Source: JUNO-106 owner's manual, MIDI Implementation 3.1: "(18 bytes
@@ -213,6 +215,24 @@ impl Patch {
         vca_gate: false,
         hpf: 1,
     };
+
+    /// The plain starting sound of a model: [`Patch::DEFAULT`] with the
+    /// high-pass switch where that model's filter is flat. At position 1,
+    /// the Juno-106's flat one, the Juno-60 has a high-pass filter at 235
+    /// Hz, which would leave its plain sound without its bass.
+    ///
+    /// Source: own choice of a plain starting sound; the positions are
+    /// the schematics' ([`law::JUNO_106`](super::law::JUNO_106) and
+    /// [`law::JUNO_60`](super::law::JUNO_60), `hpf`).
+    #[must_use]
+    pub const fn default_for(model: Model) -> Self {
+        let mut patch = Self::DEFAULT;
+        patch.hpf = match model {
+            Model::Juno106 => Self::DEFAULT.hpf,
+            Model::Juno60 => 0,
+        };
+        patch
+    }
 
     /// Reads a Juno-106 patch from its 18 bytes.
     ///
