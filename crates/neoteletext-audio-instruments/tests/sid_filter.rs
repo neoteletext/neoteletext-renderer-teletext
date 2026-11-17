@@ -108,16 +108,18 @@ fn the_cutoff_register_opens_the_low_pass_step_by_step() {
             last = level;
             levels.push(level);
         }
-        // Open, the 8580's filter passes the tone as it came, and the
-        // 6581's 3.5 dB down: what its filter's input is multiplied by
-        // with no resonance, 0.67.
+        // Open, the filter passes the tone as it came. For the 6581 that
+        // is what two real chips do: noise through the low-pass with no
+        // resonance lay 0 to 1 dB above the same noise sent past the
+        // filter on Stone Oakvalley's R2 and 1 dB below it on his R4
+        // (his recordings of Plogue's benchmark, measured 17 November
+        // 2026). TODO-6427: the filter's input was multiplied by 0.67
+        // before, 3.5 dB down, as one emulator has it.
         let direct = through(model, 2000.0, 0, 0, 0);
-        let open = match model {
-            ChipModel::Mos6581 => -3.5,
-            ChipModel::Mos8580 => 0.0,
-        };
-        assert!(decibels(levels[0] / direct) < -30.0, "{model:?} closed: {}", decibels(levels[0] / direct));
-        assert!((decibels(last / direct) - open).abs() < 1.0, "{model:?} open: {}", decibels(last / direct));
+        // Closed, the tone is five times the 6581's floor of 400 Hz, two
+        // poles down.
+        assert!(decibels(levels[0] / direct) < -25.0, "{model:?} closed: {}", decibels(levels[0] / direct));
+        assert!(decibels(last / direct).abs() < 1.0, "{model:?} open: {}", decibels(last / direct));
     }
 }
 
@@ -177,14 +179,13 @@ fn resonance_raises_the_cutoff_and_the_8580_has_more_of_it() {
             last = level;
         }
     }
-    // No resonance is -3 dB at the cutoff; the highest is +7.6 dB on a
-    // 6581 and +8 dB on an 8580 (TODO-6427 fault 6: +12 dB before, 4 dB
-    // above the reference program's). The 6581's filter input is multiplied by 0.67
-    // with no resonance (-3.5 dB) and by 0.80 with the highest (-1.9 dB).
+    // No resonance is -3 dB at the cutoff on both chips; the highest is
+    // +7.6 dB on a 6581 and +8 dB on an 8580 (TODO-6427 fault 6: +12 dB
+    // before).
     assert!((decibels(peak(ChipModel::Mos8580, 0)) + 3.0).abs() < 0.5);
     assert!((decibels(peak(ChipModel::Mos8580, 15)) - 8.0).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos8580, 15)));
-    assert!((decibels(peak(ChipModel::Mos6581, 0)) + 6.5).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 0)));
-    assert!((decibels(peak(ChipModel::Mos6581, 15)) - 5.7).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 15)));
+    assert!((decibels(peak(ChipModel::Mos6581, 0)) + 3.0).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 0)));
+    assert!((decibels(peak(ChipModel::Mos6581, 15)) - 7.6).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 15)));
 }
 
 #[test]

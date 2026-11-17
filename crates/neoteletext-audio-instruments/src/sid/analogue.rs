@@ -293,7 +293,11 @@ const RESONANCE_STEPS: u32 = 15;
 ///
 /// Source: retroisle.com, "The SID (Sound Interface Device) Chip": "the
 /// highpass component of the filter was mixed in 3 dB attenuated compared
-/// to the other outputs, making the sound more bassy".
+/// to the other outputs, making the sound more bassy". Two real chips
+/// agree: in Stone Oakvalley's recordings of his 6581 R2 and R4 playing
+/// Plogue's benchmark (at `curve_6581`), measured 17 November 2026, noise
+/// through the high-pass lies 2 to 3 dB below the same noise sent past
+/// the filter on the R2 and 4 dB below on the R4, above the cutoff.
 const HIGH_PASS_GAIN_6581: u32 = 46_341;
 
 /// Where the 6581's filter input begins to saturate, in voice units, and
@@ -314,17 +318,6 @@ const SATURATION_FLAT: i32 = SATURATION_START + (1 << (SATURATION_WIDTH_BITS - 1
 const SATURATION_PRE_SHIFT: u32 = 6;
 /// Shift from that square to distance² / (2 * width), the parabola's fall.
 const SATURATION_POST_SHIFT: u32 = SATURATION_WIDTH_BITS + 1 - 2 * SATURATION_PRE_SHIFT;
-
-/// What the 6581's filter input is multiplied by with no resonance and
-/// with the highest, in [`COEFFICIENT_BITS`] fraction bits: 0.67 and
-/// 0.80, with equal steps between.
-///
-/// Source: fitted to the output of reSIDfp's default 6581, measured 17
-/// November 2026: noise through its low-pass is 3.5 dB below the same
-/// noise sent past the filter in the pass band with no resonance, 2.9 dB
-/// at resonance 8 and 1.9 dB at resonance 15, at a fifth of full level as
-/// at full level.
-const FILTER_GAIN_6581: (u32, u32) = (43_909, 52_429);
 
 /// What the mixer's sum times the volume's sixteen steps is multiplied by
 /// to give output units, in [`COEFFICIENT_BITS`] fraction bits, for each
@@ -417,8 +410,6 @@ pub(super) struct Analogue {
     /// and the 6581's with no signal in the filter.
     coefficient: u32,
     damping: u32,
-    /// What the 6581's filter input is multiplied by at this resonance.
-    filter_gain: u32,
     low: i32,
     band: i32,
     /// The output stage's low-pass.
@@ -439,7 +430,6 @@ impl Analogue {
             mode_volume: 0,
             coefficient: coefficient(model, clock, 0),
             damping: DAMPING_NONE,
-            filter_gain: FILTER_GAIN_6581.0,
             low: 0,
             band: 0,
             output: 0,
@@ -464,9 +454,6 @@ impl Analogue {
         self.resonance = value >> 4;
         self.routing = value & 0x0F;
         self.damping = damping(self.model, self.resonance);
-        let rise = FILTER_GAIN_6581.1.saturating_sub(FILTER_GAIN_6581.0);
-        self.filter_gain =
-            FILTER_GAIN_6581.0.saturating_add(rise.saturating_mul(u32::from(self.resonance)) / RESONANCE_STEPS);
     }
 
     /// Writes the filter's mode and the volume (register $18).
@@ -489,8 +476,17 @@ impl Analogue {
     /// and of those sent past it, in voice units, to one output sample.
     #[inline]
     pub(super) fn process(&mut self, filtered: i32, direct: i32) -> i16 {
+        // The filter passes its pass band at the level it was given.
+        // Source: for the 6581, Stone Oakvalley's recordings of his R2 and
+        // R4 playing Plogue's benchmark (at `curve_6581`), measured 17
+        // November 2026: with no resonance, noise through the low-pass
+        // lies 0 to 1 dB above the same noise sent past the filter on the
+        // R2 and 1 dB below it on the R4, in the pass band. Two emulators
+        // run as separate programs have it 2 to 4 dB below with no
+        // resonance and 1 dB above to 2 dB below with the highest; no
+        // real chip was measured with resonance, and none is given here.
         let input = match self.model {
-            ChipModel::Mos6581 => scale(saturate(filtered), self.filter_gain),
+            ChipModel::Mos6581 => saturate(filtered),
             ChipModel::Mos8580 => filtered,
         };
         let coefficient = self.coefficient;
