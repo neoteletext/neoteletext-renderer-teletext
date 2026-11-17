@@ -563,6 +563,33 @@ fn a_rack_is_deterministic_and_alone() {
     }
 }
 
+/// A key struck again while its note sounds goes on sounding to the end of
+/// the block it is in, wherever in the block the message comes: the note
+/// is not left out of the rest of that block, which would cut a notch of
+/// silence into it.
+#[test]
+fn a_retriggered_note_sounds_through_the_block_it_is_struck_in() {
+    // Without oscillator key sync the sine runs on through the second key,
+    // so that nothing but a gap can make a step.
+    let unsynced = patch(|voice| voice.oscillator_key_sync = 0);
+    let largest_step = |samples: &[i16]| {
+        samples.windows(2).map(|pair| (i32::from(pair[1]) - i32::from(pair[0])).abs()).max().unwrap_or(0)
+    };
+    let mut steady = rack_with(&[unsynced]);
+    steady.event(0x90, 69, 100);
+    let slope = largest_step(&render(&mut steady, 9600)[4800..]);
+    assert!((150..250).contains(&slope), "a sine of 440 Hz at 3,270 steps by {slope}");
+    for offset in 0..32 {
+        let mut rack = rack_with(&[unsynced]);
+        rack.event(0x90, 69, 100);
+        let mut samples = render(&mut rack, 4800 + offset);
+        rack.event(0x90, 69, 100);
+        samples.extend(render(&mut rack, 960));
+        let step = largest_step(&samples[2400..]);
+        assert!(step <= slope + 2, "struck again {offset} samples into a block: a step of {step}");
+    }
+}
+
 /// Blocks are counted across calls: rendering in calls of any lengths gives
 /// the samples one call gives.
 #[test]

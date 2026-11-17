@@ -135,7 +135,8 @@ enum Stage {
 struct Slot {
     note: Note,
     stage: Stage,
-    /// Started since the last block began: it sounds from the next.
+    /// Started from silence since the last block began: it sounds from
+    /// the next.
     pending: bool,
     part: u8,
     key: u8,
@@ -327,9 +328,13 @@ impl Rack {
             }),
         };
         if let Some(slot) = slot {
-            slot.note.start(patch, key, velocity, slot.stage != Stage::Free);
+            let continues = slot.stage != Stage::Free;
+            slot.note.start(patch, key, velocity, continues);
             slot.stage = Stage::Held;
-            slot.pending = true;
+            // A note that takes over a sounding voice goes on sounding to
+            // the end of this block, at the levels the voice has: left out
+            // of it, the voice would have a notch of silence.
+            slot.pending = !continues;
             slot.part = part_number;
             slot.key = key;
             slot.started = self.clock;
