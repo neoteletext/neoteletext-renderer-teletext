@@ -155,11 +155,18 @@ fn the_cross_modulation_at_five_moves_vco_1_three_octaves() {
 
 /// What the cross modulation's aliasing is held below, in decibels, with
 /// the slider at 5 or less and keys to the A of 880 Hz, and at any
-/// setting: the worst measured when this was written (-70.5 dB and
-/// -30.1 dB), and 3 dB.
-const MODERATE_ALIASING: f64 = -67.5;
+/// setting: the worst measured (-77.1 dB and -37.9 dB), and 3 dB. Both
+/// are where VCO-2's pulse holds VCO-1 a steady three and six octaves
+/// up, and are the plain sawtooth's own figures at 7 kHz and 28 kHz.
+const MODERATE_ALIASING: f64 = -74.0;
 /// See [`MODERATE_ALIASING`].
-const DEEPEST_ALIASING: f64 = -27.0;
+const DEEPEST_ALIASING: f64 = -35.0;
+/// The same with VCO-2's sine or sawtooth moving VCO-1, the slider at 5
+/// or less and keys to the A of 880 Hz, for VCO-1's sawtooth, triangle
+/// and square: the worst measured (-86.0 dB, -91.8 dB and -82.4 dB), and
+/// 3 dB. Before the edges of VCO-1 were placed by its moving frequency
+/// and its corners rounded, these were -70.5 dB, -64.5 dB and -69.7 dB.
+const SMOOTH_ALIASING: [(u8, f64); 3] = [(1, -83.0), (0, -88.5), (3, -79.0)];
 
 /// How near a line of the sound a bin must be to count as it: six bins,
 /// beyond the window's main lobe.
@@ -173,8 +180,9 @@ const CLEAR_BINS: f64 = 6.0;
 /// the multiples of one frequency: the strongest line over the whole
 /// number that puts the most of the power on multiples, beyond what
 /// multiples so close would catch of any sound.
-fn aliasing(key: u8, depth: u8, wave: u8) -> f64 {
+fn aliasing(key: u8, depth: u8, wave: u8, first: u8) -> f64 {
     let patch = Patch::DEFAULT
+        .with(Param::Vco1Wave, first)
         .with(Param::CrossMod, depth)
         .with(Param::Vco2Wave, wave)
         .with(Param::Sync, 1)
@@ -222,7 +230,7 @@ fn what_the_cross_modulation_aliases_is_measured() {
     let keys: &[u8] = if cfg!(debug_assertions) { &[A2, A2 + 12] } else { &[A2 - 24, A2 - 12, A2, A2 + 12, A2 + 24] };
     for &key in keys {
         for depth in [26u8, 64, 128, 255] {
-            let found = [0, 1, 2].map(|wave| aliasing(key, depth, wave));
+            let found = [0, 1, 2].map(|wave| aliasing(key, depth, wave, 1));
             println!("{key:3}  {depth:5}  {:6.1}  {:6.1}  {:6.1}", found[0], found[1], found[2]);
             let worst = found.iter().copied().filter(|level| level.is_finite()).fold(f64::MIN, f64::max);
             if depth <= 128 && key <= A2 + 12 {
@@ -233,4 +241,28 @@ fn what_the_cross_modulation_aliases_is_measured() {
     }
     println!("worst with the slider at 5 or less, to the A of 880 Hz: {moderate:.1} dB; worst of all: {deepest:.1} dB");
     assert!(moderate < MODERATE_ALIASING && deepest < DEEPEST_ALIASING);
+}
+
+#[test]
+fn a_sine_or_a_sawtooth_moving_vco_1_leaves_its_edges_and_corners_clean() {
+    // VCO-1's frequency moves through every sample, so its edges fall
+    // off where one frequency for the sample would put them; and where
+    // the sync cuts VCO-2's cycle short, VCO-1's frequency jumps and its
+    // sawtooth and triangle turn a corner.
+    let keys: &[u8] = if cfg!(debug_assertions) { &[A2 + 12] } else { &[A2 - 24, A2 - 12, A2, A2 + 12] };
+    for (first, bound) in SMOOTH_ALIASING {
+        let mut worst = f64::MIN;
+        for &key in keys {
+            for depth in [26u8, 64, 128] {
+                for wave in [0, 1] {
+                    let found = aliasing(key, depth, wave, first);
+                    if found.is_finite() {
+                        worst = worst.max(found);
+                    }
+                }
+            }
+        }
+        println!("VCO-1's waveform {first}: {worst:.1} dB at worst");
+        assert!(worst < bound, "VCO-1's waveform {first}: {worst} dB");
+    }
 }
