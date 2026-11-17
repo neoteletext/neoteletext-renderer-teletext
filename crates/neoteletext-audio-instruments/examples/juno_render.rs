@@ -100,11 +100,9 @@ fn main() {
             }
         }
     };
-    // Until the file sets a patch, the plain one with the high-pass
-    // switch where the model is flat: 1 on the Juno-106, 0 on the
-    // Juno-60, whose 1 cuts below 226 Hz (`juno::law`).
-    let mut patch = Patch::DEFAULT;
-    patch.hpf = u8::from(model == Model::Juno106);
+    // Until the file sets a patch, the model's plain one, whose
+    // high-pass switch is where the model is flat.
+    let mut patch = Patch::default_for(model);
     adjust(&mut patch, &mut tail);
     juno.set_patch(&patch);
     for (time, bytes) in events {

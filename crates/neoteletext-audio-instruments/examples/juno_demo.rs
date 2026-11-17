@@ -65,13 +65,10 @@ fn note(score: &mut Vec<Timed>, key: u8, start: f64, length: f64) {
 
 /// The position of a model's high-pass switch at which nothing is cut
 /// and nothing lifted: 1 on the Juno-106, whose 0 lifts the bass, and 0
-/// on the Juno-60, whose 1 already cuts below 226 Hz (`juno::law`). With
+/// on the Juno-60, whose 1 already cuts below 235 Hz (`juno::law`). With
 /// one position for both, the Juno-60 played the piece without its bass.
 fn flat(model: Model) -> u8 {
-    match model {
-        Model::Juno106 => 1,
-        Model::Juno60 => 0,
-    }
+    Patch::default_for(model).hpf
 }
 
 /// The pad: a sawtooth and a quiet sub-oscillator, slow to rise and to

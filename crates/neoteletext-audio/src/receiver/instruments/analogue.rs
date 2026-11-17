@@ -48,6 +48,11 @@ pub(super) trait Synth {
     /// The patch the instrument plays where its bank has none, or one with
     /// a field out of its range: the instrument's own default.
     const PLAIN: Self::Patch;
+    /// That patch for this instrument as it was made, where the default
+    /// differs between an instrument's models.
+    fn plain(&self) -> Self::Patch {
+        Self::PLAIN
+    }
     /// The codec of the instrument's sounds, which is also the code of its
     /// family in a patch bank.
     const FAMILY: Codec;
@@ -83,7 +88,8 @@ impl<S: Synth> Played<S> {
     /// `synth` with the patches of the bank `entry`'s sound names, playing
     /// the first of them.
     fn new<const OBJECTS: usize>(synth: S, store: &Store<'_, OBJECTS>, entry: &Entry) -> Self {
-        let mut played = Self { synth, patches: bank::<S, OBJECTS>(store, entry.param) };
+        let patches = bank::<S, OBJECTS>(store, entry.param, synth.plain());
+        let mut played = Self { synth, patches };
         if let Some(first) = played.patches.first() {
             for channel in 0..S::PROGRAM_CHANNELS {
                 played.synth.program(channel, first);
@@ -127,8 +133,8 @@ impl<S: Synth> Player for Played<S> {
 /// range, leaves the instrument's default patch in its place, so a faulty
 /// bank costs a sound its timbre and nothing else, as a faulty DX7 bank
 /// does (REQ-6411 item 4, DEC-6421 item 4).
-fn bank<S: Synth, const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8) -> [S::Patch; BANK] {
-    let mut patches = [S::PLAIN; BANK];
+fn bank<S: Synth, const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8, plain: S::Patch) -> [S::Patch; BANK] {
+    let mut patches = [plain; BANK];
     let held = store
         .entry(handle)
         .filter(|entry| entry.codec == Codec::PatchBank && entry.setup.first() == Some(&S::FAMILY.code()));
@@ -145,6 +151,12 @@ fn bank<S: Synth, const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8) 
 impl Synth for juno::Juno {
     type Patch = juno::Patch;
     const PLAIN: Self::Patch = juno::Patch::DEFAULT;
+
+    // The Juno-60's high-pass switch is flat at another position than
+    // the Juno-106's: each model has its own plain patch.
+    fn plain(&self) -> Self::Patch {
+        juno::Patch::default_for(self.model())
+    }
     const FAMILY: Codec = Codec::Juno;
 
     fn patch(block: &[u8]) -> Option<Self::Patch> {

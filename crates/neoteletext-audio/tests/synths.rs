@@ -331,6 +331,26 @@ fn each_codec_takes_its_own_messages_and_passes_over_the_rest() {
     }
 }
 
+// Verifies REQ-6411 item 4 as DEC-6421 item 4 built it, for the Juno's two
+// models: the default patch left in a missing patch's place is the model's
+// own. The Juno-106's, played on a Juno-60, has that model's high-pass
+// filter in and no bass (TODO-6438).
+#[test]
+fn a_missing_patch_on_either_juno_leaves_that_models_plain_patch() {
+    let dull = juno::Patch::DEFAULT.with(juno::Slider::VcfFrequency, 30).to_bytes();
+    for (tag, model) in [(0, juno::Model::Juno106), (1, juno::Model::Juno60)] {
+        let plain = juno::Patch::default_for(model).to_bytes();
+        // Program 1, of a bank that has only patch 0 and of one that has
+        // the model's plain patch there.
+        let mut notes = sound(Codec::Juno, &note(&[slot(0xC0, 1, 0)], 10));
+        notes.model = Some(tag);
+        let (missing, _) = rendered(&bank(Codec::Juno, &[&dull]), &notes);
+        let (given, _) = rendered(&bank(Codec::Juno, &[&dull, &plain]), &notes);
+        assert!(loud(&missing), "{model:?}");
+        assert_eq!(missing, given, "{model:?}: a missing patch is not the model's plain patch");
+    }
+}
+
 // Verifies DEC-6429 foundations item 4: the model tag chooses the Juno-60
 // or the Prophet-5 of revisions 1 and 2, and absent means the first model.
 #[test]

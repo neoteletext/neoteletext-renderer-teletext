@@ -312,7 +312,8 @@ pub struct Juno {
 }
 
 impl Juno {
-    /// An instrument at rest playing [`Patch::DEFAULT`].
+    /// An instrument at rest playing its model's plain patch
+    /// ([`Patch::default_for`]).
     #[must_use]
     pub fn new(model: Model) -> Self {
         let law = match model {
@@ -325,11 +326,12 @@ impl Juno {
             voice = voice.wrapping_add(1);
             Voice::new(model, trim)
         });
+        let patch = Patch::default_for(model);
         let mut juno = Self {
             model,
             law,
-            patch: Patch::DEFAULT,
-            settings: Settings::new(&Patch::DEFAULT, model, law),
+            patch,
+            settings: Settings::new(&patch, model, law),
             // Each key takes the next voice round the six, and a seventh
             // key the voice of the first: JUNO-60 service notes, page 14,
             // "Key assignment"; JUNO-106 service notes, page 18, the test

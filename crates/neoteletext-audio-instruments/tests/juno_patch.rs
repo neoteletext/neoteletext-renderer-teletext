@@ -7,13 +7,14 @@
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
     reason = "a test"
 )]
 
 use std::cmp::Ordering;
 
 use neoteletext_audio_instruments::juno::patch::{PATCH_BYTES, SLIDERS};
-use neoteletext_audio_instruments::juno::{ChorusMode, Patch, PatchError, PwmSource, Range, Slider};
+use neoteletext_audio_instruments::juno::{ChorusMode, Juno, Model, Patch, PatchError, PwmSource, Range, Slider};
 
 /// The patch of the owner's manual's example of the Manual button's
 /// message (MIDI Implementation 3.2).
@@ -115,4 +116,53 @@ fn what_the_juno_106_has_not_is_written_as_the_nearest_it_has() {
     patch.hpf = 9;
     let read = Patch::from_bytes(&patch.to_bytes()).expect("a patch");
     assert_eq!((read.chorus, read.pwm, read.get(Slider::Sub), read.hpf), (ChorusMode::Two, PwmSource::Manual, 0, 3));
+}
+
+#[test]
+fn each_model_starts_on_a_plain_patch_that_is_flat_on_that_model() {
+    // The Juno-106's plain patch is the default one, and the Juno-60's
+    // differs from it by the high-pass switch alone: 1 is flat on the
+    // Juno-106 and a high-pass filter at 235 Hz on the Juno-60, whose
+    // flat position is 0.
+    assert_eq!(Patch::default_for(Model::Juno106), Patch::DEFAULT);
+    let mut expected = Patch::DEFAULT;
+    expected.hpf = 0;
+    assert_eq!(Patch::default_for(Model::Juno60), expected);
+    for model in [Model::Juno106, Model::Juno60] {
+        let plain = Patch::default_for(model);
+        assert_eq!(*Juno::new(model).patch(), plain, "{model:?}");
+        // A second of the lowest A, 55 Hz, and the size of its
+        // fundamental in the second half.
+        let low_a = |juno: &mut Juno| {
+            juno.event(0x90, 33, 100);
+            let mut out = vec![0i16; 48_000];
+            juno.render(&mut out);
+            let (mut sine, mut cosine) = (0.0f64, 0.0f64);
+            for (index, &sample) in out.iter().enumerate().skip(24_000) {
+                let angle = std::f64::consts::TAU * 55.0 * index as f64 / 48_000.0;
+                sine += f64::from(sample) * angle.sin();
+                cosine += f64::from(sample) * angle.cos();
+            }
+            (out, sine.hypot(cosine))
+        };
+        // A new instrument plays exactly its model's plain patch.
+        let (new, whole) = low_a(&mut Juno::new(model));
+        let mut given = Juno::new(model);
+        given.set_patch(&plain);
+        assert_eq!(new, low_a(&mut given).0, "{model:?}");
+        // And has its bass whole: every position of the switch that
+        // cuts leaves less than a third of that fundamental (the
+        // Juno-106's position 0 does not cut, it lifts).
+        for position in (0..=3u8).filter(|&position| position != plain.hpf) {
+            if model == Model::Juno106 && position == 0 {
+                continue;
+            }
+            let mut cutting = Juno::new(model);
+            let mut patch = plain;
+            patch.hpf = position;
+            cutting.set_patch(&patch);
+            let left = low_a(&mut cutting).1 / whole;
+            assert!(left < 0.3, "{model:?}: position {position} leaves {left} of the plain patch's 55 Hz");
+        }
+    }
 }
