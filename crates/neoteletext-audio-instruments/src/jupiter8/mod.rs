@@ -329,6 +329,9 @@ pub struct Jupiter8 {
     bend: i32,
     wheel: u8,
     volume: u8,
+    /// The volume's gain as it stands, in Q28, on its way to what the
+    /// controller asks.
+    volume_gain: crate::analog::volume::VolumeGain,
     /// Samples of the filters until the next tick.
     tick_wait: u32,
     decimator: Decimator,
@@ -370,6 +373,7 @@ impl Jupiter8 {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            volume_gain: crate::analog::volume::VolumeGain::full(),
             tick_wait: 0,
             decimator: Decimator::sharp(),
             ignored: 0,
@@ -769,7 +773,7 @@ impl Jupiter8 {
             let earlier = mixed(self.voices_sample());
             let later = mixed(self.voices_sample());
             let signal = self.decimator.process(earlier, later);
-            *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
+            *sample = to_sample(amplify(amplify(signal, self.volume_gain.towards(volume)), OUTPUT_GAIN));
         }
     }
 }

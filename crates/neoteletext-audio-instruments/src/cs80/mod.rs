@@ -196,6 +196,7 @@ use crate::analog::envelope::{ENVELOPE_ONE, RcEnvelope, apply, time_constant};
 use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::amplify;
 use crate::analog::oscillator::Noise;
+use crate::analog::volume::VolumeGain;
 use crate::analog::{frequency, to_sample};
 
 use law::OCTAVE;
@@ -601,6 +602,9 @@ pub struct Cs80 {
     bend: i32,
     wheel: u8,
     volume: u8,
+    /// The volume's gain as it stands, in Q28, on its way to what the
+    /// controller asks.
+    volume_gain: VolumeGain,
     pedal: bool,
     /// Samples of the voices until the next tick.
     tick_wait: u32,
@@ -651,6 +655,7 @@ impl Cs80 {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            volume_gain: VolumeGain::full(),
             pedal: false,
             tick_wait: 0,
             decimator: Decimator::sharp(),
@@ -765,7 +770,9 @@ impl Cs80 {
     ///   pressed, `data2`.
     /// - Channel pressure (0xDn): how hard every key that is down is
     ///   pressed, `data1`; `data2` is not used.
-    /// - Control change (0xBn) of the modulation wheel (1), volume (7),
+    /// - Control change (0xBn) of the modulation wheel (1), volume (7,
+    ///   whose gain moves to its new place over five thousandths of a
+    ///   second at the most),
     ///   the foot switch (64, down from 64), all sound off (120), reset
     ///   all controllers (121, which leaves the volume) and all notes off
     ///   (123).
@@ -1016,7 +1023,7 @@ impl Cs80 {
                     apply(signal, ENVELOPE_ONE.saturating_sub(through)).saturating_sub(apply(delayed, self.effect_on))
                 };
             }
-            *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
+            *sample = to_sample(amplify(amplify(signal, self.volume_gain.towards(volume)), OUTPUT_GAIN));
         }
     }
 }

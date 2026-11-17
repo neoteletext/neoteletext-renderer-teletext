@@ -101,6 +101,7 @@ use crate::analog::envelope::{IMMEDIATE, RcEnvelope, Stage, apply, time_constant
 use crate::analog::filter::{Ladder, ONE_Q28, OnePole, saturate};
 use crate::analog::fixed::{accumulate, amplify, mul_high, scale};
 use crate::analog::oscillator::{Noise, Oscillator, Waves, waveform};
+use crate::analog::volume::VolumeGain;
 use crate::analog::{frequency, to_sample};
 
 use law::{OCTAVE, RATE};
@@ -365,6 +366,9 @@ pub struct Minimoog {
     bend: i32,
     wheel: i32,
     volume: u8,
+    /// The volume's gain as it stands, in Q28, on its way to what the
+    /// controller asks.
+    volume_gain: VolumeGain,
     /// From the voice's rate to twice the output rate, and from there to
     /// the output rate.
     wide: Decimator,
@@ -421,6 +425,7 @@ impl Minimoog {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            volume_gain: VolumeGain::full(),
             wide: Decimator::wide(),
             decimator: Decimator::sharp(),
             ignored: 0,
@@ -519,7 +524,9 @@ impl Minimoog {
     /// - Note on (0x9n); the velocity is not used. At 8' a key sounds its
     ///   MIDI pitch; the instrument's own keyboard is keys 41 to 84, and
     ///   the keys beyond it go on as it would.
-    /// - Control change (0xBn) of the modulation wheel (1), volume (7),
+    /// - Control change (0xBn) of the modulation wheel (1), volume (7,
+    ///   whose gain moves to its new place over five thousandths of a
+    ///   second at the most),
     ///   the sustain pedal (64, down from 64, which holds the note as a
     ///   key does), all sound off (120), reset all controllers (121,
     ///   which leaves the volume) and all notes off (123).
@@ -729,7 +736,7 @@ impl Minimoog {
         for sample in out {
             let [first, second, third, fourth] = core::array::from_fn(|_| self.sample());
             let (earlier, later) = (self.wide.process(first, second), self.wide.process(third, fourth));
-            let signal = amplify(self.decimator.process(earlier, later), volume);
+            let signal = amplify(self.decimator.process(earlier, later), self.volume_gain.towards(volume));
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));
             if self.contours.last().is_some_and(|contour| contour.stage() == Stage::Rest) {
                 self.allocator.finished(0);

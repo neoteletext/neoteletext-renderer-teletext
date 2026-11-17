@@ -87,6 +87,7 @@ use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::{amplify, limit, mul_high, scale};
 use crate::analog::lfo::{LFO_ONE, Lfo, Shape};
 use crate::analog::oscillator::Noise;
+use crate::analog::volume::VolumeGain;
 use crate::analog::{LEVEL, frequency, to_sample};
 
 use law::{Law, OCTAVE};
@@ -370,14 +371,6 @@ const MICROSECONDS: u64 = 1_000_000;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
-/// The most the volume's gain moves in one sample, in Q28: from nothing
-/// to all of it in 256 samples, 5.3 ms. A volume message between two
-/// calls to render would otherwise step the signal by the gain's whole
-/// change at once, which is a click.
-///
-/// Source: own choice: long against a sample and short against a hand
-/// on a volume control; this crate's Prophet-5 moves its volume so.
-const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
 
 /// The Juno.
 ///
@@ -405,7 +398,7 @@ pub struct Juno {
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
-    volume_gain: i32,
+    volume_gain: VolumeGain,
     /// Samples of the voices until the next tick, and ticks until the
     /// next frame.
     tick_wait: u32,
@@ -481,7 +474,7 @@ impl Juno {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
-            volume_gain: ONE_Q28,
+            volume_gain: VolumeGain::full(),
             tick_wait: 0,
             frame_wait: 0,
             smoothing: voice::hold_smoothing(),
@@ -925,9 +918,7 @@ impl Juno {
                 // A share cut to nothing would never arrive.
                 self.level = if step == 0 { self.level_wanted } else { self.level.saturating_add(step) };
             }
-            let towards = volume.saturating_sub(self.volume_gain).clamp(-VOLUME_SLEW, VOLUME_SLEW);
-            self.volume_gain = self.volume_gain.saturating_add(towards);
-            signal = amplify(amplify(signal, self.level), self.volume_gain);
+            signal = amplify(amplify(signal, self.level), self.volume_gain.towards(volume));
             self.quiet = if signal.saturating_abs() < QUIET_LEVEL {
                 self.quiet.saturating_add(1).min(CHORUS_FILL_SAMPLES)
             } else {

@@ -148,6 +148,63 @@ fn heard(jupiter: &mut Jupiter8, keys: &[u8]) -> Vec<f64> {
 const KEYS: [u8; 10] = [48, 50, 53, 57, 59, 62, 64, 66, 70, 71];
 
 #[test]
+fn a_volume_message_between_two_renders_does_not_step_the_signal() {
+    // The largest step from one sample to the next.
+    let step = |signal: &[i16]| signal.windows(2).map(|pair| (pair[1] - pair[0]).unsigned_abs()).max().unwrap_or(0);
+    // VCO-1's triangle on the A above middle C: its largest step is its
+    // slope, and anything sudden is larger. The volume's gain was worked
+    // out once for each call to render, so a volume message moved it
+    // between one sample and the next (TODO-6438).
+    let patch = Patch::DEFAULT.with(Param::Vco1Wave, 0);
+    // Half a second for the note to settle; then twenty changes of the
+    // volume 3,058 samples apart, the calls to render cut at `cut`
+    // samples; then the volume at its half.
+    let lead = SAMPLE_RATE as usize / 2;
+    let run = |cut: usize| {
+        let mut jupiter = instrument(&patch);
+        jupiter.event(NOTE_ON, 69, 100);
+        let mut out = vec![0i16; 21 * 3_058 + SAMPLE_RATE as usize / 2];
+        jupiter.render(&mut vec![0i16; lead]);
+        for (turn, piece) in out.chunks_mut(3_058).enumerate() {
+            jupiter.event(CONTROL, 7, [127, 64, 127, 0][turn.min(21) % 4]);
+            for part in piece.chunks_mut(cut) {
+                jupiter.render(part);
+            }
+        }
+        out
+    };
+    let out = run(3_058);
+    assert_eq!(out, run(7), "the calls' lengths change the samples");
+    // The note alone, at the full volume of the first 3,058 samples.
+    let (alone, changes) = (&out[..3_058], &out[3_058..21 * 3_058]);
+    let (steady, worst) = (step(alone), step(changes));
+    println!("a step of {worst} units at most across the volume's changes, {steady} in the note");
+    assert!(worst * 5 < steady * 6, "the volume clicks: {worst} against {steady}");
+    // And the volume arrives: half the controller, to the sample of an
+    // instrument that had it from the first.
+    let mut there = instrument(&patch);
+    there.event(CONTROL, 7, 64);
+    there.event(NOTE_ON, 69, 100);
+    let mut same = vec![0i16; lead + out.len()];
+    there.render(&mut same);
+    let settled = out.len() - SAMPLE_RATE as usize / 4;
+    assert_eq!(out[settled..], same[lead + settled..], "the volume does not arrive");
+    // A reset puts the gain back at once: the first sample of a note is
+    // then the first sample of a new instrument's.
+    let mut again = instrument(&patch);
+    again.event(CONTROL, 7, 0);
+    again.render(&mut vec![0i16; lead]);
+    again.reset();
+    again.event(NOTE_ON, 69, 100);
+    let mut fresh = instrument(&patch);
+    fresh.event(NOTE_ON, 69, 100);
+    let (mut after_reset, mut from_new) = (vec![0i16; lead], vec![0i16; lead]);
+    again.render(&mut after_reset);
+    fresh.render(&mut from_new);
+    assert_eq!(after_reset, from_new, "a reset leaves the volume on its way");
+}
+
+#[test]
 fn poly_1_has_eight_voices_and_the_ninth_key_waits() {
     // Owner's manual, printed page 12: "When eight notes are played and
     // held, no new notes can be sounded until one of the original eight
