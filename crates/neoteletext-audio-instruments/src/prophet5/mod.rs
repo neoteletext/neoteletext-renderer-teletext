@@ -411,7 +411,8 @@ impl Prophet5 {
 
     /// Gives the instrument a patch, which it copies. It takes effect at
     /// once, on the voices that are sounding too, as moving the panel's
-    /// controls does; switching unison on or off lets go of every key.
+    /// controls does; switching unison on or off lets go of every key,
+    /// and leaves the pedal as it is.
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
         self.apply_patch();
@@ -437,7 +438,10 @@ impl Prophet5 {
         }
         let mode = Self::mode(&self.patch);
         if mode != self.allocator.mode() {
+            // The allocator lets go of every key, and of the pedal with
+            // them; the pedal has not moved, and is given back.
             self.allocator.set_mode(mode);
+            self.allocator.sustain(self.pedal);
         }
         let steps = i32::from(self.patch.get(Knob::LfoFrequency).min(law.knob_top));
         let rate = law::raise(law.lfo.0, steps.saturating_mul(law.lfo.1));
