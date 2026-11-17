@@ -63,9 +63,20 @@ fn note(score: &mut Vec<Timed>, key: u8, start: f64, length: f64) {
     score.push(Timed(start + length, Change::Midi([0x80, key, 0])));
 }
 
+/// The position of a model's high-pass switch at which nothing is cut
+/// and nothing lifted: 1 on the Juno-106, whose 0 lifts the bass, and 0
+/// on the Juno-60, whose 1 already cuts below 226 Hz (`juno::law`). With
+/// one position for both, the Juno-60 played the piece without its bass.
+fn flat(model: Model) -> u8 {
+    match model {
+        Model::Juno106 => 1,
+        Model::Juno60 => 0,
+    }
+}
+
 /// The pad: a sawtooth and a quiet sub-oscillator, slow to rise and to
 /// die, the filter half closed, chorus I.
-fn pad(cutoff: u8) -> Patch {
+fn pad(model: Model, cutoff: u8) -> Patch {
     let mut patch = Patch::DEFAULT
         .with(Slider::VcfFrequency, cutoff)
         .with(Slider::VcfResonance, 30)
@@ -79,6 +90,7 @@ fn pad(cutoff: u8) -> Patch {
         .with(Slider::LfoDelay, 60)
         .with(Slider::DcoLfo, 8);
     patch.chorus = ChorusMode::One;
+    patch.hpf = flat(model);
     patch
 }
 
@@ -99,6 +111,7 @@ fn pluck(model: Model, chorus: ChorusMode) -> Patch {
     patch.pwm = PwmSource::Lfo;
     patch.chorus = chorus;
     patch.range = Range::Eight;
+    patch.hpf = flat(model);
     patch
 }
 
@@ -110,7 +123,7 @@ const PLUCK_CUTOFF: f64 = 96.0;
 /// The first half: the pad and its bass, the cutoff opened by hand over
 /// the last two bars.
 fn first_half(model: Model) -> Vec<Timed> {
-    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pad(slider(model, PAD_CUTOFF.0)))))];
+    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pad(model, slider(model, PAD_CUTOFF.0)))))];
     let bar = BEAT * BEATS as f64;
     for (index, (chord, bass)) in CHORDS.iter().enumerate() {
         let start = index as f64 * bar;
@@ -127,7 +140,7 @@ fn first_half(model: Model) -> Vec<Timed> {
         let share = step as f64 / steps as f64;
         // Octaves in proportion to the time, as a hand on the slider.
         let hertz = PAD_CUTOFF.0 * (PAD_CUTOFF.1 / PAD_CUTOFF.0).powf(share);
-        score.push(Timed(from + (to - from) * share, Change::Patch(Box::new(pad(slider(model, hertz))))));
+        score.push(Timed(from + (to - from) * share, Change::Patch(Box::new(pad(model, slider(model, hertz))))));
     }
     score
 }
