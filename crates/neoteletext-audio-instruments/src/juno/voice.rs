@@ -121,6 +121,9 @@ const SIXTEEN_FOOT: u64 = SIXTEEN_FOOT_RATIO.1;
 /// adjustments 9-1 and 9-2: 50% and 95%.
 const PULSE_WIDTH: (u32, u32) = (1 << 31, ((45u64 << 32) / 100) as u32);
 
+/// What takes a share in Q30 to Q32: two bits.
+const Q30_TO_Q32: u32 = 1 << 2;
+
 /// The resonance at the slider's top, in Q28, as the feedback of the
 /// filter's loop: the loop oscillates from four, which the slider reaches
 /// at 117 of 127.
@@ -449,7 +452,11 @@ impl Voice {
             PwmSource::Lfo => mul_high(settings.pulse_width, (ENVELOPE_ONE >> 1).saturating_add(lfo >> 1)) << 2,
             PwmSource::Envelope => mul_high(settings.pulse_width, envelope) << 2,
         };
-        let wider = mul_high_unsigned(PULSE_WIDTH.1, position.max(0).cast_unsigned() << 2);
+        // The position from Q30 to Q32, held under one: the slider's top
+        // is one in Q30 exactly, which a word of Q32 cannot hold and a
+        // shift would turn into nothing.
+        let share = position.max(0).cast_unsigned().saturating_mul(Q30_TO_Q32);
+        let wider = mul_high_unsigned(PULSE_WIDTH.1, share);
         self.oscillator.set_width(PULSE_WIDTH.0.saturating_add(wider));
 
         // The key follow turns about middle C: JUNO-60 service notes,
