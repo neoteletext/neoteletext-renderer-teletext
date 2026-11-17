@@ -193,6 +193,34 @@ const PINK_GAIN: i32 = 3 * ONE_Q28;
 /// section 2-21 (page 43) calls the result pink noise.
 const PINK_CORNER: u32 = 159_155;
 
+/// Ticks in one loop of the instrument's computer: six thousandths of a
+/// second. Once a loop the computer compares each knob with the number
+/// it holds for it and moves the number one step towards the knob, and
+/// then sends every number through the converter to the voices: a knob
+/// that is turned moves its control voltage one step of the converter's
+/// seven bits each loop, however far and fast it was turned.
+///
+/// Source: TM3 section 2-12 (page 29): "outputting one of 24 entries
+/// from a Scratchpad RAM table of pot settings, at the same time the
+/// actual pot is being sampled through the ADC "window" comparator
+/// ... As long as the voltages don't match, the table value is
+/// decremented or incremented until they do match. Once all the pots
+/// have been checked ... the DAC again converts the pot values, this
+/// time distributing them and the oscillator and filter CVs to the
+/// synth. Thus, the DAC output, Vdac, steps between 62 values (24 pots
+/// and 38 CVs) during each 6-ms loop". Own reading of it: one value of
+/// the converter for each knob in a loop is one comparison, which says
+/// only higher or lower, and so one step. Page 31 gives 11 ms as "the
+/// longest loop time", which keys held lengthen; the shortest is taken.
+/// Each voltage is there at once when its turn comes: "a few
+/// microseconds for each S/H to acquire a specific value of Vdac"
+/// (page 31), so a step of the number is a step of the voltage. The
+/// voice sheets were not searched for a capacitor on any one voltage's
+/// way from its S/H, and the manual of revisions 1 and 2 was not read
+/// for the loop; their computer is taken to do the same.
+const LOOP_TICKS: u32 = TICK_RATE * 6 / 1_000;
+const _: () = assert!(LOOP_TICKS == 36);
+
 /// The pitch bend value that bends nothing.
 ///
 /// Source: MIDI 1.0: a pitch bend is 14 bits and its centre is 0x2000.
@@ -319,6 +347,12 @@ impl Modulator {
 pub struct Prophet5 {
     model: Model,
     patch: Patch,
+    /// The numbers the computer holds for the knobs, each on its way to
+    /// where the patch has its knob ([`LOOP_TICKS`]), with the patch's
+    /// switches: what the voices are given.
+    panel: Patch,
+    /// Ticks until the computer's next loop.
+    loop_wait: u32,
     settings: Settings,
     allocator: Allocator<VOICES>,
     voices: [Voice; VOICES],
@@ -364,6 +398,8 @@ impl Prophet5 {
         let mut prophet = Self {
             model,
             patch: Patch::DEFAULT,
+            panel: Patch::DEFAULT,
+            loop_wait: 0,
             settings: Settings::new(&Patch::DEFAULT, model),
             allocator: Allocator::new(Self::mode(&Patch::DEFAULT)),
             voices,
@@ -426,12 +462,45 @@ impl Prophet5 {
         self.set_patch(&patch);
     }
 
-    /// Gives the instrument a patch, which it copies. It takes effect at
-    /// once, on the voices that are sounding too, as moving the panel's
-    /// controls does; switching unison on or off lets go of every key,
-    /// and leaves the pedal as it is.
+    /// Gives the instrument a patch, which it copies. It takes effect on
+    /// the voices that are sounding too, as moving the panel's controls
+    /// does: the switches at once, and each knob one step of its 128
+    /// every six thousandths of a second, as the instrument's computer
+    /// follows a knob that is turned. With no voice sounding, all of it
+    /// is there at once. Switching unison on or off lets go of every
+    /// key, and leaves the pedal as it is.
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
+        if self.sounding_voices() == 0 {
+            self.panel = *patch;
+        } else {
+            // The switches, which are the top bit of each byte.
+            let mut bytes = patch.to_bytes();
+            for (byte, held) in bytes.iter_mut().zip(self.panel.to_bytes()) {
+                *byte = (*byte & !patch::KNOB_MAX) | (held & patch::KNOB_MAX);
+            }
+            self.panel = Patch::from_bytes(&bytes);
+        }
+        self.apply_patch();
+    }
+
+    /// A loop of the computer: the number it holds for each knob goes
+    /// one step towards where the patch has the knob.
+    fn scan(&mut self) {
+        if self.panel == self.patch {
+            return;
+        }
+        let mut bytes = self.panel.to_bytes();
+        for (byte, wanted) in bytes.iter_mut().zip(self.patch.to_bytes()) {
+            let (held, wanted) = (*byte & patch::KNOB_MAX, wanted & patch::KNOB_MAX);
+            let next = match held.cmp(&wanted) {
+                core::cmp::Ordering::Less => held.saturating_add(1),
+                core::cmp::Ordering::Equal => held,
+                core::cmp::Ordering::Greater => held.saturating_sub(1),
+            };
+            *byte = (*byte & !patch::KNOB_MAX) | next;
+        }
+        self.panel = Patch::from_bytes(&bytes);
         self.apply_patch();
     }
 
@@ -449,7 +518,7 @@ impl Prophet5 {
 
     fn apply_patch(&mut self) {
         let law = self.model.law();
-        self.settings = Settings::new(&self.patch, self.model);
+        self.settings = Settings::new(&self.panel, self.model);
         for voice in &mut self.voices {
             voice.configure(&self.settings);
         }
@@ -460,7 +529,7 @@ impl Prophet5 {
             self.allocator.set_mode(mode);
             self.allocator.sustain(self.pedal);
         }
-        let steps = i32::from(self.patch.get(Knob::LfoFrequency).min(law.knob_top));
+        let steps = i32::from(self.panel.get(Knob::LfoFrequency).min(law.knob_top));
         let rate = law::raise(law.lfo.0, steps.saturating_mul(law.lfo.1));
         self.lfo.step = frequency(rate, TICK_RATE);
     }
@@ -582,7 +651,7 @@ impl Prophet5 {
     /// and within the law's zone of it along an exponential.
     fn glide(&mut self, target: i32) -> i32 {
         let law = self.model.law();
-        let steps = i32::from(self.patch.get(Knob::Glide).min(law.knob_top));
+        let steps = i32::from(self.panel.get(Knob::Glide).min(law.knob_top));
         if steps == 0 {
             self.glide = target;
             return target;
@@ -602,12 +671,17 @@ impl Prophet5 {
 
     /// A tick: the voices take what the keys and the controls ask.
     fn control(&mut self) {
+        if self.loop_wait == 0 {
+            self.loop_wait = LOOP_TICKS;
+            self.scan();
+        }
+        self.loop_wait = self.loop_wait.saturating_sub(1);
         let law = self.model.law();
         let lfo = self.lfo.tick(&self.patch, law);
         let pink = amplify(self.pink.low_pass(self.wheel_noise.tick()), PINK_GAIN);
         // The source mix moves the two levels opposite ways (TM3 section
         // 2-3, page 20), and the wheel is the amount of their sum.
-        let mix = i32::from(self.patch.get(Knob::SourceMix).min(law.knob_top));
+        let mix = i32::from(self.panel.get(Knob::SourceMix).min(law.knob_top));
         let top = i32::from(law.knob_top);
         let source = law::share(lfo, top.saturating_sub(mix), top).saturating_add(law::share(pink, mix, top));
         let wheel = law::share(source, i32::from(self.wheel), i32::from(DATA_MAX));
