@@ -191,7 +191,10 @@ fn what_the_cross_modulation_aliases_is_measured() {
     println!("what is no partial of the sound, below 20 kHz, against the strongest partial, dB:");
     println!("key  depth    sine  sawtooth   pulse");
     let (mut moderate, mut deepest) = (f64::MIN, f64::MIN);
-    for key in [A2 - 24, A2 - 12, A2, A2 + 12, A2 + 24] {
+    // An unoptimised build measures the two keys that hold the worst
+    // figures, a release build all five.
+    let keys: &[u8] = if cfg!(debug_assertions) { &[A2, A2 + 12] } else { &[A2 - 24, A2 - 12, A2, A2 + 12, A2 + 24] };
+    for &key in keys {
         for depth in [26u8, 64, 128, 255] {
             let found = [0, 1, 2].map(|wave| aliasing(key, depth, wave));
             println!("{key:3}  {depth:5}  {:6.1}  {:6.1}  {:6.1}", found[0], found[1], found[2]);
