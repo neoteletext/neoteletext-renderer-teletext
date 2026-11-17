@@ -285,14 +285,17 @@ pub const LOW_RANGE: i32 = 7 * OCTAVE;
 ///
 /// Source: Roland's specifications: "LFO Rate: 0.05 - 40Hz".
 pub const LFO_RATE_BASE: u32 = 50;
-/// The octaves from the lowest rate to the highest: log₂ 800 = 9.644.
+/// The octaves from the lowest rate to the highest, 30 Hz: log₂ 600 =
+/// 9.229.
 ///
-/// Source: the same specifications. Own choice: the rate is exponential
-/// in the slider. Service notes, adjustment 21, trims the oscillator to
-/// "exactly 3 complete cycles" at 10 ms a division, 30 Hz, at a position
-/// of the slider its drawing does not show legibly; this law is at 30 Hz
-/// with the slider at 9.6.
-pub const LFO_RATE_SPAN: i32 = octaves(9_644, 1_000);
+/// Source: service notes, adjustment 21, LFO MODULATION: with the scope
+/// at "10ms/div", "Adjust CON VR3 to display exactly 3 complete cycles",
+/// 30 Hz; its drawing of the panel has the RATE slider at 10, with DELAY
+/// TIME, which the same adjustment trims to 4 s. The specifications'
+/// 40 Hz is a quarter more than the instrument is trimmed to; the
+/// trimmed figure is taken, as the attack's 6 s is ([`ATTACK_LAW`]). Own
+/// choice: the rate is exponential in the slider.
+pub const LFO_RATE_SPAN: i32 = octaves(9_229, 1_000);
 /// The longest delay of the low-frequency oscillator, in millionths of a
 /// second.
 ///
