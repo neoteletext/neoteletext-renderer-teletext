@@ -85,6 +85,32 @@ fn the_pulse_narrows_to_thirty_microseconds_at_middle_c() {
 }
 
 #[test]
+fn the_envelope_and_the_oscillator_move_the_pulses_width() {
+    // Owner's manual, printed page 17: with ENV-1 the width follows the
+    // envelope from the square; with LFO it goes "to the extreme limit
+    // set by the slider and back again". The width is read from the
+    // pulse's mean, a square's being none.
+    let mean = |signal: &[f64]| signal.iter().sum::<f64>() / signal.len() as f64;
+    let pulse = Patch::DEFAULT.with(Param::Vco1Wave, 2).with(Param::PwmDepth, 128);
+    let manual = mean(&tone(&pulse, C2));
+    // The envelope at full sustain holds the width the slider has by
+    // hand; at none it leaves the square.
+    let held = mean(&tone(&pulse.with(Param::PwmSource, 2), C2));
+    let unmoved = mean(&tone(&pulse.with(Param::PwmSource, 2).with(Param::Env1Sustain, 0), C2));
+    println!("the pulse's mean: by hand {manual:.4}, by the envelope at its peak {held:.4}, at none {unmoved:.4}");
+    assert!((held / manual - 1.0).abs() < 0.02 && unmoved.abs() < 0.02 * manual.abs());
+    // The oscillator, a sine at 3.6 Hz, swings between the square and
+    // the slider's width. Each mean is over 20 ms, which is not a whole
+    // number of the pulse's cycles: a tenth of the swing either way.
+    let swept = pulse.with(Param::PwmSource, 0).with(Param::LfoRate, 150);
+    let means: Vec<f64> = tone(&swept, C2).chunks(samples(0.02)).map(mean).collect();
+    let (most, least) =
+        (means.iter().copied().fold(f64::MIN, f64::max), means.iter().copied().fold(f64::MAX, f64::min));
+    println!("swept by the oscillator: from {least:.4} to {most:.4}");
+    assert!((most / manual - 1.0).abs() < 0.12 && least.abs() < 0.12 * manual.abs());
+}
+
+#[test]
 fn the_sync_gives_vco_2_the_period_of_vco_1() {
     // VCO-2 a fourth and an octave above, heard alone: free, it sounds
     // its own pitch; synchronised, VCO-1's.

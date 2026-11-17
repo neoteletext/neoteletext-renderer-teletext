@@ -228,3 +228,26 @@ fn the_delay_is_four_seconds_at_its_top() {
     assert!(swings[..7].iter().all(|&swing| swing < 0.03 * full));
     assert!(swings[8] > 0.05 * full && swings[9] < 0.9 * full && swings[12] > 0.95 * full);
 }
+
+#[test]
+fn the_oscillator_moves_the_amplifier_by_its_switch() {
+    // Owner's manual, printed page 20: none at 0, "three progressively
+    // deeper Levels" at 1, 2 and 3. Own choice of the depths: a third,
+    // two thirds and all of the level, either way. A square at 1.9 Hz
+    // holds each level for a quarter of a second.
+    let swing = |position: u8| {
+        let patch = square()
+            .with(Param::LfoWave, 2)
+            .with(Param::LfoRate, 138)
+            .with(Param::VcaLfoMod, 128 + position * 42 + position / 3);
+        let levels = peaks(&play(&patch, A2, 1.5, 0.0)[samples(0.2)..], 0.02);
+        let (high, low) =
+            (levels.iter().copied().fold(f64::MIN, f64::max), levels.iter().copied().fold(f64::MAX, f64::min));
+        (high - low) / (high + low)
+    };
+    let swings = [0u8, 1, 2, 3].map(swing);
+    println!("the amplifier's swing as a share of its level, positions 0 to 3: {swings:.3?}");
+    for (found, wanted) in swings.iter().zip([0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]) {
+        assert!((found - wanted).abs() < 0.03);
+    }
+}
