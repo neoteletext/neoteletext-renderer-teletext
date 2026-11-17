@@ -47,11 +47,17 @@
 //! - **How a slider travels between its documented ends** is an own
 //!   choice for the envelope's times, the low-frequency oscillator's
 //!   rate, the resonance and the amplifier's level ([`law`]).
-//! - **The Juno-106's cutoff** passes through the service notes'
-//!   calibration point, 248 Hz at FREQ 6.3, and reaches the
-//!   specification's 50 kHz at the slider's top; the slope between them
-//!   is an own choice, and below 3.6 of 10 the slider rests on the
-//!   specification's 5 Hz ([`law::JUNO_106`]).
+//! - **The Juno-106's cutoff is in open conflict with its calibration.**
+//!   The slider covers the specification's 5 Hz to 50 kHz, which puts
+//!   the service notes' test program 3 (FREQ 6.3, RES 10, KYBD 10, key
+//!   C4) at 1,650 Hz, where adjustment 7-1 trims every voice to 248 Hz,
+//!   2.7 octaves below. No one exponential passes through both ends of
+//!   the specification and that point, and a law hung from the point
+//!   with its top at 50 kHz was tried and is no Juno-106: flat over the
+//!   slider's lowest third and 41 Hz at its middle. What was read and
+//!   what would settle it are at [`law::JUNO_106`]; the test of the
+//!   calibration is in `tests/juno_filter.rs`, ignored until it is
+//!   settled.
 //! - **The chorus's delay and sweep** are in no document read; the
 //!   lines' filters are the building block's third-order ones at the
 //!   schematic's 10 kHz, where the instrument has fourth-order ones; the

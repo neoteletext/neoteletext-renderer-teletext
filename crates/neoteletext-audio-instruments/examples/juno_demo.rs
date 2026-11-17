@@ -39,11 +39,11 @@ const CHORDS: [([u8; 4], u8); BARS] = [([57, 60, 64, 69], 33), ([57, 60, 65, 69]
 
 /// The position of a model's cutoff slider that puts the cutoff at so
 /// many hertz at middle C, by the model's law (`juno::law`): the
-/// Juno-106's 248 Hz at step 80 and 50 kHz at 127, the Juno-60's 6.94 Hz
-/// at 0 and 17.2 octaves to 127.
+/// Juno-106's 5 Hz at 0 and 50 kHz at 127, the Juno-60's 6.94 Hz at 0
+/// and 17.2 octaves to 127.
 fn slider(model: Model, hertz: f64) -> u8 {
     let position = match model {
-        Model::Juno106 => 80.0 + 47.0 * (hertz / 248.0).log2() / (50_000.0f64 / 248.0).log2(),
+        Model::Juno106 => 127.0 * (hertz / 5.0).log2() / 10_000.0f64.log2(),
         Model::Juno60 => 127.0 * (hertz / 6.94).log2() / 17.2,
     };
     position.round().clamp(0.0, 127.0) as u8

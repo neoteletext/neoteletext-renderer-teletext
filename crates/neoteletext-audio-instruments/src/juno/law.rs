@@ -66,12 +66,10 @@ pub fn level(slider: u8) -> i32 {
 /// and the envelope's kind, which the voice holds.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Law {
-    /// A cutoff in thousandths of a hertz, and the position of the slider
-    /// that gives it with the key at middle C and nothing modulating: the
-    /// point the law is hung from.
-    pub cutoff_reference: (u32, u8),
-    /// The octaves the cutoff slider covers from 0 to 127, before the
-    /// bounds hold it.
+    /// The cutoff with the slider at 0, the key at middle C and nothing
+    /// modulating, in thousandths of a hertz.
+    pub cutoff_base: u32,
+    /// The octaves the cutoff slider covers from 0 to 127.
     pub cutoff_span: i32,
     /// The lowest and highest cutoff the filter chip reaches, in
     /// thousandths of a hertz.
@@ -102,50 +100,55 @@ pub struct Law {
     pub bass_boost: bool,
 }
 
-/// The position of the Juno-106's cutoff slider in its test program 3:
-/// "6.3" of 10, which of the 127 steps a patch holds is the 80th.
+/// The base-two logarithm of 10,000 in octaves: the cutoff's range of 5
+/// Hz to 50 kHz.
 ///
-/// Source: JUNO-106 service notes, page 18, the table of the test
-/// programs, bank 3 ("VCA GAIN, VCF"): HPF 1, FREQ 6.3, RES 10, ENV 0,
-/// LFO 0, KYBD 10. 6.3 / 10 of 127 is 80.01.
-const JUNO_106_TEST_SLIDER: u8 = 80;
-/// The steps of the slider from that position to its top.
-const JUNO_106_STEPS_ABOVE: i32 = (SLIDER_MAX - JUNO_106_TEST_SLIDER) as i32;
-/// The octaves from the Juno-106's calibration cutoff, 248 Hz, to the
-/// top of its specification, 50 kHz, in millionths.
-///
-/// Source: log₂ (50,000 / 248) = 7.655444.
-const JUNO_106_OCTAVES_ABOVE: i32 = 7_655_444;
-/// Millionths.
-const MILLION: i32 = 1_000_000;
+/// Source: log₂ 10,000 = 13.287712.
+const LOG2_TEN_THOUSAND: i32 = octaves(13_287_712, 1_000_000);
 
 /// The Juno-106.
 pub const JUNO_106: Law = Law {
-    // Source: JUNO-106 service notes, page 19, adjustment 7-1, "VCF
-    // FREQUENCY": in test program 3 (above), "while holding C4 key,
-    // adjust the trimmers ... for 248Hz (B3 pitch)"; the key follow turns
-    // about C4, so KYBD 10 adds nothing there. Every instrument left the
-    // factory with FREQ 6.3 at 248 Hz, and the law is hung from that
-    // point. Adjustment 8-1, "VCF WIDTH": C6 is then trimmed to 992 Hz,
-    // two octaves for two octaves of the control voltage, so the cutoff
-    // is exponential in that voltage (page 9: the VCF CV "contains CUT
-    // OFF frequency, ENV, LFO, Key follow and Bender", summed by the
-    // processor before the converter), and the slider's law is one
-    // straight line in octaves.
+    // Source: JUNO-106 service notes, page 1, Specifications: "VCF CUTOFF
+    // FREQ. 5Hz to 50kHz". Own choice: that the slider alone covers that
+    // range, exponentially, as the chip's converter makes of a voltage
+    // (AMSynths, "All about the IR3109 chip": "anti-log circuitry").
     //
-    // Own choice of its slope, which the notes do not give: the slider's
-    // top is the top of the Specifications' "VCF CUTOFF FREQ. 5Hz to
-    // 50kHz" (page 1), 7.655 octaves above 248 Hz in the 47 steps from 80
-    // to 127, which is 20.69 octaves for the whole slider. The top of the
-    // range then falls on the specification's. The foot does not: the
-    // line reaches the specification's 5 Hz at 45.4 of 127 (3.6 of 10)
-    // and would be 0.03 Hz at 0, so the bounds hold steps 0 to 45 at 5
-    // Hz, which a filter of four poles makes silence of in either case.
-    // The specification's two ends and the calibration point lie on no
-    // one exponential (5 Hz at 0 and 50 kHz at 127 give 1,655 Hz at 80),
-    // and the calibration, which every instrument was set to, is kept.
-    cutoff_reference: (248_000, JUNO_106_TEST_SLIDER),
-    cutoff_span: octaves(JUNO_106_OCTAVES_ABOVE / JUNO_106_STEPS_ABOVE * SLIDER_MAX as i32, MILLION),
+    // AN OPEN CONFLICT. The notes' adjustment 7-1 (page 19: test program
+    // 3, FREQ 6.3, RES 10, KYBD 10, key C4) trims every voice to "248Hz
+    // (B3 pitch)", and 8-1 trims C6 to 992 Hz. This law gives 1,650 Hz
+    // and 6,600 Hz there: the two octaves between them hold, and both
+    // stand 2.7 octaves high. No exponential through both ends of the
+    // specification passes through 248 Hz at 6.3 of 10. One hung from
+    // that point with its top at 50 kHz (20.7 octaves for the slider)
+    // was tried and withdrawn: it is flat at 5 Hz from 0 to 3.6 of 10
+    // and 41 Hz at the middle, which no Juno-106 is.
+    //
+    // What the notes settle of the reading of 7-1:
+    // - The key follow turns about C4, so KYBD 10 adds nothing there:
+    //   page 1, "KEY FOLLOW +3/-2 octaves", on the keyboard of page 19's
+    //   KEY DESIGNATION, C2 to C7, whose C4 is the third C (the owner's
+    //   manual, printed page 16: at 8' the "(C) 3rd from the lowest
+    //   falls on the Middle C").
+    // - FREQ 6.3 is the slider's step 80 of 127: the table's other odd
+    //   values are such steps too (1.3 is 16, 5 is 64).
+    // - Nothing else moves the cutoff in program 3: ENV 0, LFO 0.
+    // What they do not give is how many octaves the processor adds for
+    // the slider's travel: it sums the slider, the envelope, the
+    // oscillator, the key follow and the bender (page 9) and sends the
+    // sum through a 12-bit converter (page 8), and that sum's scale is
+    // in its program alone. So the assumption that fails may be this
+    // law's own: that the specification's 5 Hz to 50 kHz is the slider's
+    // travel, where it may be the range of the whole sum.
+    //
+    // What would settle it: the frequency of a real Juno-106's
+    // oscillating filter at three or more known positions of the slider
+    // with KYBD 10 at C4, from a recording or a measurement; or a
+    // document of Roland's that gives the slider's octaves. A sealed run
+    // of one reference program has 248 Hz at step 49 and 2,729 Hz at
+    // step 80, 14.2 octaves for the slider, near this law and 3.5
+    // octaves above the notes at step 80.
+    cutoff_base: 5_000,
+    cutoff_span: LOG2_TEN_THOUSAND,
     cutoff_bounds: (5_000, 50_000_000),
     // Source: the same Specifications: "ENV MOD. ±14 octaves", "LFO MOD.
     // ±3.5 octaves" (VCF), "LFO MOD. ±400 cents" (DCO).
@@ -179,7 +182,7 @@ pub const JUNO_60: Law = Law {
     // the slider is log₂ (450 / 248) = 0.86 octave, so the ten divisions
     // cover 17.2 octaves and the slider's foot is 248 Hz less 5.16
     // octaves, 6.94 Hz.
-    cutoff_reference: (6_940, 0),
+    cutoff_base: 6_940,
     cutoff_span: octaves(172, 10),
     // Source: JUNO-6 service notes, page 1, Specifications, of the same
     // filter circuit: "VCF 4Hz to 40kHz".
