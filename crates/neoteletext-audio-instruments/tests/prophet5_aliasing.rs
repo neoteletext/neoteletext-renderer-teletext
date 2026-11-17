@@ -133,6 +133,14 @@ const FREQUENCY: f64 = -88.0;
 /// envelopes that another change of this round gives revision 3. With
 /// one width for each sample the worst was -32 dB.
 const PULSE_WIDTH: [f64; 3] = [-88.0, -88.0, -71.0];
+/// The same for oscillator A's frequency and pulse width together, from
+/// oscillator B's triangle: the worst measured, -90 dB, and 3 dB. On
+/// revision 3 at all of the amount the width leaves the foot of its
+/// range just after each synchronised start and runs beside the phase,
+/// so that where the pulse rises hangs on where the width left its end;
+/// while a stretch took the width in one straight line through that
+/// corner, the two keys from 1,047 Hz up measured -76 and -56 dB.
+const TOGETHER: f64 = -87.0;
 /// The same for the cutoff, for each amount and each key: the worse of
 /// the two revisions as measured, and 3 dB. With the cutoff set from
 /// oscillator B's band-limited output these were -75 to -34 dB at a
@@ -171,11 +179,13 @@ fn aliasing_under_poly_mod_at_audio_rate() {
         // The cutoff knob at 6, no resonance.
         let cutoff = synchronised(model).with(Knob::Cutoff, 72).with_switch(Switch::PolyModFilter, true);
         let bound = |row: usize, column: usize| CUTOFF.get(row).and_then(|row| row.get(column)).copied();
-        let destinations: [(&str, Patch, Bound); 5] = [
+        let together = pulse(frequency).with_switch(Switch::PolyModPulseWidthA, true);
+        let destinations: [(&str, Patch, Bound); 6] = [
             ("sawtooth to oscillator A's frequency", frequency, &|_, _| Some(FREQUENCY)),
             ("triangle to oscillator A's frequency", triangle(frequency), &|_, _| Some(FREQUENCY)),
             ("sawtooth to oscillator A's pulse width", width, &|row, _| PULSE_WIDTH.get(row).copied()),
             ("triangle to oscillator A's pulse width", triangle(width), &|row, _| PULSE_WIDTH.get(row).copied()),
+            ("triangle to oscillator A's frequency and pulse width", triangle(together), &|_, _| Some(TOGETHER)),
             ("sawtooth to the cutoff", cutoff, &bound),
         ];
         for (name, patch, bound) in destinations {

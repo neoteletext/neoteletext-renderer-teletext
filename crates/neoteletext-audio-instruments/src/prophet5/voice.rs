@@ -23,7 +23,10 @@
 //!   ([`Oscillator::run`]).
 //! - **Oscillator A's pulse width** slides through a stretch and jumps
 //!   between two, and the pulse turns where it jumps
-//!   ([`Oscillator::jump_width`]).
+//!   ([`Oscillator::jump_width`]). A stretch ends too where the width
+//!   meets an end of its range, none or the whole of a cycle, and stays:
+//!   the width turns a corner there, and where the pulse next turns can
+//!   hang on where that corner was.
 //! - **The cutoff**, which the filter takes once a sample, is its mean
 //!   over the sample.
 //!
@@ -700,7 +703,9 @@ impl Voice {
     /// voltage there, and its width slides to what that voltage makes
     /// it; where the voltage jumps, the width jumps
     /// ([`Oscillator::jump_width`]), and where B's cycle starts, A's
-    /// does if it is synchronised. The cutoff, which the filter takes
+    /// does if it is synchronised. A stretch in which the width would
+    /// meet an end of its range ends there, so that the width stays at
+    /// the end from that instant and not from the stretch's end. The cutoff, which the filter takes
     /// once a sample, is its mean over the sample: each stretch's for
     /// that stretch's share.
     #[inline]
@@ -713,14 +718,32 @@ impl Voice {
         let mut now = u32::MAX;
         // What B has still to run in the sample, to the unit.
         let mut left = step;
+        let mut ends = WIDTH_ENDS;
         for _ in 0..STRETCHES {
-            let mark = self.to_the_mark(settings, phase).filter(|&distance| distance <= left);
-            let run = mark.unwrap_or(left);
-            let end = phase.wrapping_add(run);
+            let mut mark = self.to_the_mark(settings, phase).filter(|&distance| distance <= left);
+            let mut run = mark.unwrap_or(left);
+            let mut end = phase.wrapping_add(run);
             // Before a jump the voltage is as it was a unit of phase
             // short of it.
-            let (to, pitch_to, cutoff_to) =
+            let (mut to, mut pitch_to, mut cutoff_to) =
                 self.under(settings, if mark.is_some() { end.wrapping_sub(1) } else { end });
+            let mut jumps = mark.is_some();
+            // The width is held to its range: where it meets an end the
+            // stretch ends, with no jump.
+            if settings.poly_width != 0
+                && ends > 0
+                && let Some(share) = self.meets_an_end(settings, from, to)
+            {
+                let shorter = mul_high_unsigned(run, share);
+                if shorter > 0 && shorter < run {
+                    ends = ends.saturating_sub(1);
+                    run = shorter;
+                    mark = Some(run);
+                    jumps = false;
+                    end = phase.wrapping_add(run);
+                    (to, pitch_to, cutoff_to) = self.under(settings, end);
+                }
+            }
             left = left.saturating_sub(run);
             let until = if left == 0 { 0 } else { ratio(left, step) };
             if stretches {
@@ -735,7 +758,7 @@ impl Voice {
             cutoff = if span == u32::MAX { middle } else { cutoff.saturating_add(mul_high_unsigned(middle, span)) };
             phase = end;
             (from, pitch_from, cutoff_from) = (to, pitch_to, cutoff_to);
-            if mark.is_some() {
+            if jumps {
                 if stretches && settings.sync && phase == 0 {
                     self.oscillator_a.synchronise();
                 }
@@ -756,6 +779,25 @@ impl Voice {
             self.oscillator_a.tick(if settings.sync { self.oscillator_b.started() } else { None })
         };
         (waves, cutoff)
+    }
+
+    /// Where in a stretch oscillator A's width, on its way from what
+    /// one voltage of Poly-Mod makes it to what another does, first
+    /// meets an end of its range, as the share of the stretch run by
+    /// then in Q32; nothing if it meets neither.
+    #[inline]
+    fn meets_an_end(&self, settings: &Settings, from: i32, to: i32) -> Option<u32> {
+        let first = self.width_a.saturating_add(amplify(from, settings.poly_width));
+        let last = self.width_a.saturating_add(amplify(to, settings.poly_width));
+        let whole = first.abs_diff(last);
+        let mut nearest = None;
+        for bound in [0, WIDTH_FULL] {
+            if (first < bound && bound < last) || (first > bound && bound > last) {
+                let share = ratio(first.abs_diff(bound), whole);
+                nearest = Some(nearest.map_or(share, |other: u32| other.min(share)));
+            }
+        }
+        nearest
     }
 
     /// What Poly-Mod has of oscillator B at a phase, and oscillator A's
@@ -823,8 +865,12 @@ const HALF_CYCLE: u32 = 1 << 31;
 const SAWTOOTH_SHIFT: u32 = 32 - LEVEL.trailing_zeros() - 1;
 /// Stretches a sample of oscillator A is made in under Poly-Mod, at
 /// most: oscillator B's pulse falls, its triangle turns, its cycle
-/// starts, and the sample ends; one to spare.
-const STRETCHES: u32 = 5;
+/// starts, and the sample ends; one to spare; and one for each of
+/// [`WIDTH_ENDS`].
+const STRETCHES: u32 = 5 + WIDTH_ENDS;
+/// Times in a sample that a stretch is ended where oscillator A's pulse
+/// width meets an end of its range, at most: once for each end.
+const WIDTH_ENDS: u32 = 2;
 
 /// An oscillator's width for a share of a cycle in Q24, held between
 /// none and the whole.
