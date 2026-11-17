@@ -321,6 +321,14 @@ fn coefficient(time: u32, thousandths: u64) -> i32 {
     time_constant(u32::try_from(constant).unwrap_or(u32::MAX), TICK_RATE)
 }
 
+/// The effect's delay lines and their filters, empty.
+fn effect_line() -> Chorus {
+    let mut line = Chorus::new(SAMPLE_RATE);
+    line.set_filter_cutoff(frequency(EFFECT_FILTER, SAMPLE_RATE));
+    line.set_delay(EFFECT_DELAY, 0);
+    line
+}
+
 /// The CS-80.
 ///
 /// It holds no reference and allocates nothing. Two instruments given the
@@ -378,9 +386,6 @@ impl Cs80 {
             number = number.wrapping_add(1);
             voice
         });
-        let mut line = Chorus::new(SAMPLE_RATE);
-        line.set_filter_cutoff(frequency(EFFECT_FILTER, SAMPLE_RATE));
-        line.set_delay(EFFECT_DELAY, 0);
         let mut cs80 = Self {
             patch: Patch::DEFAULT,
             channels: [Channel::new(&Patch::DEFAULT, 0), Channel::new(&Patch::DEFAULT, 1)],
@@ -402,7 +407,7 @@ impl Cs80 {
             ring_modulation: 0,
             effect: [Wave::default(); 2],
             effect_depth: [0; 2],
-            line,
+            line: effect_line(),
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
@@ -428,6 +433,12 @@ impl Cs80 {
     /// once, on the voices that are sounding too, as moving the panel's
     /// levers does.
     pub fn set_patch(&mut self, patch: &Patch) {
+        // The effect's lines are fed only while it is on, so what they
+        // held when it was switched off is not let out when it is
+        // switched on again.
+        if !self.patch.on(Global::Effect) && patch.on(Global::Effect) {
+            self.line = effect_line();
+        }
         self.patch = *patch;
         self.apply_patch();
     }
