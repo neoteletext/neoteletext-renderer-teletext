@@ -161,31 +161,57 @@ fn the_6581_cutoff_is_the_middle_chips() {
     }
 }
 
+/// How far a tone at the cutoff is raised by the low-pass at a resonance
+/// setting, against the tone sent past the filter.
+fn peak(model: ChipModel, resonance: u8, cutoff: u16, hz: f64) -> f64 {
+    through(model, hz, cutoff, resonance, LOW_PASS) / through(model, hz, cutoff, resonance, 0)
+}
+
 #[test]
 fn resonance_raises_the_cutoff_and_the_8580_has_more_of_it() {
-    let peak = |model: ChipModel, resonance: u8| {
-        // The cutoff register for 1 kHz: on the 6581, by its curve, 495.
+    // The cutoff register for 1 kHz: on the 6581, by its curve, 495.
+    let at_1_khz = |model: ChipModel, resonance: u8| {
         let cutoff = match model {
             ChipModel::Mos6581 => 495,
             ChipModel::Mos8580 => register_8580(1000.0),
         };
-        through(model, 1000.0, cutoff, resonance, LOW_PASS) / through(model, 1000.0, cutoff, resonance, 0)
+        peak(model, resonance, cutoff, 1000.0)
     };
     for model in MODELS {
         let mut last = 0.0;
         for resonance in 0..16 {
-            let level = peak(model, resonance);
+            let level = at_1_khz(model, resonance);
             assert!(level > last, "{model:?} resonance {resonance}: {level} after {last}");
             last = level;
         }
     }
     // No resonance is -3 dB at the cutoff on both chips; the highest is
-    // +7.6 dB on a 6581 and +8 dB on an 8580 (TODO-6427 fault 6: +12 dB
-    // before).
-    assert!((decibels(peak(ChipModel::Mos8580, 0)) + 3.0).abs() < 0.5);
-    assert!((decibels(peak(ChipModel::Mos8580, 15)) - 8.0).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos8580, 15)));
-    assert!((decibels(peak(ChipModel::Mos6581, 0)) + 3.0).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 0)));
-    assert!((decibels(peak(ChipModel::Mos6581, 15)) - 7.6).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos6581, 15)));
+    // +8 dB on an 8580 (TODO-6427 fault 6: +12 dB at first).
+    assert!((decibels(at_1_khz(ChipModel::Mos8580, 0)) + 3.0).abs() < 0.5);
+    let found = decibels(at_1_khz(ChipModel::Mos8580, 15));
+    assert!((found - 8.0).abs() < 1.0, "{found}");
+    assert!((decibels(at_1_khz(ChipModel::Mos6581, 0)) + 3.0).abs() < 1.0);
+}
+
+#[test]
+fn the_6581s_resonance_is_weak_at_a_low_cutoff_and_grows_with_it() {
+    // At its floor of 400 Hz the 6581's highest resonance is a Q of 1.2,
+    // +1.6 dB: three real chips playing "$11 Heaven", which holds the
+    // highest resonance with the cutoff register between 160 and 256, are
+    // followed better the weaker it is (Stone Oakvalley's recordings of
+    // his 6581 R2, R3 and R4, measured 17 November 2026; the figures are
+    // at the constant). TODO-6427: a Q of 2.4 at every cutoff before,
+    // +7.6 dB.
+    let floor = decibels(peak(ChipModel::Mos6581, 15, 200, 400.0));
+    assert!((floor - 1.6).abs() < 1.0, "at the floor: {floor} dB");
+    // It grows with the cutoff, as two emulators have it and no real chip
+    // was measured: a Q of 1.37 at register 495, where the cutoff is
+    // 1 kHz, and 1.57 at 717, where it is 3.5 kHz, near the highest tone
+    // a voice plays.
+    let middle = decibels(peak(ChipModel::Mos6581, 15, 495, 1000.0));
+    let upper = decibels(peak(ChipModel::Mos6581, 15, 717, 3500.0));
+    assert!((middle - 2.7).abs() < 1.0 && (upper - 3.9).abs() < 1.0, "{middle} dB and {upper} dB");
+    assert!(floor < middle && middle < upper);
 }
 
 #[test]

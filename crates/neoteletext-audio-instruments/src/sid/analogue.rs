@@ -255,35 +255,60 @@ const CUTOFF_SLOPE_8580: (u32, u32) = (27, 2);
 /// Source: own choice. Data sheet, register $17: "16 resonance settings
 /// ranging linearly from no resonance (0) to maximum resonance (15)".
 const DAMPING_NONE: u32 = 46_341;
-/// The 6581's damping at the highest resonance: a Q of 2.4, a peak of
-/// 7.6 dB (1 / 2.4 = 5 / 12). Between none and the highest the damping
-/// falls in equal steps, as a ladder of weighted resistors feeding back a
-/// share of the output would make it (Yannes interview).
+/// The 6581's damping at the highest resonance, where the cutoff register
+/// is at or below the foot of [`RESONANCE_RISE_6581`] and where it is at
+/// or above its head: a Q of 1.2, a peak of 1.6 dB (1 / 1.2 = 5 / 6), and
+/// a Q of 2.5, a peak of 8 dB (1 / 2.5 = 2 / 5). Between the two the
+/// damping falls in proportion to the register. Between no resonance and
+/// the highest it falls in equal steps, as a ladder of weighted resistors
+/// feeding back a share of the output would make it (Yannes interview).
 ///
-/// Source: fitted to the output of reSIDfp's default 6581, measured 17
-/// November 2026: noise through its low-pass at the highest resonance
-/// fits a two-pole response with a Q of 2.0 to 2.5 for cutoff registers
-/// from $400 up, and 1.0 to 1.1 at resonance 8, where equal steps of
-/// damping from none give 1.13. That the older chip has the less is
-/// public: the designer could not get high resonance from the 6581 ("It
-/// would also have greatly improved the filter, particularly in achieving
-/// high resonance", Yannes interview), and the 8580 "can achieve higher
-/// resonances" (Wikipedia, "MOS Technology 6581", "Revisions").
-const DAMPING_HIGHEST_6581: u32 = (5 << DAMPING_BITS) / 12;
+/// Source: the foot is fitted to three real chips. In Stone Oakvalley's
+/// recordings of the tune "$11 Heaven" on his 6581 R2, R3 and R4
+/// (6581-8580.com), which holds the highest resonance on a low-pass with
+/// the cutoff register between 160 and 256, the loudness envelope of this
+/// chip playing the same registers follows each recording better the
+/// weaker the resonance: its correlation is 0.90, 0.86 and 0.85 at a Q of
+/// 2.4, 0.96, 0.90 and 0.92 at 1.4, and 0.96, 0.90 and 0.93 at 1.0
+/// (measured 17 November 2026). The head is from emulators only, for no
+/// real chip was measured there: noise through the low-pass of two of
+/// them, run as separate programs (sidplayfp 2.16.0, both engines), fits
+/// a two-pole response with a Q of 0.9 to 1.4 for cutoff registers up to
+/// $200, 1.7 at $2C0, 1.9 at $380 and 1.9 to 3.2 from $440 up, and of 0.6
+/// to 1.3 at resonance 8, where equal steps of damping give 0.9 to 1.15.
+/// That the older chip has little is public: the designer could not get
+/// high resonance from the 6581 ("It would also have greatly improved the
+/// filter, particularly in achieving high resonance", Yannes interview),
+/// and the 8580 "can achieve higher resonances" (Wikipedia, "MOS
+/// Technology 6581", "Revisions"). (TODO-6427: a Q of 2.4 at every cutoff
+/// before, fitted to one emulator above register $400.)
+const DAMPING_HIGHEST_6581: (u32, u32) = ((5 << DAMPING_BITS) / 6, (2 << DAMPING_BITS) / 5);
+/// The cutoff registers between which the 6581's highest resonance rises,
+/// and the width between them as a power of two.
+///
+/// Source: as [`DAMPING_HIGHEST_6581`]: the two emulators' resonance is
+/// at its least up to register $200 and near its most from $500.
+const RESONANCE_RISE_6581: (u32, u32) = (0x100, 0x500);
+const RESONANCE_RISE_BITS: u32 = 10;
+const _: () = assert!(RESONANCE_RISE_6581.1 - RESONANCE_RISE_6581.0 == 1 << RESONANCE_RISE_BITS);
 /// What each step of the 8580's resonance multiplies its damping by, in
 /// [`COEFFICIENT_BITS`] fraction bits: 0.9192, the fifteenth root of
 /// 0.2828, so that the highest resonance is a Q of 2.5 (a peak of 8 dB;
 /// 1 / 2.5 = 0.2828 * √2).
 ///
-/// Source: fitted to the output of reSIDfp's default 8580, measured 17
-/// November 2026: noise through its low-pass fits a two-pole response
-/// with a Q of 0.67 to 0.72 with no resonance, 1.36 to 1.44 at resonance
-/// 8 and 2.42 to 2.65 at resonance 15, at every cutoff from $0C0 to $780.
-/// Equal ratios from 0.707 to 2.5 give 1.39 at resonance 8; equal steps
-/// of damping, as on the 6581, would give 1.14. The Q of 4 before was an
-/// own round figure and peaked 4 dB above the reference (TODO-6427 fault
-/// 6). The test `the_8580s_highest_resonance_is_the_one_fitted` works the
-/// fifteen steps out again.
+/// Source: from emulators only. Noise through the low-pass of two of
+/// them, run as separate programs (sidplayfp 2.16.0, both engines,
+/// measured 17 November 2026), fits a two-pole response with a Q of 0.64
+/// to 0.81 with no resonance, 1.30 to 1.66 at resonance 8, and at
+/// resonance 15 2.3 to 2.8 in one and 2.6 to 3.4 in the other. Equal
+/// ratios from 0.707 to 2.5 give 1.39 at resonance 8; equal steps of
+/// damping, as on the 6581, would give 1.14. No real chip settles it:
+/// against Stone Oakvalley's recordings of three tunes on his 8580 R5,
+/// this chip's envelope correlation and spectral distance do not move by
+/// more than 0.006 and 0.1 dB for any Q from 1.5 to 3. The Q of 4 at
+/// first was an own round figure (TODO-6427 fault 6). The test
+/// `the_highest_resonance_is_the_one_fitted` works the fifteen steps out
+/// again.
 const DAMPING_RATIO_8580: u32 = 60_241;
 /// Resonance settings above none.
 const RESONANCE_STEPS: u32 = 15;
@@ -441,19 +466,21 @@ impl Analogue {
     pub(super) fn write_cutoff_low(&mut self, value: u8) {
         self.cutoff = (self.cutoff & !0x7) | u32::from(value & 0x7);
         self.coefficient = coefficient(self.model, self.clock, self.cutoff);
+        self.damping = damping(self.model, self.resonance, self.cutoff);
     }
 
     /// Writes the cutoff's upper eight bits (register $16).
     pub(super) fn write_cutoff_high(&mut self, value: u8) {
         self.cutoff = (self.cutoff & 0x7) | (u32::from(value) << 3);
         self.coefficient = coefficient(self.model, self.clock, self.cutoff);
+        self.damping = damping(self.model, self.resonance, self.cutoff);
     }
 
     /// Writes the resonance and the routing bits (register $17).
     pub(super) fn write_resonance_routing(&mut self, value: u8) {
         self.resonance = value >> 4;
         self.routing = value & 0x0F;
-        self.damping = damping(self.model, self.resonance);
+        self.damping = damping(self.model, self.resonance, self.cutoff);
     }
 
     /// Writes the filter's mode and the volume (register $18).
@@ -571,12 +598,23 @@ const fn saturate(value: i32) -> i32 {
     if value < 0 { bent.wrapping_neg() } else { bent }
 }
 
-/// The damping, the reciprocal of Q, for a resonance setting of 0 to 15.
-/// It is worked out when the register is written, not for each sample.
-const fn damping(model: ChipModel, resonance: u8) -> u32 {
+/// The damping, the reciprocal of Q, for a resonance setting of 0 to 15
+/// at a value of the cutoff register, which the 6581's depends on. It is
+/// worked out when a register is written, not for each sample.
+const fn damping(model: ChipModel, resonance: u8, register: u32) -> u32 {
     match model {
         ChipModel::Mos6581 => {
-            let span = DAMPING_NONE.saturating_sub(DAMPING_HIGHEST_6581);
+            let (foot, head) = RESONANCE_RISE_6581;
+            let into = if register <= foot {
+                0
+            } else if register >= head {
+                head.saturating_sub(foot)
+            } else {
+                register.saturating_sub(foot)
+            };
+            let fall = DAMPING_HIGHEST_6581.0.saturating_sub(DAMPING_HIGHEST_6581.1);
+            let highest = DAMPING_HIGHEST_6581.0.saturating_sub(fall.saturating_mul(into) >> RESONANCE_RISE_BITS);
+            let span = DAMPING_NONE.saturating_sub(highest);
             DAMPING_NONE.saturating_sub(span.saturating_mul(resonance as u32) / RESONANCE_STEPS)
         }
         ChipModel::Mos8580 => {
@@ -699,21 +737,35 @@ mod tests {
     }
 
     #[test]
-    fn the_8580s_highest_resonance_is_the_one_fitted() {
-        // No resonance is a Q of 1 / √2 on both chips, and the damping
-        // falls with every step.
+    fn the_highest_resonance_is_the_one_fitted() {
+        // No resonance is a Q of 1 / √2 on both chips at every cutoff, and
+        // the damping falls with every step.
         for model in [ChipModel::Mos6581, ChipModel::Mos8580] {
-            assert_eq!(damping(model, 0), DAMPING_NONE);
-            for resonance in 1..16 {
-                assert!(damping(model, resonance) < damping(model, resonance - 1), "{model:?} {resonance}");
+            for register in [0, 0x300, CUTOFF_MAX] {
+                assert_eq!(damping(model, 0, register), DAMPING_NONE);
+                for resonance in 1..16 {
+                    let (now, last) = (damping(model, resonance, register), damping(model, resonance - 1, register));
+                    assert!(now < last, "{model:?} {resonance} at {register}");
+                }
             }
         }
-        // The highest: 1 / 2.4 on the 6581 and 1 / 2.5 on the 8580, in 15
-        // fraction bits, the 8580's within a half per cent for the
-        // rounding of its fifteen steps; and its middle, 1 / 1.39.
-        assert_eq!(damping(ChipModel::Mos6581, 15), 13_653);
-        assert!(damping(ChipModel::Mos8580, 15).abs_diff((1 << DAMPING_BITS) * 2 / 5) < 66);
-        assert!(damping(ChipModel::Mos8580, 8).abs_diff((1 << DAMPING_BITS) * 100 / 139) < 240);
+        // The 6581's highest: 1 / 1.2 up to register $100, 1 / 2.5 from
+        // $500, in 15 fraction bits, and never rising with the register
+        // between. TODO-6427: 1 / 2.4 at every cutoff before, 13,653.
+        let highest = |register: u32| damping(ChipModel::Mos6581, 15, register);
+        assert_eq!((highest(0), highest(0x100)), (27_306, 27_306));
+        assert_eq!((highest(0x500), highest(CUTOFF_MAX)), (13_107, 13_107));
+        assert!(highest(0x300).abs_diff(u32::midpoint(27_306, 13_107)) <= 1);
+        for register in 1..=CUTOFF_MAX {
+            assert!(highest(register) <= highest(register - 1), "{register}");
+        }
+        // The 8580's, the same at every cutoff: 1 / 2.5, within a half
+        // per cent for the rounding of its fifteen steps; and its middle,
+        // 1 / 1.39.
+        for register in [0, CUTOFF_MAX] {
+            assert!(damping(ChipModel::Mos8580, 15, register).abs_diff((1 << DAMPING_BITS) * 2 / 5) < 66);
+            assert!(damping(ChipModel::Mos8580, 8, register).abs_diff((1 << DAMPING_BITS) * 100 / 139) < 240);
+        }
     }
 
     #[test]
