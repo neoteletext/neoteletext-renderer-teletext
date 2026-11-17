@@ -32,17 +32,26 @@ fn at(levels: &[f64], seconds: f64) -> f64 {
     levels[(seconds / WINDOW) as usize]
 }
 
-/// The attack's documented time and the time constant of the falls for a
-/// knob's number: revision 3, one second of attack at 72 steps and four
-/// decades over 120 (TM3 test table, CEM3310 data sheet); revision 2,
-/// 0.9 s at 75 steps and a decade to 24 (TM2 adjustment 4-10, SSM2050
-/// data sheet). An attack is ln(13 / 3) time constants on both.
+/// The attack's time and the time constant of the falls for a knob's
+/// number, worked out here from the components. Revision 3 (TM3 SD430
+/// and SD431, CEM3310 data sheet): the time constant is 24.3 kΩ times
+/// 0.039 µF where the chip's control pin is at 0 V, and ten times that
+/// for each 60 mV below; the pin stands where 24.3 kΩ from the knob's
+/// voltage, which the computer turns over (10 V at the knob's 0), 13 kΩ
+/// from -5 V and 806 Ω from ground leave it. Revision 2: 0.9 s at 75
+/// steps and a decade to 24 (TM2 adjustment 4-10, SSM2050 data sheet).
+/// An attack is ln(13 / 3) time constants on both.
 fn documented(model: Model, steps: f64) -> (f64, f64) {
+    let lasts = (13.0f64 / 3.0).ln();
     let attack = match model {
-        Model::Rev3 => 10f64.powf(0.4 * (steps / 12.0 - 6.0)),
+        Model::Rev3 => {
+            let (series, down, shunt) = (24_300.0, 13_000.0, 806.0);
+            let pin = ((10.0 - steps / 12.0) / series - 5.0 / down) / (1.0 / series + 1.0 / down + 1.0 / shunt);
+            lasts * 24_300.0 * 0.039e-6 * 10f64.powf(-pin / 0.060)
+        }
         Model::Rev2 => 0.9 * 10f64.powf((steps - 75.0) / 24.0),
     };
-    (attack, attack / (13.0f64 / 3.0).ln())
+    (attack, attack / lasts)
 }
 
 #[test]
@@ -99,7 +108,10 @@ fn the_documents_figures_of_time_are_met() {
     // TM3 test table: 6 on the dial, "APPROX 1-SEC ATTACK"; 10, "GREATER
     // THAN 20-SEC RELEASE". OM section 2-6: "setting 5 ... approximately
     // 1/2 second", "approximately 1 millisecond ... to 30 seconds". TM2
-    // adjustment 4-10: 6.250 V, 75 steps, "0.9-sec ATK period".
+    // adjustment 4-10: 6.250 V, 75 steps, "0.9-sec ATK period". Revision
+    // 3's components give 0.69 s of attack at 6; at 5 a time constant of
+    // 0.15 s, which is half a second to a twentieth of the way; at 0 an
+    // attack of 0.65 ms; at 10 a time constant of 49 s.
     let rise = |model: Model, steps: u8, long: f64| {
         let patch = pure(model).with(Knob::AmplifierAttack, steps);
         let levels = peaks(&play(model, &patch, KEY, long, 0.0), WINDOW);
@@ -111,12 +123,16 @@ fn the_documents_figures_of_time_are_met() {
     let (six, five, least) =
         (rise(Model::Rev3, dial(60), 2.0), rise(Model::Rev3, dial(50), 1.0), rise(Model::Rev3, 0, 0.1));
     let two = rise(Model::Rev2, 75, 2.0);
-    println!("revision 3: attack at 6 {six:.3} s (1), at 5 {five:.3} s (about 1/2), at 0 {least:.4} s (about 0.001)");
+    println!("revision 3: attack at 6 {six:.3} s (about 1), at 5 {five:.3} s, at 0 {least:.4} s (about 0.001)");
     println!("revision 2: attack at 6.25 V {two:.3} s (0.9)");
-    assert!((six - 1.0).abs() < 0.05 && (five - 0.4).abs() < 0.03 && least < 0.01 && (two - 0.9).abs() < 0.05);
+    let (at_six, at_five) = (documented(Model::Rev3, 72.0).0, documented(Model::Rev3, 60.0).0);
+    assert!((0.65..0.75).contains(&at_six) && (0.20..0.24).contains(&at_five), "{at_six} {at_five}");
+    assert!((six / at_six - 1.0).abs() < 0.05 && (five / at_five - 1.0).abs() < 0.07, "{six} {five}");
+    // The shortest attack is over inside the first window.
+    assert!(least <= WINDOW * 1.3 && (two - 0.9).abs() < 0.05, "{least} {two}");
 
     // The longest release, heard for five seconds: it has fallen as far
-    // as 27 s of time constant let it, and so sounds beyond 20 s.
+    // as 49 s of time constant let it, and so sounds beyond 20 s.
     let patch = pure(Model::Rev3).with(Knob::AmplifierRelease, 127);
     let levels = peaks(&play(Model::Rev3, &patch, KEY, 0.2, 5.2), WINDOW);
     let left = at(&levels, 5.2) / at(&levels, 0.2 + 0.05);
@@ -125,7 +141,7 @@ fn the_documents_figures_of_time_are_met() {
         "revision 3: release at 10: time constant {constant:.1} s; after 5 s {left:.3} is left ({:.3})",
         (-4.95 / constant).exp()
     );
-    assert!((left - (-4.95 / constant).exp()).abs() < 0.02);
+    assert!((45.0..55.0).contains(&constant) && (left - (-4.95 / constant).exp()).abs() < 0.01);
 }
 
 #[test]

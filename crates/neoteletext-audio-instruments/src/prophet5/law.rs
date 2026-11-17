@@ -259,23 +259,33 @@ pub const REV3: Law = Law {
     // DIAL". Own choice of 8 within that, 96 steps. The curve is the
     // CEM3320's resonance amplifier's ([`resonance`]).
     resonance: (96, true),
-    // Source: TM3 test table (page 62): at 6 on the dial, 72 steps,
-    // "APPROX 1-SEC ATTACK"; at 10, "GREATER THAN 20-SEC RELEASE"; OM
-    // section 2-6 (page 19): "approximately 1 millisecond ... to 30
-    // seconds", "setting 5 ... gives a period of approximately 1/2
-    // second". CEM3310 data sheet, page 1: "Zero to -5V Varies the Times
-    // from 2mS to 20S", four decades, and TM3 section 2-7 (page 22):
-    // the times "are controlled by 0 to -5V". Own choice among them:
-    // four decades over the knob's ten volts through one second of
-    // attack at 6, which gives 0.4 s at 5 and 40 s at 10, and 4 ms at 0
-    // where the operation manual says 1 ms. An attack lasts ln(6.5 /
-    // 1.5) = 1.466 time constants (the data sheet's asymptote and
-    // peak), so the time constant at 72 steps is 0.682 s; a step is
-    // 0.4 / 12 decade, 0.11073 octave.
-    envelope: (682_128, 72, octaves(110_730, 1_000_000)),
-    // Source: none is needed: the knob's range is inside the chip's
-    // (CEM3310 data sheet, page 2: "Time control range 50,000:1" at
-    // least).
+    // Source: the components. CEM3310 data sheet, page 1: "The times are
+    // to a first order determined only by the external resistor and
+    // capacitor and constant of physics, KT/q"; page 2: "Control Scale
+    // Sensitivity" 60 mV to the decade, and the charging current is the
+    // input current, one to one, where the control pin is at 0 V: there
+    // the time constant is the resistor times the capacitor. TM3 SD431
+    // (page 50): 24.3 kΩ and 0.039 µF on each chip (R418, C424; R439,
+    // C441): 948 µs. TM3 SD430 (page 48): each time's voltage reaches its
+    // pin through 24.3 kΩ, with 13 kΩ from the pin to -5 V and 806 Ω to
+    // ground (R415, R407, R402 and their like), so the pin has 0.030286
+    // of the voltage less 283.1 mV; section 2-7 (page 22): "the computer
+    // inverts its normal 0 to +10V output so +10V corresponds to
+    // minimum, and 0 corresponds to maximum time". The knob's 0 is then
+    // 10 V and +19.8 mV at the pin, 948 µs over 10^(19.8 / 60): 443 µs;
+    // each step of a twelfth of a volt less is 2.524 mV, 0.042064
+    // decade, 0.139735 octave of time; the knob's 10 is -283.1 mV and
+    // 49 s. An attack lasts ln(6.5 / 1.5) = 1.466 time constants (the
+    // data sheet's asymptote and peak): 0.65 ms at 0, 0.69 s at 6. The
+    // manuals' words, which no one law meets, are near it: OM section
+    // 2-6 (page 19), "approximately 1 millisecond ... to 30 seconds" and
+    // "setting 5 ... gives a period of approximately 1/2 second" (the
+    // time constant at 5 is 0.15 s); TM3 test table (page 62), at 6
+    // "APPROX 1-SEC ATTACK" and at 10 "GREATER THAN 20-SEC RELEASE".
+    envelope: (443, 0, octaves(139_735, 1_000_000)),
+    // Source: none is needed: the knob's range, 112,000 to 1, is inside
+    // the chip's (CEM3310 data sheet, page 2: "Time Control Range"
+    // 250,000:1 typical).
     envelope_bounds: (1, u32::MAX),
     // Source: OM section 2-9 (page 20): "from approximatley 0.04 Hz ...
     // to 20 Hz"; TM3 sheet SD334 (page 47): the knob's voltage enters
