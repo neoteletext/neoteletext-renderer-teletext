@@ -28,6 +28,9 @@ analog = []
 # Roland's Juno-106 and Juno-60, made from the analogue building blocks
 # (TODO-6431). No codec carries it yet, so it is not on by default.
 juno = ["analog"]
+# Roland's Jupiter-8, made from the analogue building blocks (TODO-6435).
+# No codec carries it yet, so it is not on by default.
+jupiter8 = ["analog"]
 
 # Each example plays or builds one instrument, so it is built only with it.
 [[example]]
