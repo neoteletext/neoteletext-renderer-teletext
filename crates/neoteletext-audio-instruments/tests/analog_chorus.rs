@@ -297,3 +297,19 @@ fn every_setting_and_input_leaves_the_chorus_bounded_and_the_same_each_time() {
         assert!(chorus.process(LEVEL).iter().all(|output| output.abs() <= LIMIT));
     }
 }
+
+#[test]
+fn a_delay_too_long_for_a_word_is_the_longest_delay() {
+    // 2,932,031,008 millionths of a second at 96 kHz are a hair more than
+    // 2^48 samples in millionths: with the delay's 16 bits of fraction
+    // the product leaves 64 bits, and what is left of it must not be
+    // taken for a delay of a twentieth of a sample.
+    for rate in [48_000u32, 96_000, 192_000] {
+        for microseconds in [2_932_031_008u32, 1_466_015_504, u32::MAX] {
+            let (mut long, mut longest) = (Chorus::new(rate), Chorus::new(rate));
+            long.set_delay(microseconds, microseconds);
+            longest.set_delay(DELAY_MICROSECONDS.1, DELAY_MICROSECONDS.1);
+            assert!(long == longest, "{microseconds} us at {rate} Hz");
+        }
+    }
+}

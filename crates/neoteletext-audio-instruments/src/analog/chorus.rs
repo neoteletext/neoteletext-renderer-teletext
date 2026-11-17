@@ -118,9 +118,16 @@ const INSERTION_CYCLES: u32 = (((STAGES / 2) as u64 * INSERTION_CUTOFF_THOUSANDT
 /// A delay of so many millionths of a second in samples of a rate, with
 /// [`DELAY_BITS`] of fraction, held to a word.
 const fn delay_samples(microseconds: u32, rate: u32) -> u32 {
-    let delay = ((microseconds as u64).saturating_mul(rate as u64) << DELAY_BITS) / MICROSECONDS;
+    /// The largest product that keeps its top bits through the shift.
+    const WHOLE: u64 = u64::MAX >> DELAY_BITS;
+    let samples = (microseconds as u64).saturating_mul(rate as u64);
+    // Beyond that the delay is beyond a word in any case: without the
+    // bound the shift would drop the product's top bits, and a very long
+    // delay would come out a short one.
+    let delay = ((if samples > WHOLE { WHOLE } else { samples }) << DELAY_BITS) / MICROSECONDS;
     if delay > u32::MAX as u64 { u32::MAX } else { delay as u32 }
 }
+const _: () = assert!(((u64::MAX >> DELAY_BITS) << DELAY_BITS) / MICROSECONDS > u32::MAX as u64);
 
 /// Samples between two settings of the lines' clock-following filters:
 /// the delay moves too slowly for more.
