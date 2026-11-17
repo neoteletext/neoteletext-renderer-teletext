@@ -28,6 +28,9 @@ analog = []
 # Roland's Juno-106 and Juno-60, made from the analogue building blocks
 # (TODO-6431). No codec carries it yet, so it is not on by default.
 juno = ["analog"]
+# Moog's Minimoog Model D, made from the analogue building blocks
+# (TODO-6432). No codec carries it yet, so it is not on by default.
+minimoog = ["analog"]
 
 # Each example plays or builds one instrument, so it is built only with it.
 [[example]]
@@ -53,6 +56,14 @@ required-features = ["juno"]
 [[example]]
 name = "juno_render"
 required-features = ["juno"]
+
+[[example]]
+name = "minimoog_demo"
+required-features = ["minimoog"]
+
+[[example]]
+name = "minimoog_render"
+required-features = ["minimoog"]
 
 [lints]
 workspace = true
