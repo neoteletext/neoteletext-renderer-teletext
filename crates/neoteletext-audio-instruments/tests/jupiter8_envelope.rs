@@ -17,7 +17,7 @@
 mod support;
 
 use neoteletext_audio_instruments::jupiter8::law::{KEY_FOLLOW, KEY_FOLLOW_ONE};
-use neoteletext_audio_instruments::jupiter8::{Param, Patch};
+use neoteletext_audio_instruments::jupiter8::{Jupiter8, Param, Patch};
 use support::{A2, C0, C5, NOTE_ON, cents, instrument, peaks, pitch, play, render, samples, square};
 
 /// The window the amplifier's level is read in, in seconds.
@@ -228,6 +228,46 @@ fn the_delay_is_four_seconds_at_its_top() {
     // full.
     assert!(swings[..7].iter().all(|&swing| swing < 0.03 * full));
     assert!(swings[8] > 0.05 * full && swings[9] < 0.9 * full && swings[12] > 0.95 * full);
+}
+
+#[test]
+fn a_shorter_delay_set_while_waiting_shortens_the_wait() {
+    // The delay at its top, 4 s, and a key; a tenth of a second later
+    // the panel's DELAY TIME is brought down to 0.2, 80 ms: the
+    // modulation is there within its rise, not after the 4 s that were
+    // running. The oscillator's swing of the pitch in each half second.
+    let slow = square().with(Param::LfoDelay, 255).with(Param::LfoRate, 200).with(Param::VcoLfoMod, 128 + 40);
+    let swings = |jupiter: &mut Jupiter8| -> Vec<f64> {
+        (0..3)
+            .map(|_| {
+                let track: Vec<f64> =
+                    render(jupiter, 0.5).chunks(samples(0.005)).map(|chunk| cents(1760.0, pitch(chunk))).collect();
+                let inner = &track[2..track.len() - 2];
+                inner.iter().copied().fold(f64::MIN, f64::max) - inner.iter().copied().fold(f64::MAX, f64::min)
+            })
+            .collect()
+    };
+    let mut steady = instrument(&slow.with(Param::LfoDelay, 0));
+    steady.event(NOTE_ON, A2 + 24, 100);
+    let full = swings(&mut steady)[2];
+    let mut jupiter = instrument(&slow);
+    jupiter.event(NOTE_ON, A2 + 24, 100);
+    render(&mut jupiter, 0.1);
+    jupiter.set_patch(&slow.with(Param::LfoDelay, 5));
+    let found = swings(&mut jupiter);
+    println!("the swing in cents, each half second after the delay is shortened: {found:.0?}; in full {full:.0}");
+    assert!(found.iter().all(|&swing| swing > 0.95 * full), "{found:?} against {full}");
+    // A longer delay set while waiting does not start the wait again,
+    // and none at all ends it.
+    let mut jupiter = instrument(&slow.with(Param::LfoDelay, 64));
+    jupiter.event(NOTE_ON, A2 + 24, 100);
+    render(&mut jupiter, 0.1);
+    jupiter.set_patch(&slow);
+    render(&mut jupiter, 3.0);
+    let late = swings(&mut jupiter)[2];
+    jupiter.set_patch(&slow.with(Param::LfoDelay, 0));
+    let none = swings(&mut jupiter)[0];
+    assert!(late > 0.95 * full && none > 0.95 * full, "{late} and {none} against {full}");
 }
 
 #[test]

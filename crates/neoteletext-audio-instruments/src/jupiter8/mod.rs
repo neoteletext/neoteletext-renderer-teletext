@@ -11,9 +11,10 @@
 //!   comparator make, from which the other waveforms are shaped: VCO-1
 //!   gives a triangle, a sawtooth, a pulse or a square, VCO-2 a sine, a
 //!   sawtooth, a pulse or noise. VCO-2 can be started again by each of
-//!   VCO-1's cycles (sync), can move VCO-1's frequency by up to six
-//!   octaves either way at audio rate (cross modulation), and can leave
-//!   the keyboard for a low range. Under cross modulation the
+//!   VCO-1's cycles (sync), can move VCO-1's frequency at audio rate
+//!   (cross modulation: its sawtooth and its pulse by up to six octaves
+//!   upwards, its sine by up to three either way, its noise by one and a
+//!   half), and can leave the keyboard for a low range. Under cross modulation the
 //!   oscillators run at four times the output rate, and VCO-1's
 //!   frequency is set for every sample of 5.2 µs and held to 48 kHz;
 //!   otherwise they run at twice the output rate.
@@ -73,20 +74,33 @@
 //! - **Cross modulation** is bounded at 48 kHz. With the sync on, what
 //!   it aliases below 20 kHz is 86 dB below the strongest harmonic or
 //!   better with the slider at 5 or less and keys to the A of 880 Hz,
-//!   79 dB on the A of 1,760 Hz, and with the slider at 10 as little as
-//!   46 dB (`tests/jupiter8_oscillator.rs`); without the sync it could
-//!   not be measured. The oscillators' waveforms are the building
+//!   80 dB on the A of 1,760 Hz, with VCO-2's sine or sawtooth; with
+//!   its pulse VCO-1 is a plain sawtooth three octaves up at the slider's
+//!   5, of which the filter folds back 77 dB and 68 dB on those two keys,
+//!   and at 10 one of 28 kHz, 39 dB (`tests/jupiter8_oscillator.rs`).
+//!   Without the sync, before the filter, nothing folded stands out to
+//!   the C of 1,047 Hz with the slider at 2.5 or less, 90 dB there at 5,
+//!   and 87 dB on the C of 4,186 Hz at 2.5 (the voice's own test, which
+//!   says how). Under VCO-2's sine VCO-1 is a little flat on high keys:
+//!   0.8 cent on the C of 2,093 Hz at 5. The oscillators' waveforms are the building
 //!   block's ideal ones, without the glitch the instrument's triangle
 //!   and sine carry where the sawtooth starts again.
 //! - **The resonance at its top** is a feedback of 3.95, where the
 //!   service notes' drawing of the ringing would have a little more than
 //!   the filter can take without oscillating by itself.
-//! - **Eight voices cost** 8 to 14 times less than real time on one core
-//!   of a 3.7 GHz Intel Core i9-10900KF.
+//! - **Eight voices cost** 6 to 14 times less than real time on one core
+//!   of a 3.7 GHz Intel Core i9-10900KF, the 6 under the deepest cross
+//!   modulation on the highest keys.
 //! - **No arpeggiator**, no tape memory, no external control voltages;
 //!   the hold is the pedal alone, without the panel's two selectors: it
 //!   holds both halves in whole and dual and the lower half in split, as
 //!   the instrument's pedal does.
+//! - **Of the bender panel**, which every factory patch sheet draws
+//!   beside its patch, the LFO MOD RISE TIME knob is not here: the
+//!   instrument's touch pad switches the panel's modulation on, and the
+//!   knob lets it rise (owner's manual, printed page 14); the modulation
+//!   wheel that stands in for the pad is moved by hand. Nor is the
+//!   MASTER TUNE knob.
 //! - **Velocity is ignored**, as the instrument's keyboard has none.
 
 mod assign;
@@ -756,6 +770,211 @@ impl Jupiter8 {
             let later = mixed(self.voices_sample());
             let signal = self.decimator.process(earlier, later);
             *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::too_many_lines,
+    reason = "a test"
+)]
+mod tests {
+    extern crate std;
+    use super::{AssignMode, HALF_VOICES, HALVES, Jupiter8, KeyMode, LOWER, Param, Patch, UPPER, VOICES};
+    use core::fmt::Write;
+    use std::collections::BTreeSet;
+    use std::{string::String, vec, vec::Vec};
+
+    /// Marsaglia's xorshift in 64 bits: the same sequence every time.
+    struct Random(u64);
+
+    impl Random {
+        fn below(&mut self, bound: u64) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 20) % bound
+        }
+    }
+
+    /// Voices a half assigns in the key mode.
+    fn voices(jupiter: &Jupiter8, half: usize) -> usize {
+        match jupiter.key_mode {
+            KeyMode::Whole => [VOICES, 0][half],
+            KeyMode::Dual | KeyMode::Split => HALF_VOICES,
+        }
+    }
+
+    /// The voices of a half whose gate is on, each with its key.
+    fn gated(jupiter: &Jupiter8, half: usize) -> Vec<(usize, u8)> {
+        let slots = jupiter.assigners[half].slots();
+        (0..voices(jupiter, half)).filter(|&place| slots[place].gate).map(|place| (place, slots[place].key)).collect()
+    }
+
+    /// What holds whatever was played; `down` are the keys under a
+    /// finger.
+    fn check(jupiter: &Jupiter8, down: &BTreeSet<u8>, log: &str) {
+        for half in 0..HALVES {
+            let gated = gated(jupiter, half);
+            let held = jupiter.pedal && !(jupiter.key_mode == KeyMode::Split && half == UPPER);
+            for &(place, key) in &gated {
+                assert!(down.contains(&key) || held, "half {half}, voice {place}: key {key} is up, and no hold\n{log}");
+            }
+            match jupiter.patches[half].assign_mode() {
+                AssignMode::Poly1 | AssignMode::Poly2 => {
+                    let keys: BTreeSet<u8> = gated.iter().map(|&(_, key)| key).collect();
+                    assert_eq!(keys.len(), gated.len(), "half {half}: two voices on one key, {gated:?}\n{log}");
+                }
+                AssignMode::Solo => assert!(gated.len() <= 1, "half {half}: solo on {gated:?}\n{log}"),
+                AssignMode::Unison => {
+                    assert!(gated.is_empty() || gated.len() == voices(jupiter, half), "half {half}: {gated:?}\n{log}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn random_playing_leaves_no_voice_stuck_and_no_key_without_its_voice() {
+        // Keys, the pedal, the key mode, each half's assign mode, the
+        // split point and rendering, in any order (owner's manual,
+        // printed pages 12 and 13, for what must hold):
+        // - a voice's gate is on only for a key that is down, or under a
+        //   hold;
+        // - in the poly modes no two voices of a half have one key, and
+        //   a key gets a voice if one is free, or kept by the hold alone,
+        //   or has that key already;
+        // - solo has one voice, on the key struck or a lower one;
+        // - unison has every voice of the half or none, and a key
+        //   struck while fewer keys than voices sound is among them;
+        // - after a tick, a voice whose gate is on sounds;
+        // - with every key and the pedal up, every voice dies away.
+        let sequences: u64 = if cfg!(debug_assertions) { 100 } else { 1_500 };
+        for seed in 1..=sequences {
+            let mut random = Random(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+            let mut jupiter = Jupiter8::new();
+            let mut down: BTreeSet<u8> = BTreeSet::new();
+            let mut log = String::new();
+            let mut out = [0i16; 40];
+            for _ in 0..400 {
+                match random.below(100) {
+                    0..=39 => {
+                        let key = 48 + random.below(24) as u8;
+                        let halves: &[usize] = match jupiter.key_mode {
+                            KeyMode::Whole => &[UPPER],
+                            KeyMode::Dual => &[UPPER, LOWER],
+                            KeyMode::Split => {
+                                if key >= jupiter.split {
+                                    &[UPPER]
+                                } else {
+                                    &[LOWER]
+                                }
+                            }
+                        };
+                        let before: Vec<Vec<(usize, u8)>> = halves.iter().map(|&half| gated(&jupiter, half)).collect();
+                        jupiter.event(0x90, key, 100);
+                        let _ = write!(log, "down {key}; ");
+                        for (&half, before) in halves.iter().zip(before) {
+                            let count = voices(&jupiter, half);
+                            let after = gated(&jupiter, half);
+                            let kept = before.iter().any(|&(_, sounding)| !down.contains(&sounding));
+                            let had = before.iter().any(|&(_, sounding)| sounding == key);
+                            let has = after.iter().any(|&(_, sounding)| sounding == key);
+                            let keys: BTreeSet<u8> = before.iter().map(|&(_, sounding)| sounding).collect();
+                            let owed = match jupiter.patches[half].assign_mode() {
+                                AssignMode::Poly1 | AssignMode::Poly2 => before.len() < count || kept || had,
+                                AssignMode::Solo => {
+                                    assert!(after.len() == 1 && after[0].1 <= key, "half {half}: {after:?}\n{log}");
+                                    false
+                                }
+                                AssignMode::Unison => keys.len() < count,
+                            };
+                            assert!(
+                                !owed || has,
+                                "half {half}: key {key} has no voice, {before:?} to {after:?}\n{log}"
+                            );
+                        }
+                        down.insert(key);
+                    }
+                    40..=64 => {
+                        let key = match down.iter().nth(random.below(down.len().max(1) as u64) as usize) {
+                            Some(&key) if random.below(4) != 0 => key,
+                            _ => 48 + random.below(24) as u8,
+                        };
+                        // A note off, or a note on of no velocity.
+                        jupiter.event(if random.below(2) == 0 { 0x80 } else { 0x90 }, key, 0);
+                        down.remove(&key);
+                        let _ = write!(log, "up {key}; ");
+                    }
+                    65..=74 => {
+                        let on = random.below(2) == 0;
+                        jupiter.event(0xb0, 64, if on { 127 } else { 0 });
+                        let _ = write!(log, "pedal {on}; ");
+                    }
+                    75..=79 => {
+                        let mode = [KeyMode::Whole, KeyMode::Dual, KeyMode::Split][random.below(3) as usize];
+                        jupiter.set_key_mode(mode);
+                        let _ = write!(log, "{mode:?}; ");
+                    }
+                    80..=84 => {
+                        // A patch of another assign mode, with or without
+                        // cross modulation: the oscillators' rate.
+                        let (mode, cross, upper) =
+                            (random.below(4) as u8, random.below(2) as u8 * 40, random.below(2) == 0);
+                        let patch = Patch::DEFAULT.with(Param::AssignMode, mode).with(Param::CrossMod, cross);
+                        if upper {
+                            jupiter.set_patch(&patch);
+                        } else {
+                            jupiter.set_lower_patch(&patch);
+                        }
+                        let _ = write!(log, "{} patch, assign mode {mode}; ", if upper { "upper" } else { "lower" });
+                    }
+                    85..=87 => {
+                        let split = 52 + random.below(16) as u8;
+                        jupiter.set_split(split);
+                        let _ = write!(log, "split at {split}; ");
+                    }
+                    88 => {
+                        jupiter.event(0xb0, 123, 0);
+                        down.clear();
+                        log.push_str("all notes off; ");
+                    }
+                    89 => {
+                        jupiter.event(0xb0, 121, 0);
+                        log.push_str("reset controllers; ");
+                    }
+                    _ => {
+                        // Eight samples or more hold a tick.
+                        let length = 8 + random.below(32) as usize;
+                        jupiter.render(&mut out[..length]);
+                        let _ = write!(log, "render {length}; ");
+                        for index in 0..VOICES {
+                            let (half, place) = jupiter.place(index);
+                            let slot = jupiter.assigners[half].slots()[place];
+                            assert!(
+                                !slot.gate || jupiter.voices[index].active(),
+                                "voice {index} has key {} and is silent\n{log}",
+                                slot.key
+                            );
+                        }
+                    }
+                }
+                check(&jupiter, &down, &log);
+            }
+            for &key in &down {
+                jupiter.event(0x80, key, 0);
+            }
+            jupiter.event(0xb0, 64, 0);
+            for half in 0..HALVES {
+                assert!(gated(&jupiter, half).is_empty(), "half {half} holds {:?}\n{log}", gated(&jupiter, half));
+            }
+            // The default patch's release is its shortest.
+            let mut silence = vec![0i16; 24_000];
+            jupiter.render(&mut silence);
+            assert_eq!(jupiter.sounding_voices(), 0, "voices never freed\n{log}");
         }
     }
 }

@@ -122,4 +122,9 @@ fn the_factory_patches_are_patches_and_sound() {
     assert_eq!(numbers(&|patch| patch.get(Param::AssignMode) == 2), [14, 58]);
     assert_eq!(numbers(&|patch| patch.get(Param::AssignMode) != 0 && patch.get(Param::AssignMode) != 2), []);
     assert_eq!(numbers(&|patch| !patch.on(Param::Vco1Bend) && patch.on(Param::Vco2Bend)), [14]);
+    // And what is written on GONG's sheet by hand, at VCO-2's range
+    // knob: "TUNE UP A FIFTH". VCO-1's range is in octaves from 16' and
+    // VCO-2's in semitones.
+    let gong = factory::gong();
+    assert_eq!(i32::from(gong.get(Param::Vco2Range)) - 12 * i32::from(gong.get(Param::Vco1Range)), 7);
 }

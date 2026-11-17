@@ -222,8 +222,11 @@ pub fn gong() -> Patch {
             (Param::PwmSource, 2),
             (Param::Vco1Range, 1),
             (Param::Vco1Wave, 2),
-            // The range knob a little short of 12 o'clock.
-            (Param::Vco2Range, 17),
+            // The range knob is drawn near 12 o'clock, between 8' and
+            // 4', with an asterisk, and the sheet's head says by hand
+            // what the drawing cannot: "TUNE UP A FIFTH", seven
+            // semitones above VCO-1's 8'.
+            (Param::Vco2Range, 19),
             (Param::Vco2Wave, 0),
             (Param::Env1Polarity, 1),
             // The sheet: "UNISON MODE".
