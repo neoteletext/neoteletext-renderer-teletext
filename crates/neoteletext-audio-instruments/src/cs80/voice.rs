@@ -209,16 +209,20 @@ const LEVEL_A_VOLT: (i32, i32) = (90, 602);
 /// at [`LEVEL_A_VOLT`].
 const TOUCH_LEVEL: i32 = law::octaves(64 * LEVEL_A_VOLT.0, 10 * LEVEL_A_VOLT.1);
 /// The volts the sub oscillator at its peak adds to the brilliance
-/// either way with its VCF lever at the top: 1.1 V, which
-/// [`law::MODULATION`] makes 0.36 octave of the high-pass filter and 1.34
+/// either way with its VCF lever at the top: 1.6 V, which
+/// [`law::MODULATION`] makes 0.52 octave of the high-pass filter and 1.96
 /// of the low-pass.
 ///
-/// Source: own choice: as pressure gives ([`TOUCH_VCF_REACH`]), since
-/// the touch response's levers "do the same thing as their counterparts
-/// in the Sub Oscillator section" (owner's manual, page 38, item 12).
-const SUB_VCF_REACH: i32 = TOUCH_VCF_REACH;
-/// The same by pressure on a key with the touch response's VCF lever at
-/// the top: 1.1 V either way.
+/// Source: service manual, page 64, Panel 2 circuit diagram: the VCF
+/// lever (VR10, B 10 kΩ) stands between earth and the sub oscillator
+/// board's output SUO, its wiper on the line SUB of the R52 board; page
+/// 29, SUB circuit diagram: SUO is a follower of what the FUNCTION
+/// switch chooses, the chip's sine among them; page 52, "VCO II IC
+/// (IG00150)", pin 6: the sine is "3.20Vpp". The sawtooth's 3.5 Vp-p
+/// (pin 7) would be 1.75 V; every function is given the sine's here.
+const SUB_VCF_REACH: i32 = law::octaves(16, 10);
+/// What pressure on a key lets the sub oscillator add with the touch
+/// response's VCF lever at the top: 1.1 V either way.
 ///
 /// Source: adjustment procedure, page 25, step 8: "2.2 ± .2 Vp-p" at the
 /// terminals F1 to F8, the key firmly depressed.

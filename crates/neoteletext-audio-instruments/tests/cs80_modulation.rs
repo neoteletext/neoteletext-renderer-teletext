@@ -44,8 +44,10 @@ fn tremolo(function: Function, speed: u8) -> Patch {
 #[test]
 fn the_sub_oscillator_is_150_ms_at_five_volts_and_18_ms_at_its_fastest() {
     // Adjustment procedure, page 17, sub oscillator: 150 ms with 5.0 V at
-    // the speed terminal, 18 ms at FAST. The lever's 64 of 127 is 5.04 V.
-    for (lever, period) in [(64u8, 0.150), (127, 0.018), (0, 1.25)] {
+    // the speed terminal, 18 ms at FAST. The lever is on the panel's
+    // 10.6 V (service manual, page 64), so its 60 of 127 is 5.01 V, and
+    // its foot, 5 V below at log₂ (150 / 18) octaves in 5.6 V, is 1.0 s.
+    for (lever, period) in [(60u8, 0.150), (127, 0.018), (0, 0.996)] {
         let signal = play(&tremolo(Function::Sine, lever), KEY, 100, 6.0, 0.0);
         let found = 1.0 / moving(&signal[4_800..]);
         println!("sub oscillator speed {lever}: a cycle in {:.1} ms for {:.0} ms", found * 1e3, period * 1e3);
@@ -95,11 +97,34 @@ fn the_sub_oscillators_functions_have_their_shapes() {
 }
 
 #[test]
+fn the_sub_oscillator_reaches_the_filters_with_its_own_1_6_volts() {
+    // Service manual, pages 64, 29 and 52: the VCF lever's top is the sub
+    // oscillator's own output, 3.2 Vp-p, and the low-pass filter moves
+    // 1.222 octaves for each volt of it. The square function holds each
+    // end for half of the slowest cycle, 0.996 s, from the instrument's
+    // start. A sawtooth through that filter with its lever at 2.05 V:
+    // the third harmonic's gain at a Q of 0.5 is 1 / (1 + x²).
+    let mut patch = panel(&[(Control::Lpf, 26)]);
+    patch.set(Global::SubFunction, Function::Square as u8);
+    patch.set(Global::SubSpeed, 0);
+    patch.set(Global::SubVcf, 127);
+    let signal = play(&patch, 69, 100, 1.0, 0.0);
+    let third = |from: usize| decibels(component(&signal[from..from + 14_400], 1320.0));
+    let moved = third(4_800) - third(28_800);
+    let scale = 3.3 / 2.7;
+    let cutoff = 32.703 * (21.0f64 / 12.0 + 10.0 * 26.0 / 127.0 * scale).exp2();
+    let gain = |volts: f64| -decibels(1.0 + (1320.0 / (cutoff * (volts * scale).exp2())).powi(2));
+    let expected = gain(1.6) - gain(-1.6);
+    println!("the sub oscillator's square on the filters: {moved:.1} dB of the third harmonic for {expected:.1} dB");
+    assert!((moved - expected).abs() < 0.3, "{moved} for {expected}");
+}
+
+#[test]
 fn pressure_speeds_the_sub_oscillator_by_six_volts() {
     // Adjustment procedure, page 25, step 6: +6.0 V at the speed's
     // terminal with the touch response's SPEED at the top; the sub
-    // oscillator's 0.612 octaves to the volt make that 12.7 times.
-    let mut patch = tremolo(Function::Sine, 64);
+    // oscillator's 0.546 octaves to the volt make that 9.7 times.
+    let mut patch = tremolo(Function::Sine, 60);
     patch.set(Global::TouchSpeed, 127);
     let mut cs80 = instrument(&patch);
     cs80.event(NOTE_ON, KEY, 100);
@@ -107,7 +132,7 @@ fn pressure_speeds_the_sub_oscillator_by_six_volts() {
     cs80.event(CHANNEL_PRESSURE, 127, 0);
     let pressed = moving(&render(&mut cs80, 3.0)[4_800..]);
     println!("the sub oscillator: {light:.2} Hz, and {pressed:.1} Hz under full pressure");
-    assert!((pressed / light / 6.0f64.mul_add(0.611_78, 0.0).exp2() - 1.0).abs() < 0.03);
+    assert!((pressed / light / 6.0f64.mul_add(0.546_231, 0.0).exp2() - 1.0).abs() < 0.03);
 }
 
 #[test]
@@ -383,7 +408,8 @@ fn the_ring_modulator_puts_the_sum_and_the_difference_in_place_of_the_sound() {
     assert!((component(&half[24_000..], 880.0) / 0.125 - 63.0 / 127.0).abs() < 0.02);
     // At 5 V the level moves 6.67 times a second.
     patch.set(Global::RingModulation, 127);
-    patch.set(Global::RingSpeed, 64);
+    // The lever is on the panel's 10.6 V: 60 of 127 is 5.01 V.
+    patch.set(Global::RingSpeed, 60);
     let slow = play(&patch, KEY, 100, 4.0, 0.0);
     // The level of a product with a sine goes through nothing twice a
     // cycle.
@@ -394,13 +420,13 @@ fn the_ring_modulator_puts_the_sum_and_the_difference_in_place_of_the_sound() {
 
 #[test]
 fn the_ring_modulators_envelope_speeds_it_up_and_lets_it_fall_back() {
-    // DEPTH at the top adds five volts at the envelope's peak: 30 times
-    // the speed. Attack at 64 of 127 is the 31 ms of the adjustment's 5
-    // V; the decay at 80 is 0.8 s to a tenth of the way.
+    // DEPTH at the top adds five volts at the envelope's peak: 20.9 times
+    // the speed, at log₂ 30 octaves in the 5.6 V from 5 V to the SPEED
+    // lever's top. The decay at 80 is 0.8 s to a tenth of the way.
     let mut patch = panel(&SINE);
     for (global, value) in [
         (Global::RingModulation, 127),
-        (Global::RingSpeed, 64),
+        (Global::RingSpeed, 60),
         (Global::RingDepth, 127),
         (Global::RingAttack, 0),
         (Global::RingDecay, 80),
@@ -411,10 +437,10 @@ fn the_ring_modulators_envelope_speeds_it_up_and_lets_it_fall_back() {
     let speed = |from: f64, to: f64| moving(&signal[(from * 48_000.0) as usize..(to * 48_000.0) as usize]) / 2.0;
     let (first, last) = (speed(0.01, 0.06), speed(4.0, 6.0));
     println!("ring modulator with its envelope: {first:.0} Hz just after the key, {last:.1} Hz at rest");
-    assert!((last / 6.85 - 1.0).abs() < 0.08);
+    assert!((last / 6.70 - 1.0).abs() < 0.03, "{last}");
     // Within the first 60 ms the envelope has fallen a little from its
     // peak.
-    assert!(first > 120.0 && first < 6.85 * 31.0);
+    assert!(first > 84.0 && first < 6.70 * 20.9);
 }
 
 /// The effect's parts, from the service manual's pages 55 to 58: the dry

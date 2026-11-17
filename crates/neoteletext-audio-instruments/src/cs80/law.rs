@@ -297,10 +297,18 @@ pub fn time(shortest: u32, lever: u8) -> u32 {
 /// A frequency in thousandths of a hertz that is `frequency` at five
 /// volts and `octaves_a_volt` further for each volt, at a lever's
 /// position; `more` is added to the lever's volts, in octaves of one to
-/// the volt.
+/// the volt. The lever's top is [`LEVER_VOLTS`].
 #[must_use]
 pub fn speed(frequency: u32, octaves_a_volt: i32, lever: u8, more: i32) -> u32 {
-    let volts = share(LEVER_VOLTS * OCTAVE, lever).saturating_sub(LEVER_MIDDLE_VOLTS * OCTAVE).saturating_add(more);
+    speed_under(frequency, octaves_a_volt, LEVER_VOLTS * 10, lever, more)
+}
+
+/// As [`speed`], for a lever whose top is `supply_tenths` tenths of a
+/// volt.
+#[must_use]
+pub fn speed_under(frequency: u32, octaves_a_volt: i32, supply_tenths: i32, lever: u8, more: i32) -> u32 {
+    let supply = supply_tenths.saturating_mul(VOLT / 10);
+    let volts = share(supply, lever).saturating_sub(LEVER_MIDDLE_VOLTS * OCTAVE).saturating_add(more);
     let interval = i64::from(volts).saturating_mul(i64::from(octaves_a_volt)) >> OCTAVE_BITS;
     raise(frequency, i32::try_from(interval).unwrap_or(0))
 }

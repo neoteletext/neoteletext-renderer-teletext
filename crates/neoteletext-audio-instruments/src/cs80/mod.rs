@@ -253,19 +253,30 @@ const SEED: u32 = 0x4353_3830;
 /// step 1; sub oscillator, step 1; ring modulator, step 3: each "150 ms
 /// (± 5%)" with "+5.0V" at its terminal.
 const SPEED_AT_FIVE_VOLTS: u32 = 6_667;
-/// The octaves a volt speeds the pulse width's oscillator and the ring
-/// modulator's: from 150 ms at 5 V to 5 ms at the lever's top, log₂ 30
-/// in five volts.
+/// The octaves a volt speeds the pulse width's oscillator: from 150 ms
+/// at 5 V to 5 ms at the lever's top, log₂ 30 in five volts.
 ///
-/// Source: the same steps: "5 ms (± 5%)" at FAST, and at "SPEED ... max".
-/// Own choice: the same below 5 V, which puts the lever's foot at 4.5 s.
+/// Source: adjustment procedure, page 17, pulse width modulator: "5 ms
+/// (± 5%)" at FAST. Own choice: the same below 5 V, which puts the
+/// lever's foot at 4.5 s; and the lever's top is taken as 10 V, the
+/// lever being one of a tone's, on the tone selector's line (service
+/// manual, page 62).
 const FAST_OCTAVES_A_VOLT: i32 = law::octaves(981_378, 1_000_000);
-/// The same for the sub oscillator: to 18 ms, log₂ (150 / 18) in five
-/// volts, which puts the lever's foot at 1.25 s.
+/// The same for the ring modulator's oscillator, whose SPEED lever's top
+/// is the panel's 10.6 V ([`PANEL_SUPPLY_TENTHS`]): log₂ 30 in 5.6 volts,
+/// which puts the lever's foot at 3.1 s.
+///
+/// Source: adjustment procedure, page 19, ring modulator, step 3: "150
+/// ms" with "+5.0V at VC1 terminal" and "5 ms (± 5%)" at "SPEED ... max".
+/// Own choice: the same below 5 V.
+const RING_OCTAVES_A_VOLT: i32 = law::octaves(876_230, 1_000_000);
+/// The same for the sub oscillator, whose SPEED lever is on the same
+/// line: to 18 ms, log₂ (150 / 18) in 5.6 volts, which puts the lever's
+/// foot at 1.0 s.
 ///
 /// Source: adjustment procedure, page 17, sub oscillator: "18ms (± 5%)"
 /// at FAST.
-const SUB_OCTAVES_A_VOLT: i32 = law::octaves(611_780, 1_000_000);
+const SUB_OCTAVES_A_VOLT: i32 = law::octaves(546_231, 1_000_000);
 /// The share of the mixed output that is a sample, in Q28: 1288 / 1000.
 /// One line's sawtooth through the open filters then peaks 14.5 dB below
 /// full scale, and eight keys struck together 0.4 dB below, the tops of
@@ -316,7 +327,7 @@ const EFFECT_FASTEST: (u32, u32) = (17_857, 2_000);
 /// (VR8 and VR6).
 const PANEL_SUPPLY_TENTHS: i32 = 106;
 /// A tenth of a volt, in the units of an octave to the volt.
-const TENTH_OF_A_VOLT: i32 = OCTAVE / 10;
+const TENTH_OF_A_VOLT: i32 = law::VOLT / 10;
 /// The SPEED knob and what loads its wiper, in hundreds of ohms, which
 /// keep the products of [`effect_speed_volts`] inside a word: the knob's
 /// 10 kΩ,
@@ -841,9 +852,10 @@ impl Cs80 {
         if pressed != self.sub_pressed {
             self.sub_pressed = pressed;
             let volts = law::share(TOUCH_SPEED_VOLTS * OCTAVE, patch.get(Global::TouchSpeed));
-            let speed = law::speed(
+            let speed = law::speed_under(
                 SPEED_AT_FIVE_VOLTS,
                 SUB_OCTAVES_A_VOLT,
+                PANEL_SUPPLY_TENTHS,
                 patch.get(Global::SubSpeed),
                 law::scaled(volts, pressed),
             );
@@ -856,9 +868,10 @@ impl Cs80 {
 
         let rise = self.ring_envelope.tick();
         let volts = law::share(RING_DEPTH_VOLTS * OCTAVE, patch.get(Global::RingDepth));
-        let speed = law::speed(
+        let speed = law::speed_under(
             SPEED_AT_FIVE_VOLTS,
-            FAST_OCTAVES_A_VOLT,
+            RING_OCTAVES_A_VOLT,
+            PANEL_SUPPLY_TENTHS,
             patch.get(Global::RingSpeed),
             law::scaled(volts, rise),
         );
