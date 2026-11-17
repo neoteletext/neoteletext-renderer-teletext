@@ -57,5 +57,13 @@ required-features = ["juno"]
 name = "juno_render"
 required-features = ["juno"]
 
+[[example]]
+name = "cs80_demo"
+required-features = ["cs80"]
+
+[[example]]
+name = "cs80_render"
+required-features = ["cs80"]
+
 [lints]
 workspace = true
