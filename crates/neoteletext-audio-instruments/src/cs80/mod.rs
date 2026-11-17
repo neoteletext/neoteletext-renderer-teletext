@@ -71,6 +71,13 @@
 //!   wherever its `Source:` line says so: above all how many octaves or
 //!   decibels a volt of touch, of the keyboard control and of the sub
 //!   oscillator is, and how far the overall levers reach.
+//! - **A hard stroke is brighter than the one real instrument heard.**
+//!   A velocity of 127 is taken as the keyboard's largest voltage and a
+//!   pressure of 127 likewise, in a straight line between (own choice);
+//!   with the presets' touch levers that puts BRASS 1's filter three
+//!   octaves above where a recording of a real instrument has it, and at
+//!   the softest stroke one octave above
+//!   (`~/devel/teletext-reference/synthesizers/cs-80/validation/`).
 //! - **The filters do not distort**, and the loss of resonance at high
 //!   frequencies that Haible finds (180 pF across the damping) is left
 //!   out.
