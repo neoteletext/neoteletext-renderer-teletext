@@ -33,7 +33,8 @@
 //!
 //! It is written under the clean-room procedure of DEC-6428, from
 //! Roland's service notes and owner's manuals of the Juno-106, Juno-60
-//! and Juno-6, Roland's specification pages, the MN3009's data sheet and
+//! and Juno-6, Roland's specification pages, the chorus block's figures
+//! of the MN3009 and
 //! the published write-ups named where each figure is used, with no code
 //! and no table from any emulator or plugin. Two reference programs were
 //! run as sealed programs and their output measured; where a figure here
@@ -171,7 +172,8 @@ const CHORUS_RATES: [u32; 3] = [500, 833, 10_000];
 ///
 /// Source: own choice: no document read gives either (Anwander: "At the
 /// moment I can provide only the modulation rates"). They lie inside the
-/// MN3009's 0.64 to 12.8 ms, and near one reference program's measured
+/// MN3009's 0.64 to 12.8 ms (the chorus block's figures, from its data
+/// sheet), and near one reference program's measured
 /// 1.6 to 5.2 ms.
 const CHORUS_DELAY: (u32, u32) = (3_500, 1_850);
 /// The sweep with both buttons down, as a share of the sweep with one,

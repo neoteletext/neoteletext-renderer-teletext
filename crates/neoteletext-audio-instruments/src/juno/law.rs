@@ -302,9 +302,9 @@ pub const JUNO_60: Law = Law {
     // the Specifications say "DELAY TIME (0 - 1.5s)".
     lfo_rate: (300, octaves(6_058_894, 1_000_000)),
     lfo_delay: 2_000_000,
-    // Source: own choice, NOT read from the Juno-60's schematic: position
-    // 0 is flat (its owner's manual), and the three others are the
-    // Juno-106's two corners with their geometric mean between.
+    // Source: own choice, NOT read from the Juno-60's schematic or its
+    // owner's manual: position 0 is taken as flat, and the three others
+    // as the Juno-106's two corners with their geometric mean between.
     hpf: [0, 225_800, 403_300, 720_500],
     bass_boost: false,
 };

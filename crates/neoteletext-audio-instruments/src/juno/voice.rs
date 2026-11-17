@@ -152,7 +152,9 @@ const COMPENSATION_SHIFT: u32 = 1;
 const OSCILLATION_FLAT: i32 = law::cents(31);
 /// The feedback at which the loop begins to oscillate, in Q28.
 ///
-/// Source: Zavalishin, "The Art of VA Filter Design", section 5.1.
+/// Source: the filter block's own bound
+/// ([`RESONANCE_LIMIT`](crate::analog::filter::RESONANCE_LIMIT)), which
+/// cites Zavalishin, "The Art of VA Filter Design", section 5.1.
 const OSCILLATION_ONSET: i32 = 4 * ONE_Q28;
 /// The feedback from the onset to the slider's top.
 const OSCILLATION_SPAN: i64 = (RESONANCE_TOP - OSCILLATION_ONSET) as i64;
