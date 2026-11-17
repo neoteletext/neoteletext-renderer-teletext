@@ -74,36 +74,58 @@ fn vibrato(model: Model, shape: Switch, frequency: u8) -> Patch {
 #[test]
 fn the_low_frequency_oscillator_runs_at_the_documents_rates() {
     // OM section 2-9: "approximatley 0.04 Hz ... to 20 Hz"; TM3 SD334: 110
-    // kΩ, 0.909 octave to the volt. Revision 2: 5 Hz at 6 on the dial
-    // (patch sheet 1-1) and 0.75 octave to the volt (TM2 SD312).
-    for (model, steps) in [(Model::Rev3, [72u8, 96, 120]), (Model::Rev2, [72, 96, 127])] {
-        for steps in steps {
-            let expected = match model {
-                Model::Rev3 => 0.04 * (f64::from(steps) / 12.0 * 100.0 / 110.0).exp2(),
-                Model::Rev2 => 5.0 * ((f64::from(steps) - 72.0) / 12.0 * 0.75).exp2(),
-            };
-            let (_, _, rate) =
-                swing(&wobble(model, &vibrato(model, Switch::LfoTriangle, steps), 30.0 / expected.max(3.0)));
-            println!("{model:?} at {steps} steps: {rate:.3} Hz (the documents: {expected:.3})");
-            assert!((rate / expected - 1.0).abs() < 0.01, "{model:?} {steps}: {rate} for {expected}");
-        }
+    // kΩ, 0.909 octave to the volt.
+    for steps in [72u8, 96, 120] {
+        let expected = 0.04 * (f64::from(steps) / 12.0 * 100.0 / 110.0).exp2();
+        let (_, _, rate) =
+            swing(&wobble(Model::Rev3, &vibrato(Model::Rev3, Switch::LfoTriangle, steps), 30.0 / expected.max(3.0)));
+        println!("Rev3 at {steps} steps: {rate:.3} Hz (the documents: {expected:.3})");
+        assert!((rate / expected - 1.0).abs() < 0.01, "{steps}: {rate} for {expected}");
     }
+    // Revision 2: the knob's voltage through 75 kΩ into a summer of
+    // 100 kΩ back, 4/3 octave to the volt, a ninth of an octave a step
+    // (TM2 SD312: R368, R371); and "approximately 5 cycles per second"
+    // where patch sheet 1-1 draws the knob, at 6.6, 79 steps.
+    let rate = |steps: u8| {
+        let patch = vibrato(Model::Rev2, Switch::LfoTriangle, steps);
+        swing(&wobble(Model::Rev2, &patch, 10.0)).2
+    };
+    let (low, drawn, high) = (rate(61), rate(79), rate(88));
+    println!("Rev2: {low:.3} Hz at 61 steps, {drawn:.3} at 79, {high:.3} at 88 (two octaves and one between; 5 at 79)");
+    assert!((drawn / low / 4.0 - 1.0).abs() < 0.01 && (high / drawn / 2.0 - 1.0).abs() < 0.01, "{low} {drawn} {high}");
+    assert!((drawn / 5.0 - 1.0).abs() < 0.05, "{drawn}");
 }
 
 #[test]
 fn wheel_mod_bends_pitch_through_182_kilohms_and_the_shapes_stand_as_the_chip_makes_them() {
     // One unit of Wheel-Mod is 100 / 182 octave, 659 cents: the sawtooth
     // from 0 to that, the square from 0 to its level against the
-    // sawtooth, the triangle a quarter either way.
+    // sawtooth, the triangle a half either way: its 5 V are doubled about
+    // their reference before the 160 kΩ the sawtooth's 10 V pass (TM3
+    // SD334: U380 with R3147 and R3148, 100 kΩ each, and R3131).
     for model in MODELS {
         let unit = 1200.0 * 100.0 / 182.0;
         let square = if model == Model::Rev3 { 1.08 } else { 0.75 };
         for (shape, low, high) in [
-            (Switch::LfoTriangle, -0.25 * unit, 0.25 * unit),
+            (Switch::LfoTriangle, -0.5 * unit, 0.5 * unit),
             (Switch::LfoSawtooth, 0.0, unit),
             (Switch::LfoSquare, 0.0, square * unit),
         ] {
-            let (found_low, found_high, _) = swing(&wobble(model, &vibrato(model, shape, 96), 1.5));
+            let track = wobble(model, &vibrato(model, shape, 96), 1.5);
+            let (mut found_low, mut found_high, _) = swing(&track);
+            if shape == Switch::LfoSquare {
+                // Two levels: each is the middle one of its side. The
+                // cycles a jump spoils, which are as many as the
+                // thirtieth that the swing leaves out, do not move it.
+                let middle = f64::midpoint(found_low, found_high);
+                let side = |above: bool| {
+                    let mut values: Vec<f64> =
+                        track.iter().map(|&(_, value)| value).filter(|&value| (value > middle) == above).collect();
+                    values.sort_by(f64::total_cmp);
+                    values[values.len() / 2]
+                };
+                (found_low, found_high) = (side(false), side(true));
+            }
             println!("{model:?} {shape:?}: {found_low:.1} to {found_high:.1} cents (expected {low:.1} to {high:.1})");
             assert!((found_low - low).abs() < 35.0 && (found_high - high).abs() < 35.0, "{model:?} {shape:?}");
         }
@@ -193,6 +215,32 @@ fn poly_mod_from_oscillator_b_sweeps_oscillator_a_and_the_filter() {
         println!("{model:?}: through the filter the level swings from {least:.5} to {most:.4}");
         assert!(most > 30.0 * least);
     }
+}
+
+#[test]
+fn oscillator_bs_triangle_is_as_large_as_its_sawtooth_on_revision_3() {
+    // TM3 SD431: the triangle's 5 V pass a level shifter of a gain of two
+    // (U451: R4254 and R4255, 100 kΩ each, about the reference) and leave
+    // it 10 V from peak to peak about zero, into 150 kΩ (R4285) as the
+    // sawtooth's 10 V are (R4241). Of two waves of one size the
+    // triangle's fundamental is 8 / π² of half the size and the
+    // sawtooth's 2 / π of it: 4 / π between them.
+    let alone = |shape: Switch| {
+        let patch = plain(Model::Rev3)
+            .with(Knob::MixerOscA, 0)
+            .with(Knob::MixerOscB, 120)
+            .with_switch(Switch::OscASawtooth, false)
+            .with_switch(shape, true);
+        let signal = play(Model::Rev3, &patch, 60, 1.0, 0.0);
+        let steady = &signal[samples(0.2)..];
+        amplitude(steady, pitch(steady))
+    };
+    let (sawtooth, triangle) = (alone(Switch::OscBSawtooth), alone(Switch::OscBTriangle));
+    let ratio = triangle / sawtooth;
+    println!(
+        "revision 3: fundamental of the sawtooth {sawtooth:.4}, of the triangle {triangle:.4}: {ratio:.3} (4 / π: 1.273)"
+    );
+    assert!((ratio - 4.0 / std::f64::consts::PI).abs() < 0.04, "{ratio}");
 }
 
 #[test]

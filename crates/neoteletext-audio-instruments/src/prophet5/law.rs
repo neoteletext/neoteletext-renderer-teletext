@@ -87,7 +87,15 @@ pub fn bend(step: u32, octaves: i32) -> u32 {
     let half = mul_high_unsigned(step, fine);
     if whole >= 0 {
         let shift = whole.unsigned_abs().saturating_add(1);
-        if half.leading_zeros() < shift { u32::MAX } else { half << shift }
+        // Nothing stays nothing; and with something there the shift
+        // is below the word's width wherever it is made.
+        if half == 0 {
+            0
+        } else if half.leading_zeros() < shift {
+            u32::MAX
+        } else {
+            half << shift
+        }
     } else {
         // A step loses its low bits here; a fall of an octave or more
         // from a step that has few is beyond a fiftieth of a cent.
@@ -233,11 +241,18 @@ pub const REV3: Law = Law {
     // sawtooth through 150 kΩ, the pulse through 200 kΩ, the triangle
     // through 150 kΩ. CEM3340 data sheet, page 2: the sawtooth is 0 to
     // 10 V, the triangle 0 to 5 V, and "the pulse peak is 1.5 volts
-    // below the supply", 13.5 V: currents of 67, 67.5 and 33 µA peak to
-    // peak, so the pulse is as large as the sawtooth and the triangle
-    // half.
+    // below the supply", 13.5 V. The triangle does not reach its
+    // resistor as the chip makes it: the "DC level-shifter" of the same
+    // sheet (U451) takes it at its non-inverting input and has 100 kΩ
+    // from its inverting input to the 5 V reference and 100 kΩ back
+    // (R4254, R4255), a gain of two less the reference, so what leaves
+    // it is 10 V from peak to peak about zero (TM3 section 2-4, page 21:
+    // "shifts down the dc-level of the triangle to be symmetrical about
+    // ground"). Currents of 67, 67.5 and 67 µA peak to peak: the pulse
+    // and the triangle are each as large as the sawtooth, in the mixer
+    // and, through the same 150 kΩ (R4243, R4260), in Poly-Mod.
     mixing: Mixing::Currents,
-    levels: (ONE_Q30_LEVEL, ONE_Q30_LEVEL / 2),
+    levels: (ONE_Q30_LEVEL, ONE_Q30_LEVEL),
     // Source: TM3 adjustment 4-20 (pages 70 and 71): with the cutoff
     // voltage "as close to 2.000V as the quantized voltage steps will
     // allow", 24 steps, and the filter oscillating, "Alternately play A3
@@ -252,23 +267,33 @@ pub const REV3: Law = Law {
     // DIAL". Own choice of 8 within that, 96 steps. The curve is the
     // CEM3320's resonance amplifier's ([`resonance`]).
     resonance: (96, true),
-    // Source: TM3 test table (page 62): at 6 on the dial, 72 steps,
-    // "APPROX 1-SEC ATTACK"; at 10, "GREATER THAN 20-SEC RELEASE"; OM
-    // section 2-6 (page 19): "approximately 1 millisecond ... to 30
-    // seconds", "setting 5 ... gives a period of approximately 1/2
-    // second". CEM3310 data sheet, page 1: "Zero to -5V Varies the Times
-    // from 2mS to 20S", four decades, and TM3 section 2-7 (page 22):
-    // the times "are controlled by 0 to -5V". Own choice among them:
-    // four decades over the knob's ten volts through one second of
-    // attack at 6, which gives 0.4 s at 5 and 40 s at 10, and 4 ms at 0
-    // where the operation manual says 1 ms. An attack lasts ln(6.5 /
-    // 1.5) = 1.466 time constants (the data sheet's asymptote and
-    // peak), so the time constant at 72 steps is 0.682 s; a step is
-    // 0.4 / 12 decade, 0.11073 octave.
-    envelope: (682_128, 72, octaves(110_730, 1_000_000)),
-    // Source: none is needed: the knob's range is inside the chip's
-    // (CEM3310 data sheet, page 2: "Time control range 50,000:1" at
-    // least).
+    // Source: the components. CEM3310 data sheet, page 1: "The times are
+    // to a first order determined only by the external resistor and
+    // capacitor and constant of physics, KT/q"; page 2: "Control Scale
+    // Sensitivity" 60 mV to the decade, and the charging current is the
+    // input current, one to one, where the control pin is at 0 V: there
+    // the time constant is the resistor times the capacitor. TM3 SD431
+    // (page 50): 24.3 kΩ and 0.039 µF on each chip (R418, C424; R439,
+    // C441): 948 µs. TM3 SD430 (page 48): each time's voltage reaches its
+    // pin through 24.3 kΩ, with 13 kΩ from the pin to -5 V and 806 Ω to
+    // ground (R415, R407, R402 and their like), so the pin has 0.030286
+    // of the voltage less 283.1 mV; section 2-7 (page 22): "the computer
+    // inverts its normal 0 to +10V output so +10V corresponds to
+    // minimum, and 0 corresponds to maximum time". The knob's 0 is then
+    // 10 V and +19.8 mV at the pin, 948 µs over 10^(19.8 / 60): 443 µs;
+    // each step of a twelfth of a volt less is 2.524 mV, 0.042064
+    // decade, 0.139735 octave of time; the knob's 10 is -283.1 mV and
+    // 49 s. An attack lasts ln(6.5 / 1.5) = 1.466 time constants (the
+    // data sheet's asymptote and peak): 0.65 ms at 0, 0.69 s at 6. The
+    // manuals' words, which no one law meets, are near it: OM section
+    // 2-6 (page 19), "approximately 1 millisecond ... to 30 seconds" and
+    // "setting 5 ... gives a period of approximately 1/2 second" (the
+    // time constant at 5 is 0.15 s); TM3 test table (page 62), at 6
+    // "APPROX 1-SEC ATTACK" and at 10 "GREATER THAN 20-SEC RELEASE".
+    envelope: (443, 0, octaves(139_735, 1_000_000)),
+    // Source: none is needed: the knob's range, 112,000 to 1, is inside
+    // the chip's (CEM3310 data sheet, page 2: "Time Control Range"
+    // 250,000:1 typical).
     envelope_bounds: (1, u32::MAX),
     // Source: OM section 2-9 (page 20): "from approximatley 0.04 Hz ...
     // to 20 Hz"; TM3 sheet SD334 (page 47): the knob's voltage enters
@@ -276,7 +301,18 @@ pub const REV3: Law = Law {
     // volt to the octave: 0.909 octave to the volt, 9.09 octaves over
     // ten volts, 0.04 Hz to 21.8 Hz. The square comes through 200 kΩ
     // from 13.5 V and the sawtooth through 160 kΩ from 10 V: 1.08 of
-    // it.
+    // it. The components bear the manual's range out no nearer than a
+    // quarter either way: by the CEM3340 data sheet's formulas (page 3),
+    // with the sheet's 0.1 µF (C382), 2.21 MΩ of reference (R3138),
+    // 5.62 kΩ, 1.82 kΩ and an untrimmed 30.1 kΩ about the multiplier
+    // (R3108, R3137, R3107) and 487 kΩ from 15 V to set the knob's 0
+    // (R3135, whose first figure is faint in the scan), the oscillator
+    // runs from 0.049 Hz, 0.94 octave to the volt, to 33 Hz; the
+    // oscillators of the voices trim that resistor between 28.7 and
+    // 33.7 kΩ, so one chip and the next differ that much. The manual's
+    // words are kept. Sequential's patch sheet 1-1 has "approximately 5
+    // cycles per second" with the knob drawn at 6.6, but of revisions 1
+    // and 2 ([`REV2`]); here that knob gives 2.5 Hz.
     lfo: (40, octaves(909, 12_000), (ONE_Q30_LEVEL as i64 * 108 / 100) as i32),
     // Source: own choice: the glide's amplifier is linear only over a
     // small difference (TM3 sheet SD334: a CA3280 with 4.7 kΩ at its
@@ -290,8 +326,10 @@ pub const REV3: Law = Law {
     // compensation"; own choice of 10 cents.
     tolerance: (octaves(15, 12_000), cents(10)),
     // Source: TM3 SD431 (page 50): the filter's output passes C4164,
-    // 2.2 µF, into R4499, 100 kΩ: 1 / (2 π R C) is 0.72 Hz.
-    blocking: (false, 723),
+    // 2.2 µF, to the output buffer's non-inverting input, which R4460,
+    // 68 kΩ, ties to ground: 1 / (2 π R C) is 1.06 Hz. (R4499, 100 kΩ,
+    // is at the buffer's other input, with R4500 the buffer's gain.)
+    blocking: (false, 1_064),
     // Source: measured on this filter at the feedback of the knob's top
     // (`tests/prophet5_filter.rs`); adjustment 4-20 tunes the filters
     // while they oscillate.
@@ -360,14 +398,23 @@ pub const REV2: Law = Law {
     // Source: SSM2050 data sheet, page 2, "Time range", typical: 1 to
     // 100,000 ms, taken as the attack's time, 1.466 time constants.
     envelope_bounds: (682, 68_212_824),
-    // Source: Sequential's original patch sheet 1-1, "Brass": the
-    // vibrato is "approximately 5 cycles per second" with the knob drawn
-    // at about 6, 72 steps; TM2 sheet SD312 (page 75): the knob's
-    // voltage is scaled by 75 kΩ into 100 kΩ (R368, R371) ahead of a
-    // converter of a volt to the octave, 0.75 octave to the volt: 0.22
-    // Hz at 0 and 54 Hz at the top. The manual gives no range. The
-    // pulse is 7.5 V against the sawtooth's 10 V (section 2-23).
-    lfo: (221, octaves(75, 1_200), (ONE_Q30_LEVEL as i64 * 3 / 4) as i32),
+    // Source: TM2 sheet SD312 (page 75): the knob's voltage enters an
+    // inverting summer through 75 kΩ (R368) with 100 kΩ back (R371), a
+    // gain of 4/3, and its output reaches the SSM2030's base through
+    // 54.9 kΩ over 1 kΩ (R377, R381), 17.9 mV to the volt, an octave
+    // (SSM2030 data sheet, page 2, the basic connection's 54.9 kΩ and
+    // 1 kΩ): 4/3 octave to the volt, a ninth of an octave a step. Where on that slope the knob stands is from Sequential's
+    // original patch sheet 1-1, "Brass": the vibrato is "approximately
+    // 5 cycles per second" with the knob drawn at 6.6 (the pointer's
+    // angle measured on the scan), 79 steps: 11 thousandths of a hertz
+    // at 0, 4.8 Hz at 79 steps and 195 Hz at the top. The manual gives
+    // no range, and the components do not bear the sheet out: 15 V
+    // through 100 kΩ (R370) offset the summer, and with 2.21 MΩ of
+    // reference and 0.01 µF (R382, C335) the data sheet's 10 V sawtooth
+    // would run at 0.9 Hz at that knob and 37 Hz at the top. The sheet's
+    // words are kept, as the nearer to the instrument. The pulse is
+    // 7.5 V against the sawtooth's 10 V (section 2-23).
+    lfo: (11, octaves(1, 9), (ONE_Q30_LEVEL as i64 * 3 / 4) as i32),
     // Source: TM2 section 2-21 (page 43): diodes "clamp the difference
     // between these to not exceed 0.6V".
     glide_zone: octaves(6, 10),
@@ -471,5 +518,16 @@ mod tests {
         }
         assert!(worst < 0.02 * 2.0f64.ln() / 1200.0, "{worst}");
         assert_eq!((bend(5, 40 * OCTAVE), bend(u32::MAX, -70 * OCTAVE), bend(1 << 20, OCTAVE)), (u32::MAX, 0, 1 << 21));
+    }
+
+    #[test]
+    fn nothing_bent_is_nothing_however_far() {
+        // A step of zero raised 31 octaves and more: the shift was then
+        // the word's whole width, which a debug build refuses ("attempt
+        // to shift left with overflow") and a release build wraps.
+        for octaves in [0, 30, 31, 32, 40] {
+            assert_eq!(bend(0, octaves * OCTAVE), 0, "{octaves}");
+        }
+        assert_eq!((bend(1 << 20, 31 * OCTAVE), bend(1 << 20, 11 * OCTAVE)), (u32::MAX, 1 << 31));
     }
 }

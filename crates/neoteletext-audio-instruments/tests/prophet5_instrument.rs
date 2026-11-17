@@ -229,6 +229,77 @@ fn random_patches_and_random_messages_neither_panic_nor_leave_the_bounds() {
 }
 
 #[test]
+fn the_pedal_still_holds_after_a_patch_turns_unison_on_or_off() {
+    // Changing between polyphonic and unison lets go of every key, but a
+    // pedal that is down is down still: a key struck and let go after
+    // the change sounds on until the pedal comes up. The instrument used
+    // to keep the pedal for its releases and forget it for its keys.
+    for model in MODELS {
+        for unison in [true, false] {
+            let before = plain(model).with_switch(Switch::Unison, !unison).with(Knob::AmplifierRelease, 0);
+            let mut prophet = instrument(model, &before);
+            prophet.event(CONTROL, 64, 127);
+            prophet.set_patch(&before.with_switch(Switch::Unison, unison));
+            prophet.event(NOTE_ON, 60, 100);
+            render(&mut prophet, 0.2);
+            prophet.event(NOTE_OFF, 60, 0);
+            render(&mut prophet, 0.3);
+            let held = rms(&render(&mut prophet, 0.1));
+            let voices = prophet.sounding_voices();
+            prophet.event(CONTROL, 64, 0);
+            render(&mut prophet, 0.3);
+            let lifted = rms(&render(&mut prophet, 0.1));
+            println!("{model:?} to unison {unison}: under the pedal {voices} voices at {held:.4}; lifted {lifted:.6}");
+            assert_eq!(voices, if unison { VOICES } else { 1 }, "{model:?} {unison}");
+            assert!(held > 0.01 && lifted < 1.0e-4 && prophet.sounding_voices() == 0, "{model:?} {unison}");
+        }
+    }
+}
+
+#[test]
+fn no_run_of_keys_pedals_and_patches_leaves_a_note_sounding() {
+    // Random keys down and up in a small compass, the pedal, all notes
+    // off, all sound off, reset all controllers, random patches and
+    // unison switched, rendered between; then every key up, the pedal
+    // up and both releases short: nothing may sound a second later.
+    for model in MODELS {
+        for seed in 1..=60u64 {
+            let mut random = Random(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            let mut prophet = Prophet5::new(model);
+            let mut out = vec![0i16; 3000];
+            for _ in 0..20 + random.next() % 60 {
+                let key = 36 + (random.next() % 12) as u8;
+                match random.next() % 20 {
+                    0..=7 => prophet.event(NOTE_ON, key, 100),
+                    8..=12 => prophet.event(NOTE_OFF, key, 0),
+                    13 => prophet.event(CONTROL, 64, if random.next().is_multiple_of(2) { 0 } else { 127 }),
+                    14 => prophet.event(CONTROL, 123, 0),
+                    15 => prophet.event(CONTROL, 121, 0),
+                    16 => prophet.event(CONTROL, 120, 0),
+                    17 | 18 => prophet.set_patch(&random.patch()),
+                    _ => {
+                        let patch = *prophet.patch();
+                        prophet.set_patch(&patch.with_switch(Switch::Unison, !patch.on(Switch::Unison)));
+                    }
+                }
+                let length = 1 + random.next() as usize % out.len();
+                prophet.render(&mut out[..length]);
+            }
+            for key in 0..=127 {
+                prophet.event(NOTE_OFF, key, 0);
+            }
+            prophet.event(CONTROL, 64, 0);
+            let unison = prophet.patch().on(Switch::Unison);
+            let short = plain(model).with(Knob::AmplifierRelease, 0).with(Knob::FilterRelease, 0);
+            prophet.set_patch(&short.with_switch(Switch::Unison, unison));
+            render(&mut prophet, 1.0);
+            let tail = rms(&render(&mut prophet, 0.1));
+            assert!(prophet.sounding_voices() == 0 && tail < 1.0e-4, "{model:?} seed {seed}: {tail}");
+        }
+    }
+}
+
+#[test]
 fn the_same_messages_give_the_same_samples_however_they_are_rendered() {
     for model in MODELS {
         let score = |prophet: &mut Prophet5, lengths: &[usize]| {

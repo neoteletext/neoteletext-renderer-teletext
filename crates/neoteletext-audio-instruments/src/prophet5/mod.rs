@@ -157,24 +157,30 @@ pub const MASTER_TUNE_CENTS: i32 = 100;
 /// Source: own choice, since neither manual gives Wheel-Mod's voltage,
 /// only the resistors it passes: one volt. Through the 182 kΩ of an
 /// oscillator's summer that is 0.55 octave for the sawtooth and the
-/// square, and a triangle of a quarter of that either way, 1.6
-/// semitones; the patch sheets ask for the wheel "up slightly (1/8 to
-/// 1/4) to engage vibrato" (program 1-1), which is then 20 to 40 cents
-/// either way.
+/// square, and a triangle of half of that either way, 3.3 semitones;
+/// the patch sheets ask for the wheel "up slightly (1/8 to 1/4) to
+/// engage vibrato" (program 1-1), which is then 40 to 80 cents either
+/// way.
 pub const WHEEL_MOD: i32 = UNIT;
 /// The triangle of the low-frequency oscillator against its sawtooth: a
-/// quarter either way.
+/// half either way, as a right shift of a triangle of one either way.
 ///
 /// Source: TM3 sheet SD334 (page 47): the triangle, 5 V peak to peak
-/// (CEM3340 data sheet, page 2) and shifted to stand about zero, passes
-/// 160 kΩ as the sawtooth's 10 V does: half its swing, half of it either
-/// side.
-const LFO_TRIANGLE_SHIFT: u32 = 2;
+/// (CEM3340 data sheet, page 2), is shifted to stand about zero by an
+/// amplifier that also doubles it (U380: the triangle at the
+/// non-inverting input, R3148 of 100 kΩ from the inverting input to the
+/// reference and R3147 of 100 kΩ back), and then passes 160 kΩ (R3131)
+/// as the sawtooth's 10 V do (R3133): the sawtooth's swing, half of it
+/// either side. Own choice for revisions 1 and 2: the same. TM2 sheet
+/// SD312 (page 75) has the triangle converter's output, the sawtooth
+/// and the pulse each through 10 kΩ (R373, R385, R386); the size of what
+/// the converter makes was not worked out.
+const LFO_TRIANGLE_SHIFT: u32 = 1;
 /// The gain of the filtered noise as Wheel-Mod has it, in Q28.
 ///
 /// Source: own choice: white noise through the filter below keeps a
 /// sixth of its level at this module's tick; three times that is about
-/// half a unit, the level of the triangle's peak to peak.
+/// half a unit, the triangle's peak.
 const PINK_GAIN: i32 = 3 * ONE_Q28;
 /// The corner of the filter that makes Wheel-Mod's noise of white
 /// noise, in thousandths of a hertz.
@@ -405,7 +411,8 @@ impl Prophet5 {
 
     /// Gives the instrument a patch, which it copies. It takes effect at
     /// once, on the voices that are sounding too, as moving the panel's
-    /// controls does; switching unison on or off lets go of every key.
+    /// controls does; switching unison on or off lets go of every key,
+    /// and leaves the pedal as it is.
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
         self.apply_patch();
@@ -431,7 +438,10 @@ impl Prophet5 {
         }
         let mode = Self::mode(&self.patch);
         if mode != self.allocator.mode() {
+            // The allocator lets go of every key, and of the pedal with
+            // them; the pedal has not moved, and is given back.
             self.allocator.set_mode(mode);
+            self.allocator.sustain(self.pedal);
         }
         let steps = i32::from(self.patch.get(Knob::LfoFrequency).min(law.knob_top));
         let rate = law::raise(law.lfo.0, steps.saturating_mul(law.lfo.1));
