@@ -71,6 +71,10 @@
     clippy::todo,
     clippy::unimplemented
 )]
+// REQ-GEN-016: nothing that ships computes in floating point, so that the
+// crate runs the same on a processor with no floating-point unit. The
+// tests inside the crate compare against f64 and are left out.
+#![cfg_attr(not(test), deny(clippy::float_arithmetic, clippy::float_cmp))]
 
 #[cfg(test)]
 extern crate std;
