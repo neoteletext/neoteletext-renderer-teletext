@@ -300,8 +300,6 @@ impl Juno {
             Model::Juno106 => &law::JUNO_106,
             Model::Juno60 => &law::JUNO_60,
         };
-        let mut chorus = Chorus::new(SAMPLE_RATE);
-        chorus.set_filter_cutoff(frequency(CHORUS_FILTER, SAMPLE_RATE));
         let mut voice = 0u32;
         let voices = core::array::from_fn(|_| {
             let trim = Variation::new(SEED, voice).offset(CUTOFF_TOLERANCE);
@@ -333,12 +331,20 @@ impl Juno {
             high_pass: OnePole::new(),
             bass: OnePole::new(),
             level: ONE_Q28,
-            chorus,
+            chorus: Self::empty_chorus(),
             ignored: 0,
         };
         juno.bass.set_cutoff(frequency(BASS_BOOST_CORNER, SAMPLE_RATE));
         juno.apply_patch();
         juno
+    }
+
+    /// The chorus with nothing in its lines, before a patch sets its
+    /// delay and its sweep.
+    fn empty_chorus() -> Chorus {
+        let mut chorus = Chorus::new(SAMPLE_RATE);
+        chorus.set_filter_cutoff(frequency(CHORUS_FILTER, SAMPLE_RATE));
+        chorus
     }
 
     /// Which instrument this is.
@@ -361,6 +367,13 @@ impl Juno {
     /// controls does. A setting the model has not is taken as the
     /// nearest it has ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
     pub fn set_patch(&mut self, patch: &Patch) {
+        // While the chorus is off its lines are not run, to spare the
+        // work, and so keep what they held when it was switched off. The
+        // instrument's lines run on and have long emptied by the time
+        // they are heard again: a chorus switched on starts empty.
+        if self.patch.chorus == ChorusMode::Off && patch.chorus != ChorusMode::Off {
+            self.chorus = Self::empty_chorus();
+        }
         self.patch = *patch;
         self.apply_patch();
     }
