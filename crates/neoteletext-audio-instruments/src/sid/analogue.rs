@@ -235,19 +235,30 @@ const CUTOFF_BEND_COEFFICIENT: u32 =
 /// The 8580's cutoff at the bottom of the register, in hertz (data sheet:
 /// "ranges from 30 Hz to 12 kHz").
 const CUTOFF_FLOOR_8580_HZ: u32 = 30;
-/// The 8580's rise: 6.75 Hz a register step, as a multiplier and a shift,
-/// which puts the top of the register at 13.8 kHz.
+/// The 8580's rise: 7.25 Hz a register step, as a multiplier and a shift,
+/// which puts the top of the register at 14.9 kHz.
 ///
 /// Source: that the line is straight is public: the 8580's cutoff "is a
 /// straight line on a linear scale, and is closer to the designers'
 /// actual specifications" (retroisle.com), which are the data sheet's
-/// 12 kHz. Its slope is fitted to the output of reSIDfp's default 8580,
-/// measured 17 November 2026 as the corner of its low-pass for noise at
-/// the highest resonance: 1,733 Hz at register $100, 3,496 at $200, 7,057
-/// at $400, 10,689 at $600 and 13,803 at $7FF, where this line has 1,758,
-/// 3,486, 6,942, 10,398 and 13,847. The slope before, 12,500 Hz over the
-/// register, lay a tenth lower (TODO-6427 fault 6).
-const CUTOFF_SLOPE_8580: (u32, u32) = (27, 2);
+/// 12 kHz, 5.85 Hz a step. Its slope is the middle of four real chips,
+/// measured 17 November 2026:
+///
+/// - Michiel Boland's three 8580s, his b4, b8 and b10, whose spectrograms
+///   "all look identical" ("SID filter measurements", November 2024):
+///   the brightest frequency of each column of the picture where it lies
+///   between 300 Hz and 4 kHz, less the 30 Hz, over the register: 7.8,
+///   7.5 and 7.0 Hz a step, each readable to about a tenth.
+/// - Stone Oakvalley's 8580 R5 (6581-8580.com), from his recordings of
+///   three tunes that sweep the filter: with this chip playing the same
+///   registers at slopes from 6.25 to 8 Hz a step, the two are as bright
+///   as each other, by the spectrum's centroid, at 6.6, 6.7 and 7.3.
+///
+/// Two emulators run as separate programs (sidplayfp 2.16.0, both
+/// engines at their defaults) have 6.75 and 9.6 Hz a step; the first was
+/// this line's slope before (TODO-6427 fault 6: 12,500 Hz over the
+/// register at first, 6.1 a step).
+const CUTOFF_SLOPE_8580: (u32, u32) = (29, 2);
 
 /// The damping (the reciprocal of Q) with no resonance: the square root of
 /// two, a filter with no peak at all, in [`DAMPING_BITS`] fraction bits.
@@ -858,14 +869,17 @@ mod tests {
     #[test]
     fn the_8580_curve_is_a_straight_line() {
         assert_eq!(cutoff_hz(ChipModel::Mos8580, 0), 30);
-        assert_eq!(cutoff_hz(ChipModel::Mos8580, 1024), 30 + 6_912);
-        assert_eq!(cutoff_hz(ChipModel::Mos8580, CUTOFF_MAX), 30 + 13_817);
-        // The corners of the reference program's low-pass, measured from
-        // its output on 17 November 2026 (CUTOFF_SLOPE_8580): the line
-        // passes within a twentieth of each.
-        for (register, hz) in [(0x100, 1_733), (0x200, 3_496), (0x400, 7_057), (0x600, 10_689), (0x7FF, 13_803)] {
-            let found = cutoff_hz(ChipModel::Mos8580, register);
-            assert!(found.abs_diff(hz) * 20 < hz, "${register:03X}: {found} Hz for {hz}");
+        assert_eq!(cutoff_hz(ChipModel::Mos8580, 1024), 30 + 7_424);
+        assert_eq!(cutoff_hz(ChipModel::Mos8580, CUTOFF_MAX), 30 + 14_840);
+        // The slope lies among four real chips', measured 17 November
+        // 2026 (CUTOFF_SLOPE_8580): 6.6 to 7.3 Hz a register step on Stone
+        // Oakvalley's R5, and 7.0, 7.5 and 7.8 on Michiel Boland's three.
+        // In hundredths of a hertz over a thousand steps.
+        let rise = cutoff_hz(ChipModel::Mos8580, 1000) - cutoff_hz(ChipModel::Mos8580, 0);
+        assert!((7_000..=7_500).contains(&rise), "{rise}");
+        for register in 1..=CUTOFF_MAX {
+            let step = cutoff_hz(ChipModel::Mos8580, register) - cutoff_hz(ChipModel::Mos8580, register - 1);
+            assert!((7..=8).contains(&step), "{register}: {step}");
         }
     }
 

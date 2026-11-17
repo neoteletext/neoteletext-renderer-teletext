@@ -49,10 +49,10 @@ fn through(model: ChipModel, hz: f64, cutoff: u16, resonance: u8, mode: u8) -> f
     amplitude(&render(&mut sid, 0.5), pitch(register, clock))
 }
 
-/// The 8580's cutoff register for a cutoff in hertz: 30 Hz and 6.75 Hz a
+/// The 8580's cutoff register for a cutoff in hertz: 30 Hz and 7.25 Hz a
 /// step.
 fn register_8580(hz: f64) -> u16 {
-    ((hz - 30.0) / 6.75).round() as u16
+    ((hz - 30.0) / 7.25).round() as u16
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn the_8580_cutoff_is_a_straight_line_and_the_6581_is_not() {
     let straight = register_reaching(ChipModel::Mos8580, 2000.0);
     assert!(straight.abs_diff(register_8580(2000.0)) <= 16, "8580: {straight}");
     // The 6581 lies at its floor first, and reaches 500 Hz far later than
-    // the 8580 does: at register 391 by its curve, against 70.
+    // the 8580 does: at register 391 by its curve, against 65.
     let (bent, line) = (register_reaching(ChipModel::Mos6581, 500.0), register_reaching(ChipModel::Mos8580, 500.0));
     assert!(bent > 2 * line && bent.abs_diff(391) <= 16, "6581: {bent} against {line}");
 }
