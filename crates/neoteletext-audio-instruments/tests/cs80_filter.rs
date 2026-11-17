@@ -138,8 +138,7 @@ fn the_resonance_is_a_q_of_a_half_to_five_in_a_straight_line_with_the_two_levers
     // the control voltage and 5 at the other; pages 39 and 41: the pin
     // has the mean of the filter's own lever and the overall one. Half
     // way it is 2.75, and BRASS 1's 61 with the overall lever at its
-    // centre is 2.71, where a real instrument's BRASS 1 has it
-    // (`cs80::law::damping`).
+    // foot, where it rests, is 1.58 (`cs80::law::damping`).
     for (hpf_resonance, lpf_resonance, overall) in
         [(0u8, 127u8, 0u8), (127, 0, 0), (64, 64, 0), (127, 127, 0), (0, 0, 127), (127, 127, 127), (40, 90, 60)]
     {
@@ -305,8 +304,8 @@ fn brass_1_rests_where_a_real_instruments_does() {
         let note = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
         let signal = play(&patch, key, 1, 11.5, 0.0);
         // The Q is the preset's own lever and the overall lever at its
-        // centre: 0.5 + 4.5 × (61 + 64) / 254.
-        let rest = fitted_cutoff(&signal[samples(9.5)..], note, 2.71);
+        // foot: 0.5 + 4.5 × 61 / 254.
+        let rest = fitted_cutoff(&signal[samples(9.5)..], note, 1.58);
         println!("BRASS 1, key {key}: at rest {rest:+.2} octaves above the note");
         assert!((1.39..=2.00).contains(&rest), "key {key}: {rest:+.2} octaves for the recordings' +1.39 to +2.00");
     }

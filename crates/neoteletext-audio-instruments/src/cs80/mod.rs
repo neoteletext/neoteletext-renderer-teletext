@@ -127,10 +127,15 @@
 //!   manual, pages 39 and 41), and its Q of 5 with both at their most
 //!   (page 42; adjustment procedure, page 11). So one lever alone reaches
 //!   a Q of 2.75, and where the overall lever stands matters to every
-//!   sound: the recordings' Q of 2.7 for BRASS 1 is met with it at its
-//!   centre, where the owner's manual pictures it and the panel at rest
-//!   here has it, and is out of reach with it at its foot. That the
-//!   recorded instrument's lever stood at its centre is not known.
+//!   sound. It rests with the lever up, at its least (owner's manual,
+//!   page 38, item 8: "Nominal setting is always with the lever up for
+//!   minimum additional resonance"; page 31 draws it so), and so does
+//!   the panel at rest here. BRASS 1's Q is then 1.58 by the straight
+//!   line, where the recordings fit 2.7; it would be 2.71 with the lever
+//!   at its centre, but where the recorded instrument's lever stood is
+//!   not known, and the fundamental's fall on the same twelve keys is
+//!   met with the lever up and not with it at its centre (5.4 dB and 8.3
+//!   dB for the recordings' 4.0 dB).
 //! - **The real sine is not pure**: recordings have its second and third
 //!   harmonics 20 to 25 dB down, where the sine here has them 77 dB
 //!   down. The documents give no figure for it: the waveshaper's sheet
