@@ -70,6 +70,20 @@
 //!   so are the tracking errors the HI END COMP trimmers correct.
 //! - **Oscillator 3's pitch off the keyboard** is an own choice
 //!   ([`law::FREE_KEY`]).
+//! - **What the ladder's curve folds back.** The oscillators by
+//!   themselves leave nothing below 20 kHz that is no harmonic within
+//!   91 dB (`analog::oscillator`). The ladder's stages bend their edges,
+//!   and at twice the output rate what that makes above 76 kHz comes
+//!   back below 20 kHz. Against the note's strongest harmonic, with the
+//!   filter open: one sawtooth at 10 leaves 84 dB at 110 Hz, 66 dB at
+//!   880 Hz and 53 dB at 4,186 Hz, the top key at 2'; at 5, 11 dB more;
+//!   the narrow rectangular wave 6 to 8 dB less than the sawtooth;
+//!   three sawtooths at 10 in step, 71 dB at 110 Hz and 40 dB at
+//!   4,186 Hz; a triangle, 97 dB at worst. From 220 Hz up at 10 that is
+//!   short of the 80 dB the oscillators are held to. The amplifier's
+//!   curve after the ladder is not the cause: without it one
+//!   oscillator's figures move by less than 1 dB
+//!   (`tests/minimoog_aliasing.rs` holds the figures).
 //! - **Velocity is ignored**, as the keyboard has none; there is no
 //!   A-440 tone and no external control input.
 
