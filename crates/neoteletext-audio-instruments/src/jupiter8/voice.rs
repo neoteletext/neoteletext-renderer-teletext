@@ -995,7 +995,8 @@ impl Lfo {
         }
     }
 
-    /// Takes a patch's rate, waveform and delay.
+    /// Takes a patch's rate, waveform and delay. A delay that is
+    /// shortened while it runs shortens what is left of it.
     pub fn configure(&mut self, patch: &Patch) {
         let rate = law::raise(law::LFO_RATE_BASE, law::share(law::LFO_RATE_SPAN, patch.get(Param::LfoRate)));
         self.step = frequency(rate, TICK_RATE);
@@ -1007,8 +1008,8 @@ impl Lfo {
             Some(step) => step.cast_signed(),
             None => FADE_FULL,
         };
+        self.waiting = self.waiting.min(self.delay);
         if self.delay == 0 {
-            self.waiting = 0;
             self.fade = FADE_FULL;
         }
     }
