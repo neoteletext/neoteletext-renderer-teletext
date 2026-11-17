@@ -62,10 +62,11 @@ pub const fn time_constant(microseconds: u32, rate: u32) -> i32 {
     let Some(mut x) = (MICROSECONDS << 32).checked_div(samples) else {
         return IMMEDIATE;
     };
-    // The series needs x up to one: halve it until it is, and square
-    // e⁻ˣ back afterwards.
+    // The series needs x below one: halve it until it is, and square
+    // e⁻ˣ back afterwards. At one exactly the first product below would
+    // be 2⁶⁴ and wrap to nothing.
     let mut halvings = 0u32;
-    while x > ONE_Q32 {
+    while x >= ONE_Q32 {
         x >>= 1;
         halvings = halvings.saturating_add(1);
         if halvings > HALVINGS_LIMIT {
@@ -73,7 +74,7 @@ pub const fn time_constant(microseconds: u32, rate: u32) -> i32 {
         }
     }
     // 1 - e⁻ˣ = x - x²/2 + x³/6 - ...: each term is the last times x / n,
-    // and with x up to one in Q32 no product leaves 64 bits.
+    // and with x below one in Q32 no product leaves 64 bits.
     let mut term = x;
     let mut sum = x;
     let mut index = 2u64;

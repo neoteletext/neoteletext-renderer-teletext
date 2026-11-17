@@ -36,6 +36,20 @@ fn the_coefficient_is_one_less_the_exponential() {
     assert_eq!((time_constant(0, RATE), time_constant(1_000, 0)), (IMMEDIATE, IMMEDIATE));
 }
 
+#[test]
+fn a_time_constant_of_a_whole_power_of_two_of_samples_is_no_exception() {
+    // A million over a power of two of microsecond-hertz makes x, or x
+    // halved, exactly one in Q32: the series' first product is then 2^64,
+    // and must not wrap to nothing.
+    for (microseconds, rate) in
+        [(1_000u32, 1_000u32), (20, 50_000), (500, 1_000), (250, 1_000), (125, 1_000), (125, 500), (125, 250)]
+    {
+        let exact = 1.0 - (-1.0e6 / (f64::from(microseconds) * f64::from(rate))).exp();
+        let found = f64::from(time_constant(microseconds, rate)) / 2_147_483_648.0;
+        assert!((found - exact).abs() < 1.0e-9, "{microseconds} us at {rate} Hz: {found} for {exact}");
+    }
+}
+
 /// Samples until `done`, ticking the envelope.
 fn samples_until(envelope: &mut RcEnvelope, mut done: impl FnMut(&RcEnvelope, i32) -> bool) -> usize {
     for sample in 1..=20 * RATE as usize {
