@@ -46,5 +46,13 @@ required-features = ["dx7"]
 name = "analog_tables"
 required-features = ["analog"]
 
+[[example]]
+name = "juno_demo"
+required-features = ["juno"]
+
+[[example]]
+name = "juno_render"
+required-features = ["juno"]
+
 [lints]
 workspace = true
