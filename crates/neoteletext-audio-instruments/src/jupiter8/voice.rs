@@ -179,12 +179,17 @@ const A4_STEP_PLAIN: u32 = frequency(law::A4.0, RATE);
 /// Half a cycle: the square's width.
 const HALF_CYCLE: u32 = 1 << 31;
 /// How much wider than a square the pulse is with its slider at the top:
-/// 49.215% of a cycle, which leaves 0.785% of it low.
+/// 46.861% of a cycle, which leaves 3.139% of it low.
 ///
 /// Source: service notes, adjustment 11, PULSE WIDTH MOD LEVEL: "Press
-/// C2 key, adjust ... for 30µs space width". Own reading: at 8', where
-/// the key C2 is middle C, 261.63 Hz, a cycle of 3,822 µs.
-const PULSE_SPAN: u32 = ((49_215u64 << 32) / 100_000) as u32;
+/// C2 key, adjust ... for 30µs space width". The adjustment's drawing of
+/// the panel, read at the scan's 400 dots an inch, has the PULSE WIDTH
+/// MOD slider at 10, its switch at MANUAL and VCO-1's RANGE knob on the
+/// last of its four marks, 2' (the drawings of adjustments 7 and 9,
+/// which tune the key A2 to the A-442 reference, have it on the second,
+/// 8'). At 2' the key C2 is two octaves above middle C, 1,046.5 Hz, a
+/// cycle of 955.6 µs.
+const PULSE_SPAN: u32 = ((46_861u64 << 32) / 100_000) as u32;
 
 /// The resonance at the slider's top, in Q28, as the feedback of the
 /// filter's loop, which oscillates from four: the filter rings, and does
