@@ -216,6 +216,8 @@ pub struct Chorus {
     bounds: (u32, u32),
     /// Whether the instrument has set the filters' cutoff itself.
     cutoff_set: bool,
+    /// Whether the second line is swept opposite to the first.
+    opposite: bool,
     lfo: Lfo,
     anti_aliasing: ThirdOrder,
     lines: [Line; 2],
@@ -235,6 +237,7 @@ impl Chorus {
             depth: 0,
             bounds: (bound(DELAY_MICROSECONDS.0), bound(DELAY_MICROSECONDS.1)),
             cutoff_set: false,
+            opposite: true,
             lfo: Lfo::new(1),
             anti_aliasing: ThirdOrder::new(),
             lines: [Line::new(), Line::new()],
@@ -290,8 +293,17 @@ impl Chorus {
         self.lfo.set_shape(shape);
     }
 
+    /// Chooses whether the second line is swept opposite to the first, as
+    /// it is until this is called, or along with it: the Juno-6 and the
+    /// Juno-60 with both chorus buttons down sweep the two alike ("In the
+    /// 'fast mode' the second BBD is controlled in a non inverted way":
+    /// Florian Anwander, "Roland choruses and ensemble effects").
+    pub const fn set_opposite(&mut self, opposite: bool) {
+        self.opposite = opposite;
+    }
+
     /// One sample: the two lines' outputs, the second swept opposite to
-    /// the first.
+    /// the first unless [`Chorus::set_opposite`] says otherwise.
     #[inline]
     pub fn process(&mut self, input: i32) -> [i32; 2] {
         // The sweep in samples: the depth times the oscillator, in Q30.
@@ -299,7 +311,9 @@ impl Chorus {
         let (shortest, longest) = self.bounds;
         let delays = [
             self.base.saturating_add_signed(sweep).clamp(shortest, longest),
-            self.base.saturating_add_signed(sweep.wrapping_neg()).clamp(shortest, longest),
+            self.base
+                .saturating_add_signed(if self.opposite { sweep.wrapping_neg() } else { sweep })
+                .clamp(shortest, longest),
         ];
         if self.wait == 0 {
             self.wait = CONTROL_INTERVAL;
