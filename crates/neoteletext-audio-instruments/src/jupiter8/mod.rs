@@ -77,8 +77,12 @@
 //!   80 dB on the A of 1,760 Hz, with VCO-2's sine or sawtooth; with
 //!   its pulse VCO-1 is a plain sawtooth three octaves up at the slider's
 //!   5, of which the filter folds back 77 dB and 68 dB on those two keys,
-//!   and at 10 one of 28 kHz, 39 dB (`tests/jupiter8_oscillator.rs`);
-//!   without the sync it could not be measured. The oscillators' waveforms are the building
+//!   and at 10 one of 28 kHz, 39 dB (`tests/jupiter8_oscillator.rs`).
+//!   Without the sync, before the filter, nothing folded stands out to
+//!   the C of 1,047 Hz with the slider at 2.5 or less, 90 dB there at 5,
+//!   and 87 dB on the C of 4,186 Hz at 2.5 (the voice's own test, which
+//!   says how). Under VCO-2's sine VCO-1 is a little flat on high keys:
+//!   0.8 cent on the C of 2,093 Hz at 5. The oscillators' waveforms are the building
 //!   block's ideal ones, without the glitch the instrument's triangle
 //!   and sine carry where the sawtooth starts again.
 //! - **The resonance at its top** is a feedback of 3.95, where the

@@ -285,7 +285,9 @@ fn what_the_cross_modulation_aliases_is_measured() {
     // With the sync on, where the sound has one period and what belongs
     // to it can be told from what does not. Without it the partials are
     // sums of multiples of two unrelated frequencies and lie everywhere:
-    // nothing is measured there. The slider at 1, 2.5, 5 and 10; where
+    // that is measured before the filter, against the same sound three
+    // octaves lower, by the voice's own test. The slider at 1, 2.5, 5
+    // and 10; where
     // VCO-1 is driven out of hearing altogether there is nothing to
     // measure against.
     println!("what is no partial of the sound, below 20 kHz, against the strongest partial, dB:");

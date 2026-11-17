@@ -91,9 +91,32 @@
 //! of the same three sawtooths (`tests/analog_filter_aliasing.rs`).
 //!
 //! Without the sync the partials are sums of multiples of two unrelated
-//! frequencies and lie everywhere, so nothing can be told apart and
-//! nothing was measured; the arithmetic is the same without the start
-//! to place.
+//! frequencies and lie everywhere, and no grid tells them from what is
+//! folded. It is measured against the same sound three octaves lower,
+//! which has the same partials an eighth as fast and next to nothing
+//! folded, the oscillators' rate being for it what 32 times the output
+//! rate is for the sound (the test in this file, before the filter):
+//! the strongest line below 20 kHz that stands 12 dB or more above
+//! anything the lower sound has there, against the strongest line.
+//! VCO-1's sawtooth at 8', VCO-2 a fifth above it:
+//!
+//! | CROSS MOD | middle C | key 84, 1,047 Hz | key 96, 2,093 Hz | key 108, 4,186 Hz |
+//! |---|---|---|---|---|
+//! | 1, VCO-2's sawtooth or pulse | none | none | none | 109 dB down |
+//! | 2.5 | none | none | 100 dB | 87 dB |
+//! | 5 | none | 90 dB | 104 dB | 66 dB |
+//! | 10 | none | at the bound | at the bound | at the bound |
+//! | 1 and 2.5, VCO-2's sine | 125 dB | 112 dB | | |
+//!
+//! The 66 dB is no folding that can be told: the lower sound has as
+//! much that the upper lacks, VCO-1 being swept there from 4 kHz to
+//! 33 kHz. Under VCO-2's sine deeper or higher than the last row, VCO-1's
+//! pitch differs between the two sounds, and they cannot be compared:
+//! the sine is taken as a straight line through each sample, which
+//! shortens its swing by a twelfth of the square of the angle VCO-2
+//! turns in a sample, and VCO-1 is flat by 0.1 cent on key 84 at 5, by
+//! 0.8 cent on key 96 at 5 and by 8.5 cents on key 108 at 10, where
+//! VCO-2 is at 6.3 kHz.
 //!
 //! # What it costs
 //!
@@ -1113,28 +1136,21 @@ mod tests {
         real.iter().zip(&imaginary).take(count / 2).map(|(re, im)| re.hypot(*im)).collect()
     }
 
-    /// What the two oscillators make under cross modulation with the
-    /// sync, before the filter, brought down to the output rate: the
-    /// strongest thing below 20 kHz that is no harmonic of VCO-1's
-    /// period, in decibels against the strongest harmonic. The period is
-    /// counted from the starts of VCO-1's cycle.
-    fn before_the_filter(key: u8, depth: u8, wave: u8, first: u8) -> f64 {
-        let patch = Patch::DEFAULT
-            .with(Param::Vco1Wave, first)
-            .with(Param::CrossMod, depth)
-            .with(Param::Vco2Wave, wave)
-            .with(Param::Sync, 1)
-            .with(Param::Vco2Range, 24);
-        let settings = Settings::new(&patch);
+    /// The two oscillators' mix before the filter, brought down to the
+    /// output rate, on a key of a voice with no tolerance: `points`
+    /// samples after `settle` that are left out; and VCO-1's cycles a
+    /// second, counted from the starts of its cycle.
+    fn mixed(patch: &Patch, key: u8, points: usize, settle: usize) -> (Vec<f64>, f64) {
+        let settings = Settings::new(patch);
         let mut voice = Voice::new([0, 0], 0);
         voice.configure(&settings);
         voice.start(key, true, &settings);
         let controls = Controls { lfo: 0, bend: 0, vibrato: 0, cutoff: 0, glide: IMMEDIATE };
         let (mut wide, mut sharp) = (Decimator::wide(), Decimator::sharp());
         let (mut starts, mut first_start, mut last_start) = (0u32, 0.0f64, 0.0f64);
-        let mut signal = Vec::new();
+        let mut signal = Vec::with_capacity(points + settle);
         let mut count = 0usize;
-        while signal.len() < POINTS + SETTLE {
+        while signal.len() < points + settle {
             if count.is_multiple_of(TICK_SAMPLES as usize * OSCILLATOR_SAMPLES) {
                 voice.tick(&settings, controls);
             }
@@ -1153,8 +1169,24 @@ mod tests {
             let [a, b, c, d] = four;
             signal.push(f64::from(sharp.process(wide.process(a, b), wide.process(c, d))));
         }
-        let fundamental = f64::from(starts - 1) / (last_start - first_start) * f64::from(OSCILLATOR_RATE);
-        let magnitudes = spectrum(&signal[SETTLE..]);
+        let cycles = f64::from(starts.saturating_sub(1)) / (last_start - first_start) * f64::from(OSCILLATOR_RATE);
+        (signal.split_off(settle), cycles)
+    }
+
+    /// What the two oscillators make under cross modulation with the
+    /// sync, before the filter, brought down to the output rate: the
+    /// strongest thing below 20 kHz that is no harmonic of VCO-1's
+    /// period, in decibels against the strongest harmonic. The period is
+    /// counted from the starts of VCO-1's cycle.
+    fn before_the_filter(key: u8, depth: u8, wave: u8, first: u8) -> f64 {
+        let patch = Patch::DEFAULT
+            .with(Param::Vco1Wave, first)
+            .with(Param::CrossMod, depth)
+            .with(Param::Vco2Wave, wave)
+            .with(Param::Sync, 1)
+            .with(Param::Vco2Range, 24);
+        let (signal, fundamental) = mixed(&patch, key, POINTS, SETTLE);
+        let magnitudes = spectrum(&signal);
         let bin = 48_000.0 / POINTS as f64;
         let (mut on, mut off) = (0.0f64, 0.0f64);
         for (index, &magnitude) in magnitudes.iter().enumerate().skip(8) {
@@ -1170,6 +1202,175 @@ mod tests {
             }
         }
         20.0 * (off / on).log10()
+    }
+
+    /// Octaves below a sound that the same sound is played to tell what
+    /// of it is folded: three, where every frequency is an eighth and the
+    /// oscillators' rate is against it what 32 times the output rate is
+    /// against the sound itself.
+    const LOWER: u32 = 3;
+    /// How far above anything the lower sound has near it a line must
+    /// stand to be taken as folded: four times, 12 dB. Lines that share
+    /// a bin add by their phases, which the two sounds do not share to
+    /// the last place, so two sounds that are the same differ by a
+    /// factor of two or so where their lines are dense.
+    const STANDS_OUT: f64 = 4.0;
+    /// Bins either side within which a line of the lower sound is the
+    /// same line.
+    const NEAR: usize = 3;
+
+    /// What cross modulation folds back below 20 kHz without the sync,
+    /// before the filter: the strongest line of VCO-1's sound on a key
+    /// that the same sound three octaves lower does not have, in
+    /// decibels against the sound's strongest line; and, as a control,
+    /// the same the other way about, a line of the lower sound that the
+    /// sound itself lacks.
+    ///
+    /// Without the sync the partials are the sums of multiples of two
+    /// unrelated frequencies and lie everywhere, so no grid tells them
+    /// from what is folded. But everything here is a matter of
+    /// frequencies against the oscillators' rate: with VCO-1 and VCO-2
+    /// both three octaves lower, the voice makes the same sound an
+    /// eighth as fast, with its partials in the same proportions, while
+    /// what folds about the rate lands elsewhere and is far weaker, the
+    /// rate being eight times further off. Eight times as many samples
+    /// of the lower sound have the same lines in the same bins. A line
+    /// of the upper sound with nothing near it in the lower is folded,
+    /// or is a fault of the upper sound's arithmetic; where the control
+    /// is as high, the two sounds differ in what they are and nothing is
+    /// told of folding.
+    ///
+    /// VCO-2 is `interval` semitones above VCO-1 and a little sharp, so
+    /// that the two are unrelated. Where VCO-1's own cycles a second
+    /// differ between the two sounds (VCO-2's sine is taken as a straight
+    /// line through each sample, which the lower sound has eight times
+    /// as many of), a line of VCO-1's harmonic n is moved by n times the
+    /// difference: the lower sound's lines are looked for that much
+    /// further off on that side.
+    fn folded(key: u8, depth: u8, wave: u8, first: u8, interval: u8) -> (f64, f64) {
+        /// VCO-2's fine tune: 8.7 cents sharp.
+        const SHARP: u8 = 150;
+        /// Harmonics of VCO-1 beyond those that reach below 20 kHz
+        /// that are allowed for: a quarter more.
+        const BEYOND: f64 = 1.25;
+        let patch = |range1: u8, range2: u8| {
+            Patch::DEFAULT
+                .with(Param::Vco1Wave, first)
+                .with(Param::CrossMod, depth)
+                .with(Param::Vco2Wave, wave)
+                .with(Param::FineTune, SHARP)
+                .with(Param::Vco1Range, range1)
+                .with(Param::Vco2Range, range2)
+        };
+        // The sound at 8', and three octaves lower: the key two octaves
+        // down and both oscillators' ranges one.
+        let (upper, cycles) = mixed(&patch(1, 12 + interval), key, POINTS, SETTLE);
+        let (lower, slow) = mixed(&patch(0, interval), key - 24, POINTS << LOWER, SETTLE << LOWER);
+        let scale = f64::from(1u32 << LOWER);
+        let (upper, lower) = (spectrum(&upper), spectrum(&lower));
+        let lower: Vec<f64> = lower.iter().map(|magnitude| magnitude / scale).collect();
+        let bin = 48_000.0 / POINTS as f64;
+        let top = (20_000.0 / bin) as usize;
+        // VCO-1's harmonics that VCO-2's sine brings below 20 kHz, and
+        // how many bins the last of them is moved.
+        let hertz = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
+        let down = if wave == 0 { 3.0 * f64::from(depth) / 255.0 } else { 0.0 };
+        let moved = BEYOND * 20_000.0 / (hertz * (-down).exp2()) * (cycles - scale * slow) / bin;
+        let further = moved.abs().ceil() as usize;
+        let (below, above) = if moved > 0.0 { (NEAR + further, NEAR) } else { (NEAR, NEAR + further) };
+        let most = |spectrum: &[f64], from: usize, to: usize| {
+            spectrum[from.max(1)..=to.min(spectrum.len() - 1)].iter().copied().fold(0.0f64, f64::max)
+        };
+        let strongest = |spectrum: &[f64]| most(spectrum, 8, top);
+        let (mut folded, mut control) = (0.0f64, 0.0f64);
+        for index in 8..top {
+            if upper[index] > STANDS_OUT * most(&lower, index.saturating_sub(below), index + above) {
+                folded = folded.max(upper[index]);
+            }
+            if lower[index] > STANDS_OUT * most(&upper, index.saturating_sub(above), index + below) {
+                control = control.max(lower[index]);
+            }
+        }
+        (20.0 * (folded / strongest(&upper)).log10(), 20.0 * (control / strongest(&lower)).log10())
+    }
+
+    #[test]
+    fn what_cross_modulation_without_the_sync_folds_back_is_measured() {
+        // VCO-1's sawtooth at 8' on the Cs from middle C to the highest
+        // key MIDI has a C for, VCO-2 a fifth above it, the slider at 1,
+        // 2.5 and 5: the bound for each key and position, the worst
+        // measured for VCO-2's sawtooth and pulse (none at all on middle
+        // C; -90.0 dB on key 84; -100.1 dB on key 96; -108.9 dB, -87.5 dB
+        // and -66.4 dB on key 108) and 3 dB or more. With the slider at
+        // 5 on key 108 the control is as high, -64.4 dB: VCO-1 is there
+        // between 4 kHz and 33 kHz, and the two sounds differ in their
+        // own partials.
+        let bounds: &[(u8, [f64; 3])] = if cfg!(debug_assertions) {
+            &[(96, [f64::NAN, -95.0, f64::NAN])]
+        } else {
+            &[
+                (60, [-110.0; 3]),
+                (84, [-110.0, -110.0, -85.0]),
+                (96, [-110.0, -95.0, -95.0]),
+                (108, [-100.0, -83.0, -62.0]),
+            ]
+        };
+        println!(
+            "without the sync, before the filter: what the sound three octaves lower has not, and the control, dB"
+        );
+        println!("key  depth    sawtooth           pulse");
+        for &(key, bounds) in bounds {
+            for (depth, bound) in [26u8, 64, 128].into_iter().zip(bounds) {
+                if bound.is_nan() {
+                    continue;
+                }
+                let found = [1u8, 2].map(|wave| folded(key, depth, wave, 1, 7));
+                println!(
+                    "{key:3}  {depth:5}  {:6.1} ({:6.1})  {:6.1} ({:6.1})",
+                    found[0].0, found[0].1, found[1].0, found[1].1
+                );
+                for (folded, _) in found {
+                    assert!(folded < bound, "key {key}, depth {depth}: {folded} dB");
+                }
+            }
+        }
+        if cfg!(debug_assertions) {
+            return;
+        }
+        // With the slider at 10 the sawtooth and the pulse take VCO-1
+        // six octaves up, to 17 kHz from middle C and to its bound of
+        // 48 kHz from the keys above: on middle C nothing stands out.
+        for wave in [1u8, 2] {
+            let (folded, control) = folded(60, 255, wave, 1, 7);
+            println!("key 60, the slider at 10, VCO-2's waveform {wave}: {folded:.1} ({control:.1})");
+            assert!(folded < -110.0);
+        }
+        // VCO-2's sine, where VCO-1's pitch is the same in the two
+        // sounds to a twentieth of a cent: -112.7 dB at worst. Deeper
+        // and higher its pitch is not (0.8 cent flat on key 96 at 5, and
+        // 8.5 cents on key 108 at 10, the sine being a straight line
+        // through each sample), and the two sounds are then two sounds.
+        for key in [60u8, 84] {
+            for depth in [26u8, 64] {
+                let (folded, control) = folded(key, depth, 0, 1, 7);
+                println!("key {key}, depth {depth}, VCO-2's sine: {folded:.1} ({control:.1})");
+                assert!(folded < -108.0, "key {key}, depth {depth}: {folded} dB");
+            }
+        }
+        // VCO-1's triangle and square, on the two keys where the
+        // sawtooth has most: -101.8 dB and -105.6 dB at worst on key
+        // 96.
+        for first in [0u8, 3] {
+            for (key, bound) in [(84u8, -110.0), (96, -97.0)] {
+                for wave in [1u8, 2] {
+                    let (folded, control) = folded(key, 128, wave, first, 7);
+                    println!(
+                        "VCO-1's waveform {first}, key {key}, the slider at 5, VCO-2's {wave}: {folded:.1} ({control:.1})"
+                    );
+                    assert!(folded < bound, "VCO-1 {first}, key {key}: {folded} dB");
+                }
+            }
+        }
     }
 
     #[test]
