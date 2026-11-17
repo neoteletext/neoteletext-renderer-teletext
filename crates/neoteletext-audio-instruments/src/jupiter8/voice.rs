@@ -874,10 +874,13 @@ impl Voice {
             Some(carried) if settings.wave2 != Vco2Wave::Noise => carried,
             _ => self.crossed_at(settings, phase, noise),
         };
+        // What VCO-2 has still to run in the sample, to the unit: worked
+        // out again from a share of the sample that was itself rounded it
+        // comes out a unit or two short, and a jump of VCO-2 where the
+        // sample ends would then be seen by no sample.
+        let mut left = step;
         for _ in 0..STRETCHES {
             let now = self.first.now();
-            // What VCO-2 runs in what is left of the sample.
-            let left = if now == u32::MAX { step } else { mul_high_unsigned(step, now) };
             let jump = self.to_the_jump(settings, phase).filter(|&distance| distance <= left);
             let run = jump.unwrap_or(left);
             let until = if run >= left { 0 } else { ratio(left.wrapping_sub(run), step) };
@@ -891,11 +894,18 @@ impl Voice {
                 // page 16: "forces the pitch of that oscillator to
                 // synchronize itself to that of VCO-1"); without the
                 // sync VCO-2 has run to that instant.
-                let ran = mul_high_unsigned(step, now.wrapping_sub(at)).min(run);
-                phase = if settings.sync { 0 } else { phase.wrapping_add(ran) };
+                let ran = mul_high_unsigned(step, now.saturating_sub(at)).min(run);
+                // Its new cycle runs what its own oscillator will find
+                // that it has run since the start.
+                (phase, left) = if settings.sync {
+                    (0, mul_high_unsigned(step, at))
+                } else {
+                    (phase.wrapping_add(ran), left.saturating_sub(ran))
+                };
                 from = self.crossed_at(settings, phase, noise);
             } else {
                 phase = end;
+                left = left.saturating_sub(run);
                 from = if jump.is_some() { self.crossed_at(settings, phase, noise) } else { last };
             }
             if self.first.now() == 0 {
@@ -1371,6 +1381,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_jump_of_vco_2_as_a_sample_ends_is_a_jump_for_vco_1() {
+        // VCO-2's pulse falls a quarter of the way through a sample and
+        // its cycle starts exactly where the sample ends. What was left
+        // of the sample after the fall was worked out again from a
+        // rounded share of it and came out a unit short of the start,
+        // which no sample then saw: VCO-1 slid through the next sample
+        // to the frequency it should have jumped to.
+        let (step, fall) = (0x0400_0000u32, 0x0100_0000u32);
+        let patch = Patch::DEFAULT.with(Param::CrossMod, 128).with(Param::Vco2Wave, 2);
+        let settings = Settings::new(&patch);
+        let mut voice = Voice::new([0, 0], 0);
+        voice.configure(&settings);
+        voice.start(36, true, &settings);
+        voice.tick(&settings, Controls { lfo: 0, bend: 0, vibrato: 0, cutoff: 0, glide: IMMEDIATE });
+        for _ in 0..7 {
+            let _ = voice.oscillators(&settings, 0);
+        }
+        // VCO-2 a sample short of its cycle's start.
+        voice.second.set_step(step);
+        voice.second.restart();
+        voice.second.rewind(step);
+        voice.width = step.wrapping_neg() + fall;
+        voice.second.set_width(voice.width);
+        voice.carried = None;
+        let _ = voice.oscillators(&settings, 0);
+        assert_eq!(voice.second.phase(), 0, "VCO-2's cycle starts with the sample");
+        // The pulse is up again: VCO-1 is three octaves above its own
+        // step from this instant.
+        let (low, high) = (voice.crossed(&settings, 0), voice.crossed_at(&settings, 0, 0));
+        assert!(high > 7 * low && low == voice.step);
+        assert_eq!(voice.carried, Some(high), "VCO-1's step as the sample ends, against {low} before the jump");
     }
 
     #[test]
