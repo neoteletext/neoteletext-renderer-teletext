@@ -8,10 +8,13 @@
 //! Sheets" 1.1 (2020), scanned from the original manual: one drawing of
 //! the panel for each program, each knob a pointer on its dial of 0 to
 //! 10 and each switch filled or empty, with the oscillators' pitches in
-//! words beneath. A pointer is read to about one mark of the dial;
-//! where the sheet's own text gives a setting, that is used; a setting
-//! marked `?` below could not be read with confidence and is a choice
-//! among what the drawing allows.
+//! words beneath. Each pointer's angle was measured on the scan (the
+//! dial's 0 is 150 degrees left of upright and its 10 150 degrees
+//! right, as its printed numbers stand) and is given to a tenth of a
+//! mark; where the sheet's own text gives a setting, that is used. The
+//! frequency knobs are taken from the sheets' words, since their
+//! drawings stand up to half a mark from them. A setting marked `?`
+//! below was read by eye from the scan.
 
 // Without the feature there is nothing here to test.
 #![cfg(feature = "prophet5")]
@@ -81,33 +84,32 @@ use Knob::{
     FilterAttack as FA, FilterDecay as FD, FilterEnvelopeAmount as Amount, FilterRelease as FR, FilterSustain as FS,
     Glide, LfoFrequency as Lfo, MixerOscA, MixerOscB, OscAPulseWidth as WidthA, OscBFine as Fine,
     OscBFrequency as FrequencyB, OscBPulseWidth as WidthB, PolyModFilterEnvelope as PolyEnvelope,
-    PolyModOscB as PolyOscB, Resonance,
+    PolyModOscB as PolyOscB, Resonance, SourceMix as Mix,
 };
 
 /// 1-1, Brass. Oscillator A "up 1 octave (basic pitch)"; "OSC B is
-/// programmed off (no waveform selected)". `?`: the cutoff and the
-/// resonance at about 1, the amplifier's sustain (6 taken).
+/// programmed off (no waveform selected)"; "PULSE-WIDTH on both
+/// oscillators is set at 2". The cutoff and the resonance are drawn at
+/// 0: the filter envelope opens the filter. `?`: the filter's decay.
 pub const BRASS: Sheet = Sheet {
     name: "1-1 Brass",
     semitones: (12, 24),
     knobs: &[
-        (Lfo, 60),
+        (Lfo, 66),
         (WidthA, 20),
         (WidthB, 20),
-        (MixerOscA, 95),
-        (MixerOscB, 90),
-        (Cutoff, 10),
-        (Resonance, 10),
-        (Amount, 70),
-        (FA, 35),
-        (FD, 40),
+        (MixerOscA, 99),
+        (MixerOscB, 98),
+        (Amount, 74),
+        (FA, 45),
+        (FD, 56),
         (FS, 50),
-        (FR, 40),
-        (AA, 30),
-        (AD, 40),
-        (AS, 60),
+        (FR, 46),
+        (AA, 41),
+        (AD, 39),
+        (AS, 59),
         (AR, 50),
-        (Glide, 60),
+        (Glide, 65),
     ],
     switches: &[
         Switch::LfoTriangle,
@@ -121,24 +123,25 @@ pub const BRASS: Sheet = Sheet {
 };
 
 /// 1-2, Low Strings. Both oscillators "up 1 octave"; the modulation
-/// wheel "must be moved up 1/4 to 1/3 for proper effect". `?`: the
-/// mixer's levels at about 4, the filter envelope's knobs at about 0.
+/// wheel "must be moved up 1/4 to 1/3 for proper effect". The filter
+/// envelope's knobs and its amount are drawn at 0. `?`: the amplifier's
+/// attack.
 pub const LOW_STRINGS: Sheet = Sheet {
     name: "1-2 Low Strings",
     semitones: (12, 12),
     knobs: &[
-        (Lfo, 60),
+        (Lfo, 65),
         (WidthA, 30),
-        (WidthB, 30),
-        (Fine, 20),
-        (MixerOscA, 40),
-        (MixerOscB, 40),
-        (Cutoff, 60),
-        (Resonance, 5),
-        (AA, 60),
-        (AD, 35),
-        (AS, 95),
-        (AR, 55),
+        (WidthB, 29),
+        (Fine, 16),
+        (MixerOscA, 41),
+        (MixerOscB, 39),
+        (Cutoff, 56),
+        (Resonance, 1),
+        (AA, 58),
+        (AD, 40),
+        (AS, 100),
+        (AR, 53),
     ],
     switches: &[
         Switch::LfoTriangle,
@@ -153,52 +156,53 @@ pub const LOW_STRINGS: Sheet = Sheet {
 };
 
 /// 1-3, Muted Clav. Both oscillators "up 1 octave"; "RELEASE is
-/// programmed off". `?`: the cutoff and the envelope amount at about 4,
-/// the filter's sustain; the amplifier's decay and sustain could not be
-/// read at all, and are taken as the filter's decay and none.
+/// programmed off". The sheet draws the amplifier's attack, decay and
+/// sustain all at 0, which on this instrument is a click and no note:
+/// own choice, the amplifier's decay is taken as the filter's, which
+/// the sheet draws at 6. `?`: the amplifier's release.
 pub const MUTED_CLAV: Sheet = Sheet {
     name: "1-3 Muted Clav.",
     semitones: (12, 12),
     knobs: &[
-        (Lfo, 70),
-        (WidthA, 15),
-        (WidthB, 15),
-        (MixerOscA, 95),
-        (MixerOscB, 95),
-        (Cutoff, 40),
-        (Resonance, 30),
-        (Amount, 40),
+        (Lfo, 68),
+        (WidthA, 13),
+        (WidthB, 14),
+        (MixerOscA, 99),
+        (MixerOscB, 99),
+        (Cutoff, 54),
+        (Resonance, 31),
+        (Amount, 44),
         (FD, 60),
         (FS, 60),
-        (FR, 65),
+        (FR, 64),
         (AD, 60),
-        (AR, 60),
+        (AR, 67),
     ],
     switches: &[Switch::LfoTriangle, Switch::WheelFilter, Switch::OscAPulse, Switch::OscBPulse, Switch::OscBKeyboard],
 };
 
 /// 1-5, Flutes. Oscillator A "up 3 octaves", oscillator B "LF mode":
-/// "POLY-MOD is being used to create a quasi-tremolo effect". `?`:
-/// oscillator B's frequency at about 6.
+/// "POLY-MOD is being used to create a quasi-tremolo effect". `?`: the
+/// amplifier's attack.
 pub const FLUTES: Sheet = Sheet {
     name: "1-5 Flutes",
     semitones: (36, 0),
     knobs: &[
         (PolyOscB, 20),
-        (Lfo, 70),
+        (Lfo, 72),
         (WidthA, 50),
         (WidthB, 50),
-        (FrequencyB, 60),
-        (MixerOscA, 95),
-        (Cutoff, 30),
-        (Resonance, 5),
+        (FrequencyB, 55),
+        (MixerOscA, 100),
+        (Cutoff, 27),
+        (Resonance, 1),
         (Amount, 35),
         (FA, 50),
         (FD, 70),
-        (FS, 75),
+        (FS, 70),
         (FR, 50),
         (AA, 50),
-        (AD, 60),
+        (AD, 59),
         (AS, 80),
         (AR, 50),
     ],
@@ -217,26 +221,28 @@ pub const FLUTES: Sheet = Sheet {
 /// 1-7, Sync I. Oscillator A "up 1 octave + a minor 3rd", oscillator B
 /// "up 1 octave (basic pitch)"; "Although the filter ENVELOPE AMOUNT is
 /// set at 0, the filter envelope generator settings are programmed for
-/// use as a modulation source for the POLY-MOD section". `?`: the
-/// mixer's level of oscillator A, the filter's sustain, the amplifier's
-/// decay and sustain.
+/// use as a modulation source for the POLY-MOD section". The source mix
+/// is drawn one mark from its end at the low-frequency oscillator. `?`:
+/// the low-frequency oscillator's frequency.
 pub const SYNC: Sheet = Sheet {
     name: "1-7 Sync I",
     semitones: (15, 12),
     knobs: &[
-        (PolyEnvelope, 60),
-        (Lfo, 65),
+        (PolyEnvelope, 61),
+        (Lfo, 66),
+        (Mix, 10),
         (WidthA, 50),
-        (WidthB, 50),
+        (WidthB, 49),
         (MixerOscA, 50),
         (MixerOscB, 50),
-        (Cutoff, 60),
-        (Resonance, 20),
-        (FA, 35),
+        (Cutoff, 55),
+        (Resonance, 23),
+        (FA, 40),
         (FD, 60),
-        (FR, 70),
-        (AS, 95),
-        (AR, 70),
+        (FR, 69),
+        (AA, 2),
+        (AS, 100),
+        (AR, 69),
         (Glide, 60),
     ],
     switches: &[
@@ -252,25 +258,25 @@ pub const SYNC: Sheet = Sheet {
 
 /// 1-8, Percussive Organ. Oscillator A "up 3 octaves + a perfect 5th",
 /// "must be a square wave"; oscillator B "up 1 octave (basic pitch)".
-/// `?`: the mixer's levels, the filter's decay, sustain and release,
-/// the amplifier's decay and sustain.
+/// `?`: the low-frequency oscillator's frequency, the resonance (at 0),
+/// the filter's attack (at 0), the amplifier's attack and decay (at 0)
+/// and its release.
 pub const ORGAN: Sheet = Sheet {
     name: "1-8 Percussive Organ",
     semitones: (43, 12),
     knobs: &[
-        (Lfo, 65),
+        (Lfo, 72),
         (WidthA, 50),
-        (WidthB, 50),
-        (MixerOscA, 35),
-        (MixerOscB, 65),
-        (Cutoff, 30),
-        (Resonance, 5),
-        (Amount, 35),
-        (FD, 60),
-        (FS, 30),
-        (FR, 40),
-        (AS, 95),
-        (AR, 40),
+        (WidthB, 49),
+        (MixerOscA, 40),
+        (MixerOscB, 68),
+        (Cutoff, 34),
+        (Amount, 39),
+        (FD, 59),
+        (FS, 25),
+        (FR, 39),
+        (AS, 99),
+        (AR, 39),
     ],
     switches: &[
         Switch::LfoTriangle,
@@ -285,26 +291,25 @@ pub const ORGAN: Sheet = Sheet {
 
 /// 2-1, Unison Glide With Resonance. Oscillator A "up 2 octaves",
 /// oscillator B "up 1 octave"; "PULSE-WIDTH on both oscillators is set
-/// at 3". `?`: the envelope amount at about 9, the filter's attack and
-/// release; its decay and sustain could not be read, and 5 and 3 are
-/// taken.
+/// at 3". The envelope amount and the filter's decay and sustain are
+/// drawn at 10.
 pub const UNISON_GLIDE: Sheet = Sheet {
     name: "2-1 Unison Glide With Resonance",
     semitones: (24, 12),
     knobs: &[
-        (Lfo, 65),
+        (Lfo, 69),
         (WidthA, 30),
-        (WidthB, 30),
-        (MixerOscA, 50),
+        (WidthB, 29),
+        (MixerOscA, 51),
         (MixerOscB, 50),
         (Cutoff, 20),
-        (Resonance, 65),
-        (Amount, 90),
-        (FD, 50),
-        (FS, 30),
-        (FR, 75),
-        (AD, 50),
-        (AS, 95),
+        (Resonance, 64),
+        (Amount, 99),
+        (FD, 99),
+        (FS, 100),
+        (FR, 66),
+        (AD, 51),
+        (AS, 100),
         (AR, 80),
         (Glide, 60),
     ],
@@ -322,27 +327,26 @@ pub const UNISON_GLIDE: Sheet = Sheet {
 };
 
 /// 4-8, Clangorous Bells. Oscillator A "up 2 octaves + a tritone",
-/// oscillator B "up 2 octaves - less 1/2 step". `?`: both Poly-Mod
-/// amounts at about 3.5, the mixer's level of oscillator A, the
-/// filter's sustain, the amplifier's sustain.
+/// oscillator B "up 2 octaves - less 1/2 step". Poly-Mod's amount of
+/// the filter envelope is drawn at 0 and its amount of oscillator B at
+/// its top: the clang is oscillator B on oscillator A's frequency.
 pub const BELLS: Sheet = Sheet {
     name: "4-8 Clangorous Bells",
     semitones: (30, 23),
     knobs: &[
-        (PolyEnvelope, 35),
-        (PolyOscB, 35),
-        (Lfo, 40),
+        (PolyOscB, 98),
+        (Lfo, 42),
         (WidthA, 50),
         (WidthB, 50),
-        (MixerOscA, 95),
+        (MixerOscA, 98),
         (MixerOscB, 50),
         (Cutoff, 30),
         (Resonance, 50),
-        (Amount, 30),
+        (Amount, 29),
         (FD, 70),
         (FS, 30),
-        (FR, 70),
-        (AD, 70),
+        (FR, 75),
+        (AD, 75),
         (AR, 80),
     ],
     switches: &[
