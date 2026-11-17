@@ -57,5 +57,13 @@ required-features = ["juno"]
 name = "juno_render"
 required-features = ["juno"]
 
+[[example]]
+name = "minimoog_demo"
+required-features = ["minimoog"]
+
+[[example]]
+name = "minimoog_render"
+required-features = ["minimoog"]
+
 [lints]
 workspace = true
