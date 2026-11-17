@@ -396,16 +396,6 @@ impl Oscillator {
         self.pulse_high = self.width > 0;
     }
 
-    /// Moves the phase back by `amount`, in units of 2⁻³² cycle and held
-    /// to the phase itself, with no band-limiting: for a caller that
-    /// changed the frequency part of the way through the last sample of
-    /// [`Oscillator::tick`], and takes back what the cycle has run too
-    /// far since. Every waveform steps by what the amount is of it, so
-    /// it is for small amounts.
-    pub const fn set_back(&mut self, amount: u32) {
-        self.phase = self.phase.saturating_sub(amount);
-    }
-
     /// The phase, in units of 2⁻³² cycle.
     #[must_use]
     pub const fn phase(&self) -> u32 {
