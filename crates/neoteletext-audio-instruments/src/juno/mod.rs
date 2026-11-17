@@ -569,7 +569,7 @@ impl Juno {
                     voice.release();
                 }
                 voice.frame(&self.settings, controls);
-                if key.stage == Stage::Released && voice.silent(&self.settings) {
+                if key.stage == Stage::Released && voice.silent() {
                     self.allocator.finished(index);
                 }
             }

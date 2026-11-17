@@ -415,13 +415,19 @@ impl Voice {
         self.configure(settings);
     }
 
-    /// Whether the voice, its key up, has fallen silent.
-    pub fn silent(&self, settings: &Settings) -> bool {
+    /// Whether the voice, its key up, has fallen silent and its envelope
+    /// has come to rest. A voice is not run while it rests, so one let go
+    /// with its envelope part of the way down would keep that level for
+    /// its next key, where the instrument's envelope runs on whether it
+    /// is heard or not: with the amplifier on the gate the sound is gone
+    /// long before a slow release is, and the envelope still moves the
+    /// cutoff and the pulse's width of the next note.
+    pub fn silent(&self) -> bool {
         let at_rest = match self.model {
             Model::Juno106 => self.stepped.stage() == Stage::Rest,
             Model::Juno60 => self.analogue.stage() == Stage::Rest,
         };
-        !self.gate && self.level.value < REST_LEVEL && self.gain < REST_LEVEL && (settings.vca_gate || at_rest)
+        !self.gate && self.level.value < REST_LEVEL && self.gain < REST_LEVEL && at_rest
     }
 
     /// A frame: the envelope moves on, and the pitch, the pulse's width
