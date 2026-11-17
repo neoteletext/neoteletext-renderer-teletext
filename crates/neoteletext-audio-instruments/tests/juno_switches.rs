@@ -16,8 +16,9 @@
 #[path = "juno_support.rs"]
 mod support;
 
+use neoteletext_audio_instruments::SAMPLE_RATE;
 use neoteletext_audio_instruments::juno::{ChorusMode, Model, Patch, Slider, VOICES};
-use support::{MODELS, NOTE_OFF, NOTE_ON, flat, instrument, render, rms, whistle};
+use support::{MODELS, NOTE_OFF, NOTE_ON, flat, instrument, play, render, rms, whistle};
 
 #[test]
 fn a_voice_on_the_gate_starts_its_next_note_with_its_envelope_at_rest() {
@@ -229,5 +230,98 @@ fn the_amplifiers_level_moved_under_a_note_does_not_step() {
             // The note's own steps are those of the louder of the two.
             assert!(worst < 1.2 * steady, "{model:?}: to {level} clicks: {worst} against {steady}");
         }
+    }
+}
+
+#[test]
+fn the_chorus_switched_at_random_however_fast_does_not_click() {
+    let modes = [ChorusMode::Off, ChorusMode::One, ChorusMode::Two, ChorusMode::Both];
+    // The largest step from one sample to the next.
+    let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    for model in MODELS {
+        // The filter's own oscillation near middle C, a sine.
+        let cutoff = match model {
+            Model::Juno106 => 62,
+            Model::Juno60 => 44,
+        };
+        let sine = flat(model, whistle(cutoff));
+        // The sine's largest step with the chorus on, which adds to it.
+        let steady = modes.iter().fold(0.0f64, |steady, &mode| {
+            let mut patch = sine;
+            patch.chorus = mode;
+            steady.max(step(&play(model, &patch, 60, 2.5, 0.0)[SAMPLE_RATE as usize / 2..]))
+        });
+        // A new setting every so many samples: faster than the fade
+        // moves at all, inside the fade out, inside the 288 samples the
+        // lines fill in, inside the fade in, and about the fade's whole
+        // 480 + 288 + 480.
+        for every in [1usize, 7, 50, 200, 479, 481, 700, 768, 1300] {
+            let run = |cut: usize| {
+                let mut juno = instrument(model, &sine);
+                juno.event(NOTE_ON, 60, 100);
+                render(&mut juno, 0.5);
+                let mut random = 12_345u32;
+                let mut out = vec![0i16; every * (2 * SAMPLE_RATE as usize / every).min(20_000)];
+                for piece in out.chunks_mut(every) {
+                    random = random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    let mut patch = sine;
+                    patch.chorus = modes[(random >> 24) as usize % modes.len()];
+                    juno.set_patch(&patch);
+                    for part in piece.chunks_mut(cut) {
+                        juno.render(part);
+                    }
+                }
+                out
+            };
+            let out = run(every);
+            assert_eq!(out, run(5), "{model:?}: every {every} samples: the calls' lengths change the samples");
+            let signal: Vec<f64> = out.iter().map(|&sample| f64::from(sample) / 32_768.0).collect();
+            let worst = step(&signal);
+            println!("{model:?}: a setting every {every} samples: a step of {worst:.4} at most, {steady:.4} steady");
+            assert!(worst < 1.1 * steady, "{model:?}: every {every} samples clicks: {worst} against {steady}");
+        }
+    }
+}
+
+#[test]
+fn a_voice_whose_envelope_runs_on_unheard_is_silent_and_gives_way_to_a_seventh_key() {
+    for model in MODELS {
+        // The amplifier on the gate and the longest release: each note
+        // is silent a few thousandths of a second after its key, and its
+        // envelope takes 54 s to come to rest.
+        let mut patch = flat(model, Patch::DEFAULT).with(Slider::Release, 127);
+        patch.vca_gate = true;
+        let mut alone = instrument(model, &patch);
+        alone.event(NOTE_ON, 72, 100);
+        let fresh = rms(&render(&mut alone, 0.1));
+        let mut juno = instrument(model, &patch);
+        for key in 60..66 {
+            juno.event(NOTE_ON, key, 100);
+            render(&mut juno, 0.05);
+        }
+        for key in 60..66 {
+            juno.event(NOTE_OFF, key, 0);
+        }
+        // Counted, since their envelopes run, and not heard.
+        let after = render(&mut juno, 3.0);
+        assert_eq!(juno.sounding_voices(), VOICES, "{model:?}");
+        assert!(after[after.len() / 2..].iter().all(|&sample| sample == 0.0), "{model:?}: a voice is heard");
+        // A seventh key has a voice at once, and as loud as on an
+        // instrument that has played nothing.
+        juno.event(NOTE_ON, 72, 100);
+        let seventh = rms(&render(&mut juno, 0.1));
+        assert_eq!(juno.sounding_voices(), VOICES, "{model:?}");
+        assert!((seventh / fresh - 1.0).abs() < 0.02, "{model:?}: the seventh key sounds at {seventh}, not {fresh}");
+        // Six keys more are all held: none is refused for a voice that
+        // only counts.
+        for key in 48..54 {
+            juno.event(NOTE_ON, key, 100);
+        }
+        let seven = rms(&render(&mut juno, 0.2));
+        assert!(seven > 1.5 * fresh, "{model:?}: six keys sound at {seven}");
+        // And every envelope comes to rest in the end.
+        juno.event(0xb0, 123, 0);
+        render(&mut juno, 60.0);
+        assert_eq!(juno.sounding_voices(), 0, "{model:?}: an envelope never rests");
     }
 }

@@ -63,7 +63,7 @@ fn random_event(random: &mut Random) -> (u8, u8, u8) {
     match kind % 16 {
         0..=6 => (NOTE_ON | (a & 15), 24 + b % 85, c & 0x7f),
         7..=10 => (NOTE_OFF | (a & 15), 24 + b % 85, c & 0x7f),
-        11 => (CONTROL, [1, 7, 64, 120, 121, 123, 10, 91][usize::from(b % 8)], c & 0x7f),
+        11 => (CONTROL, [1, 7, 64, 120, 121, 123, 124, 125, 126, 127, 10, 91][usize::from(b % 12)], c & 0x7f),
         12 => (PITCH_BEND, b & 0x7f, c & 0x7f),
         13 => (0xc0 | (a & 15), b & 0x7f, c & 0x7f),
         _ => (a, b, c),
