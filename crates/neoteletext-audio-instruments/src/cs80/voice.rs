@@ -141,14 +141,38 @@ const ENVELOPE_REACH: i32 = 5 * law::VOLT;
 /// VCF's high pass and low pass control inputs" (owner's manual, page 38,
 /// item 7), and what stands across it was not read.
 const BRILLIANCE_REACH: i32 = 15 * law::VOLT;
-/// The volts the touch response adds to the brilliance at its levers'
-/// tops: 6.4 V, which [`law::MODULATION`] makes 2.08 octaves of the
-/// high-pass filter and 7.82 of the low-pass.
+/// The volts the touch response's amplifiers give at their levers' tops
+/// for the voltage they are trimmed with: 6.4 V, which
+/// [`law::MODULATION`] makes 2.08 octaves of the high-pass filter and
+/// 7.82 of the low-pass. Pressure reaches it; a stroke does not
+/// ([`STROKE_HARDEST`]).
 ///
 /// Source: adjustment procedure, page 23, steps 1 and 3: initial-touch
 /// and after-touch brilliance are each trimmed to "+6.4 ± .3V" at the
-/// levers' tops.
+/// levers' tops; the after-touch "while firmly depressing C1 key", so
+/// that a firm pressure is the 6.4 V itself. Service manual, page 39,
+/// R51-52 circuit diagram: the two (IB, AB) reach each voice's FL line
+/// through 39 kΩ, as the low-pass lever does, and its FH line through
+/// 120 kΩ.
 const TOUCH_BRILLIANCE: i32 = law::octaves(64, 10);
+/// The most a stroke gives of [`TOUCH_BRILLIANCE`], as a fraction: 7.9 V
+/// of the 8.5 V that the amplifier is trimmed with.
+///
+/// Source: adjustment procedure, page 23, step 1: the 6.4 V are trimmed
+/// with the key's own signal taken off and the +8.5 V supply put in its
+/// place ("Disconnect wire from terminal (b1 - b8) ... Connect jumper
+/// wire from +8.5 (+V) terminal on KBC board"), so they are the
+/// amplifier's gain, 6.4 / 8.5, and not what a stroke gives. Service
+/// manual, page 11, TSB 1 circuit diagram, "DET": a key's signal reaches
+/// that terminal through a silicon diode (1S1555) into 0.047 µF across 1
+/// MΩ, so the terminal stands a diode's 0.6 V or more below whatever the
+/// key gives, which the supply bounds. Own choice: the hardest stroke,
+/// a velocity of 127, is that bound, and the voltage is in proportion to
+/// the velocity below it; how many volts a stroke of a given speed gives
+/// is in no document read. Owner's manual, page 36, item 42: the lever
+/// "increases the brightness of any note when you play harder", so the
+/// softest stroke adds nothing.
+const STROKE_HARDEST: (i32, i32) = (79, 85);
 /// The octaves of amplitude the touch response's level levers reach: the
 /// same 6.4 V at 3 dB to the volt.
 ///
@@ -364,7 +388,11 @@ impl Channel {
             amp_sustain: law::level(lever(Control::Sustain)),
             amp_sustained: coefficient(law::time(law::FALL_SHORTEST, sustained), fall),
             level: loudness,
-            touch_brilliance: law::share(TOUCH_BRILLIANCE, lever(Control::TouchBrilliance)),
+            touch_brilliance: law::share_of(
+                law::share(TOUCH_BRILLIANCE, lever(Control::TouchBrilliance)),
+                STROKE_HARDEST.0,
+                STROKE_HARDEST.1,
+            ),
             pressure_brilliance: law::share(TOUCH_BRILLIANCE, lever(Control::PressureBrilliance)),
             touch_level: law::share(TOUCH_LEVEL, lever(Control::TouchLevel)),
             pressure_level: law::share(TOUCH_LEVEL, lever(Control::PressureLevel)),

@@ -179,8 +179,11 @@ fn the_touch_moves_the_level_and_the_brilliance() {
     // With the levers down the touch does nothing.
     assert!((level(&panel(&SINE), 1, 127) - level(&panel(&SINE), 127, 0)).abs() < 0.01);
 
-    // The brilliance: 6.4 V at the levers' tops, 1.222 octaves to the
-    // volt at the low-pass filter. A sawtooth through that filter with
+    // The brilliance: 6.4 V at the levers' tops for a firm pressure and
+    // for the 8.5 V the stroke's amplifier is trimmed with, of which the
+    // hardest stroke gives 7.9 V (adjustment procedure, page 23; service
+    // manual, page 11, the detector's diode); 1.222 octaves to the volt
+    // at the low-pass filter. A sawtooth through that filter with
     // its lever at 2.05 V: the third harmonic's gain at a Q of 0.5 is
     // 1 / (1 + x²), x its frequency over the cutoff.
     let bright = |control: Control, velocity: u8, pressure: u8| {
@@ -195,7 +198,8 @@ fn the_touch_moves_the_level_and_the_brilliance() {
     let gain = |volts: f64| -decibels(1.0 + (1320.0 / (cutoff * (volts * scale).exp2())).powi(2));
     // 40 of 127 of 6.4 V is 2.016 V.
     let reach = 6.4 * 40.0 / 127.0;
-    let expected_stroke = gain(reach * 64.0 / 127.0) - gain(reach / 127.0);
+    let stroke = reach * 7.9 / 8.5;
+    let expected_stroke = gain(stroke * 64.0 / 127.0) - gain(stroke / 127.0);
     let expected_pressure = gain(reach * 64.0 / 127.0) - gain(0.0);
     let by_stroke = bright(Control::TouchBrilliance, 64, 0) - bright(Control::TouchBrilliance, 1, 0);
     let by_pressure = bright(Control::PressureBrilliance, 100, 64) - bright(Control::PressureBrilliance, 100, 0);
@@ -203,6 +207,12 @@ fn the_touch_moves_the_level_and_the_brilliance() {
         "a volt of brilliance by the stroke: {by_stroke:.1} dB for {expected_stroke:.1} dB; by pressure: {by_pressure:.1} dB for {expected_pressure:.1} dB"
     );
     assert!((by_stroke - expected_stroke).abs() < 0.3 && (by_pressure - expected_pressure).abs() < 0.3);
+    // The hardest stroke against the firmest pressure, each alone: the
+    // stroke's 0.6 V less at the lever's top are 40 / 127 of them here.
+    let hardest = bright(Control::TouchBrilliance, 127, 0) - bright(Control::PressureBrilliance, 127, 127);
+    let expected_hardest = gain(stroke) - gain(reach);
+    println!("the hardest stroke against the firmest pressure: {hardest:.2} dB for {expected_hardest:.2} dB");
+    assert!(expected_hardest < -0.2 && (hardest - expected_hardest).abs() < 0.1);
 }
 
 #[test]
