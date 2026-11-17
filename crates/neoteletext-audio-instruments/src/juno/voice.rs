@@ -208,7 +208,7 @@ pub struct Settings {
     /// it.
     resonance: i32,
     compensation: i32,
-    /// Octaves from the law's base to the cutoff, before the key, the
+    /// Octaves from the law's reference to the cutoff, before the key, the
     /// envelope and the oscillator.
     cutoff: i32,
     keyboard: u8,
@@ -255,6 +255,7 @@ impl Settings {
             resonance,
             compensation: ONE_Q28.saturating_add(resonance >> COMPENSATION_SHIFT),
             cutoff: law::share(law.cutoff_span, patch.get(Slider::VcfFrequency))
+                .saturating_sub(law::share(law.cutoff_span, law.cutoff_reference.1))
                 .saturating_add(i32::try_from(tuning).unwrap_or(0)),
             keyboard: patch.get(Slider::VcfKeyboard),
             cutoff_envelope: if patch.envelope_inverted { envelope.saturating_neg() } else { envelope },
@@ -518,7 +519,7 @@ impl Voice {
             Model::Juno60 => (IMMEDIATE, if settings.vca_gate { smoothing } else { IMMEDIATE }),
         };
         let octaves = self.cutoff.tick(cutoff_smoothing);
-        let hertz = law::raise(law.cutoff_base, octaves).clamp(law.cutoff_bounds.0, law.cutoff_bounds.1);
+        let hertz = law::raise(law.cutoff_reference.0, octaves).clamp(law.cutoff_bounds.0, law.cutoff_bounds.1);
         self.filter.set(frequency(hertz, RATE), settings.resonance);
         let level = self.level.tick(level_smoothing);
         self.gain_step = level.saturating_sub(self.gain) >> TICK_BITS;

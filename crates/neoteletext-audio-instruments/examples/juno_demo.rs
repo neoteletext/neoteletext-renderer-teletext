@@ -90,7 +90,9 @@ fn pluck(chorus: ChorusMode) -> Patch {
 /// The first half: the pad and its bass, the cutoff opened by hand over
 /// the last two bars.
 fn first_half() -> Vec<Timed> {
-    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pad(60))))];
+    // The Juno-106's slider at 84 is near 390 Hz at middle C, and at 116
+    // near 14.5 kHz.
+    let mut score = vec![Timed(0.0, Change::Patch(Box::new(pad(84))))];
     let bar = BEAT * BEATS as f64;
     for (index, (chord, bass)) in CHORDS.iter().enumerate() {
         let start = index as f64 * bar;
@@ -105,7 +107,7 @@ fn first_half() -> Vec<Timed> {
     let steps = ((to - from) * 30.0) as usize;
     for step in 0..steps {
         let share = step as f64 / steps as f64;
-        score.push(Timed(from + (to - from) * share, Change::Patch(Box::new(pad(60 + (share * 50.0) as u8)))));
+        score.push(Timed(from + (to - from) * share, Change::Patch(Box::new(pad(84 + (share * 32.0) as u8)))));
     }
     score
 }

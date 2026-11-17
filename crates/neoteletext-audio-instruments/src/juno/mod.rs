@@ -47,9 +47,11 @@
 //! - **How a slider travels between its documented ends** is an own
 //!   choice for the envelope's times, the low-frequency oscillator's
 //!   rate, the resonance and the amplifier's level ([`law`]).
-//! - **The Juno-106's cutoff** follows the specification's 5 Hz to 50
-//!   kHz and not the service notes' adjustment 7-1, which the two cannot
-//!   both be ([`law::JUNO_106`]).
+//! - **The Juno-106's cutoff** passes through the service notes'
+//!   calibration point, 248 Hz at FREQ 6.3, and reaches the
+//!   specification's 50 kHz at the slider's top; the slope between them
+//!   is an own choice, and below 3.6 of 10 the slider rests on the
+//!   specification's 5 Hz ([`law::JUNO_106`]).
 //! - **The chorus's delay and sweep** are in no document read; the
 //!   lines' filters are the building block's third-order ones at the
 //!   schematic's 10 kHz, where the instrument has fourth-order ones; the

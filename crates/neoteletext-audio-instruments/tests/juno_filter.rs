@@ -35,20 +35,42 @@ fn oscillation(model: Model, patch: &Patch, key: u8) -> f64 {
 }
 
 /// The cutoff the documents give for a position of the slider at middle
-/// C: the Juno-106's 5 Hz to 50 kHz across the slider; the Juno-60's 248
-/// Hz at 3 of 10 and 17.2 octaves across it, held to the chip's 40 kHz.
+/// C: the Juno-106's 248 Hz at 6.3 of 10 (step 80) and 50 kHz at the top,
+/// held to the specification's 5 Hz below; the Juno-60's 248 Hz at 3 of
+/// 10 and 17.2 octaves across it, held to the chip's 40 kHz.
 fn documented(model: Model, slider: u8) -> f64 {
     let travel = f64::from(slider) / 127.0;
     match model {
-        Model::Juno106 => 5.0 * 10_000f64.powf(travel),
+        Model::Juno106 => {
+            let octaves = (50_000.0f64 / 248.0).log2() * (f64::from(slider) - 80.0) / 47.0;
+            (248.0 * octaves.exp2()).max(5.0)
+        }
         Model::Juno60 => (248.0 * (17.2 * (travel - 0.3)).exp2()).min(40_000.0),
+    }
+}
+
+/// Positions of the cutoff slider at which each model's filter
+/// oscillates where it can be heard and timed.
+fn audible(model: Model) -> [u8; 5] {
+    match model {
+        Model::Juno106 => [64, 72, 80, 96, 112],
+        Model::Juno60 => [32, 38, 48, 64, 80],
+    }
+}
+
+/// The slider's position that the tests of what moves the cutoff start
+/// from: near 800 Hz on either model.
+fn middle(model: Model) -> u8 {
+    match model {
+        Model::Juno106 => 90,
+        Model::Juno60 => 64,
     }
 }
 
 #[test]
 fn the_oscillation_is_at_the_cutoff_the_documents_give() {
     for model in MODELS {
-        for slider in [32u8, 38, 48, 64, 80] {
+        for slider in audible(model) {
             let found = oscillation(model, &whistle(slider), 60);
             let off = cents(documented(model, slider), found);
             println!(
@@ -63,9 +85,29 @@ fn the_oscillation_is_at_the_cutoff_the_documents_give() {
 }
 
 #[test]
+fn the_juno_106_is_calibrated_as_its_service_notes_calibrate_it() {
+    // JUNO-106 service notes, test program 3 (page 18): FREQ 6.3, RES 10,
+    // KYBD 10; adjustment 7-1 (page 19): holding C4, each voice's filter
+    // is trimmed to 248 Hz; adjustment 8-1: holding C6, to 992 Hz.
+    let program = whistle(80).with(Slider::VcfKeyboard, 127);
+    for (key, hertz) in [(60u8, 248.0), (84, 992.0)] {
+        let found = oscillation(Model::Juno106, &program, key);
+        println!("Juno106: test program 3, key {key}: oscillates at {found:.1} Hz; the notes say {hertz} Hz");
+        assert!(cents(hertz, found).abs() < TOLERANCE, "key {key}: {found} Hz");
+    }
+    // The slider's top is the specification's 50 kHz, and its foot is
+    // held at the specification's 5 Hz.
+    assert!(cents(50_000.0, documented(Model::Juno106, 127)).abs() < 1.0);
+    assert!((documented(Model::Juno106, 0) - 5.0).abs() < 1.0e-9);
+    // The slider never lowers the cutoff as it rises.
+    let law: Vec<f64> = (0..=127u8).map(|slider| documented(Model::Juno106, slider)).collect();
+    assert!(law.windows(2).all(|pair| pair[1] >= pair[0]));
+}
+
+#[test]
 fn the_cutoff_follows_the_keyboard_about_middle_c_and_the_envelope() {
     for model in MODELS {
-        let slider = 64;
+        let slider = middle(model);
         let middle = oscillation(model, &whistle(slider), 60);
         // With the key follow at its top, two octaves up the keyboard
         // are two octaves of cutoff (the service notes trim C4 to 248 Hz
@@ -98,9 +140,9 @@ fn the_cutoff_follows_the_keyboard_about_middle_c_and_the_envelope() {
 fn the_resonance_rises_to_oscillation_as_large_as_a_square_wave() {
     for model in MODELS {
         // No oscillation below the last tenth of the slider.
-        let quiet = play(model, &flat(model, whistle(64).with(Slider::VcfResonance, 110)), 60, 1.5, 0.0);
+        let quiet = play(model, &flat(model, whistle(middle(model)).with(Slider::VcfResonance, 110)), 60, 1.5, 0.0);
         assert!(rms(&quiet[samples(1.0)..]) < 1.0e-3, "{model:?}: oscillates at 110");
-        let loud = play(model, &flat(model, whistle(64)), 60, 2.0, 0.0);
+        let loud = play(model, &flat(model, whistle(middle(model))), 60, 2.0, 0.0);
         let wave = play(model, &flat(model, square()), 60, 1.0, 0.0);
         let (whistle, wave) = (&loud[samples(1.5)..], &wave[samples(0.5)..]);
         let swing = |signal: &[f64]| signal.iter().fold(0.0f64, |peak, &value| peak.max(value.abs()));

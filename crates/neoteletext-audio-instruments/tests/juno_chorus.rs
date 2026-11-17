@@ -171,7 +171,7 @@ fn each_line_is_47_parts_to_the_dry_signals_78_in_the_mono_output() {
     // lies below the lines' filters, and that is unlike itself a
     // millisecond later, comes out with the three's powers added:
     // 1 + 2 g² is 2.38 dB.
-    for (model, cutoff) in [(Model::Juno106, 84), (Model::Juno60, 62)] {
+    for (model, cutoff) in [(Model::Juno106, 99), (Model::Juno60, 62)] {
         let wet = noise(model, ChorusMode::One, cutoff, 8.5);
         let dry = noise(model, ChorusMode::Off, cutoff, 8.5);
         let louder = 20.0 * (rms(&wet) / rms(&dry)).log10();
