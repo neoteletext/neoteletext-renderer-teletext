@@ -444,7 +444,9 @@ pub struct Shared {
 /// oscillator: ".17ms" with the lever at SHORT and ".16s" at LONG. Owner's
 /// manual, page 12, A: at LONG "about 2 seconds per octave", which twelve
 /// periods of 0.16 s are. log₂ (160 / 0.17) = 9.878. Own choice: the
-/// period is exponential in the lever between the two.
+/// period is exponential in the lever between the two. The lever's foot
+/// itself switches the glide off ([`Shared::new`]): the 0.17 ms is the
+/// clock there, which then moves nothing.
 const GLIDE_CLOCK: (u32, i32) = (170_000, law::octaves(9_878, 1_000));
 /// Billionths of a second in a second.
 const NANOSECONDS: u64 = 1_000_000_000;
@@ -472,7 +474,15 @@ impl Shared {
             touch_vco: law::share(TOUCH_VCO_REACH, lever(Global::TouchVco)),
             touch_vcf: law::share(TOUCH_VCF_REACH, lever(Global::TouchVcf)),
             touch_bend: law::share(TOUCH_BEND.0, lever(Global::TouchPitchBend)),
-            glide_step: i32::try_from(step).unwrap_or(i32::MAX).max(1),
+            // At the lever's foot the glide is off, and a voice takes its
+            // key's voltage at once: service manual, page 15, "D-A
+            // CONVERTER LSI (YM26700)", pin 3, POR: "When the portament
+            // VR is turned on, +8.5V is supplied to the pin and actuate".
+            glide_step: if lever(Global::GlideTime) == 0 {
+                i32::MAX
+            } else {
+                i32::try_from(step).unwrap_or(i32::MAX).max(1)
+            },
             glissando: patch.on(Global::Glissando),
             bend_return: time_constant(TOUCH_BEND.1, TICK_RATE),
             damp: coefficient(DAMP_TIME, TIME_CONSTANT_THOUSANDTHS.1),

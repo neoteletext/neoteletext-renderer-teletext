@@ -312,12 +312,16 @@ fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     println!("the keyboard's level levers at their trimmed keys: {low:.2} dB and {high:.2} dB");
     assert!((low + 8.28).abs() < 0.1 && (high - 8.28).abs() < 0.1);
     // Each lever has its own half of the keyboard, and the middle none.
-    assert!(
-        level(Global::KeyboardLevelLow, 0, 85).abs() < 0.01 && level(Global::KeyboardLevelHigh, 127, 48).abs() < 0.01
-    );
-    assert!(
-        level(Global::KeyboardLevelLow, 0, 66).abs() < 0.01 && level(Global::KeyboardLevelHigh, 0, 66).abs() < 0.01
-    );
+    // The level is taken over a quarter of a second, which on the key 48
+    // is 32.7 cycles: the part of a cycle left over moves it by up to
+    // 1 / (4 π 32.7) of itself, 0.021 dB.
+    let none = [
+        level(Global::KeyboardLevelLow, 0, 85),
+        level(Global::KeyboardLevelHigh, 127, 48),
+        level(Global::KeyboardLevelLow, 0, 66),
+        level(Global::KeyboardLevelHigh, 0, 66),
+    ];
+    assert!(none.iter().all(|level| level.abs() < 0.03), "{none:?}");
     // The curve is the square of the distance: half way, a quarter.
     assert!((level(Global::KeyboardLevelLow, 0, 57) + 8.28 / 4.0).abs() < 0.1);
     // The brilliance levers move the filters: 2.76 V at the same keys,

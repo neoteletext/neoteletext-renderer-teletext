@@ -97,7 +97,7 @@
 //!   PITCH knob, no HIGH/LOW output switch.
 //! - **Portamento is per voice**, each from the pitch it last had; the
 //!   instrument's key assigner was not read closely enough to say that
-//!   this is what it does.
+//!   this is what it does. With the lever at its foot there is none.
 //! - **The four memories** are not kept: a memory is a tone, and
 //!   [`Patch`] holds two.
 
