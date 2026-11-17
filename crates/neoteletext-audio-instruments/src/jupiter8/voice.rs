@@ -421,9 +421,54 @@ pub struct Settings {
 ///
 /// Source: own choice. Owner's manual, printed page 20: "three
 /// progressively deeper Levels of modulation appearing at switch
-/// positions '1', '2' and '3'"; no document gives the depths. The three
-/// are taken as a third, two thirds and all.
+/// positions '1', '2' and '3'"; what the depth at 3 is against the level
+/// rests on the voltage the expression pedal's line has with no pedal
+/// (module controller schematic, VCA MOD: R108, 100 kΩ, from "EXP
+/// PEDAL" to the level amplifier's other input), which was not found.
+/// The same drawing has the oscillator reach the level amplifier turned
+/// over, offset and held above ground (IC13: R119, 220 kΩ, in; R118,
+/// 120 kΩ, back with the diode D15 across it; R117, 820 kΩ, to -15 V:
+/// about 0 V to 4.9 V for the oscillator's drawn 10 V), so that on the
+/// instrument the modulation only lowers the level. Here it moves the
+/// level as far above as below, as it did before the drawing was read:
+/// without the depth, the one-sided form has no figure to be given.
 const LEVEL_LFO: i32 = ENVELOPE_ONE;
+/// The switch's positions as points of the signed byte's 127 steps, and
+/// the depth at each in thousandths of position 3's: 234, 532 and all.
+///
+/// Source: service notes, module controller schematic (page 12 of the
+/// file), VCA MOD, read at the scan's 400 dots an inch. The oscillator
+/// reaches the level amplifier IC12 through three paths side by side,
+/// each 47 kΩ (R121, R123, R122) and then 180 kΩ, 470 kΩ and 470 kΩ
+/// (R111, R113, R112), and a transistor at the middle of each (TR19,
+/// TR20, TR18) shorts its path to ground as the switch's two lines say,
+/// TR18 when either is high. What is left open is the 517 kΩ path, the
+/// 227 kΩ path, or all three: 1.934, 4.405 and 8.274 µS. Own reading:
+/// the least is position 1. Own choice: straight lines between, for a
+/// byte that is not at a position.
+const LEVEL_LFO_LAW: [(i32, i32); 4] = [(0, 0), (42, 234), (85, 532), (law::SIGNED_MAX, LEVEL_LFO_WHOLE)];
+/// The whole of [`LEVEL_LFO_LAW`]'s shares.
+const LEVEL_LFO_WHOLE: i32 = 1_000;
+
+/// The share of its level that the oscillator moves the amplifier either
+/// way for the signed byte of its switch, in Q30, signed as the byte is.
+fn level_lfo(slider: i32) -> i32 {
+    let position = slider.clamp(-law::SIGNED_MAX, law::SIGNED_MAX);
+    let size = position.saturating_abs();
+    let mut from = (0, 0);
+    let mut thousandths = LEVEL_LFO_WHOLE;
+    for to in LEVEL_LFO_LAW {
+        if size <= to.0 {
+            let along =
+                law::share_of(to.1.saturating_sub(from.1), size.saturating_sub(from.0), to.0.saturating_sub(from.0));
+            thousandths = from.1.saturating_add(along);
+            break;
+        }
+        from = to;
+    }
+    let share = law::share_of(LEVEL_LFO, thousandths, LEVEL_LFO_WHOLE);
+    if position < 0 { share.saturating_neg() } else { share }
+}
 /// The most the amplifier's level is multiplied by: twice, less a unit
 /// of Q30.
 const SWING_MOST: i32 = i32::MAX;
@@ -474,7 +519,7 @@ impl Settings {
             cutoff_lfo: law::signed_share(law::CUTOFF_LFO, patch.signed(Param::VcfLfoMod)),
             key_follow: law::key_follow(patch.signed(Param::VcfKeyFollow)),
             level: law::level(patch.get(Param::VcaLevel)),
-            level_lfo: law::signed_share(LEVEL_LFO, patch.signed(Param::VcaLfoMod)),
+            level_lfo: level_lfo(patch.signed(Param::VcaLfoMod)),
             inverted: patch.on(Param::Env1Polarity),
             envelopes: [
                 EnvelopeSettings::new(patch, Param::Env1Attack, Param::Env1Sustain, Param::Env1KeyFollow),
