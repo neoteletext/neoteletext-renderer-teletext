@@ -185,3 +185,49 @@ fn the_chorus_switched_in_silence_is_switched_at_once() {
         assert_eq!(render(&mut switched, 0.1), render(&mut dry, 0.1), "{model:?}: a line is still fading");
     }
 }
+
+#[test]
+fn the_amplifiers_level_moved_under_a_note_does_not_step() {
+    // The largest step from one sample to the next.
+    let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    for model in MODELS {
+        // The filter's own oscillation near middle C, a sine: its
+        // largest step is its slope, and anything sudden is larger. The
+        // level set in one sample stepped the output by 0.13 of full
+        // scale where the sine's own steps are 0.016 (TODO-6438).
+        let cutoff = match model {
+            Model::Juno106 => 62,
+            Model::Juno60 => 44,
+        };
+        let sine = flat(model, whistle(cutoff));
+        for level in [0, 48, 80, 127] {
+            let moved = sine.with(Slider::VcaLevel, level);
+            let (mut worst, mut steady) = (0.0f64, 0.0f64);
+            // At sixteen instants of the sine's cycle.
+            for instant in 0..16 {
+                let mut juno = instrument(model, &sine);
+                let mut there = instrument(model, &moved);
+                for juno in [&mut juno, &mut there] {
+                    juno.event(NOTE_ON, 60, 100);
+                }
+                let lead = 0.4 + 0.00037 * f64::from(instant);
+                let mut around = render(&mut juno, lead);
+                steady = steady.max(step(&around[around.len() / 2..]));
+                // From the last sample before the level moves on.
+                around.drain(..around.len() - 1);
+                juno.set_patch(&moved);
+                around.extend(render(&mut juno, 0.05));
+                worst = worst.max(step(&around));
+                // What it comes to: the note of an instrument that had
+                // the level from the first, to the sample.
+                render(&mut there, lead + 0.05);
+                let (settled, alone) = (render(&mut juno, 0.1), render(&mut there, 0.1));
+                steady = steady.max(step(&alone));
+                assert_eq!(settled, alone, "{model:?}: the level moved to {level} is not the level {level}");
+            }
+            println!("{model:?}: the level moved to {level}: a step of {worst:.4} at most, {steady:.4} in the notes");
+            // The note's own steps are those of the louder of the two.
+            assert!(worst < 1.2 * steady, "{model:?}: to {level} clicks: {worst} against {steady}");
+        }
+    }
+}

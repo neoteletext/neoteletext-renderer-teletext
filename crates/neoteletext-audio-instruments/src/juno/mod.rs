@@ -285,6 +285,16 @@ const VCA_LEVEL_RANGE: i32 = OCTAVE;
 /// Source: own choice with [`VCA_LEVEL_RANGE`]: 64 of 0 to 127, the
 /// slider's 0 between -5 and +5, where [`Patch::DEFAULT`] has it.
 const VCA_LEVEL_CENTRE: i32 = 64;
+/// The right shift of the share of the way the amplifier's level moves
+/// in a sample towards a level a patch has newly set: a time constant of
+/// 64 samples, 1.3 ms. A level set in one sample under a note is a step
+/// as large as the note's signal at that instant times the change.
+///
+/// Source: own choice: the nearest power of two to the 1 ms that follows
+/// each of the Juno-106's held control voltages (service notes, module
+/// board schematic, page 13: 10 kΩ onto 0.1 µF); the level's own path
+/// was not read.
+const VCA_LEVEL_SLEW_SHIFT: u32 = 6;
 /// The share of the mixed output that is a sample, in Q28: 494 / 1000.
 /// One voice's sawtooth through an open filter then peaks 16.8 dB below
 /// full scale, and six struck together 3.4 dB below.
@@ -344,7 +354,10 @@ pub struct Juno {
     coupling: OnePole,
     high_pass: OnePole,
     bass: OnePole,
+    /// The amplifier's level in Q28, and the level the patch asks, which
+    /// it follows.
     level: i32,
+    level_wanted: i32,
     chorus: Chorus,
     /// The setting the lines are swept by now, which follows the patch's
     /// at once or by way of a fade; off, the lines are not run.
@@ -402,6 +415,7 @@ impl Juno {
             high_pass: OnePole::new(),
             bass: OnePole::new(),
             level: ONE_Q28,
+            level_wanted: ONE_Q28,
             chorus: Self::empty_chorus(),
             sweep: ChorusMode::Off,
             wet: 0,
@@ -442,8 +456,10 @@ impl Juno {
     /// once, on the voices that are sounding too, as moving the panel's
     /// controls does; but the chorus, switched while anything passes
     /// into it, goes and comes over a hundredth of a second, so that its
-    /// lines are not cut into the output or out of it in one step. A setting
-    /// the model has not is taken as the nearest it has
+    /// lines are not cut into the output or out of it in one step, and
+    /// the amplifier's level then moves to its new place over a
+    /// thousandth of a second or so. A setting the model has not is
+    /// taken as the nearest it has
     /// ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
@@ -485,7 +501,11 @@ impl Juno {
         }
         let slider = i32::from(patch.get(Slider::VcaLevel)).saturating_sub(VCA_LEVEL_CENTRE);
         let octaves = slider.saturating_mul(VCA_LEVEL_RANGE) / VCA_LEVEL_CENTRE;
-        self.level = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
+        self.level_wanted = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
+        if self.quiet >= CHORUS_FILL_SAMPLES {
+            // Nothing passes through the amplifier: at once.
+            self.level = self.level_wanted;
+        }
 
         let wanted = self.chorus_mode();
         if self.quiet >= CHORUS_FILL_SAMPLES {
@@ -743,6 +763,11 @@ impl Juno {
             signal = self.high_pass.high_pass(signal);
             if boost {
                 signal = signal.saturating_add(amplify(self.bass.low_pass(signal), BASS_BOOST_GAIN));
+            }
+            if self.level != self.level_wanted {
+                let step = self.level_wanted.saturating_sub(self.level) >> VCA_LEVEL_SLEW_SHIFT;
+                // A share cut to nothing would never arrive.
+                self.level = if step == 0 { self.level_wanted } else { self.level.saturating_add(step) };
             }
             signal = amplify(amplify(signal, self.level), volume);
             self.quiet = if signal.saturating_abs() < QUIET_LEVEL {
