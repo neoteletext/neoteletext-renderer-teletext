@@ -67,20 +67,33 @@
 //!   measurements", <http://www.michiel.boland.org/sid/filter_log_sweep.html>;
 //!   and the forum thread "6581 filter curves",
 //!   <https://csdb.dk/forums/?roomid=14&topicid=105719>.
+//! - Real chips, measured from what their owners published. Michiel
+//!   Boland's spectrogram of four 6581s and three 8580s on the page
+//!   above. Stone Oakvalley's recordings of his 6581 R2, R3 and R4 and
+//!   8580 R5, <https://www.6581-8580.com>: two of the chips playing a
+//!   test program ("The SID Chips visualized & benched", 1 September
+//!   2015), and all four playing tunes. The test program is Plogue's
+//!   one-page BASIC SID benchmark,
+//!   <https://ploguechipsounds.blogspot.com/2010/05/one-page-basic-sid-benchmark.html>.
 //!
 //! # What is not the chip
 //!
-//! No two 6581s sound alike, and this is one plausible chip, not a
-//! measured one. The 6581 filter's cutoff curve, its highest resonance
-//! and its level are fitted to the output of a reference program run
-//! beside this one (DEC-6425), and so is the output level of both chips;
-//! each such figure says so where it is defined. The 6581 filter's
-//! distortion is an own model; so is what a 6581 does to combined
-//! waveforms beyond the logical AND. That the 6581's cutoff rises with
-//! the level of the signal in the filter is not modelled: its curve is
-//! the one for a signal of middling level. The external audio input, the
-//! two potentiometer registers and the chip's noise floor are not
-//! modelled.
+//! No two 6581s sound alike, and this is no one chip: where real chips
+//! could be measured, each figure is the middle of them, and says which
+//! chips, how they were measured and the range they span where it is
+//! defined (DEC-6425). That is so of the 6581's cutoff curve, its
+//! resonance at a low cutoff, the level of its filter's pass band and of
+//! its combined waveforms, of the 8580's cutoff slope, and of how loudly
+//! both chips play samples through the volume register. Where no real
+//! chip could be measured the figure is from two emulators run as
+//! separate programs, and says so: the 6581's resonance at a high
+//! cutoff, the 8580's resonance, the 6581's combined waveforms at pulse
+//! widths other than 0, and how loud one chip is against the other. The
+//! 6581 filter's distortion is an own model; so is what a 6581 does to
+//! combined waveforms beyond the logical AND. That the 6581's cutoff
+//! rises with the level of the signal in the filter is not modelled. The
+//! external audio input, the two potentiometer registers and the chip's
+//! noise floor are not modelled.
 
 mod analogue;
 mod decimator;
