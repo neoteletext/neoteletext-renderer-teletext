@@ -19,7 +19,10 @@ pub use crate::analog::octave::{CENTS, OCTAVE, OCTAVE_BITS, SEMITONES, cents, ke
 use crate::analog::octave::{ONE_Q30, square_root};
 
 /// How many times the output rate the voice runs at: the ladder distorts,
-/// and the oscillators want it for their aliasing to be 80 dB down.
+/// and the oscillators want it for their aliasing to be 80 dB down. What
+/// the ladder's curve makes of their edges at this rate is not 80 dB
+/// down: the instrument's own figures are in its module's "What is not
+/// here", and `tests/minimoog_aliasing.rs` holds them.
 ///
 /// Source: own choice, from the measurements of the building blocks
 /// (`analog::oscillator`, `analog::filter`).
