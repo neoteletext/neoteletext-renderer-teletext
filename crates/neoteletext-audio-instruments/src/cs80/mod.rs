@@ -20,8 +20,9 @@
 //!   state-variable filter of 12 dB an octave with its own resonance
 //!   ([`StateVariable`](crate::analog::filter::StateVariable)). Their
 //!   cutoffs follow the key, and move an octave for each volt. The
-//!   resonance reaches a Q of 5 by its lever and 9.5 with the overall
-//!   lever's help; the filters do not oscillate by themselves.
+//!   resonance is set by a filter's own lever and the overall lever
+//!   together, a Q of 0.5 with both at their feet and of 5 with both at
+//!   their tops; the filters do not oscillate by themselves.
 //! - **Envelopes.** The filters' (IG00152) starts at an initial level
 //!   below the levers' setting, rises to an attack level above it, decays
 //!   to the setting and on release returns to the initial level. The
@@ -116,16 +117,16 @@
 //!   the after-touch is trimmed with
 //!   (`~/devel/teletext-reference/synthesizers/cs-80/validation/`).
 //! - **The resonance between its ends** follows the same recordings and
-//!   not a document ([`law::damping`]). The drawings leave one thing
-//!   open: each voice's Q input is fed by its filter's lever and by the
-//!   overall RESONANCE lever through 220 kΩ each, with no resistor to
-//!   earth (service manual, pages 39 and 41), so that the chip may see
-//!   the mean of the two and not their sum, and the alignment sets both
-//!   to their most for the chip's Q of 5 (adjustment procedure, page
-//!   11). Read so, with the overall lever at its nominal least, no
-//!   preset would have a Q above 1.6 to 2.8, and BRASS 1's would be
-//!   under 1.5, which the recordings' 2.7 does not bear out; the sum is
-//!   kept.
+//!   not a document ([`law::damping`]). What the drawings do say is that
+//!   the chip has the mean of a filter's own lever and the overall
+//!   RESONANCE lever, 220 kΩ from each and no resistor to earth (service
+//!   manual, pages 39 and 41), and its Q of 5 with both at their most
+//!   (page 42; adjustment procedure, page 11). So one lever alone reaches
+//!   a Q of 2.75, and where the overall lever stands matters to every
+//!   sound: the recordings' Q of 2.7 for BRASS 1 is met with it at its
+//!   centre, where the owner's manual pictures it and the panel at rest
+//!   here has it, and is out of reach with it at its foot. That the
+//!   recorded instrument's lever stood at its centre is not known.
 //! - **The real sine is not pure**: recordings have its second and third
 //!   harmonics 20 to 25 dB down, where the sine here has them 77 dB
 //!   down. The documents give no figure for it: the waveshaper's sheet

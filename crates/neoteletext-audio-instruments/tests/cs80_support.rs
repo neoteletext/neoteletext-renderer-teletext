@@ -16,7 +16,7 @@
 )]
 
 use neoteletext_audio_instruments::SAMPLE_RATE;
-use neoteletext_audio_instruments::cs80::{Control, Cs80, Patch, Tone};
+use neoteletext_audio_instruments::cs80::{Control, Cs80, Global, Patch, Tone};
 
 /// The output rate as f64.
 pub const RATE: f64 = SAMPLE_RATE as f64;
@@ -61,10 +61,13 @@ pub fn instrument(patch: &Patch) -> Cs80 {
 }
 
 /// The panel at rest with channel I's tone changed: each control given
-/// is set.
+/// is set. The overall RESONANCE lever, which rests at its centre, is put
+/// at its foot, so that a filter whose own lever is at its foot has the
+/// chip's least Q, 0.5.
 #[must_use]
 pub fn panel(controls: &[(Control, u8)]) -> Patch {
     let mut patch = Patch::DEFAULT;
+    patch.set(Global::Resonance, 0);
     for &(control, value) in controls {
         patch.tones[0].set(control, value);
     }

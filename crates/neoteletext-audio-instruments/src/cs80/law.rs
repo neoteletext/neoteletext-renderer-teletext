@@ -237,33 +237,41 @@ pub const Q_FOOT: u64 = 1 << 27;
 pub const Q_TOP: u64 = 5 << 28;
 
 /// A filter's damping, 1 / Q, in Q28, for the sum of the positions of
-/// its own resonance lever and the overall one: the Q rises in a straight
-/// line with the levers, from [`Q_FOOT`] to [`Q_TOP`] over one lever's
-/// travel and as far again over the other's, 9.5 with both at their tops,
-/// and never past [`DAMPING_LEAST`].
+/// its own resonance lever and the overall one: the chip's Q input has
+/// the mean of the two, and the Q rises in a straight line with it from
+/// [`Q_FOOT`], both levers at their feet, to [`Q_TOP`], both at their
+/// tops; one lever alone reaches the middle, 2.75.
 ///
-/// Source: own choice of the line between the chip's two stated ends,
+/// Source: for the mean, service manual, page 39, R51-52 circuit
+/// diagram: each voice's Q line is fed by its filter's lever (QH or QL)
+/// and by the overall lever (RES) through 220 kΩ each and by nothing
+/// else; page 41, M circuit diagram: the line goes to the chip's pin 7
+/// with 10 µF to earth and no resistor, so that the pin stands at the
+/// mean of the two levers' voltages; and the chip has its Q of 5 at 0 V
+/// (page 42, pin 7), which is both levers at their most, as the
+/// alignment sets them for it (adjustment procedure, page 11). Were the
+/// two added, their tops together would ask for a voltage below nothing.
+/// For the straight line, own choice between the chip's two stated ends,
 /// which no document read draws, made by twelve recordings of a real
 /// instrument's BRASS 1, whose low-pass resonance row stands at 5.19 V:
 /// their filters' peaks fit a Q of 1.8 to 3.3, 2.7 in the middle
 /// (`~/devel/teletext-reference/synthesizers/cs-80/validation/table.py`).
-/// A Q in a straight line with the voltage is 2.66 there; a damping
-/// falling tenfold in equal ratios for equal steps, as this was first
-/// written, 1.51, and a damping in a straight line 0.88. That the overall
-/// lever adds its travel is a reading of the service manual, page 39,
-/// R51-52 circuit diagram: each voice's Q line is fed by its filter's
-/// lever (QH or QL) and by the overall lever (RES) through 220 kΩ each.
+/// With the overall lever at its centre, as the owner's manual pictures
+/// the two overall levers (page 8) and as [`super::Patch::DEFAULT`] has
+/// it, the straight line gives BRASS 1 a Q of 2.71; with it at its foot
+/// 1.58, and no law that keeps the chip's two ends reaches 2.7 there.
 #[must_use]
 pub fn damping(levers: u32) -> u32 {
-    const FULL: u64 = LEVER_MAX as u64;
+    /// The two levers' tops together.
+    const FULL: u64 = 2 * LEVER_MAX as u64;
     /// One in Q28, squared: a Q28 over a Q28 in Q28.
     const ONE_SQUARED: u64 = 1 << 56;
     let q = Q_FOOT.saturating_add(Q_TOP.saturating_sub(Q_FOOT).saturating_mul(u64::from(levers)) / FULL);
     let damping = ONE_SQUARED.checked_div(q).unwrap_or(u64::MAX);
     u32::try_from(damping).unwrap_or(u32::MAX).max(DAMPING_LEAST)
 }
-/// The least damping the filter reaches whatever is added to the
-/// resonance, in Q28: a Q of 12.5.
+/// The least damping the filter could reach, in Q28: a Q of 12.5. The
+/// levers stop at a Q of 5, well short of it.
 ///
 /// Source: Haible, "Analyzing the CS-80 VCF" (2001): "maximum Q is
 /// limited by 1.2M resistors across damping gm cells", and "approx. 20uS

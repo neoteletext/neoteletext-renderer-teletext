@@ -420,6 +420,7 @@ impl Patch {
         globals[Global::FeetTwo as usize] = Feet::Eight as u8;
         globals[Global::Detune as usize] = super::law::LEVER_CENTRE;
         globals[Global::Brilliance as usize] = super::law::LEVER_CENTRE;
+        globals[Global::Resonance as usize] = super::law::LEVER_CENTRE;
         globals[Global::KeyboardBrillianceLow as usize] = super::law::LEVER_CENTRE;
         globals[Global::KeyboardBrillianceHigh as usize] = super::law::LEVER_CENTRE;
         globals[Global::KeyboardLevelLow as usize] = super::law::LEVER_CENTRE;

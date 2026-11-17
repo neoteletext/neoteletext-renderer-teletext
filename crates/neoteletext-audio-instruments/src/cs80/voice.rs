@@ -386,7 +386,8 @@ impl Channel {
             law::scaled(law::share(law::LEVER_VOLTS * law::VOLT, lever(control)), lever_weight)
                 .saturating_add(law::scaled(brilliance, brilliance_weight))
         };
-        // The overall lever adds its travel to each filter's own.
+        // The chip has the mean of each filter's own lever and the
+        // overall one ([`law::damping`]).
         let resonance = u32::from(patch.get(Global::Resonance));
         let damping = |control: Control| {
             let damping = law::damping(u32::from(lever(control)).saturating_add(resonance));
