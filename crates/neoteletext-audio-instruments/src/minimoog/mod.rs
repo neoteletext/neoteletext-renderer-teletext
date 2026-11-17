@@ -101,6 +101,7 @@ use crate::analog::envelope::{IMMEDIATE, RcEnvelope, Stage, apply, time_constant
 use crate::analog::filter::{Ladder, ONE_Q28, OnePole, saturate};
 use crate::analog::fixed::{accumulate, amplify, mul_high, scale};
 use crate::analog::oscillator::{Noise, Oscillator, Waves, waveform};
+use crate::analog::volume::VolumeGain;
 use crate::analog::{frequency, to_sample};
 
 use law::{OCTAVE, RATE};
@@ -174,14 +175,6 @@ pub const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 1296 / 10000) as i32;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
-/// The most the volume's gain moves in one sample, in Q28: from nothing
-/// to all of it in 256 samples, 5.3 ms. A volume message between two
-/// calls to render would otherwise step the signal by the gain's whole
-/// change at once, which is a click.
-///
-/// Source: own choice: long against a sample and short against a hand
-/// on a volume control; this crate's Prophet-5 moves its volume so.
-const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
 /// The rate the noise generators run at, in hertz: twice the output
 /// rate, each of their samples held for two of the voice's.
 ///
@@ -375,7 +368,7 @@ pub struct Minimoog {
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
-    volume_gain: i32,
+    volume_gain: VolumeGain,
     /// From the voice's rate to twice the output rate, and from there to
     /// the output rate.
     wide: Decimator,
@@ -432,7 +425,7 @@ impl Minimoog {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
-            volume_gain: ONE_Q28,
+            volume_gain: VolumeGain::full(),
             wide: Decimator::wide(),
             decimator: Decimator::sharp(),
             ignored: 0,
@@ -743,9 +736,7 @@ impl Minimoog {
         for sample in out {
             let [first, second, third, fourth] = core::array::from_fn(|_| self.sample());
             let (earlier, later) = (self.wide.process(first, second), self.wide.process(third, fourth));
-            let towards = volume.saturating_sub(self.volume_gain).clamp(-VOLUME_SLEW, VOLUME_SLEW);
-            self.volume_gain = self.volume_gain.saturating_add(towards);
-            let signal = amplify(self.decimator.process(earlier, later), self.volume_gain);
+            let signal = amplify(self.decimator.process(earlier, later), self.volume_gain.towards(volume));
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));
             if self.contours.last().is_some_and(|contour| contour.stage() == Stage::Rest) {
                 self.allocator.finished(0);

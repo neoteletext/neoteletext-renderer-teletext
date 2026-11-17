@@ -196,6 +196,7 @@ use crate::analog::envelope::{ENVELOPE_ONE, RcEnvelope, apply, time_constant};
 use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::amplify;
 use crate::analog::oscillator::Noise;
+use crate::analog::volume::VolumeGain;
 use crate::analog::{frequency, to_sample};
 
 use law::OCTAVE;
@@ -490,14 +491,6 @@ const THOUSAND: u64 = 1_000;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
-/// The most the volume's gain moves in one sample, in Q28: from nothing
-/// to all of it in 256 samples, 5.3 ms. A volume message between two
-/// calls to render would otherwise step the signal by the gain's whole
-/// change at once, which is a click.
-///
-/// Source: own choice: long against a sample and short against a hand
-/// on a volume control; this crate's Prophet-5 moves its volume so.
-const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
 /// Samples of output in a tick of the voices.
 const TICK_OUTPUT_SAMPLES: u32 = TICK_SAMPLES / OVERSAMPLING.factor();
 /// Ticks of the output's slow oscillators a second: they move with the
@@ -611,7 +604,7 @@ pub struct Cs80 {
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
-    volume_gain: i32,
+    volume_gain: VolumeGain,
     pedal: bool,
     /// Samples of the voices until the next tick.
     tick_wait: u32,
@@ -662,7 +655,7 @@ impl Cs80 {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
-            volume_gain: ONE_Q28,
+            volume_gain: VolumeGain::full(),
             pedal: false,
             tick_wait: 0,
             decimator: Decimator::sharp(),
@@ -1030,9 +1023,7 @@ impl Cs80 {
                     apply(signal, ENVELOPE_ONE.saturating_sub(through)).saturating_sub(apply(delayed, self.effect_on))
                 };
             }
-            let towards = volume.saturating_sub(self.volume_gain).clamp(-VOLUME_SLEW, VOLUME_SLEW);
-            self.volume_gain = self.volume_gain.saturating_add(towards);
-            *sample = to_sample(amplify(amplify(signal, self.volume_gain), OUTPUT_GAIN));
+            *sample = to_sample(amplify(amplify(signal, self.volume_gain.towards(volume)), OUTPUT_GAIN));
         }
     }
 }

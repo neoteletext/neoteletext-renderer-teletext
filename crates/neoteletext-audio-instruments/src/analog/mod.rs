@@ -18,6 +18,7 @@
 //!   cents.
 //! - [`allocator`]: which voice plays which key.
 //! - [`decimator`]: from twice or four times the output rate down to it.
+//! - [`volume`]: the gain of a volume control, moved without a click.
 //! - [`fixed`], [`octave`] and [`tables`]: the arithmetic, the intervals and
 //!   their exponential, and the tables under them.
 //!
@@ -148,6 +149,7 @@ pub mod lfo;
 pub mod octave;
 pub mod oscillator;
 pub mod tables;
+pub mod volume;
 
 use crate::SAMPLE_RATE;
 
