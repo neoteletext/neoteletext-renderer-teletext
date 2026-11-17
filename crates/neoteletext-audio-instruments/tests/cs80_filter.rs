@@ -291,8 +291,9 @@ fn brass_1_rests_where_a_real_instruments_does() {
     // The same recordings against this reading otherwise: the filter's
     // peak comes 116 to 260 ms after the key for our 170 to 390 ms; the
     // fall from it is one exponential of 2.8 to 3.6 s, and ours on
-    // middle C, struck as hard, 2.7 s; the fundamental falls 2.7 to 6.8
-    // dB from 1 s to 10 s, 4.3 dB in the mean, for our 4.0 dB.
+    // middle C, struck as hard, 2.7 s; the fundamental falls 3.0 to 5.3
+    // dB from 1 s to 10 s, 4.0 dB in the mean, for our 5.4 dB
+    // (`the_hardest_strokes_level_drains_from_brass_1_as_the_drawings_resistors_make_it`).
     //
     // What the documents were asked and did not answer is in the
     // module's notes ([`neoteletext_audio_instruments::cs80`], "What is
@@ -308,5 +309,43 @@ fn brass_1_rests_where_a_real_instruments_does() {
         let rest = fitted_cutoff(&signal[samples(9.5)..], note, 2.71);
         println!("BRASS 1, key {key}: at rest {rest:+.2} octaves above the note");
         assert!((1.39..=2.00).contains(&rest), "key {key}: {rest:+.2} octaves for the recordings' +1.39 to +2.00");
+    }
+}
+
+#[test]
+fn the_hardest_strokes_level_drains_from_brass_1_as_the_drawings_resistors_make_it() {
+    // BRASS 1 has LEVEL and INITIAL LEVEL at their tops. The hardest
+    // stroke's 6.4 × 7.9 / 8.5 V through 270 kΩ beside the lever's 10 V
+    // through 560 kΩ (service manual, pages 39 and 41) make the gain
+    // 2.234 times the lever's own, and drain away in 3.3 s (page 17):
+    // from 1 s to 10 s after the key that is 5.1 dB. The amplifier's
+    // envelope falls 2.0 dB in the same time on its way to a sustain of
+    // 78 of 127; with INITIAL LEVEL at its foot that is all that falls.
+    // The filter is taken out of it: its lever at the top and no touch.
+    // Twelve recordings of a real instrument's BRASS 1 fall 3.0 to 5.3
+    // dB, 4.0 dB in the mean, filter and all (`validation/h1.py`): ours
+    // with its filter falls 5.4 dB.
+    assert_eq!(PRESETS[2].0, "BRASS 1");
+    let fall = |initial_level: u8, key: u8| {
+        let mut tone = PRESETS[2].1;
+        tone.set(Control::TouchLevel, initial_level);
+        tone.set(Control::TouchBrilliance, 0);
+        tone.set(Control::Lpf, 127);
+        tone.set(Control::InitialLevel, 0);
+        tone.set(Control::AttackLevel, 0);
+        let mut patch = Patch::with_tones(tone, tone);
+        patch.set(Global::Resonance, 0);
+        let note = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
+        let signal = play(&patch, key, 127, 10.3, 0.0);
+        let at = |seconds: f64| component(&signal[samples(seconds)..samples(seconds + 0.25)], note);
+        decibels(at(0.875) / at(9.875))
+    };
+    let left = |seconds: f64| 1.0 + 0.64 * 560.0 / 270.0 * 7.9 / 8.5 * (-seconds / 3.3f64).exp();
+    let stroke = decibels(left(1.0) / left(10.0));
+    assert!((stroke - 5.12).abs() < 0.01, "{stroke}");
+    for key in [39u8, 60, 88] {
+        let (envelope, whole) = (fall(0, key), fall(127, key));
+        println!("BRASS 1, key {key}: {whole:.2} dB from 1 s to 10 s, {envelope:.2} dB of it the envelope's");
+        assert!((whole - envelope - stroke).abs() < 0.15, "key {key}: {whole} less {envelope} for {stroke}");
     }
 }

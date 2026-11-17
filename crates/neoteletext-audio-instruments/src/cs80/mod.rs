@@ -73,9 +73,12 @@
 //!
 //! - **The custom chips' insides** are not published. What a control
 //!   voltage does between a chip's documented ends is an own choice
-//!   wherever its `Source:` line says so: above all how many octaves or
-//!   decibels a volt of touch, of the keyboard control and of the sub
-//!   oscillator is, and how far the overall levers reach.
+//!   wherever its `Source:` line says so: above all how many octaves a
+//!   volt of the sub oscillator is, how many volts a stroke gives, and
+//!   how far the overall levers reach. The level is not among them: the
+//!   touch and the keyboard control add their voltages to the LEVEL
+//!   lever's at the amplifier's linear input, through resistors that are
+//!   drawn (`voice`, `LEVEL_RESISTORS`).
 //! - **BRASS 1 is brighter than the one real instrument heard.** Twelve
 //!   keys of a real instrument's BRASS 1, struck hard, come to rest 1.39
 //!   to 2.00 octaves above their notes; this reading comes to rest at
@@ -84,9 +87,10 @@
 //!   The real filter's peak also comes sooner (116 to 260 ms after the
 //!   key for 170 to 390 ms). The fall from the peak agrees since the
 //!   stroke's voltage drains away as the touch board drains it: on
-//!   middle C a time constant of 2.73 s for the recording's 2.80 s, and
-//!   the fundamental 4.0 dB down from 1 s to 10 s for the recordings'
-//!   4.3 dB in the mean. The figures, and a test that states the rest
+//!   middle C a time constant of 2.73 s for the recording's 2.80 s. The
+//!   fundamental falls 5.4 dB from 1 s to 10 s for the recordings' 4.0 dB
+//!   in the mean (3.0 to 5.3 dB), by the drawings' resistors and a
+//!   hardest stroke of 7.9 V. The figures, and a test that states the rest
 //!   level and fails, are in `tests/cs80_filter.rs`
 //!   (`brass_1_rests_where_a_real_instruments_does`, ignored). What the
 //!   documents were asked:
