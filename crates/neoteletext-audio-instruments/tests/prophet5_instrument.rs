@@ -16,7 +16,7 @@ mod prophet5_programs;
 mod prophet5_support;
 
 use neoteletext_audio_instruments::prophet5::patch::PATCH_BYTES;
-use neoteletext_audio_instruments::prophet5::{Knob, Model, Patch, Prophet5, VOICES};
+use neoteletext_audio_instruments::prophet5::{Knob, Model, Patch, Prophet5, Switch, VOICES};
 use prophet5_programs::SHEETS;
 use prophet5_support::{
     CONTROL, MODELS, NOTE_OFF, NOTE_ON, PITCH_BEND, amplitude, instrument, plain, pure, render, rms,
@@ -139,6 +139,37 @@ fn the_messages_it_hears_and_those_it_counts() {
     assert_eq!((prophet.ignored_events(), prophet.sounding_voices()), (0, 0));
     assert_eq!(prophet.patch(), &plain(Model::Rev3));
     assert_eq!(prophet.model(), Model::Rev3);
+}
+
+#[test]
+fn all_notes_off_lets_go_of_every_key_held_in_unison_and_the_pedal_still_holds() {
+    // In unison one key sounds and the others held wait their turn: a
+    // note off for the one that sounds hands the note to the next. All
+    // notes off is a note off for every one of them.
+    for model in MODELS {
+        let patch = plain(model).with_switch(Switch::Unison, true);
+        let mut prophet = instrument(model, &patch);
+        for key in [60u8, 64, 67, 72] {
+            prophet.event(NOTE_ON, key, 100);
+        }
+        render(&mut prophet, 0.2);
+        assert_eq!(prophet.sounding_voices(), VOICES);
+        prophet.event(CONTROL, 123, 0);
+        render(&mut prophet, 0.5);
+        assert_eq!(prophet.sounding_voices(), 0, "{model:?}: a key was left held");
+        // With the pedal down the note goes on until the pedal is up.
+        prophet.event(CONTROL, 64, 127);
+        for key in [60u8, 64, 67] {
+            prophet.event(NOTE_ON, key, 100);
+        }
+        render(&mut prophet, 0.2);
+        prophet.event(CONTROL, 123, 0);
+        render(&mut prophet, 0.5);
+        assert_eq!(prophet.sounding_voices(), VOICES, "{model:?}: the pedal holds");
+        prophet.event(CONTROL, 64, 0);
+        render(&mut prophet, 0.5);
+        assert_eq!(prophet.sounding_voices(), 0, "{model:?}: the pedal is up");
+    }
 }
 
 /// A 64-bit linear congruential generator with Knuth's MMIX constants.
