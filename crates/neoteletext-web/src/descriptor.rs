@@ -84,6 +84,8 @@ pub enum Member {
     PushAddress,
     /// `push.input`
     PushInput,
+    /// `push.wheel`
+    PushWheel,
     /// `region`
     Region,
     /// `services`
@@ -160,6 +162,9 @@ pub struct Descriptor {
     /// The channel takes the viewer's keys on its push WebSocket (area
     /// INT, decision E.90).
     input: bool,
+    /// The channel uses the mouse wheel over its pages (`push.wheel`,
+    /// the browser's DEC-6447): only with `input`.
+    wheel: bool,
     /// The default character set region (decision E.4), 0 to 15.
     pub region: Option<u8>,
     services: [Option<LinkedService>; MAX_LINKED_SERVICES],
@@ -258,6 +263,7 @@ impl Descriptor {
             base: *base,
             push: None,
             input: false,
+            wheel: false,
             region: None,
             services: [None; MAX_LINKED_SERVICES],
             service_addresses: TextBuf::new(),
@@ -314,6 +320,15 @@ impl Descriptor {
     #[must_use]
     pub const fn input(&self) -> bool {
         self.input
+    }
+
+    /// Whether the channel uses the mouse wheel over its pages
+    /// (`push.wheel`), so that a receiver gives it the wheel there rather
+    /// than stepping a page's sub-pages with it (the browser's DEC-6447).
+    /// Never without `input`.
+    #[must_use]
+    pub const fn wheel(&self) -> bool {
+        self.wheel
     }
 
     /// A linked service by its short name (Appendix E.2 rule 2: an unknown

@@ -131,6 +131,33 @@ fn input_needs_a_websocket() {
     assert!(!Descriptor::parse(VALID.as_bytes(), &base()).unwrap().input());
 }
 
+/// The browser's DEC-6447: `push.wheel` says the channel uses the mouse
+/// wheel over its pages, and only a channel that takes input can.
+#[test]
+fn the_wheel_is_a_kind_of_input() {
+    let plain = Url::parse("http://s.example/service.json").unwrap();
+    let with =
+        |push: &str| std::format!(r#"{{"name":"S","initial_page":"100","page_template":"/{{mpp}}","push":{push}}}"#);
+    let parse = |push: &str| Descriptor::parse(with(push).as_bytes(), &plain).map(|descriptor| descriptor.wheel());
+    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":true,"wheel":true}"#), Ok(true));
+    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":true,"wheel":false}"#), Ok(false));
+    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":true}"#), Ok(false));
+    assert_eq!(
+        parse(r#"{"address":"ws://s.example/p","wheel":true}"#),
+        Err(DescriptorError::Invalid(Member::PushWheel)),
+        "no wheel without input"
+    );
+    assert_eq!(
+        parse(r#"{"address":"ws://s.example/p","input":true,"wheel":1}"#),
+        Err(DescriptorError::Invalid(Member::PushWheel))
+    );
+    assert_eq!(
+        parse(r#"{"address":"ws://s.example/p","input":true,"wheel":true,"wheel":true}"#),
+        Err(DescriptorError::Duplicate(Member::PushWheel))
+    );
+    assert!(!Descriptor::parse(VALID.as_bytes(), &base()).unwrap().wheel());
+}
+
 /// Finding F-90 (DOC-1865): keys go back only to a push
 /// WebSocket on the descriptor's own origin. A service's descriptor could
 /// send them to any origin; a channel's push was already held to its own.
