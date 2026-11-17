@@ -329,6 +329,9 @@ pub struct Jupiter8 {
     bend: i32,
     wheel: u8,
     volume: u8,
+    /// The volume's gain as it stands, in Q28, on its way to what the
+    /// controller asks.
+    volume_gain: i32,
     /// Samples of the filters until the next tick.
     tick_wait: u32,
     decimator: Decimator,
@@ -370,6 +373,7 @@ impl Jupiter8 {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            volume_gain: ONE_Q28,
             tick_wait: 0,
             decimator: Decimator::sharp(),
             ignored: 0,
@@ -750,6 +754,15 @@ impl Jupiter8 {
     /// second. The work of a sample is at most that of eight voices,
     /// whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
+        /// The most the volume's gain moves in one sample, in Q28: from
+        /// nothing to all of it in 256 samples, 5.3 ms. A volume message
+        /// between two calls to render would otherwise step the signal
+        /// by the gain's whole change at once, which is a click.
+        ///
+        /// Source: own choice: long against a sample and short against
+        /// a hand on a volume control; this crate's Prophet-5 moves its
+        /// volume so.
+        const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
         // The square of the controller's share, in Q28 (own choice of
         // the law, as a volume control's taper).
         let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
@@ -769,7 +782,9 @@ impl Jupiter8 {
             let earlier = mixed(self.voices_sample());
             let later = mixed(self.voices_sample());
             let signal = self.decimator.process(earlier, later);
-            *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
+            let towards = volume.saturating_sub(self.volume_gain).clamp(-VOLUME_SLEW, VOLUME_SLEW);
+            self.volume_gain = self.volume_gain.saturating_add(towards);
+            *sample = to_sample(amplify(amplify(signal, self.volume_gain), OUTPUT_GAIN));
         }
     }
 }
