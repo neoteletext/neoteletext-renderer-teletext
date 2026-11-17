@@ -560,6 +560,13 @@ fn effect_line() -> Chorus {
     line
 }
 
+/// Messages kept while all sound off takes the sound out, to be taken
+/// when it has gone: more than come in the 5.3 ms that lasts but from
+/// a stream that means to flood, whose next message ends the wait.
+///
+/// Source: own choice.
+const DEFERRED: usize = 16;
+
 /// The CS-80.
 ///
 /// It holds no reference and allocates nothing. Two instruments given the
@@ -567,7 +574,18 @@ fn effect_line() -> Chorus {
 /// same samples.
 #[derive(Clone, Debug)]
 pub struct Cs80 {
+    /// The patch the instrument was given.
+    wanted: Patch,
+    /// The panel as it stands and is played: the given patch's switches
+    /// and selectors, and its levers each on its way to where the patch
+    /// has it ([`Cs80::slide`]).
     patch: Patch,
+    /// All sound off has come and the sound is on its way out: the gain
+    /// that takes it there, which the voices are cut at the end of; and
+    /// the messages that came meanwhile, in order, and how many.
+    cut: Option<VolumeGain>,
+    deferred: [(u8, u8, u8); DEFERRED],
+    deferred_count: usize,
     channels: [Channel; 2],
     shared: Shared,
     allocator: Allocator<VOICES>,
@@ -626,6 +644,10 @@ impl Cs80 {
             voice
         });
         let mut cs80 = Self {
+            wanted: Patch::DEFAULT,
+            cut: None,
+            deferred: [(0, 0, 0); DEFERRED],
+            deferred_count: 0,
             patch: Patch::DEFAULT,
             channels: [Channel::new(&Patch::DEFAULT, 0), Channel::new(&Patch::DEFAULT, 1)],
             shared: Shared::new(&Patch::DEFAULT),
@@ -666,14 +688,17 @@ impl Cs80 {
     /// patch, which it keeps: silent, its controllers at rest, the count
     /// of ignored messages at zero.
     pub fn reset(&mut self) {
-        let patch = self.patch;
+        let patch = self.wanted;
         *self = Self::new();
         self.set_patch(&patch);
     }
 
-    /// Gives the instrument a patch, which it copies. It takes effect at
-    /// once, on the voices that are sounding too, as moving the panel's
-    /// levers does.
+    /// Gives the instrument a patch, which it copies. It takes effect on
+    /// the voices that are sounding too, as moving the panel's controls
+    /// does: the tabs and selectors at once, and each lever a step of
+    /// its 128 at every tick, its whole travel in 21 thousandths of a
+    /// second, as a hand moves it through every place between. With no
+    /// voice sounding, all of it is there at once.
     pub fn set_patch(&mut self, patch: &Patch) {
         // The effect's lines are fed only while its switches are over at
         // all, so what they held when the switches came to rest at off is
@@ -688,14 +713,59 @@ impl Cs80 {
         if self.allocator.sounding() == 0 {
             self.effect_on = if patch.on(Global::Effect) { ENVELOPE_ONE } else { 0 };
         }
-        self.patch = *patch;
+        self.wanted = *patch;
+        let mut bytes = patch.to_bytes();
+        if self.allocator.sounding() > 0 {
+            let levers = Self::levers();
+            for ((byte, held), lever) in bytes.iter_mut().zip(self.patch.to_bytes()).zip(levers) {
+                if lever {
+                    *byte = held;
+                }
+            }
+        }
+        self.patch = Patch::from_bytes(&bytes).unwrap_or(*patch);
         self.apply_patch();
     }
 
-    /// The patch being played.
+    /// The patch the instrument was given.
     #[must_use]
+    #[allow(
+        clippy::misnamed_getters,
+        reason = "the patch is the one given; the field of that name is the panel on its way to it"
+    )]
     pub const fn patch(&self) -> &Patch {
-        &self.patch
+        &self.wanted
+    }
+
+    /// Which bytes of a patch are levers, which pass every place between
+    /// two, and not tabs or selectors, which have none between.
+    fn levers() -> impl Iterator<Item = bool> {
+        let maxima = patch::TONE_MAXIMA.iter().chain(&patch::TONE_MAXIMA).chain(&patch::GLOBAL_MAXIMA);
+        maxima.map(|&most| most == law::LEVER_MAX)
+    }
+
+    /// A tick of the levers: each goes one step towards where the given
+    /// patch has it.
+    ///
+    /// Source: own choice of the rate. A lever is a potentiometer under
+    /// a hand; a patch set under a sounding voice put it at its new
+    /// place in one sample, which no hand does and which steps the
+    /// signal. A step of a 128th at each tick of a sixth of a
+    /// millisecond: long against a sample, short against a hand.
+    fn slide(&mut self) {
+        if self.patch == self.wanted {
+            return;
+        }
+        let mut bytes = self.patch.to_bytes();
+        for (held, wanted) in bytes.iter_mut().zip(self.wanted.to_bytes()) {
+            *held = match (*held).cmp(&wanted) {
+                core::cmp::Ordering::Less => held.saturating_add(1),
+                core::cmp::Ordering::Equal => *held,
+                core::cmp::Ordering::Greater => held.saturating_sub(1),
+            };
+        }
+        self.patch = Patch::from_bytes(&bytes).unwrap_or(self.wanted);
+        self.apply_patch();
     }
 
     fn apply_patch(&mut self) {
@@ -770,15 +840,27 @@ impl Cs80 {
     /// - Control change (0xBn) of the modulation wheel (1), volume (7,
     ///   whose gain moves to its new place over five thousandths of a
     ///   second at the most),
-    ///   the foot switch (64, down from 64), all sound off (120), reset
-    ///   all controllers (121, which leaves the volume) and all notes off
-    ///   (123).
+    ///   the foot switch (64, down from 64), all sound off (120, which
+    ///   takes the sound out over five thousandths of a second and then
+    ///   silences every voice; a message that comes before then is taken
+    ///   when the sound has gone), reset all controllers (121, which
+    ///   leaves the volume) and all notes off (123).
     /// - Pitch bend (0xEn), 14 bits, `data1` the low seven: the ribbon.
     ///
     /// Anything else is ignored and counted ([`Cs80::ignored_events`]):
     /// any other status or controller, a data byte above 127. Nothing is
     /// an error.
     pub fn event(&mut self, status: u8, data1: u8, data2: u8) {
+        // While all sound off takes the sound out, a message waits for
+        // it to have gone; with no room to wait, the sound is cut now.
+        if self.cut.is_some() {
+            if let Some(slot) = self.deferred.get_mut(self.deferred_count) {
+                *slot = (status, data1, data2);
+                self.deferred_count = self.deferred_count.saturating_add(1);
+                return;
+            }
+            self.cut();
+        }
         if data1 > DATA_MAX || data2 > DATA_MAX {
             self.ignore();
             return;
@@ -842,11 +924,15 @@ impl Cs80 {
             CONTROL_MODULATION_WHEEL => self.wheel = value,
             CONTROL_VOLUME => self.volume = value,
             CONTROL_SUSTAIN => self.pedal = value >= PEDAL_DOWN,
+            // The sound goes out over the 5.3 ms a volume's gain takes,
+            // and the voices are cut and the keys let go when it has
+            // gone: cut where they stood, the signal would fall to
+            // nothing in one sample.
             CONTROL_ALL_SOUND_OFF => {
-                self.allocator.all_keys_up();
-                for (index, voice) in self.voices.iter_mut().enumerate() {
-                    voice.cut(&self.channels);
-                    self.allocator.finished(index);
+                if self.allocator.sounding() == 0 {
+                    self.cut();
+                } else if self.cut.is_none() {
+                    self.cut = Some(VolumeGain::full());
                 }
             }
             CONTROL_RESET_CONTROLLERS => {
@@ -859,6 +945,25 @@ impl Cs80 {
             }
             CONTROL_ALL_NOTES_OFF => self.allocator.all_keys_up(),
             _ => self.ignore(),
+        }
+    }
+
+    /// Silences every voice at once and lets every key go: what all
+    /// sound off comes to. The messages that waited are then taken, in
+    /// order.
+    fn cut(&mut self) {
+        self.cut = None;
+        self.allocator.all_keys_up();
+        self.patch = self.wanted;
+        self.apply_patch();
+        for (index, voice) in self.voices.iter_mut().enumerate() {
+            voice.cut(&self.channels);
+            self.allocator.finished(index);
+        }
+        let (deferred, count) = (self.deferred, self.deferred_count);
+        self.deferred_count = 0;
+        for &(status, data1, data2) in deferred.iter().take(count) {
+            self.event(status, data1, data2);
         }
     }
 
@@ -893,6 +998,7 @@ impl Cs80 {
     /// A tick: the slow oscillators move on, and the voices take what the
     /// keys and the controls ask.
     fn control(&mut self) {
+        self.slide();
         let patch = self.patch;
         let keys = *self.allocator.voices();
         // One sub oscillator serves every key: the hardest pressed sets
@@ -982,13 +1088,27 @@ impl Cs80 {
     /// second. The work of a sample is at most that of sixteen lines and
     /// the effect, whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        let volume = volume::wanted(self.volume);
-        let ring = self.ring_modulation;
-        let effect = self.patch.on(Global::Effect);
-        let depth = self.effect_depth;
+        let mut volume = volume::wanted(self.volume);
         for sample in out {
-            let earlier = self.voices_sample();
-            let later = self.voices_sample();
+            let mut earlier = self.voices_sample();
+            let mut later = self.voices_sample();
+            // Faded before the decimator, which then ends on silence:
+            // what it still holds when the voices are cut is nothing.
+            if let Some(cut) = &mut self.cut {
+                let gain = cut.towards(0);
+                (earlier, later) = (amplify(earlier, gain), amplify(later, gain));
+                if gain == 0 {
+                    // The messages that waited are taken now, the
+                    // volume's among them.
+                    self.cut();
+                    volume = volume::wanted(self.volume);
+                }
+            }
+            // Read at every sample: a tick inside this call may have
+            // moved the levers they come from.
+            let ring = self.ring_modulation;
+            let effect = self.patch.on(Global::Effect);
+            let depth = self.effect_depth;
             let mut signal = self.decimator.process(earlier, later);
             if ring != 0 {
                 // The sound times the oscillator takes the place of the

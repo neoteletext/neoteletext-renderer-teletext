@@ -104,7 +104,7 @@ impl Control {
 
 /// The largest value of each byte of a tone.
 #[allow(clippy::indexing_slicing, reason = "worked out by the compiler: a fault here stops the build, and no program")]
-const TONE_MAXIMA: [u8; TONE_BYTES] = {
+pub(super) const TONE_MAXIMA: [u8; TONE_BYTES] = {
     let mut maxima = [LEVER_MAX; TONE_BYTES];
     maxima[Control::Square as usize] = Control::Square.max();
     maxima[Control::Sawtooth as usize] = Control::Sawtooth.max();
@@ -287,7 +287,7 @@ impl Global {
 
 /// The largest value of each byte outside the tones.
 #[allow(clippy::indexing_slicing, reason = "worked out by the compiler: a fault here stops the build, and no program")]
-const GLOBAL_MAXIMA: [u8; GLOBAL_BYTES] = {
+pub(super) const GLOBAL_MAXIMA: [u8; GLOBAL_BYTES] = {
     let mut maxima = [LEVER_MAX; GLOBAL_BYTES];
     maxima[Global::FeetOne as usize] = SELECTOR_MAX;
     maxima[Global::FeetTwo as usize] = SELECTOR_MAX;
