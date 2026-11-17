@@ -48,8 +48,9 @@ const _: () = assert!(TICK_RATE == 6_000 && RATE.is_multiple_of(TICK_SAMPLES));
 /// with the knob at 0 is C0. TM2 adjustment 4-18 (page 117) agrees: with
 /// the knob 39 semitones up, the lowest key "should be about 155.5 Hz",
 /// which is 39 semitones above 16.35 Hz. The number is 440 × 2^(-57/12) ×
-/// 2³² / 96,000, which `tests/prophet5_pitch.rs` checks by the pitch.
-const STEP_OF_C0: u32 = 731_567;
+/// 2³² / 96,000 = 731,558.1, which a test below checks, and
+/// `tests/prophet5_pitch.rs` by the pitch.
+const STEP_OF_C0: u32 = 731_558;
 /// The frequency step of 440 Hz, where the filters are tuned.
 const STEP_OF_A: u32 = frequency(440_000, RATE);
 
@@ -636,3 +637,17 @@ fn mean(share: i32) -> i32 {
 /// The interval between two keys a semitone apart, which the key numbers
 /// are counted in.
 const _: () = assert!(SEMITONES == 12 && ONE_Q28 == 1 << 28 && UNIT == LEVEL);
+
+#[cfg(test)]
+#[allow(clippy::cast_precision_loss, clippy::arithmetic_side_effects, reason = "a test, in f64")]
+mod tests {
+    use super::{RATE, STEP_OF_C0};
+
+    #[test]
+    fn the_step_of_c0_is_the_number_its_source_gives() {
+        // 440 Hz, 57 semitones down, as a share of the voices' rate in
+        // 32 bits; a unit of the step is a four hundredth of a cent.
+        let exact = 440.0 * (-57.0f64 / 12.0).exp2() * 4_294_967_296.0 / f64::from(RATE);
+        assert!((f64::from(STEP_OF_C0) - exact).abs() <= 0.5, "{STEP_OF_C0} for {exact}");
+    }
+}
