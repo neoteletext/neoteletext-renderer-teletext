@@ -501,7 +501,8 @@ impl Prophet5 {
     /// - Control change (0xBn) of the modulation wheel (1), volume (7),
     ///   the pedal (64, down from 64), all sound off (120), reset all
     ///   controllers (121, which leaves the volume) and all notes off
-    ///   (123). The pedal holds the notes whose keys go up while it is
+    ///   (123). All sound off silences every voice at once and leaves
+    ///   the pedal where it is. The pedal holds the notes whose keys go up while it is
     ///   down, as a MIDI instrument's does, and is besides the
     ///   instrument's release footswitch: while it is down the
     ///   envelopes' releases are as the knobs say though the release
@@ -542,12 +543,14 @@ impl Prophet5 {
             }
             CONTROL_ALL_SOUND_OFF => {
                 self.allocator.all_keys_up();
-                self.pedal = false;
                 for (index, voice) in self.voices.iter_mut().enumerate() {
                     voice.cut();
                     voice.configure(&self.settings);
                     self.allocator.finished(index);
                 }
+                // The allocator lets go of the pedal with the keys; the
+                // pedal has not moved, and is given back.
+                self.allocator.sustain(self.pedal);
             }
             CONTROL_RESET_CONTROLLERS => {
                 self.wheel = 0;

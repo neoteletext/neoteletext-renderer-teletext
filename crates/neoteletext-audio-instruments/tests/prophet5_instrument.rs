@@ -229,6 +229,30 @@ fn random_patches_and_random_messages_neither_panic_nor_leave_the_bounds() {
 }
 
 #[test]
+fn the_pedal_still_holds_after_all_sound_off() {
+    // All sound off silences the voices; it is no message about the
+    // pedal, which is still down: a key struck and let go after it is
+    // held, and the pedal going up lets it go.
+    for model in MODELS {
+        let mut prophet = instrument(model, &pure(model));
+        prophet.event(CONTROL, 64, 127);
+        prophet.event(NOTE_ON, 60, 100);
+        render(&mut prophet, 0.1);
+        prophet.event(CONTROL, 120, 0);
+        render(&mut prophet, 0.1);
+        assert_eq!(prophet.sounding_voices(), 0, "{model:?}: silenced");
+        prophet.event(NOTE_ON, 64, 100);
+        render(&mut prophet, 0.1);
+        prophet.event(NOTE_OFF, 64, 0);
+        render(&mut prophet, 0.5);
+        assert_eq!(prophet.sounding_voices(), 1, "{model:?}: the pedal holds the key let go");
+        prophet.event(CONTROL, 64, 0);
+        render(&mut prophet, 0.5);
+        assert_eq!(prophet.sounding_voices(), 0, "{model:?}: the pedal up lets it go");
+    }
+}
+
+#[test]
 fn the_pedal_still_holds_after_a_patch_turns_unison_on_or_off() {
     // Changing between polyphonic and unison lets go of every key, but a
     // pedal that is down is down still: a key struck and let go after
