@@ -18,7 +18,7 @@ mod support;
 
 use neoteletext_audio_instruments::SAMPLE_RATE;
 use neoteletext_audio_instruments::juno::{ChorusMode, Model, Patch, Slider, VOICES};
-use support::{MODELS, NOTE_OFF, NOTE_ON, flat, instrument, play, render, rms, whistle};
+use support::{MODELS, NOTE_OFF, NOTE_ON, flat, instrument, play, render, rms, samples, square, whistle};
 
 #[test]
 fn a_voice_on_the_gate_starts_its_next_note_with_its_envelope_at_rest() {
@@ -323,5 +323,192 @@ fn a_voice_whose_envelope_runs_on_unheard_is_silent_and_gives_way_to_a_seventh_k
         juno.event(0xb0, 123, 0);
         render(&mut juno, 60.0);
         assert_eq!(juno.sounding_voices(), 0, "{model:?}: an envelope never rests");
+    }
+}
+
+#[test]
+fn the_high_pass_switch_moved_under_a_note_does_not_step() {
+    // The largest step from one sample to the next.
+    let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    for model in MODELS {
+        // The filter's own oscillation near middle C, a sine: its
+        // largest step is its slope, and anything sudden is larger. The
+        // switch's filter was emptied, and the bass lift's cut out, in
+        // one sample: under this sine a step of up to 0.09 of full scale
+        // where the sine's own are 0.008 to 0.016, and under a low
+        // sawtooth 0.15 (TODO-6438).
+        let cutoff = match model {
+            Model::Juno106 => 62,
+            Model::Juno60 => 44,
+        };
+        let sine = whistle(cutoff);
+        for from in 0..=3u8 {
+            for to in (0..=3u8).filter(|&to| to != from) {
+                let (mut before, mut after) = (sine, sine);
+                before.hpf = from;
+                after.hpf = to;
+                let (mut worst, mut steady, mut apart) = (0.0f64, 0.0f64, 0.0f64);
+                // At sixteen instants of the sine's cycle.
+                for instant in 0..16 {
+                    let mut juno = instrument(model, &before);
+                    let mut there = instrument(model, &after);
+                    for juno in [&mut juno, &mut there] {
+                        juno.event(NOTE_ON, 60, 100);
+                    }
+                    let lead = 0.4 + 0.00037 * f64::from(instant);
+                    let mut around = render(&mut juno, lead);
+                    steady = steady.max(step(&around[around.len() / 2..]));
+                    // From the last sample before the switch on.
+                    around.drain(..around.len() - 1);
+                    juno.set_patch(&after);
+                    around.extend(render(&mut juno, 0.1));
+                    worst = worst.max(step(&around));
+                    // What it comes to, once a filter left out of the
+                    // path has given up the last of what it held: the
+                    // note of an instrument that had the switch there
+                    // from the first.
+                    render(&mut juno, 0.4);
+                    render(&mut there, lead + 0.5);
+                    let (settled, alone) = (render(&mut juno, 0.1), render(&mut there, 0.1));
+                    steady = steady.max(step(&alone));
+                    if flat(model, sine).hpf == to {
+                        // With no filter in the path, to the sample.
+                        assert_eq!(settled, alone, "{model:?}: {from} to {to} is not the switch at {to}");
+                    }
+                    apart = settled.iter().zip(&alone).fold(apart, |apart, (a, b)| apart.max((a - b).abs()));
+                }
+                println!(
+                    "{model:?}: the switch from {from} to {to}: a step of {worst:.4} at most, {steady:.4} in the notes; {:.1} units from the switch at {to} afterwards",
+                    apart * 32_768.0
+                );
+                // The note's own steps are those of the louder of the two.
+                assert!(worst < 1.2 * steady, "{model:?}: {from} to {to} clicks: {worst} against {steady}");
+                assert!(apart * 32_768.0 < 1.5, "{model:?}: {from} to {to} does not come to the switch at {to}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_high_pass_switch_moved_after_a_wide_pulse_lets_nothing_through_at_once() {
+    // A pulse at its widest on the gate, the switch at its top: once the
+    // key is up the coupling capacitor gives up the pulse's steady part
+    // over seconds, the switch's filter keeps it from the output, and the
+    // output is silent. The filter emptied and taken out of the path in
+    // one sample let all of it through at once: a step of 0.058 of full
+    // scale out of silence (TODO-6438).
+    let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    for model in MODELS {
+        let mut pulse = Patch::DEFAULT.with(Slider::DcoPwm, 127);
+        pulse.sawtooth = false;
+        pulse.pulse = true;
+        pulse.vca_gate = true;
+        for (from, to) in [(3u8, flat(model, pulse).hpf), (flat(model, pulse).hpf, 3), (3, 0), (0, 3), (2, 1), (1, 0)] {
+            let (mut before, mut after) = (pulse, pulse);
+            before.hpf = from;
+            after.hpf = to;
+            let mut juno = instrument(model, &before);
+            let mut open = instrument(model, &flat(model, pulse));
+            for juno in [&mut juno, &mut open] {
+                juno.event(NOTE_ON, 60, 100);
+                render(juno, 1.0);
+                juno.event(NOTE_OFF, 60, 0);
+            }
+            let mut around = render(&mut juno, 0.2);
+            let left = render(&mut open, 0.2)[samples(0.2) - 1].abs();
+            assert_eq!(juno.sounding_voices(), 0, "{model:?}: the voice is at rest");
+            assert!(left > 0.05, "{model:?}: the capacitor still gives up {left}");
+            // From the last sample before the switch on.
+            around.drain(..around.len() - 1);
+            juno.set_patch(&after);
+            around.extend(render(&mut juno, 0.2));
+            let worst = step(&around);
+            println!("{model:?}: the switch from {from} to {to} with {left:.3} left: a step of {worst:.5} at most");
+            // The whole of what is left, let through as the capacitor
+            // empties over 10 ms, is 0.0002 a sample at the most; taken
+            // away as the corner rises, 0.0007, and with the bass lift's
+            // share of it, three times what is left, 0.0012.
+            assert!(worst < 0.002, "{model:?}: {from} to {to} clicks: {worst}");
+        }
+    }
+}
+
+#[test]
+fn the_high_pass_switch_moved_in_silence_is_moved_at_once() {
+    // Once nothing passes into the switch's filters and nothing comes
+    // out of them the switch moves at once: a note struck straight after
+    // is the note of an instrument that had the switch there from the
+    // first, to the sample, with no filter moving under it.
+    for model in MODELS {
+        for from in 0..=3u8 {
+            for to in (0..=3u8).filter(|&to| to != from) {
+                let (mut before, mut after) = (square(), square());
+                before.hpf = from;
+                after.hpf = to;
+                let mut moved = instrument(model, &before);
+                let mut there = instrument(model, &after);
+                for juno in [&mut moved, &mut there] {
+                    juno.event(NOTE_ON, 45, 100);
+                    render(juno, 0.3);
+                    juno.event(NOTE_OFF, 45, 0);
+                    render(juno, 4.0);
+                    assert_eq!(juno.sounding_voices(), 0, "{model:?}");
+                }
+                moved.set_patch(&after);
+                for juno in [&mut moved, &mut there] {
+                    juno.event(NOTE_ON, 40, 100);
+                }
+                let (first, second) = (render(&mut moved, 0.2), render(&mut there, 0.2));
+                assert!(rms(&second) > 0.01, "{model:?}: no note");
+                assert_eq!(first, second, "{model:?}: {from} to {to}: a filter is still moving");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_high_pass_switch_moved_at_random_however_fast_does_not_click() {
+    // The largest step from one sample to the next.
+    let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    for model in MODELS {
+        // The filter's own oscillation near middle C, a sine.
+        let cutoff = match model {
+            Model::Juno106 => 62,
+            Model::Juno60 => 44,
+        };
+        let sine = whistle(cutoff);
+        // The sine's largest step at each position of the switch.
+        let steady = (0..=3u8).fold(0.0f64, |steady, position| {
+            let mut patch = sine;
+            patch.hpf = position;
+            steady.max(step(&play(model, &patch, 60, 1.0, 0.0)[SAMPLE_RATE as usize / 2..]))
+        });
+        // A new position every so many samples: faster than the corner
+        // moves at all, inside its 480 samples, and about them.
+        for every in [1usize, 7, 50, 200, 479, 481, 700, 1300] {
+            let run = |cut: usize| {
+                let mut juno = instrument(model, &sine);
+                juno.event(NOTE_ON, 60, 100);
+                render(&mut juno, 0.5);
+                let mut random = 54_321u32;
+                let mut out = vec![0i16; every * (2 * SAMPLE_RATE as usize / every).min(20_000)];
+                for piece in out.chunks_mut(every) {
+                    random = random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    let mut patch = sine;
+                    patch.hpf = (random >> 24) as u8 % 4;
+                    juno.set_patch(&patch);
+                    for part in piece.chunks_mut(cut) {
+                        juno.render(part);
+                    }
+                }
+                out
+            };
+            let out = run(every);
+            assert_eq!(out, run(5), "{model:?}: every {every} samples: the calls' lengths change the samples");
+            let signal: Vec<f64> = out.iter().map(|&sample| f64::from(sample) / 32_768.0).collect();
+            let worst = step(&signal);
+            println!("{model:?}: a position every {every} samples: a step of {worst:.4} at most, {steady:.4} steady");
+            assert!(worst < 1.2 * steady, "{model:?}: every {every} samples clicks: {worst} against {steady}");
+        }
     }
 }

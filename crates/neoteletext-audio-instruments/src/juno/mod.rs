@@ -84,7 +84,7 @@ use crate::analog::chorus::Chorus;
 use crate::analog::decimator::Decimator;
 use crate::analog::drift::Variation;
 use crate::analog::filter::{ONE_Q28, OnePole};
-use crate::analog::fixed::{amplify, mul_high, scale};
+use crate::analog::fixed::{amplify, limit, mul_high, scale};
 use crate::analog::lfo::{LFO_ONE, Lfo, Shape};
 use crate::analog::oscillator::Noise;
 use crate::analog::{LEVEL, frequency, to_sample};
@@ -286,6 +286,43 @@ const BASS_BOOST_CORNER: u32 = 72_000;
 /// reference program, measured, lifts 55 Hz by 8.3 dB.
 const BASS_BOOST_GAIN: i32 = ((100i64 << 28) / 47) as i32;
 
+/// Samples over which the high-pass switch's filter and the bass lift come
+/// and go when the switch moves while anything passes through them: 10
+/// ms, the chorus's ([`CHORUS_FADE_SAMPLES`]). A filter emptied or cut out
+/// in one sample is a step as large as what it held: under a low note
+/// 0.15 of full scale, and 0.06 in silence after a wide pulse, whose
+/// steady part the capacitor before the switch still gives up and a
+/// filter at the switch's top keeps from the output.
+///
+/// Source: own choice of the time. On the instruments an analogue switch
+/// (IC3 of the Juno-106's jack board, IC5 of the Juno-60's chorus board)
+/// puts another capacitor in the path at once; how the capacitors then
+/// settle was not worked out.
+const HIGH_PASS_FADE_SAMPLES: u32 = SAMPLE_RATE / 100;
+/// What one step of the bass lift's fade is of its whole, in Q31.
+const HIGH_PASS_FADE_UNIT: i32 = i32::MAX / HIGH_PASS_FADE_SAMPLES.cast_signed();
+/// The highest corner of either model's high-pass switch, in thousandths
+/// of a hertz.
+const HIGH_PASS_TOP: u32 = {
+    /// The larger of two corners.
+    const fn larger(one: u32, other: u32) -> u32 {
+        if one > other { one } else { other }
+    }
+    let ([a, b, c, d], [e, f, g, h]) = (law::JUNO_106.hpf, law::JUNO_60.hpf);
+    larger(larger(larger(a, b), larger(c, d)), larger(larger(e, f), larger(g, h)))
+};
+/// The most the high-pass filter's corner moves in a sample, as a
+/// frequency step: the whole of the highest corner in
+/// [`HIGH_PASS_FADE_SAMPLES`].
+const HIGH_PASS_SLEW: u32 = frequency(HIGH_PASS_TOP, SAMPLE_RATE).div_ceil(HIGH_PASS_FADE_SAMPLES);
+const _: () = assert!(HIGH_PASS_SLEW > 0);
+/// The corner at which the high-pass filter's capacitor, once the switch
+/// has left it out of the path, gives up what it still holds, in
+/// thousandths of a hertz: a time constant of 10 ms.
+///
+/// Source: own choice: the fade's time ([`HIGH_PASS_FADE_SAMPLES`]).
+const HIGH_PASS_DISCHARGE: u32 = 15_915;
+
 /// The amplifier's level slider moves the level by this either way, in
 /// octaves of amplitude: 6 dB.
 ///
@@ -377,6 +414,18 @@ pub struct Juno {
     coupling: OnePole,
     high_pass: OnePole,
     bass: OnePole,
+    /// The high-pass filter's corner as it stands, a frequency step, on
+    /// its way to the corner of the patch's switch; at zero the filter is
+    /// out of the path and only gives up what it holds.
+    corner: u32,
+    corner_wanted: u32,
+    /// Steps of its fade the bass lift has risen, 0 to
+    /// [`HIGH_PASS_FADE_SAMPLES`].
+    lift: u32,
+    /// Samples for which the signal into the high-pass switch and the
+    /// signal out of it have both stayed under [`QUIET_LEVEL`], counted
+    /// no further than [`CHORUS_FILL_SAMPLES`].
+    still: u32,
     /// The amplifier's level in Q28, and the level the patch asks, which
     /// it follows.
     level: i32,
@@ -438,6 +487,10 @@ impl Juno {
             coupling: OnePole::new(),
             high_pass: OnePole::new(),
             bass: OnePole::new(),
+            corner: 0,
+            corner_wanted: 0,
+            lift: 0,
+            still: CHORUS_FILL_SAMPLES,
             level: ONE_Q28,
             level_wanted: ONE_Q28,
             chorus: Self::empty_chorus(),
@@ -480,7 +533,10 @@ impl Juno {
     /// once, on the voices that are sounding too, as moving the panel's
     /// controls does; but the chorus, switched while anything passes
     /// into it, goes and comes over a hundredth of a second, so that its
-    /// lines are not cut into the output or out of it in one step, and
+    /// lines are not cut into the output or out of it in one step; the
+    /// high-pass switch's filter and bass lift, moved while anything
+    /// passes through them, take as long to come to their new places,
+    /// so that nothing they hold is let out or cut off in one step; and
     /// the amplifier's level then moves to its new place over a
     /// thousandth of a second or so. A setting the model has not is
     /// taken as the nearest it has
@@ -513,16 +569,22 @@ impl Juno {
         self.lfo.set_delay(ticks, ticks / LFO_FADE_SHARE);
 
         let corner = law.hpf.get(usize::from(patch.hpf.min(patch::HPF_MAX))).copied().unwrap_or(0);
-        self.high_pass.set_cutoff(frequency(corner, SAMPLE_RATE));
-        if corner == 0 {
+        self.corner_wanted = frequency(corner, SAMPLE_RATE);
+        if self.still >= CHORUS_FILL_SAMPLES {
+            // Nothing passes into the switch's filters and they hold
+            // nothing: at once, and empty. That nothing comes out of them
+            // is not enough: a filter at the switch's top keeps from the
+            // output the charge the capacitor before it gives up for
+            // seconds after a wide pulse's note, and taken out of the
+            // path in one sample it lets all of that through at once.
+            self.corner = self.corner_wanted;
+            self.set_high_pass();
             self.high_pass.reset();
-        }
-        // The bass lift's capacitor is followed only while the lift is
-        // heard; what it held when the switch left 0 is not brought back
-        // when the switch returns.
-        if !(law.bass_boost && patch.hpf == 0) {
             self.bass.reset();
+            self.lift = if self.bass_lift() { HIGH_PASS_FADE_SAMPLES } else { 0 };
         }
+        // Otherwise the corner and the lift move to their places in
+        // `render`, a sample at a time.
         let slider = i32::from(patch.get(Slider::VcaLevel)).saturating_sub(VCA_LEVEL_CENTRE);
         let octaves = slider.saturating_mul(VCA_LEVEL_RANGE) / VCA_LEVEL_CENTRE;
         self.level_wanted = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
@@ -551,6 +613,61 @@ impl Juno {
         }
         // Any other change is made in `render`, while the lines are not
         // heard.
+    }
+
+    /// Whether the patch's high-pass switch lifts the bass.
+    fn bass_lift(&self) -> bool {
+        self.law.bass_boost && self.patch.hpf == 0
+    }
+
+    /// Sets the high-pass filter to its corner as it stands; with the
+    /// filter out of the path, to the corner its capacitor empties at.
+    fn set_high_pass(&mut self) {
+        let step = if self.corner == 0 { frequency(HIGH_PASS_DISCHARGE, SAMPLE_RATE) } else { self.corner };
+        self.high_pass.set_cutoff(step);
+    }
+
+    /// One sample of the high-pass switch: the filter at its corner, which
+    /// moves towards the switch's by [`HIGH_PASS_SLEW`] at the most, and
+    /// the bass lift, which comes and goes over
+    /// [`HIGH_PASS_FADE_SAMPLES`]. Nothing in it is ever emptied or cut
+    /// out at once while a signal passes: a filter out of the path gives
+    /// up what it holds, and the lift's low-pass is fed less and less.
+    #[inline]
+    fn high_pass_switch(&mut self, input: i32, lift: bool) -> i32 {
+        if self.corner != self.corner_wanted {
+            self.corner = if self.corner < self.corner_wanted {
+                self.corner.saturating_add(HIGH_PASS_SLEW).min(self.corner_wanted)
+            } else {
+                self.corner.saturating_sub(HIGH_PASS_SLEW).max(self.corner_wanted)
+            };
+            self.set_high_pass();
+        }
+        let mut signal = if self.corner == 0 {
+            limit(input).saturating_sub(self.high_pass.low_pass(0))
+        } else {
+            self.high_pass.high_pass(input)
+        };
+        let whole = if lift { HIGH_PASS_FADE_SAMPLES } else { 0 };
+        if self.lift < whole {
+            self.lift = self.lift.saturating_add(1);
+        } else if self.lift > whole {
+            self.lift = self.lift.saturating_sub(1);
+        }
+        if self.law.bass_boost {
+            let into = if self.lift == HIGH_PASS_FADE_SAMPLES {
+                signal
+            } else {
+                scale(signal, self.lift.cast_signed().saturating_mul(HIGH_PASS_FADE_UNIT))
+            };
+            signal = signal.saturating_add(amplify(self.bass.low_pass(into), BASS_BOOST_GAIN));
+        }
+        self.still = if input.saturating_abs() < QUIET_LEVEL && signal.saturating_abs() < QUIET_LEVEL {
+            self.still.saturating_add(1).min(CHORUS_FILL_SAMPLES)
+        } else {
+            0
+        };
+        signal
     }
 
     /// The patch's chorus setting as the model has it.
@@ -788,17 +905,14 @@ impl Juno {
         // the law, as a volume control's taper).
         let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
         let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
-        let boost = self.law.bass_boost && self.patch.hpf == 0;
+        let lift = self.bass_lift();
         let chorus = self.chorus_mode();
         for sample in out {
             let earlier = self.voices_sample();
             let later = self.voices_sample();
             let mut signal = self.decimator.process(earlier, later);
             signal = self.coupling.high_pass(signal);
-            signal = self.high_pass.high_pass(signal);
-            if boost {
-                signal = signal.saturating_add(amplify(self.bass.low_pass(signal), BASS_BOOST_GAIN));
-            }
+            signal = self.high_pass_switch(signal, lift);
             if self.level != self.level_wanted {
                 let step = self.level_wanted.saturating_sub(self.level) >> VCA_LEVEL_SLEW_SHIFT;
                 // A share cut to nothing would never arrive.
