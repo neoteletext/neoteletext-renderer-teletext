@@ -78,7 +78,7 @@ fn parts() -> Vec<(&'static str, Vec<Timed>, f64)> {
     }
 
     // The line, all eight voices on each key, sliding from key to key.
-    let lead = factory::sync_sweep().with(Param::AssignMode, 2).with(Param::Env2Release, 90);
+    let lead = factory::sync_sweep().with(Param::Env2Release, 90);
     let glide = Performance { portamento: Portamento::On, portamento_time: 12, ..Performance::DEFAULT };
     let mut line = vec![
         Timed(0.0, Change::Mode(KeyMode::Whole)),
@@ -93,7 +93,14 @@ fn parts() -> Vec<(&'static str, Vec<Timed>, f64)> {
 
     let mut gong = vec![
         Timed(0.0, Change::Panel(Performance::DEFAULT)),
-        Timed(0.0, Change::Upper(Box::new(factory::gong().with(Param::Env2Sustain, 0).with(Param::Env2Decay, 190)))),
+        // The sheet has the gong in unison, for single notes; in poly 1
+        // here each stroke rings on under the next.
+        Timed(
+            0.0,
+            Change::Upper(Box::new(
+                factory::gong().with(Param::AssignMode, 0).with(Param::Env2Sustain, 0).with(Param::Env2Decay, 190),
+            )),
+        ),
     ];
     for (key, beat) in STROKES {
         note(&mut gong, key, beat * BEAT, 0.3);

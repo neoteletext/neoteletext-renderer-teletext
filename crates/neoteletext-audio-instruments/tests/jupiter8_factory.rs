@@ -4,7 +4,8 @@
 //!
 //! Source: "Roland Jupiter-8 factory patch sheets" (65 scanned pages):
 //! each sheet draws the panel with every slider and switch where the
-//! patch has it. The scans are coarse: a slider's position is read to
+//! patch has it, and names under it the assign mode and what the bender
+//! reaches. The scans are coarse: a slider's position is read to
 //! about half a division of its ten, a knob's to its nearest marking,
 //! and what could not be told apart is said below. They are fixtures,
 //! not a transcription to rely on; the data cassette is not used.
@@ -186,6 +187,10 @@ pub fn sync_sweep() -> Patch {
             // The range knob at 12 o'clock, between 8' and 4'.
             (Param::Vco2Range, 18),
             (Param::Vco2Wave, 2),
+            // The sheet: "UNISON", and "BENDER: VCO-2 ONLY (MANUAL SYNC
+            // SWEEP)".
+            (Param::AssignMode, 2),
+            (Param::Vco1Bend, 0),
         ],
     )
 }
@@ -221,6 +226,8 @@ pub fn gong() -> Patch {
             (Param::Vco2Range, 17),
             (Param::Vco2Wave, 0),
             (Param::Env1Polarity, 1),
+            // The sheet: "UNISON MODE".
+            (Param::AssignMode, 2),
         ],
     )
 }
