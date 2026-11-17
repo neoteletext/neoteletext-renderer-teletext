@@ -97,7 +97,7 @@ pub mod patch;
 use crate::analog::allocator::{Allocator, HELD_KEYS, Mode, Priority, Stage as KeyStage, Trigger};
 use crate::analog::decimator::Decimator;
 use crate::analog::drift::Drift;
-use crate::analog::envelope::{IMMEDIATE, RcEnvelope, Stage, apply, time_constant};
+use crate::analog::envelope::{ENVELOPE_ONE, IMMEDIATE, RcEnvelope, Stage, apply, time_constant};
 use crate::analog::filter::{Ladder, ONE_Q28, OnePole, saturate};
 use crate::analog::fixed::{accumulate, amplify, mul_high, scale};
 use crate::analog::oscillator::{Noise, Oscillator, Waves, waveform};
@@ -186,6 +186,71 @@ const NOISE_RATE: u32 = RATE / 2;
 /// Millionths of a second in a thousandth.
 const MILLISECOND: u32 = 1_000;
 
+/// The right shift from a potentiometer's whole travel to the most of it
+/// that a sample of the voice moves it: the whole travel in 1,024
+/// samples of the voice, which are 256 of the output's, 5.3 ms, the
+/// time a volume controller's gain takes
+/// ([`VOLUME_SLEW`](crate::analog::volume::VOLUME_SLEW)).
+///
+/// Source: own choice. A knob of the panel is a potentiometer under a
+/// hand, which passes every place between two; a patch that is set
+/// under a sounding note puts the knob at its new place in no time,
+/// which no hand does and which steps the signal. Long against a
+/// sample, short against a hand.
+const POT_SLEW_SHIFT: u32 = 10;
+/// The filter's two knobs, CUTOFF FREQUENCY and EMPHASIS, go more
+/// slowly, by this shift: their whole travel in 4,096 samples of the
+/// voice, 21 ms.
+///
+/// Source: own choice, measured (`tests/minimoog_control_sweep.rs`, on
+/// a triangle through the open filter, against the triangle's own
+/// largest step). The CUTOFF FREQUENCY's travel is ten octaves and the
+/// filter follows it at once: crossed in 5.3 ms, the filter opens over
+/// a steady tone within a few samples, a step 1.42 times the tone's
+/// own, and in 21 ms 1.16 times. The EMPHASIS takes most of the level
+/// it takes in the first of its travel (the gain below the cutoff is
+/// `1 / (1 + k)`): one division of its dial in 5.3 ms of the whole is a
+/// step 1.28 times the tone's own.
+const FILTER_SLEW_SHIFT: u32 = 12;
+/// The most a sample moves each potentiometer of [`Pots`].
+const LEVEL_SLEW: i32 = i32::MAX >> POT_SLEW_SHIFT;
+/// Likewise the noise's level, whose top is [`law::NOISE_LEVEL`].
+const NOISE_SLEW: i32 = law::NOISE_LEVEL >> POT_SLEW_SHIFT;
+/// Likewise the external input's gain, whose top is
+/// [`law::EXTERNAL_GAIN`].
+const EXTERNAL_SLEW: i32 = law::EXTERNAL_GAIN >> POT_SLEW_SHIFT;
+/// Likewise the EMPHASIS, whose top is [`law::EMPHASIS_TOP`].
+const EMPHASIS_SLEW: i32 = law::EMPHASIS_TOP >> FILTER_SLEW_SHIFT;
+/// Likewise the modulation wheel, which is the amount of what moves the
+/// cutoff and goes as slowly as the filter's knobs: two thirds of its travel in
+/// 5.3 ms under a note with the EMPHASIS up is a step 1.78 times the
+/// note's own.
+const WHEEL_SLEW: i32 = i32::MAX >> FILTER_SLEW_SHIFT;
+/// Likewise a contour's SUSTAIN LEVEL, whose top is one in Q30.
+const SUSTAIN_SLEW: i32 = ENVELOPE_ONE >> POT_SLEW_SHIFT;
+/// Likewise the AMOUNT OF CONTOUR, whose top is [`law::CONTOUR`].
+const CONTOUR_SLEW: i32 = law::CONTOUR >> POT_SLEW_SHIFT;
+/// Likewise the CUTOFF FREQUENCY, whose travel is the dial's ten
+/// divisions.
+const CUTOFF_SLEW: i32 = (law::CUTOFF_DIVISION * CUTOFF_DIVISIONS) >> FILTER_SLEW_SHIFT;
+/// Divisions of the CUTOFF FREQUENCY dial, from -5 to 5.
+const CUTOFF_DIVISIONS: i32 = (2 * patch::CUTOFF_MAX / 100) as i32;
+
+/// A potentiometer's place a sample on: `most` nearer to `wanted` than
+/// `now`, or `wanted` itself once it is that near.
+#[inline]
+const fn approach(now: i32, wanted: i32, most: i32) -> i32 {
+    let distance = wanted.saturating_sub(now);
+    let step = if distance > most {
+        most
+    } else if distance < most.saturating_neg() {
+        most.saturating_neg()
+    } else {
+        distance
+    };
+    now.saturating_add(step)
+}
+
 /// Pink noise, and red: white noise through one-pole filters two octaves
 /// apart, each half as strong as the one below ([`law::PINK_CORNER`]).
 #[derive(Clone, Debug)]
@@ -234,41 +299,84 @@ struct OscillatorSettings {
     /// What its range and FREQUENCY knob add to its pitch, in octaves.
     offset: i32,
     waveform: Waveform,
-    /// Its level in the mixer, in Q31: nothing with its switch off.
-    level: i32,
+    /// Its switch in the mixer.
+    on: bool,
+}
+
+/// The potentiometers of the panel that set a level in the signal's
+/// path or the filter: where a patch puts them, or where they stand on
+/// their way there ([`POT_SLEW_SHIFT`]). The mixer's switches are no
+/// part of them: a switch opens its path at once, on the instrument
+/// too.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Pots {
+    /// The mixer's VOLUME of each oscillator, in Q31.
+    levels: [i32; OSCILLATORS],
+    /// The NOISE VOLUME, as the noise's level in Q31.
+    noise: i32,
+    /// The EXTERNAL INPUT VOLUME, as its gain in Q28.
+    external: i32,
+    /// The cutoff with nothing added, in octaves from the anchor.
+    cutoff: i32,
+    /// The EMPHASIS, as the filter's feedback.
+    feedback: i32,
+    /// The AMOUNT OF CONTOUR, in octaves.
+    contour: i32,
+    /// The MODULATION MIX: the noise's share of the modulation, in Q31.
+    mix: i32,
+    /// The main output's VOLUME, in Q31.
+    volume: i32,
+    /// The SUSTAIN LEVEL of the filter's contour and of the loudness
+    /// contour, in Q30.
+    sustains: [i32; 2],
+}
+
+impl Pots {
+    /// Each potentiometer a sample nearer to where `wanted` has it.
+    #[inline]
+    fn approach(&mut self, wanted: &Self) {
+        for (level, &wanted) in self.levels.iter_mut().zip(&wanted.levels) {
+            *level = approach(*level, wanted, LEVEL_SLEW);
+        }
+        self.noise = approach(self.noise, wanted.noise, NOISE_SLEW);
+        self.external = approach(self.external, wanted.external, EXTERNAL_SLEW);
+        self.cutoff = approach(self.cutoff, wanted.cutoff, CUTOFF_SLEW);
+        self.feedback = approach(self.feedback, wanted.feedback, EMPHASIS_SLEW);
+        self.contour = approach(self.contour, wanted.contour, CONTOUR_SLEW);
+        self.mix = approach(self.mix, wanted.mix, LEVEL_SLEW);
+        self.volume = approach(self.volume, wanted.volume, LEVEL_SLEW);
+        for (sustain, &wanted) in self.sustains.iter_mut().zip(&wanted.sustains) {
+            *sustain = approach(*sustain, wanted, SUSTAIN_SLEW);
+        }
+    }
 }
 
 /// What a patch asks of the voice, worked out once when it is set.
+#[allow(clippy::struct_excessive_bools, reason = "each is a switch of the panel, on or off")]
 #[derive(Clone, Copy, Debug)]
 struct Settings {
     oscillators: [OscillatorSettings; OSCILLATORS],
     /// Oscillator 3 follows the keyboard.
     follow: bool,
     tune: i32,
-    noise: i32,
+    /// The mixer's switches of the noise and of the external input.
+    noise_on: bool,
+    external_on: bool,
     pink: bool,
-    /// The external input's gain, in Q28: nothing with its switch off.
-    external: i32,
-    /// The cutoff with nothing added, in octaves from the anchor.
-    cutoff: i32,
-    feedback: i32,
     keyboard: i32,
-    contour: i32,
     /// How far the modulation moves the pitch and the cutoff, in octaves
     /// in Q28: nothing with its switch off.
     oscillator_modulation: i32,
     filter_modulation: i32,
-    /// The noise's share of the modulation, in Q31.
-    mix: i32,
     glide: i32,
-    volume: i32,
+    /// Where the patch has the potentiometers.
+    pots: Pots,
 }
 
 impl Settings {
     fn new(patch: &Patch) -> Self {
         let [first, second, third] = patch.oscillators;
         let range = |oscillator: OscillatorPatch| law::RANGES.get(oscillator.range as usize).copied().unwrap_or(0);
-        let level = |oscillator: OscillatorPatch| if oscillator.on { law::share(oscillator.volume) } else { 0 };
         let third_frequency = if patch.oscillator_3_control {
             law::cents(i32::from(third.frequency))
         } else {
@@ -286,36 +394,42 @@ impl Settings {
             if first_control { third_share } else { 0 }.saturating_add(if second_control { two_thirds } else { 0 });
         Self {
             oscillators: [
-                OscillatorSettings { offset: range(first), waveform: first.waveform, level: level(first) },
+                OscillatorSettings { offset: range(first), waveform: first.waveform, on: first.on },
                 OscillatorSettings {
                     offset: range(second).saturating_add(law::cents(i32::from(second.frequency))),
                     waveform: second.waveform,
-                    level: level(second),
+                    on: second.on,
                 },
                 OscillatorSettings {
                     offset: range(third).saturating_add(third_frequency),
                     waveform: third.waveform,
-                    level: level(third),
+                    on: third.on,
                 },
             ],
             follow: patch.oscillator_3_control,
             tune: law::cents(i32::from(patch.tune)),
-            noise: if patch.noise_on { scale(law::NOISE_LEVEL, law::share(patch.noise_volume)) } else { 0 },
+            noise_on: patch.noise_on,
+            external_on: patch.external_on,
             pink: patch.noise_pink,
-            external: if patch.external_on { scale(law::EXTERNAL_GAIN, law::square(patch.external_volume)) } else { 0 },
-            cutoff: law::share_of(law::CUTOFF_DIVISION, dial, 100).saturating_add(trim),
-            feedback,
             keyboard,
-            contour: scale(law::CONTOUR, law::share(patch.contour_amount)),
             oscillator_modulation: if patch.oscillator_modulation { law::OSCILLATOR_MODULATION } else { 0 },
             filter_modulation: if patch.filter_modulation { law::FILTER_MODULATION } else { 0 },
-            mix: law::share(patch.modulation_mix),
             glide: if patch.glide_on && patch.glide > 0 {
                 time_constant(law::glide(patch.glide), RATE)
             } else {
                 IMMEDIATE
             },
-            volume: law::share(patch.volume),
+            pots: Pots {
+                levels: [law::share(first.volume), law::share(second.volume), law::share(third.volume)],
+                noise: scale(law::NOISE_LEVEL, law::share(patch.noise_volume)),
+                external: scale(law::EXTERNAL_GAIN, law::square(patch.external_volume)),
+                cutoff: law::share_of(law::CUTOFF_DIVISION, dial, 100).saturating_add(trim),
+                feedback,
+                contour: scale(law::CONTOUR, law::share(patch.contour_amount)),
+                mix: law::share(patch.modulation_mix),
+                volume: law::share(patch.volume),
+                sustains: [law::level(patch.filter_contour.sustain), law::level(patch.loudness_contour.sustain)],
+            },
         }
     }
 }
@@ -329,6 +443,9 @@ impl Settings {
 pub struct Minimoog {
     patch: Patch,
     settings: Settings,
+    /// The potentiometers as they stand, on their way to where the patch
+    /// has them.
+    pots: Pots,
     allocator: Allocator<1>,
     /// The trigger count the contours last acted on.
     triggers: u32,
@@ -359,9 +476,11 @@ pub struct Minimoog {
     pitch: i32,
     pitch_fraction: u32,
     /// The pitch wheel, in octaves, and the modulation wheel's share in
-    /// Q31.
+    /// Q31: where the controller has it, and where it stands on its way
+    /// there, a potentiometer as the knobs are.
     bend: i32,
     wheel: i32,
+    wheel_now: i32,
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
@@ -397,6 +516,7 @@ impl Minimoog {
         let mut minimoog = Self {
             patch: Patch::DEFAULT,
             settings: Settings::new(&Patch::DEFAULT),
+            pots: Settings::new(&Patch::DEFAULT).pots,
             // Owner's manual, page 8: "If more than one key is held down,
             // only the lowest one has effect"; page 2: "A timing signal
             // begins whenever a key on the keyboard is depressed, and
@@ -421,6 +541,7 @@ impl Minimoog {
             pitch_fraction: 0,
             bend: 0,
             wheel: 0,
+            wheel_now: 0,
             volume: DATA_MAX,
             volume_gain: VolumeGain::full(),
             wide: Decimator::wide(),
@@ -442,12 +563,18 @@ impl Minimoog {
         self.set_patch(&patch);
     }
 
-    /// Gives the instrument a patch, which it copies. It takes effect at
-    /// once, on a note that is sounding too, as moving the panel's
-    /// controls does.
+    /// Gives the instrument a patch, which it copies. It takes effect on
+    /// a note that is sounding too, as moving the panel's controls does:
+    /// the switches at once, and the knobs that set a level or the
+    /// filter over five thousandths of a second at the most, the CUTOFF
+    /// FREQUENCY over 85, as a hand turns them through every place
+    /// between. With no note sounding, all of it is there at once.
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
         self.apply_patch();
+        if !self.sounding() {
+            self.pots = self.settings.pots;
+        }
     }
 
     /// The patch being played.
@@ -495,7 +622,6 @@ impl Minimoog {
             contour.set_attack_target(law::ATTACK_TARGET);
             contour.set_attack(time(source.attack));
             contour.set_decay(decay);
-            contour.set_sustain(law::level(source.sustain));
             contour.set_release(if patch.decay_on { decay } else { dump });
         }
     }
@@ -572,6 +698,7 @@ impl Minimoog {
                 self.allocator.finished(0);
                 self.contours = [RcEnvelope::new(), RcEnvelope::new()];
                 self.apply_patch();
+                self.pots = self.settings.pots;
                 self.ladder.reset();
                 self.coupling.reset();
                 self.return_coupling.reset();
@@ -643,6 +770,9 @@ impl Minimoog {
     #[inline]
     fn sample(&mut self) -> i32 {
         let settings = self.settings;
+        self.pots.approach(&settings.pots);
+        let pots = self.pots;
+        self.wheel_now = approach(self.wheel_now, self.wheel, WHEEL_SLEW);
 
         // The glide: the pitch moves a share of the way to the key's.
         if settings.glide == IMMEDIATE {
@@ -656,8 +786,8 @@ impl Minimoog {
         // The modulation: oscillator 3 and the noise, mixed, through the
         // wheel. A full swing is one in Q24.
         let (periodic, random) = self.modulation;
-        let mixed = periodic.wrapping_add(scale(random.wrapping_sub(periodic), settings.mix));
-        let modulation = scale(mixed, self.wheel);
+        let mixed = periodic.wrapping_add(scale(random.wrapping_sub(periodic), pots.mix));
+        let modulation = scale(mixed, self.wheel_now);
         let pitch_modulation = amplify(modulation, settings.oscillator_modulation);
         let cutoff_modulation = amplify(modulation, settings.filter_modulation);
 
@@ -666,8 +796,8 @@ impl Minimoog {
         let free = law::keys(law::PITCH_KEY, law::FREE_KEY);
         let mut sum = 0i32;
         let mut third_wave = 0i32;
-        let parts = self.oscillators.iter_mut().zip(&mut self.drifts).zip(settings.oscillators);
-        for (((oscillator, drift), setting), number) in parts.zip(0u8..) {
+        let parts = self.oscillators.iter_mut().zip(&mut self.drifts).zip(settings.oscillators).zip(pots.levels);
+        for ((((oscillator, drift), setting), level), number) in parts.zip(0u8..) {
             let third = number == 2;
             let base = if third && !settings.follow { free } else { keyed };
             let pitch = base.wrapping_add(setting.offset).wrapping_add(drift.tick());
@@ -676,13 +806,15 @@ impl Minimoog {
             if third {
                 third_wave = wave;
             }
-            sum = sum.wrapping_add(scale(wave, setting.level));
+            if setting.on {
+                sum = sum.wrapping_add(scale(wave, level));
+            }
         }
 
         // The noise: white or pink to the mixer; to the modulation, pink
         // with the switch at white and red with it at pink (service
         // manual, figure 9-8: "PINK OR RED NOISE" to the modulation mix).
-        let needs_colour = settings.pink || (settings.mix > 0 && self.wheel > 0);
+        let needs_colour = settings.pink || (pots.mix > 0 && self.wheel_now > 0);
         self.noise_due = !self.noise_due;
         if self.noise_due {
             let (pink, red) = if needs_colour { self.pink.tick() } else { (0, 0) };
@@ -692,33 +824,39 @@ impl Minimoog {
         let (heard, random) = if settings.pink { (pink, red) } else { (white, pink) };
         // The circuit's own noise is what the filter's oscillation grows
         // from.
-        sum = sum.wrapping_add(scale(heard, settings.noise)).wrapping_add(white >> law::FLOOR_SHIFT);
+        if settings.noise_on {
+            sum = sum.wrapping_add(scale(heard, pots.noise));
+        }
+        sum = sum.wrapping_add(white >> law::FLOOR_SHIFT);
         self.modulation = (third_wave, random);
 
         // The instrument's own output, back through the external input's
         // preamplifier, which clips.
-        if settings.external != 0 {
+        if settings.external_on && pots.external != 0 {
             let back = self.return_coupling.high_pass(self.returned);
-            sum = sum.wrapping_add(saturate(amplify(back, settings.external)));
+            sum = sum.wrapping_add(saturate(amplify(back, pots.external)));
         }
         let mixed = self.coupling.high_pass(sum);
 
         // The filter: the knob, the keyboard, the contour, the
         // modulation.
         let [filter_contour, loudness_contour] = &mut self.contours;
+        let [filter_sustain, loudness_sustain] = pots.sustains;
+        filter_contour.set_sustain(filter_sustain);
+        loudness_contour.set_sustain(loudness_sustain);
         let keyboard = self.pitch.wrapping_sub(law::keys(law::PITCH_KEY, law::KEYBOARD.0));
-        let cutoff = settings
+        let cutoff = pots
             .cutoff
             .wrapping_add(scale(keyboard, settings.keyboard))
-            .wrapping_add(mul_high(filter_contour.tick(), settings.contour) << 2)
+            .wrapping_add(mul_high(filter_contour.tick(), pots.contour) << 2)
             .wrapping_add(cutoff_modulation);
-        self.ladder.set(law::raise(CUTOFF_STEP, cutoff), settings.feedback);
+        self.ladder.set(law::raise(CUTOFF_STEP, cutoff), pots.feedback);
         // The pair that reads the ladder's top stage bends as the ladder's
         // own do (law::OUTPUT_STAGE).
         let filtered = saturate(self.ladder.tick(mixed));
 
         // The amplifier and the output's volume.
-        let output = scale(apply(filtered, loudness_contour.tick()), settings.volume);
+        let output = scale(apply(filtered, loudness_contour.tick()), pots.volume);
         self.returned = output;
         output
     }
