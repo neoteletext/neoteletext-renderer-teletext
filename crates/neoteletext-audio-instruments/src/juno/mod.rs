@@ -154,6 +154,12 @@ const CONTROL_ALL_SOUND_OFF: u8 = 120;
 const CONTROL_RESET_CONTROLLERS: u8 = 121;
 /// Controller: all notes off.
 const CONTROL_ALL_NOTES_OFF: u8 = 123;
+/// Controller: the last of the mode messages (omni off, omni on, mono on,
+/// poly on), each of which is an all notes off too.
+///
+/// Source: JUNO-106 owner's manual, MIDI Implementation 2.1, Notes: "Mode
+/// messages (123 - 127) are also recognized as ALL NOTES OFF."
+const CONTROL_POLY_ON: u8 = 127;
 
 /// The seed of the instrument's noise, of its voices' tolerances and of
 /// its oscillators that hold a random level.
@@ -472,8 +478,10 @@ impl Juno {
     /// - Note on (0x9n); the velocity is not used.
     /// - Control change (0xBn) of the modulation wheel (1), volume (7),
     ///   the sustain pedal (64, down from 64), all sound off (120), reset
-    ///   all controllers (121, which leaves the volume) and all notes off
-    ///   (123).
+    ///   all controllers (121, which leaves the volume), all notes off
+    ///   (123) and the four mode messages (124 to 127), which are an all
+    ///   notes off and nothing more: the instrument stays one part that
+    ///   hears every channel.
     /// - Pitch bend (0xEn), 14 bits, `data1` the low seven.
     ///
     /// Anything else is ignored and counted ([`Juno::ignored_events`]):
@@ -525,7 +533,7 @@ impl Juno {
                 self.bend = 0;
                 self.allocator.sustain(false);
             }
-            CONTROL_ALL_NOTES_OFF => {
+            CONTROL_ALL_NOTES_OFF..=CONTROL_POLY_ON => {
                 // As a note off for every key: the pedal still holds.
                 let voices = *self.allocator.voices();
                 for voice in voices.iter().filter(|voice| voice.stage == Stage::Held) {
