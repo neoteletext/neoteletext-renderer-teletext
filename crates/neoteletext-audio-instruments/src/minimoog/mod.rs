@@ -73,17 +73,21 @@
 //! - **What the ladder's curve folds back.** The oscillators by
 //!   themselves leave nothing below 20 kHz that is no harmonic within
 //!   91 dB (`analog::oscillator`). The ladder's stages bend their edges,
-//!   and at twice the output rate what that makes above 76 kHz comes
-//!   back below 20 kHz. Against the note's strongest harmonic, with the
-//!   filter open: one sawtooth at 10 leaves 84 dB at 110 Hz, 66 dB at
-//!   880 Hz and 53 dB at 4,186 Hz, the top key at 2'; at 5, 11 dB more;
-//!   the narrow rectangular wave 6 to 8 dB less than the sawtooth;
-//!   three sawtooths at 10 in step, 71 dB at 110 Hz and 40 dB at
-//!   4,186 Hz; a triangle, 97 dB at worst. From 220 Hz up at 10 that is
-//!   short of the 80 dB the oscillators are held to. The amplifier's
-//!   curve after the ladder is not the cause: without it one
-//!   oscillator's figures move by less than 1 dB
-//!   (`tests/minimoog_aliasing.rs` holds the figures).
+//!   and at four times the output rate, where the voice runs, what that
+//!   makes above 172 kHz comes back below 20 kHz. Against the note's
+//!   strongest harmonic, with the filter open: one sawtooth at 10 leaves
+//!   92 dB at 110 Hz, 74 dB at 880 Hz and 61 dB at 4,186 Hz, the top key
+//!   at 2'; at 5, 80 dB or better to 1,760 Hz and 72 dB at the top key;
+//!   the narrow rectangular wave 4 to 6 dB less than the sawtooth; three
+//!   sawtooths at 10 in step, 78 dB at 110 Hz and 46 dB at 4,186 Hz; a
+//!   triangle, 99 dB at worst. From 880 Hz up at 10 that is short of the
+//!   80 dB the oscillators are held to; at twice the output rate every
+//!   figure was 6 to 9 dB worse. The amplifier's curve after the ladder
+//!   is not the cause: without it one oscillator's figures move by less
+//!   than 1 dB (`tests/minimoog_aliasing.rs` holds the figures).
+//! - **The noise is made at twice the output rate** and each of its
+//!   samples held for two of the voice's, which takes 0.6 dB off it at
+//!   20 kHz.
 //! - **Velocity is ignored**, as the keyboard has none; there is no
 //!   A-440 tone and no external control input.
 
@@ -170,6 +174,17 @@ pub const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 1296 / 10000) as i32;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
+/// The rate the noise generators run at, in hertz: twice the output
+/// rate, each of their samples held for two of the voice's.
+///
+/// Source: own choice. A generator that gives a new number for each
+/// sample spreads its power evenly to half the rate it is run at, and
+/// the levels of the noise were set with the generators at this rate:
+/// run at the voice's four times the output rate, half as much of the
+/// same power would lie below 20 kHz. Held, the noise is as it was to
+/// within 0.6 dB at 20 kHz.
+const NOISE_RATE: u32 = RATE / 2;
+
 /// Millionths of a second in a thousandth.
 const MILLISECOND: u32 = 1_000;
 
@@ -191,7 +206,7 @@ impl Pink {
         });
         let stages = core::array::from_fn(|_| {
             let mut stage = OnePole::new();
-            stage.set_cutoff(frequency(corner, RATE));
+            stage.set_cutoff(frequency(corner, NOISE_RATE));
             // Two octaves to the next.
             corner = corner.saturating_mul(4);
             stage
@@ -324,6 +339,10 @@ pub struct Minimoog {
     drift_cents: u8,
     noise: Noise,
     pink: Pink,
+    /// The noises' last samples, white, pink and red, and whether the
+    /// next sample of the voice takes new ones ([`NOISE_RATE`]).
+    noises: (i32, i32, i32),
+    noise_due: bool,
     coupling: OnePole,
     ladder: Ladder,
     /// The filter's contour and the loudness contour.
@@ -346,6 +365,9 @@ pub struct Minimoog {
     bend: i32,
     wheel: i32,
     volume: u8,
+    /// From the voice's rate to twice the output rate, and from there to
+    /// the output rate.
+    wide: Decimator,
     decimator: Decimator,
     ignored: u64,
 }
@@ -385,6 +407,8 @@ impl Minimoog {
             drift_cents: law::DRIFT_DEFAULT_CENTS,
             noise: Noise::new(SEED),
             pink: Pink::new(),
+            noises: (0, 0, 0),
+            noise_due: false,
             coupling,
             ladder: Ladder::new(),
             contours: [RcEnvelope::new(), RcEnvelope::new()],
@@ -397,6 +421,7 @@ impl Minimoog {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            wide: Decimator::wide(),
             decimator: Decimator::sharp(),
             ignored: 0,
         };
@@ -653,9 +678,13 @@ impl Minimoog {
         // The noise: white or pink to the mixer; to the modulation, pink
         // with the switch at white and red with it at pink (service
         // manual, figure 9-8: "PINK OR RED NOISE" to the modulation mix).
-        let white = self.noise.tick();
         let needs_colour = settings.pink || (settings.mix > 0 && self.wheel > 0);
-        let (pink, red) = if needs_colour { self.pink.tick() } else { (0, 0) };
+        self.noise_due = !self.noise_due;
+        if self.noise_due {
+            let (pink, red) = if needs_colour { self.pink.tick() } else { (0, 0) };
+            self.noises = (self.noise.tick(), pink, red);
+        }
+        let (white, pink, red) = self.noises;
         let (heard, random) = if settings.pink { (pink, red) } else { (white, pink) };
         // The circuit's own noise is what the filter's oscillation grows
         // from.
@@ -698,8 +727,8 @@ impl Minimoog {
         let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
         let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
         for sample in out {
-            let earlier = self.sample();
-            let later = self.sample();
+            let [first, second, third, fourth] = core::array::from_fn(|_| self.sample());
+            let (earlier, later) = (self.wide.process(first, second), self.wide.process(third, fourth));
             let signal = amplify(self.decimator.process(earlier, later), volume);
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));
             if self.contours.last().is_some_and(|contour| contour.stage() == Stage::Rest) {

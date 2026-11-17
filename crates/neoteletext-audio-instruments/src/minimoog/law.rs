@@ -19,14 +19,19 @@ pub use crate::analog::octave::{CENTS, OCTAVE, OCTAVE_BITS, SEMITONES, cents, ke
 use crate::analog::octave::{ONE_Q30, square_root};
 
 /// How many times the output rate the voice runs at: the ladder distorts,
-/// and the oscillators want it for their aliasing to be 80 dB down. What
-/// the ladder's curve makes of their edges at this rate is not 80 dB
-/// down: the instrument's own figures are in its module's "What is not
-/// here", and `tests/minimoog_aliasing.rs` holds them.
+/// and what its curve makes of the oscillators' edges folds back from the
+/// rate. At twice the output rate one sawtooth at 10 left 77 dB at 220 Hz
+/// and 53 dB at the top key; at four times it leaves 85 dB and 61 dB,
+/// each doubling of the rate gaining about 8 dB. It is still not 80 dB
+/// down above 440 Hz: the instrument's own figures are in its module's
+/// "What is not here", and `tests/minimoog_aliasing.rs` holds them.
 ///
-/// Source: own choice, from the measurements of the building blocks
-/// (`analog::oscillator`, `analog::filter`).
-pub const OVERSAMPLING: Oversampling = Oversampling::Twice;
+/// Source: own choice, from those measurements and from what it costs:
+/// the one voice renders 30 times faster than real time at four times
+/// the output rate, and 58 times at twice (`tests/minimoog_instrument.rs`,
+/// `rendering_speed`, 17 November 2026, one core of a 3.7 GHz Intel Core
+/// i9-10900KF).
+pub const OVERSAMPLING: Oversampling = Oversampling::FourTimes;
 /// The voice's rate in hertz.
 pub const RATE: u32 = OVERSAMPLING.rate();
 

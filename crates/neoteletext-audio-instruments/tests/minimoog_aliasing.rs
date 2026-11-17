@@ -4,10 +4,12 @@
 //!
 //! The oscillators by themselves are 91 dB clean at the voice's rate
 //! (`tests/analog_oscillator.rs`). The ladder's stages bend their edges,
-//! and what that makes above 76 kHz comes back below 20 kHz when it is
-//! sampled at 96 kHz: the figures held here are what the instrument
-//! does, and from 220 Hz up with a sawtooth at 10 they are not the 80 dB
-//! asked of the oscillators.
+//! and what that makes above 172 kHz comes back below 20 kHz when it is
+//! sampled at 192 kHz: the figures held here are what the instrument
+//! does, and from 880 Hz up with a sawtooth at 10 they are not the 80 dB
+//! asked of the oscillators. At 96 kHz, where the voice first ran, each
+//! was 6 to 9 dB worse: the sawtooth at 10 left 83.6, 76.9, 72.1, 66.3,
+//! 60.4 and 52.7 dB, and three in step 71.2 to 39.6 dB.
 
 // Without the feature there is nothing here to test.
 #![cfg(feature = "minimoog")]
@@ -92,12 +94,12 @@ type Case = (&'static str, Waveform, [u8; 3], [f64; 6]);
 /// The filter open (CUTOFF FREQUENCY at 5), no EMPHASIS, no drift; the
 /// oscillators of one case at one pitch and in step.
 const CASES: [Case; 6] = [
-    ("triangle at 10", Waveform::Triangle, [100, 0, 0], [-101.8, -100.5, -100.0, -99.4, -96.8, -98.6]),
-    ("sawtooth at 5", Waveform::Sawtooth, [50, 0, 0], [-88.6, -87.2, -82.7, -76.7, -71.4, -63.8]),
-    ("sawtooth at 10", Waveform::Sawtooth, [100, 0, 0], [-83.6, -76.9, -72.1, -66.3, -60.4, -52.7]),
-    ("square at 10", Waveform::Square, [100, 0, 0], [-83.1, -76.6, -71.7, -65.8, -59.8, -51.7]),
-    ("narrow at 10", Waveform::Narrow, [100, 0, 0], [-77.6, -70.8, -66.1, -60.2, -54.2, -44.7]),
-    ("three sawtooths at 10", Waveform::Sawtooth, [100, 100, 100], [-71.2, -64.6, -59.4, -53.4, -47.4, -39.6]),
+    ("triangle at 10", Waveform::Triangle, [100, 0, 0], [-101.7, -100.3, -99.7, -99.0, -98.7, -103.6]),
+    ("sawtooth at 5", Waveform::Sawtooth, [50, 0, 0], [-88.8, -91.8, -87.6, -85.2, -79.9, -72.1]),
+    ("sawtooth at 10", Waveform::Sawtooth, [100, 0, 0], [-91.5, -85.3, -80.3, -74.4, -68.4, -60.8]),
+    ("square at 10", Waveform::Square, [100, 0, 0], [-91.6, -85.2, -79.6, -73.9, -67.9, -60.5]),
+    ("narrow at 10", Waveform::Narrow, [100, 0, 0], [-86.1, -79.4, -74.2, -68.0, -62.3, -56.4]),
+    ("three sawtooths at 10", Waveform::Sawtooth, [100, 100, 100], [-77.6, -71.0, -65.7, -59.7, -53.7, -46.4]),
 ];
 
 /// The oscillators' own bound, which the instrument's path meets where

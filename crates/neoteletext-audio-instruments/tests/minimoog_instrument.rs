@@ -266,8 +266,9 @@ fn the_noise_is_five_decibels_below_an_oscillator_and_pink_falls_three_decibels_
     for (index, (white, pink)) in white_bands.windows(2).zip(pink_bands.windows(2)).enumerate() {
         let (white, pink) = (10.0 * (white[1] / white[0]).log10(), 10.0 * (pink[1] / pink[0]).log10());
         println!("octave {index}: white {white:+.2} dB, pink {pink:+.2} dB");
-        // Equal power in each octave for pink, twice it for white.
-        assert!((white - 3.0).abs() < 0.8 && pink.abs() < 0.8);
+        // Equal power in each octave for pink, twice it for white; the
+        // open filter takes a little off the top octave of the five.
+        assert!((white - 3.0).abs() < 0.8 && pink.abs() < 0.9);
     }
 }
 
