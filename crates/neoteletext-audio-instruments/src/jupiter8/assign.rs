@@ -130,11 +130,33 @@ impl Assigner {
         match self.mode {
             AssignMode::Poly1 | AssignMode::Poly2 => self.poly_down(key),
             AssignMode::Solo | AssignMode::Unison => {
+                let solo = self.mode == AssignMode::Solo;
+                let fingers = self.held().iter().any(|held| held.down);
                 if let Some(held) = self.held_mut().iter_mut().find(|held| held.key == key) {
                     held.down = true;
-                } else if let Some(place) = self.held.get_mut(self.holding) {
-                    *place = Held { key, down: true };
-                    self.holding = self.holding.wrapping_add(1);
+                } else {
+                    // A key beyond the voices takes the place of the
+                    // oldest key that only the hold keeps (owner's
+                    // manual, printed page 13, quoted at `poly_down`).
+                    let voices = if solo { self.count.min(1) } else { self.count };
+                    if self.holding >= voices.min(HELD_KEYS)
+                        && let Some(kept) = self.held().iter().find(|held| !held.down).map(|held| held.key)
+                    {
+                        self.forget(|held| held.key == kept);
+                    }
+                    if let Some(place) = self.held.get_mut(self.holding) {
+                        *place = Held { key, down: true };
+                        self.holding = self.holding.wrapping_add(1);
+                    }
+                }
+                // Own reading: in solo a key struck with no other under
+                // a finger starts the envelopes again, though the hold
+                // kept a note sounding.
+                if solo
+                    && !fingers
+                    && let Some(slot) = self.active_mut().first_mut()
+                {
+                    slot.gate = false;
                 }
                 self.share_out();
             }
@@ -160,6 +182,14 @@ impl Assigner {
     /// voice and cuts short every other. A key that is already sounding
     /// (which a keyboard cannot send, and MIDI can) starts its own voice
     /// again.
+    ///
+    /// Source: owner's manual, printed page 13, "Hold Selectors": "Any
+    /// notes played after the Hold function is turned on will sustain
+    /// until that Hold function is removed or until more notes are played
+    /// than there are voices available. In this case, voices will be
+    /// taken in the order that they were originally used so long as their
+    /// keys are not physically held on the keyboard." So when every voice
+    /// is sounding, a new key takes the voice the hold has kept longest.
     fn poly_down(&mut self, key: u8) {
         let cyclic = self.mode == AssignMode::Poly1;
         let mut clock = self.clock;
@@ -173,7 +203,11 @@ impl Assigner {
                 up.map(|(index, _)| index).next()
             }
         };
-        let Some(taken) = own.or_else(free) else {
+        let kept = || {
+            let kept = slots.iter().enumerate().filter(|(_, slot)| slot.kept);
+            kept.min_by_key(|(_, slot)| slot.started).map(|(index, _)| index)
+        };
+        let Some(taken) = own.or_else(free).or_else(kept) else {
             return;
         };
         if !cyclic {

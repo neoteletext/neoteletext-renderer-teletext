@@ -71,17 +71,17 @@
 //!   later serial numbers, on a reading of adjustments 14 and 16 that
 //!   their drawings leave open ([`law::CUTOFF_BASE`]).
 //! - **Cross modulation** is bounded at 48 kHz. With the sync on, what
-//!   it aliases below 20 kHz is 70 dB below the strongest harmonic or
+//!   it aliases below 20 kHz is 86 dB below the strongest harmonic or
 //!   better with the slider at 5 or less and keys to the A of 880 Hz,
-//!   56 dB on the A of 1,760 Hz, and with the slider at 10 as little as
-//!   30 dB (`tests/jupiter8_oscillator.rs`); without the sync it could
+//!   79 dB on the A of 1,760 Hz, and with the slider at 10 as little as
+//!   46 dB (`tests/jupiter8_oscillator.rs`); without the sync it could
 //!   not be measured. The oscillators' waveforms are the building
 //!   block's ideal ones, without the glitch the instrument's triangle
 //!   and sine carry where the sawtooth starts again.
 //! - **The resonance at its top** is a feedback of 3.95, where the
 //!   service notes' drawing of the ringing would have a little more than
 //!   the filter can take without oscillating by itself.
-//! - **Eight voices cost** 9 to 14 times less than real time on one core
+//! - **Eight voices cost** 8 to 14 times less than real time on one core
 //!   of a 3.7 GHz Intel Core i9-10900KF.
 //! - **No arpeggiator**, no tape memory, no external control voltages;
 //!   the hold is one pedal for both halves.
@@ -402,8 +402,23 @@ impl Jupiter8 {
     /// Sets how the keyboard is shared between the patches. A change
     /// releases every voice.
     pub fn set_key_mode(&mut self, key_mode: KeyMode) {
+        let moved = (self.key_mode == KeyMode::Whole) != (key_mode == KeyMode::Whole);
         self.key_mode = key_mode;
         self.apply();
+        if moved {
+            // The last four voices now read another assigner's slots,
+            // which count their triggers by themselves: what each voice
+            // last acted on is its new slot as it stands, released, or a
+            // key whose count and number happened to match the old
+            // slot's would not start its voice.
+            for index in 0..VOICES {
+                let (half, place) = self.place(index);
+                let slot = self.assigners.get(half).and_then(|assigner| assigner.slots().get(place));
+                if let (Some(seen), Some(slot)) = (self.seen.get_mut(index), slot) {
+                    *seen = (slot.triggers, slot.key);
+                }
+            }
+        }
     }
 
     /// The key mode.

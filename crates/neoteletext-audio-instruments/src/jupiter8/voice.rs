@@ -29,49 +29,75 @@
 //!   run the rest of that sample at the frequency of the cycle that
 //!   ended. The start itself is placed where it falls; what VCO-1's
 //!   phase then ran too far is taken back before the next sample, and
-//!   what it ran too little is added in it, so one sample of VCO-1 is
-//!   off by at most the difference of the two frequencies over a
-//!   sample.
+//!   what it ran too little is added in it, and the one sample that
+//!   stood where the phase had run to is moved to where it should have.
 //! - VCO-1's frequency is held to a quarter of the oscillators' rate,
 //!   48 kHz ([`STEP_LIMIT`](crate::analog::STEP_LIMIT)), so it is bounded
 //!   whatever the two do to each other.
 //! - Each oscillator's edges are band-limited as the building block
 //!   makes them, and a synchronised start is an edge like any other.
+//! - The building block's oscillator takes one frequency for a sample,
+//!   and puts an edge where that frequency would. Where VCO-2's sine or
+//!   sawtooth moves VCO-1's frequency through the sample, the edge
+//!   falls a little earlier or later: each edge of VCO-1 is moved to
+//!   where a frequency that changes in a straight line through the
+//!   sample puts it ([`Voice::placed`]), and VCO-2 is started again
+//!   from there.
+//! - Where VCO-1's frequency jumps (VCO-2's sawtooth starting again, its
+//!   pulse rising or falling, its cycle cut short by the sync) VCO-1's
+//!   sawtooth and triangle turn a corner, which is rounded as the
+//!   building block rounds a triangle's ([`Corners`]).
 //!
-//! What this leaves: the corner that a jump of VCO-1's frequency makes
-//! in its waveform is not rounded; one sample of VCO-1 after a
-//! synchronised start is off as said above; and exponential modulation
-//! at audio rate has partials without end, of which those beyond
-//! 172 kHz fold back below 20 kHz.
+//! What this leaves: exponential modulation at audio rate has partials
+//! without end, of which those beyond 172 kHz fold back below 20 kHz;
+//! an edge of VCO-1 in a sample in which VCO-2's waveform jumps is
+//! placed by the sample's mean frequency; and VCO-1's pulse turns no
+//! corner but its edges move with the pulse's width, which is set at
+//! each tick.
 //!
 //! # What is left of the aliasing
 //!
 //! `tests/jupiter8_oscillator.rs` measures it with the sync on, where
 //! the sound has one period and what is no harmonic of it can be told
 //! apart: the strongest such thing below 20 kHz against the strongest
-//! harmonic, for a sine, a sawtooth and a pulse as VCO-2's waveform, on
-//! the five As from 110 Hz to 1,760 Hz, VCO-2 an octave above VCO-1.
+//! harmonic, on the five As from 110 Hz to 1,760 Hz, VCO-2 an octave
+//! above VCO-1. With VCO-1's sawtooth, and VCO-2's sine or sawtooth
+//! moving it (the worse of the two):
 //!
-//! | CROSS MOD | to the A of 440 Hz | the A of 880 Hz | the A of 1,760 Hz |
+//! | CROSS MOD | on the A of 440 Hz | the A of 880 Hz | the A of 1,760 Hz |
 //! |---|---|---|---|
-//! | 1 (0.6 octave) | 81 dB down | 90 dB | 78 dB |
-//! | 2.5 (1.5 octaves) | 82 dB | 83 dB | 70 dB |
-//! | 5 (3 octaves) | 78 dB | 70 dB | 56 dB |
-//! | 10 (6 octaves) | 30 dB | 43 dB | 32 dB |
+//! | 1 (0.6 octave) | 100 dB down | 94 dB | 89 dB |
+//! | 2.5 (1.5 octaves) | 92 dB | 93 dB | 87 dB |
+//! | 5 (3 octaves) | 91 dB | 86 dB | 79 dB |
+//! | 10 (6 octaves) | 84 dB | 78 dB | 46 dB |
 //!
-//! At 10 the worst is where VCO-1 is driven to its bound of 48 kHz for
-//! part of every cycle: the instrument's own oscillator has a bound
-//! there too, which no document read gives. Without the sync the
-//! partials are sums of multiples of two unrelated frequencies and lie
-//! everywhere, so nothing can be told apart and nothing was measured;
-//! the arithmetic is the same without the start to place.
+//! Before the edges were moved and the corners rounded, the slider at 5
+//! left 78 dB, 70 dB and 56 dB, and at 10 56 dB, 43 dB and 32 dB. With
+//! VCO-1's triangle the slider to 5 and keys to the A of 880 Hz leave
+//! 91 dB or better (64 dB before), and with its square 82 dB (69 dB). At 10 on the highest A, VCO-1 is
+//! driven to its bound of 48 kHz for part of every cycle: the
+//! instrument's own oscillator has a bound there too, which no document
+//! read gives.
+//!
+//! With VCO-2's pulse and the sync, VCO-1 at the slider's 5 is a
+//! sawtooth three octaves above its key and nothing else, the pulse
+//! never falling before VCO-1 starts it again: what is measured there is
+//! the building block's sawtooth at 3.5 kHz, 7 kHz and 14 kHz, 84 dB,
+//! 77 dB and 68 dB; a key of 3.5 kHz or 7 kHz with no cross modulation
+//! measures the same.
+//!
+//! Without the sync the partials are sums of multiples of two unrelated
+//! frequencies and lie everywhere, so nothing can be told apart and
+//! nothing was measured; the arithmetic is the same without the start
+//! to place.
 //!
 //! # What it costs
 //!
 //! Eight voices render 14 times faster than real time with one
 //! oscillator each, 12.5 times with a factory patch of two oscillators
-//! and a moving pulse, and 9 times under cross modulation with sync, on
-//! one core of a 3.7 GHz Intel Core i9-10900KF
+//! and a moving pulse, and 8.3 times under cross modulation with sync
+//! (8.8 before its edges were moved and its corners rounded), on one
+//! core of a 3.7 GHz Intel Core i9-10900KF
 //! (`tests/jupiter8_instrument.rs`, `rendering_speed`, 17 November
 //! 2026).
 
@@ -80,6 +106,7 @@ use crate::analog::envelope::{ENVELOPE_ONE, IMMEDIATE, REST_LEVEL, RcEnvelope, S
 use crate::analog::filter::{ONE_Q28, OnePole, OtaCascade};
 use crate::analog::fixed::{amplify, mul_high, mul_high_unsigned, ratio, scale};
 use crate::analog::oscillator::{Noise, Oscillator, waveform};
+use crate::analog::tables::{BLAMP, BLEP, BLEP_PHASES_SHIFT, BLEP_TAPS};
 use crate::analog::{LEVEL, LIMIT, Oversampling, frequency};
 
 use super::law::{self, OCTAVE};
@@ -254,6 +281,88 @@ const SAWTOOTH_SHIFT: u32 = 32 - LEVEL.trailing_zeros() - 1;
 const fn triangle(phase: u32) -> i32 {
     let folded = if phase < HALF_CYCLE { phase } else { phase.wrapping_neg() };
     (folded >> (SAWTOOTH_SHIFT - 1)).cast_signed().wrapping_sub(LEVEL)
+}
+
+/// The mask that wraps a position in the corners' ring.
+const RING_MASK: usize = BLEP_TAPS - 1;
+const _: () = assert!(BLEP_TAPS.is_power_of_two() && Oscillator::DELAY == BLEP_TAPS / 2);
+/// Bits of the weight between two rows of the corner table, the shift
+/// from a fraction of a sample in Q32 to a row, and the shift to the row
+/// with the weight below it: as the building block reads the table.
+const BLEND_BITS: u32 = 8;
+/// See [`BLEND_BITS`].
+const ROW_SHIFT: u32 = 32 - BLEP_PHASES_SHIFT;
+/// See [`BLEND_BITS`].
+const BLEND_SHIFT: u32 = ROW_SHIFT - BLEND_BITS;
+/// A change of slope gives up these bits before it meets an entry of the
+/// corner table's Q17, and the product the rest: a change of 2²⁵ at most
+/// times an entry below 2¹⁵ stays inside 32 bits.
+const CORNER_SHIFTS: (u32, u32) = (10, 7);
+/// The same for a step's height, against the step table's Q15.
+const STEP_SHIFTS: (u32, u32) = (11, 4);
+
+/// What rounds the corners that a jump of VCO-1's frequency makes in its
+/// sawtooth and its triangle under cross modulation: the building
+/// block's oscillator rounds the corners it makes itself, and knows
+/// nothing of a frequency that jumps between two of its samples. Each
+/// corner's residual is read from the building block's table and kept
+/// here until the oscillator's own sample of the same instant comes out,
+/// [`Oscillator::DELAY`] samples late.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct Corners {
+    samples: [i32; BLEP_TAPS],
+    position: usize,
+}
+
+impl Corners {
+    const fn new() -> Self {
+        Self { samples: [0; BLEP_TAPS], position: 0 }
+    }
+
+    /// A corner: the slope changed by `change` a sample, `fraction` of a
+    /// sample ago.
+    #[inline]
+    fn corner(&mut self, fraction: u32, change: i32) {
+        self.add(&BLAMP, fraction, change >> CORNER_SHIFTS.0, CORNER_SHIFTS.1);
+    }
+
+    /// A step of `height`, `fraction` of a sample ago.
+    #[inline]
+    fn step(&mut self, fraction: u32, height: i32) {
+        self.add(&BLEP, fraction, height >> STEP_SHIFTS.0, STEP_SHIFTS.1);
+    }
+
+    #[inline]
+    fn add(&mut self, table: &[[i16; BLEP_TAPS]], fraction: u32, amount: i32, shift: u32) {
+        let row = (fraction >> ROW_SHIFT) as usize;
+        let weight = ((fraction >> BLEND_SHIFT) & ((1 << BLEND_BITS) - 1)).cast_signed();
+        let (Some(before), Some(after)) = (table.get(row), table.get(row.wrapping_add(1))) else {
+            return;
+        };
+        for (tap, (&before, &after)) in before.iter().zip(after).enumerate() {
+            let (before, after) = (i32::from(before), i32::from(after));
+            let entry = before.wrapping_add(after.wrapping_sub(before).wrapping_mul(weight) >> BLEND_BITS);
+            if let Some(slot) = self.samples.get_mut(self.position.wrapping_add(tap) & RING_MASK) {
+                *slot = slot.wrapping_add(amount.wrapping_mul(entry) >> shift);
+            }
+        }
+    }
+
+    /// Moves the sample of this instant by `amount`.
+    #[inline]
+    fn shift(&mut self, amount: i32) {
+        if let Some(slot) = self.samples.get_mut(self.position.wrapping_add(BLEP_TAPS / 2) & RING_MASK) {
+            *slot = slot.wrapping_add(amount);
+        }
+    }
+
+    /// Gives what is to be added to the oscillator's sample of this turn.
+    #[inline]
+    fn turn(&mut self) -> i32 {
+        let complete = self.samples.get_mut(self.position).map_or(0, core::mem::take);
+        self.position = self.position.wrapping_add(1) & RING_MASK;
+        complete
+    }
 }
 
 /// An envelope's settings.
@@ -456,6 +565,7 @@ pub struct Voice {
     first: Oscillator,
     second: Oscillator,
     decimator: Decimator,
+    corners: Corners,
     high_pass: OnePole,
     filter: OtaCascade,
     envelopes: [RcEnvelope; 2],
@@ -489,6 +599,7 @@ impl Voice {
             first: Oscillator::new(),
             second: Oscillator::new(),
             decimator: Decimator::wide(),
+            corners: Corners::new(),
             high_pass: OnePole::new(),
             filter: OtaCascade::new(),
             envelopes: [RcEnvelope::new(), RcEnvelope::new()],
@@ -517,6 +628,9 @@ impl Voice {
             self.high_pass.reset();
         }
         self.owed = 0;
+        if settings.cross == 0 {
+            self.corners = Corners::new();
+        }
         self.set_envelopes(settings);
     }
 
@@ -707,22 +821,175 @@ impl Voice {
         }
     }
 
+    /// VCO-2's waveform at a phase, as it moves VCO-1; none for the
+    /// noise, which has no phase.
+    #[inline]
+    fn modulator(&self, settings: &Settings, phase: u32) -> Option<i32> {
+        match settings.wave2 {
+            Vco2Wave::Sine => Some(sine(triangle(phase))),
+            Vco2Wave::Sawtooth => Some((phase >> SAWTOOTH_SHIFT).cast_signed().wrapping_sub(LEVEL)),
+            Vco2Wave::Pulse => Some(if phase < self.width { LEVEL } else { -LEVEL }),
+            Vco2Wave::Noise => None,
+        }
+    }
+
+    /// The slope of VCO-1's waveform for a frequency step, signed, where
+    /// its phase now is; none for the pulse, which has no slope.
+    #[inline]
+    const fn slope(&self, settings: &Settings, step: i32) -> Option<i32> {
+        match settings.wave1 {
+            Vco1Wave::Sawtooth => Some(step >> SAWTOOTH_SHIFT),
+            Vco1Wave::Triangle => {
+                let slope = step >> (SAWTOOTH_SHIFT - 1);
+                Some(if self.first.phase() < HALF_CYCLE { slope } else { slope.wrapping_neg() })
+            }
+            Vco1Wave::Pulse | Vco1Wave::Square => None,
+        }
+    }
+
+    /// Rounds the corners that the edges of VCO-2's own cycle made in
+    /// VCO-1's waveform in the sample just run: where a sawtooth of VCO-2
+    /// started again and where its pulse rose and fell, VCO-1's frequency
+    /// jumped, and its waveform turned a corner. `old` and `step` are
+    /// VCO-2's phase and step before the sample, and `floor` is how long
+    /// ago VCO-1 started VCO-2 again, before which alone VCO-2's own
+    /// edges happened.
+    #[inline]
+    fn round_edges(&mut self, settings: &Settings, old: u32, step: u32, floor: u32) {
+        let pulse = match settings.wave2 {
+            Vco2Wave::Sawtooth => false,
+            Vco2Wave::Pulse => true,
+            Vco2Wave::Sine | Vco2Wave::Noise => return,
+        };
+        let new = old.wrapping_add(step);
+        let wrapped = new < old;
+        let width = self.width;
+        // Whether the pulse turned down in the sample.
+        let down = pulse && old < width && (wrapped || new >= width);
+        if !wrapped && !down {
+            return;
+        }
+        // VCO-1's step with VCO-2's waveform at its top, less at its
+        // bottom: the pulse jumps up by it where its cycle starts and
+        // down where it turns, and the sawtooth down where it starts.
+        let jump =
+            self.crossed(settings, LEVEL).cast_signed().wrapping_sub(self.crossed(settings, -LEVEL).cast_signed());
+        if down {
+            let fraction = ratio(new.wrapping_sub(width), step);
+            if fraction >= floor
+                && let Some(change) = self.slope(settings, jump.wrapping_neg())
+            {
+                self.corners.corner(fraction, change);
+            }
+        }
+        if wrapped {
+            let fraction = ratio(new, step);
+            if fraction >= floor
+                && let Some(change) = self.slope(settings, if pulse { jump } else { jump.wrapping_neg() })
+            {
+                self.corners.corner(fraction, change);
+            }
+        }
+    }
+
+    /// Where an edge of VCO-1's cycle fell in the sample just run, as
+    /// how long ago, with VCO-1's frequency taken to move in a straight
+    /// line through the sample as VCO-2's waveform moved it; `since` is
+    /// where the oscillator put it, which takes the sample's mean
+    /// throughout. `old` and `step` are VCO-2's phase and step before the
+    /// sample, and `stepped` VCO-1's step in it.
+    ///
+    /// With the frequency f₀ at the sample's start and f₁ at its end, an
+    /// edge that the mean would put a share s of the sample ago falls
+    /// (f₁ - f₀) / 2 mean × s (1 - s) later than that. Where VCO-2's
+    /// waveform jumps within the sample the line is no better than the
+    /// mean, and the edge is left where it was put.
+    #[inline]
+    fn placed(&self, settings: &Settings, old: u32, step: u32, stepped: u32, since: u32) -> u32 {
+        let new = old.wrapping_add(step);
+        let smooth = match settings.wave2 {
+            Vco2Wave::Sine => true,
+            Vco2Wave::Sawtooth => new >= old,
+            Vco2Wave::Pulse | Vco2Wave::Noise => false,
+        };
+        let (Some(from), Some(to)) = (self.modulator(settings, old), self.modulator(settings, new)) else {
+            return since;
+        };
+        if !smooth {
+            return since;
+        }
+        let (from, to) = (self.crossed(settings, from), self.crossed(settings, to));
+        let later = mul_high_unsigned(ratio(from.abs_diff(to) >> 1, stepped), mul_high_unsigned(since, !since));
+        if to > from { since.saturating_sub(later) } else { since.saturating_add(later) }
+    }
+
+    /// Moves the edges of VCO-1's waveform in the sample just run from
+    /// where the oscillator put them to where [`Voice::placed`] has
+    /// them: the start of its cycle, and the pulse's fall or the
+    /// triangle's turn. `before` is VCO-1's phase before the sample.
+    /// Gives how long ago the cycle started, if it did.
+    #[inline]
+    fn place_edges(&mut self, settings: &Settings, before: u32, stepped: u32, old: u32, step: u32) -> Option<u32> {
+        /// A step of the pulse, and of the sawtooth.
+        const STEP: i32 = 2 * LEVEL;
+        // The change of the triangle's slope where it turns.
+        let turn = (stepped >> (SAWTOOTH_SHIFT - 2)).cast_signed();
+        let middle = match settings.wave1 {
+            Vco1Wave::Sawtooth => None,
+            Vco1Wave::Triangle | Vco1Wave::Square => Some(HALF_CYCLE),
+            Vco1Wave::Pulse => Some(self.width),
+        };
+        // As the oscillator finds a crossing: the phase passed the mark.
+        if let Some(mark) = middle
+            && mark.wrapping_sub(before).wrapping_sub(1) < stepped
+        {
+            let since = ratio(before.wrapping_add(stepped).wrapping_sub(mark), stepped);
+            let placed = self.placed(settings, old, step, stepped, since);
+            if settings.wave1 == Vco1Wave::Triangle {
+                self.corners.corner(placed, turn.wrapping_neg());
+                self.corners.corner(since, turn);
+            } else {
+                self.corners.step(placed, -STEP);
+                self.corners.step(since, STEP);
+            }
+        }
+        let since = self.first.started()?;
+        let placed = self.placed(settings, old, step, stepped, since);
+        match settings.wave1 {
+            Vco1Wave::Sawtooth => {
+                self.corners.step(placed, -STEP);
+                self.corners.step(since, STEP);
+            }
+            Vco1Wave::Triangle => {
+                self.corners.corner(placed, turn);
+                self.corners.corner(since, turn.wrapping_neg());
+            }
+            Vco1Wave::Pulse | Vco1Wave::Square => {
+                self.corners.step(placed, STEP);
+                self.corners.step(since, -STEP);
+            }
+        }
+        Some(placed)
+    }
+
     /// One sample of the two oscillators, mixed, at the rate they are
     /// run at: four times the output rate under cross modulation, and
     /// twice without. An oscillator that is not heard and that the other
     /// does not need stands still.
     #[inline]
     fn oscillators(&mut self, settings: &Settings, noise: i32) -> i32 {
-        let stepped = if settings.cross == 0 {
-            self.step
-        } else {
+        let crossing = settings.cross != 0;
+        let stepped = if crossing {
             // What the sample before owes is paid in this one.
-            let stepped = self.cross_modulated(settings, noise).saturating_add(self.owed);
-            self.first.set_step(stepped);
+            self.first.set_step(self.cross_modulated(settings, noise).saturating_add(self.owed));
             self.owed = 0;
-            stepped
+            // As the oscillator holds it to its bound.
+            self.first.step()
+        } else {
+            self.step
         };
-        let first = if settings.first_runs {
+        let before = self.first.phase();
+        let mut first = if settings.first_runs {
             let waves = self.first.tick(None);
             match settings.wave1 {
                 Vco1Wave::Triangle => waves.triangle,
@@ -738,7 +1005,13 @@ impl Voice {
         // VCO-1 starts VCO-2's cycle (owner's manual, printed page 16:
         // "forces the pitch of that oscillator to synchronize itself to
         // that of VCO-1").
-        let sync = if settings.sync { self.first.started() } else { None };
+        let (old, step) = (self.second.phase(), self.second.step());
+        let started = if crossing && settings.first_runs {
+            self.place_edges(settings, before, stepped, old, step)
+        } else {
+            self.first.started()
+        };
+        let sync = if settings.sync { started } else { None };
         let waves = self.second.tick(sync);
         let second = match settings.wave2 {
             Vco2Wave::Sine => sine(waves.triangle),
@@ -746,20 +1019,50 @@ impl Voice {
             Vco2Wave::Pulse => waves.pulse,
             Vco2Wave::Noise => noise,
         };
-        if settings.cross != 0
-            && let Some(since) = sync
-        {
+        if crossing && settings.first_runs {
+            self.round_edges(settings, old, step, sync.unwrap_or(0));
+        }
+        if crossing && let Some(since) = sync {
             // VCO-2 started again when VCO-1 did, `since` of a sample
             // ago, and VCO-1 has run since then at the frequency of the
             // cycle that ended, not at the one VCO-2's new cycle gives
             // it. What it ran too far is taken back at once; what it ran
-            // too little is owed to the next sample.
+            // too little is owed to the next sample. Either way the
+            // sample just made stood where VCO-1 had run to, and is
+            // moved to where it should have.
             let after = self.stretch(settings, 0, self.second.phase(), noise);
-            if after < stepped {
-                self.first.set_back(mul_high_unsigned(stepped.wrapping_sub(after), since));
+            let (ran, due) = (self.first.phase(), mul_high_unsigned(after, since));
+            let moved = if due < ran {
+                self.first.set_back(ran.wrapping_sub(due));
+                ran.wrapping_sub(due).cast_signed().wrapping_neg()
             } else {
-                self.owed = mul_high_unsigned(after.wrapping_sub(stepped), since);
+                self.owed = due.wrapping_sub(ran);
+                self.owed.cast_signed()
+            };
+            if let Some(shift) = self.slope(settings, moved) {
+                self.corners.shift(shift);
             }
+            // And VCO-1's frequency jumped where its own cycle started:
+            // from what VCO-2's waveform made it where that was cut
+            // short, to what the start of VCO-2's cycle makes it.
+            let reached = old.wrapping_add(step).wrapping_sub(mul_high_unsigned(step, since));
+            if let (Some(before), Some(start)) = (self.modulator(settings, reached), self.modulator(settings, 0)) {
+                let before = self.crossed(settings, before).cast_signed();
+                let start = self.crossed(settings, start).cast_signed();
+                let change = match settings.wave1 {
+                    Vco1Wave::Sawtooth => start.wrapping_sub(before) >> SAWTOOTH_SHIFT,
+                    // The oscillator rounded this corner as twice the
+                    // slope it was given: it is the two slopes' sum.
+                    Vco1Wave::Triangle => (start >> (SAWTOOTH_SHIFT - 1))
+                        .wrapping_add(before >> (SAWTOOTH_SHIFT - 1))
+                        .wrapping_sub((stepped >> (SAWTOOTH_SHIFT - 2)).cast_signed()),
+                    Vco1Wave::Pulse | Vco1Wave::Square => 0,
+                };
+                self.corners.corner(since, change);
+            }
+        }
+        if crossing && settings.first_runs {
+            first = first.wrapping_add(self.corners.turn());
         }
         apply(first, settings.mix1).wrapping_add(apply(second, settings.mix2))
     }
