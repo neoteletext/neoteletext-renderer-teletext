@@ -788,3 +788,66 @@ fn the_amplifiers_level_arrives_exactly_wherever_it_was_sent_on_the_way() {
         }
     }
 }
+
+#[test]
+fn the_high_pass_switch_moved_away_and_back_comes_back_to_the_samples_of_one_never_moved() {
+    // The switch goes to another position and comes back, sooner than
+    // its filter's corner gets there or later, under a note. What it
+    // comes back to (TODO-6438, measured over 20 s for every pair of
+    // positions, with and without a steady level in the signal):
+    //
+    // - A position with no filter in the path (0 and 1 of the Juno-106,
+    //   0 of the Juno-60): the samples of an instrument whose switch
+    //   never moved, exactly, from 0.16 s after it is back at the
+    //   latest. The filter left out of the path gives up what it holds
+    //   until it holds nothing.
+    // - A position with a filter: never quite. The filter's state keeps
+    //   a difference below a unit of its own arithmetic, far below a
+    //   unit of a 16-bit sample, which rounds one sample in sixteen
+    //   thousand or fewer the other way, by one unit. Nothing can be
+    //   heard of it, and the instrument is as deterministic as it was;
+    //   it is only not the same stream to the bit.
+    let positions: &[u8] = if cfg!(debug_assertions) { &[0, 2] } else { &[0, 1, 2, 3] };
+    for model in MODELS {
+        for &home in positions {
+            for &away in positions.iter().filter(|&&away| away != home) {
+                for gap in [1usize, 480] {
+                    let mut patch = Patch::DEFAULT.with(Slider::VcfFrequency, 90);
+                    patch.hpf = home;
+                    let mut elsewhere = patch;
+                    elsewhere.hpf = away;
+                    let mut moved = instrument(model, &patch);
+                    let mut never = instrument(model, &patch);
+                    for juno in [&mut moved, &mut never] {
+                        juno.event(NOTE_ON, 36, 100);
+                        render(juno, 0.5);
+                    }
+                    moved.set_patch(&elsewhere);
+                    for juno in [&mut moved, &mut never] {
+                        juno.render(&mut vec![0i16; gap]);
+                    }
+                    moved.set_patch(&patch);
+                    let mut back = vec![0i16; samples(2.0)];
+                    let mut same = back.clone();
+                    moved.render(&mut back);
+                    never.render(&mut same);
+                    let filtered = match model {
+                        Model::Juno106 => home >= 2,
+                        Model::Juno60 => home >= 1,
+                    };
+                    let name = format!("{model:?}: {home} to {away} for {gap} samples and back");
+                    if filtered {
+                        let apart = back[samples(1.0)..]
+                            .iter()
+                            .zip(&same[samples(1.0)..])
+                            .map(|(a, b)| (i32::from(*a) - i32::from(*b)).abs())
+                            .max();
+                        assert!(apart <= Some(1), "{name}: {apart:?} units apart after a second");
+                    } else {
+                        assert_eq!(back[samples(0.25)..], same[samples(0.25)..], "{name}: not the same samples");
+                    }
+                }
+            }
+        }
+    }
+}

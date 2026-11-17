@@ -843,3 +843,75 @@ fn all_sound_off_closes_the_voices_in_a_fiftieth_of_a_second_and_a_key_struck_me
         assert_eq!(juno.sounding_voices(), 0, "{model:?}");
     }
 }
+
+/// A run of everything that slews or fades, each begun before the last
+/// has ended, rendered in calls of `chunk` samples: the high-pass switch,
+/// the VCA switch, the chorus, the volume, all sound off with a key
+/// struck while the voices close, and `reset()` in the middle of it all.
+/// Gives the samples, and how many of them follow the reset.
+fn everything_at_once(model: Model, chunk: usize) -> (Vec<i16>, usize) {
+    let mut patch = Patch::DEFAULT.with(Slider::DcoPwm, 100).with(Slider::Release, 60);
+    patch.pulse = true;
+    patch.chorus = ChorusMode::One;
+    patch.hpf = 0;
+    let mut juno = instrument(model, &patch);
+    let mut out = Vec::new();
+    let run = |juno: &mut Juno, count: usize, out: &mut Vec<i16>| {
+        let mut piece = vec![0i16; count];
+        for part in piece.chunks_mut(chunk) {
+            juno.render(part);
+        }
+        out.extend(piece);
+    };
+    juno.event(NOTE_ON, 40, 100);
+    juno.event(NOTE_ON, 52, 100);
+    run(&mut juno, 5_000, &mut out);
+    for (index, hpf) in [3u8, 0, 2, 1, 3, 2, 0].into_iter().enumerate() {
+        patch.hpf = hpf;
+        patch.vca_gate = index % 2 == 0;
+        if index == 3 {
+            patch.chorus = ChorusMode::Two;
+        }
+        juno.set_patch(&patch);
+        juno.event(CONTROL, 7, (index * 37 % 128) as u8);
+        run(&mut juno, 97 + index * 131, &mut out);
+    }
+    juno.event(CONTROL, 120, 0);
+    run(&mut juno, 33, &mut out);
+    juno.event(NOTE_ON, 64, 100);
+    run(&mut juno, 3_000, &mut out);
+    patch.hpf = 3;
+    juno.set_patch(&patch);
+    run(&mut juno, 100, &mut out);
+    juno.reset();
+    juno.event(NOTE_ON, 60, 100);
+    let after = 3_000;
+    run(&mut juno, after, &mut out);
+    (out, after)
+}
+
+#[test]
+fn what_slews_and_fades_gives_the_same_samples_in_calls_of_any_length_and_nothing_of_it_outlasts_reset() {
+    for model in MODELS {
+        let (whole, after) = everything_at_once(model, usize::MAX);
+        for chunk in [1usize, 2, 7, 64, 199, 200, 4_800] {
+            assert!(
+                whole == everything_at_once(model, chunk).0,
+                "{model:?}: calls of {chunk} samples give other samples"
+            );
+        }
+        // After the reset: a new instrument given the patch, to the
+        // sample, though a filter's corner, a gain and a fade were on
+        // their way.
+        let mut patch = Patch::DEFAULT.with(Slider::DcoPwm, 100).with(Slider::Release, 60);
+        patch.pulse = true;
+        patch.chorus = ChorusMode::Two;
+        patch.hpf = 3;
+        patch.vca_gate = true;
+        let mut fresh = instrument(model, &patch);
+        fresh.event(NOTE_ON, 60, 100);
+        let mut tail = vec![0i16; after];
+        fresh.render(&mut tail);
+        assert!(whole[whole.len() - after..] == tail[..], "{model:?}: reset() leaves something of what was moving");
+    }
+}
