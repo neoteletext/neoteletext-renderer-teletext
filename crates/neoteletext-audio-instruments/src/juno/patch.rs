@@ -1,12 +1,14 @@
 //! A patch: the panel of the instrument as a fixed record.
 //!
 //! The Juno-106 sends and takes a patch as 18 bytes, sixteen sliders and
-//! two bytes of switches, and [`Patch::from_bytes`] reads exactly those,
-//! checking each. The Juno-60's panel has the same sliders and a few more
-//! switch positions (a switch for the sub-oscillator, a third source for
-//! the pulse width, a third chorus setting), which the same record
-//! holds; the Juno-60 itself has no MIDI, so there is no byte form of its
-//! own.
+//! two bytes of switches. The Juno-60's panel has the same sliders and a
+//! few more switch positions (a switch for the sub-oscillator, a third
+//! source for the pulse width, a third chorus setting); the Juno-60 itself
+//! has no MIDI, so it has no byte form of its own. The audio profile's
+//! patch is the Juno-106's 18 bytes followed by two of NeoTeletext's own
+//! that carry those three settings ([`PATCH_BYTES`], the owner's decision
+//! of 18 November 2026), and [`Patch::from_bytes`] reads and checks all
+//! twenty.
 //!
 //! Source: Roland JUNO-106 owner's manual, "MIDI Implementation",
 //! sections 3.1 to 3.4 (the last printed page): the patch messages of 18
@@ -17,11 +19,20 @@
 
 use super::Model;
 
-/// Bytes of a Juno-106 patch.
+/// Bytes of a Juno-106 patch as the instrument sends it over MIDI.
 ///
 /// Source: JUNO-106 owner's manual, MIDI Implementation 3.1: "(18 bytes
 /// total for values)".
-pub const PATCH_BYTES: usize = 18;
+pub const MIDI_PATCH_BYTES: usize = 18;
+
+/// Bytes of a patch in the audio profile: the Juno-106's
+/// [`MIDI_PATCH_BYTES`], then byte 18 holding the Juno-60's three settings
+/// the Juno-106 has not ([`SUB_OFF_BIT`], [`PWM_ENVELOPE_BIT`],
+/// [`CHORUS_BOTH_BIT`]) and byte 19, reserved and zero.
+///
+/// Source: own choice, the owner's of 18 November 2026: the patch grows by
+/// two bytes so that both models use it.
+pub const PATCH_BYTES: usize = MIDI_PATCH_BYTES + 2;
 
 /// Sliders of a patch: the first sixteen bytes.
 ///
@@ -128,6 +139,10 @@ pub enum PatchError {
     Range,
     /// The second switch byte has one of its three top bits set.
     Switches,
+    /// Byte 18 has a bit set above the three that are defined, or asks for
+    /// chorus I+II while byte 16 says the chorus is off; or byte 19, which
+    /// is reserved, is not zero.
+    Juno60,
 }
 
 /// Byte 16, bits 0 to 2: the range, one bit for each.
@@ -167,6 +182,17 @@ const HPF_SHIFT: u32 = 3;
 const DATA_MASK: u8 = 0x7f;
 /// Byte 17: the bits that mean something.
 const SWITCHES_MASK: u8 = 0b1_1111;
+/// Byte 18, bit 0: the Juno-60's sub-oscillator switch is off. Clear on
+/// every Juno-106 patch, whose sub-oscillator has a level and no switch.
+pub const SUB_OFF_BIT: u8 = 1 << 0;
+/// Byte 18, bit 1: the envelope moves the pulse's width, the Juno-60's
+/// third source. Byte 17 then says manual, the nearest the Juno-106 has.
+pub const PWM_ENVELOPE_BIT: u8 = 1 << 1;
+/// Byte 18, bit 2: both chorus buttons are down, the Juno-60's I+II. Byte
+/// 16 then says II, the nearest the Juno-106 has.
+pub const CHORUS_BOTH_BIT: u8 = 1 << 2;
+/// Byte 18: the bits that mean something.
+const JUNO_60_MASK: u8 = SUB_OFF_BIT | PWM_ENVELOPE_BIT | CHORUS_BOTH_BIT;
 
 /// One patch. Every value of every field is a patch the instrument can
 /// play: [`Patch::set`] holds a slider to its range, and the high-pass
@@ -234,16 +260,19 @@ impl Patch {
         patch
     }
 
-    /// Reads a Juno-106 patch from its 18 bytes.
+    /// Reads a patch from its [`PATCH_BYTES`]: the Juno-106's 18, then the
+    /// Juno-60's settings.
     ///
     /// # Errors
     ///
     /// [`PatchError::Slider`] if one of the first sixteen bytes is above
     /// 127; [`PatchError::Range`] if byte 16 is above 127 or does not
     /// name exactly one range; [`PatchError::Switches`] if byte 17 has a
-    /// bit set above the five that are defined.
+    /// bit set above the five that are defined; [`PatchError::Juno60`] if
+    /// byte 18 has a bit set above its three, asks for chorus I+II with
+    /// the chorus off, or byte 19 is not zero.
     pub fn from_bytes(bytes: &[u8; PATCH_BYTES]) -> Result<Self, PatchError> {
-        let [values @ .., first, second] = bytes;
+        let [values @ .., first, second, juno_60, reserved] = bytes;
         let mut sliders = [0u8; SLIDERS];
         for ((slider, &value), number) in sliders.iter_mut().zip(values).zip(0u8..) {
             if value > SLIDER_MAX {
@@ -258,40 +287,47 @@ impl Patch {
         if second & !SWITCHES_MASK != 0 {
             return Err(PatchError::Switches);
         }
+        let both = juno_60 & CHORUS_BOTH_BIT != 0;
+        if juno_60 & !JUNO_60_MASK != 0 || *reserved != 0 || (both && first & CHORUS_OFF_BIT != 0) {
+            return Err(PatchError::Juno60);
+        }
         Ok(Self {
             sliders,
             range,
             pulse: first & PULSE_BIT != 0,
             sawtooth: first & SAWTOOTH_BIT != 0,
-            sub: true,
+            sub: juno_60 & SUB_OFF_BIT == 0,
             chorus: if first & CHORUS_OFF_BIT != 0 {
                 ChorusMode::Off
+            } else if both {
+                ChorusMode::Both
             } else if first & CHORUS_ONE_BIT != 0 {
                 ChorusMode::One
             } else {
                 ChorusMode::Two
             },
-            pwm: if second & PWM_MANUAL_BIT != 0 { PwmSource::Manual } else { PwmSource::Lfo },
+            pwm: if juno_60 & PWM_ENVELOPE_BIT != 0 {
+                PwmSource::Envelope
+            } else if second & PWM_MANUAL_BIT != 0 {
+                PwmSource::Manual
+            } else {
+                PwmSource::Lfo
+            },
             envelope_inverted: second & ENVELOPE_INVERTED_BIT != 0,
             vca_gate: second & VCA_GATE_BIT != 0,
             hpf: HPF_MAX.saturating_sub((second >> HPF_SHIFT) & HPF_MAX),
         })
     }
 
-    /// The patch as the Juno-106's 18 bytes, as far as that instrument
-    /// has it: I+II is written as II, the envelope as the pulse width's
-    /// source as manual, and a sub-oscillator switched off as a level of
-    /// zero.
+    /// The patch as its [`PATCH_BYTES`]. The Juno-106's 18 hold the
+    /// nearest that instrument has (I+II as II, the envelope as the pulse
+    /// width's source as manual) and byte 18 the Juno-60's own settings, so
+    /// that reading the bytes gives this patch back.
     #[must_use]
     pub fn to_bytes(&self) -> [u8; PATCH_BYTES] {
         let mut bytes = [0u8; PATCH_BYTES];
-        let [values @ .., first, second] = &mut bytes;
+        let [values @ .., first, second, juno_60, _reserved] = &mut bytes;
         *values = self.sliders;
-        if !self.sub
-            && let Some(level) = values.last_mut()
-        {
-            *level = 0;
-        }
         let range = RANGE_BITS.iter().find(|(_, range)| *range == self.range).map_or(0, |&(bits, _)| bits);
         let chorus = match self.chorus {
             // As the owner's manual's own example of a patch writes it.
@@ -305,6 +341,9 @@ impl Patch {
             | flag(self.envelope_inverted, ENVELOPE_INVERTED_BIT)
             | flag(self.vca_gate, VCA_GATE_BIT)
             | (HPF_MAX.saturating_sub(self.hpf.min(HPF_MAX)) << HPF_SHIFT);
+        *juno_60 = flag(!self.sub, SUB_OFF_BIT)
+            | flag(self.pwm == PwmSource::Envelope, PWM_ENVELOPE_BIT)
+            | flag(self.chorus == ChorusMode::Both, CHORUS_BOTH_BIT);
         bytes
     }
 
