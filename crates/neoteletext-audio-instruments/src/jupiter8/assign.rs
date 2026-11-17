@@ -191,7 +191,13 @@ impl Assigner {
     /// Own reading: poly 1 takes, of the voices whose key is up, the one
     /// that was given its key longest ago, which is the service notes'
     /// "modules from A to H one by one"; poly 2 takes the first such
-    /// voice and cuts short every other. A key that is already sounding
+    /// voice and cuts short every other. So in poly 2 "the last note or
+    /// notes played together" are the keys that are down when the newest
+    /// key is struck, with that key: each of them has its natural release
+    /// when it goes up, until another key is struck, which cuts short
+    /// whatever is then dying away. A key held from before and let go
+    /// after later ones were struck keeps its natural release, having
+    /// been down together with them. A key that is already sounding
     /// (which a keyboard cannot send, and MIDI can) starts its own voice
     /// again.
     ///
