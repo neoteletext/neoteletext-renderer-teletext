@@ -15,7 +15,9 @@
 //! Behind the feature `analog`, which is not on by default, are the
 //! building blocks the analogue synthesizers of DEC-6429 are to be made
 //! from ([`analog`]): oscillators, filters, envelopes, a chorus and a
-//! voice allocator. They are no codec yet.
+//! voice allocator. They are no codec yet. Behind the feature `juno`, also
+//! not on by default, is the first instrument made from them: Roland's
+//! Juno-106 and Juno-60 ([`juno`]).
 //!
 //! # Whose code this is
 //!
@@ -73,6 +75,8 @@ extern crate std;
 pub mod analog;
 #[cfg(feature = "dx7")]
 pub mod dx7;
+#[cfg(feature = "juno")]
+pub mod juno;
 #[cfg(feature = "sid")]
 pub mod sid;
 

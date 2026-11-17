@@ -25,6 +25,9 @@ dx7 = []
 # filters, envelopes, the chorus and the voice allocator. Not a codec by
 # itself, so it is not on by default.
 analog = []
+# Roland's Juno-106 and Juno-60, made from the analogue building blocks
+# (TODO-6431). No codec carries it yet, so it is not on by default.
+juno = ["analog"]
 
 # Each example plays or builds one instrument, so it is built only with it.
 [[example]]
