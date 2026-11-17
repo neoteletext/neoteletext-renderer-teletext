@@ -91,6 +91,9 @@ const PULSE_WIDTH: (u32, u32) = (1 << 31, ((40u64 << 32) / 100) as u32);
 /// top the effect "is identical to manually moving the PW slider back
 /// and forth all the way". Own choice of the swing from that.
 const PWM_SWING: u32 = ((20u64 << 32) / 100) as u32;
+// The whole of the width's travel is under half a cycle, so the
+// difference of any two widths is a signed word ([`Line::tick`]).
+const _: () = assert!(PULSE_WIDTH.1 < 1 << 31);
 
 /// The noise at NOISE 10 against a waveform, in Q30: 3.0 V of 3.5 V.
 ///
@@ -544,6 +547,14 @@ struct Line {
     /// The amplifier's gain in Q30 and what it gains each sample.
     gain: i32,
     gain_step: i32,
+    /// The pulse's width and what it gains each sample, in units of 2⁻³²
+    /// cycle: the width moves in a straight line from one tick to the
+    /// next, as the gain does. Set once a tick it would be a staircase,
+    /// which adds components the ticks' rate away from the sound's own
+    /// (36 dB below the strongest harmonic with PWM and its SPEED at
+    /// their tops, `tests/cs80_modulation.rs`).
+    width: u32,
+    width_step: i32,
     /// The oscillator's own offset of pitch, in octaves.
     trim: i32,
     /// What the oscillator and the filters were last set from, so that a
@@ -574,6 +585,8 @@ impl Line {
             amp_envelope: RcEnvelope::new(),
             gain: 0,
             gain_step: 0,
+            width: PULSE_WIDTH.0,
+            width_step: 0,
             trim: variation.offset(PITCH_TOLERANCE),
             set: [UNSET; 3],
         }
@@ -643,7 +656,9 @@ impl Line {
             .width
             .saturating_add_signed(swing)
             .clamp(PULSE_WIDTH.0, PULSE_WIDTH.0.saturating_add(PULSE_WIDTH.1));
-        self.oscillator.set_width(width);
+        // Both are inside the lever's travel, 40% of a cycle, so their
+        // difference is a signed word.
+        self.width_step = width.wrapping_sub(self.width).cast_signed() >> TICK_BITS;
 
         let envelope = channel.initial.saturating_add(law::scaled(channel.span, filter_level));
         let filters = [
@@ -674,6 +689,8 @@ impl Line {
     /// One sample. `noise` is the channel's noise generator.
     #[inline]
     fn sample(&mut self, channel: &Channel, noise: i32) -> i32 {
+        self.width = self.width.wrapping_add_signed(self.width_step);
+        self.oscillator.set_width(self.width);
         let waves = self.oscillator.tick(None);
         let mut signal = 0;
         if channel.filtered {
