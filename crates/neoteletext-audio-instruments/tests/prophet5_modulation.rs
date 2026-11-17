@@ -103,12 +103,20 @@ fn wheel_mod_bends_pitch_through_182_kilohms_and_the_shapes_stand_as_the_chip_ma
     // sawtooth, the triangle a half either way: its 5 V are doubled about
     // their reference before the 160 kΩ the sawtooth's 10 V pass (TM3
     // SD334: U380 with R3147 and R3148, 100 kΩ each, and R3131).
+    //
+    // Revision 2 (TM2 SD312): the sawtooth and the pulse through 10 kΩ
+    // each (R385, R386) to a node with 200 kΩ to ground (R384), 0.952 of
+    // each alone; and the triangle, 10 V from peak to peak as the
+    // sawtooth is, through 10 kΩ (R373) against the 10 kΩ (R387) of the
+    // follower that reads that node: half of it, a quarter of the
+    // sawtooth's swing either way.
     for model in MODELS {
         let unit = 1200.0 * 100.0 / 182.0;
-        let square = if model == Model::Rev3 { 1.08 } else { 0.75 };
+        let (triangle, sawtooth, square) =
+            if model == Model::Rev3 { (0.5, 1.0, 1.08) } else { (0.25, 100.0 / 105.0, 0.75 * 100.0 / 105.0) };
         for (shape, low, high) in [
-            (Switch::LfoTriangle, -0.5 * unit, 0.5 * unit),
-            (Switch::LfoSawtooth, 0.0, unit),
+            (Switch::LfoTriangle, -triangle * unit, triangle * unit),
+            (Switch::LfoSawtooth, 0.0, sawtooth * unit),
             (Switch::LfoSquare, 0.0, square * unit),
         ] {
             let track = wobble(model, &vibrato(model, shape, 96), 1.5);

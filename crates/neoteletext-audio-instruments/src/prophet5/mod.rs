@@ -90,7 +90,7 @@ use crate::analog::fixed::amplify;
 use crate::analog::oscillator::Noise;
 use crate::analog::{frequency, to_sample};
 
-use law::{Law, OCTAVE, SEMITONES, UNIT};
+use law::{Law, Mixing, OCTAVE, SEMITONES, UNIT};
 pub use patch::{Knob, Patch, Switch};
 use voice::{Controls, Settings, TICK_RATE, TICK_SAMPLES, Voice};
 
@@ -157,10 +157,11 @@ pub const MASTER_TUNE_CENTS: i32 = 100;
 /// Source: own choice, since neither manual gives Wheel-Mod's voltage,
 /// only the resistors it passes: one volt. Through the 182 kΩ of an
 /// oscillator's summer that is 0.55 octave for the sawtooth and the
-/// square, and a triangle of half of that either way, 3.3 semitones;
-/// the patch sheets ask for the wheel "up slightly (1/8 to 1/4) to
-/// engage vibrato" (program 1-1), which is then 40 to 80 cents either
-/// way.
+/// square, and a triangle of half of that either way, 3.3 semitones, on
+/// revision 3 and of a quarter, 1.6 semitones, on revisions 1 and 2;
+/// the patch sheets, which are of those, ask for the wheel "up slightly
+/// (1/8 to 1/4) to engage vibrato" (program 1-1), which is then 20 to
+/// 40 cents either way.
 pub const WHEEL_MOD: i32 = UNIT;
 /// The triangle of the low-frequency oscillator against its sawtooth: a
 /// half either way, as a right shift of a triangle of one either way.
@@ -171,10 +172,10 @@ pub const WHEEL_MOD: i32 = UNIT;
 /// non-inverting input, R3148 of 100 kΩ from the inverting input to the
 /// reference and R3147 of 100 kΩ back), and then passes 160 kΩ (R3131)
 /// as the sawtooth's 10 V do (R3133): the sawtooth's swing, half of it
-/// either side. Own choice for revisions 1 and 2: the same. TM2 sheet
-/// SD312 (page 75) has the triangle converter's output, the sawtooth
-/// and the pulse each through 10 kΩ (R373, R385, R386); the size of what
-/// the converter makes was not worked out.
+/// either side. On revisions 1 and 2 the converter makes the same of
+/// the sawtooth's 10 V (TM2 sheet SD312, page 75: the sawtooth through
+/// 10 kΩ, R365, to an inverting input with 20 kΩ back, R362), and how
+/// much of it Wheel-Mod has is the sheet's nodes ([`Modulator::tick`]).
 const LFO_TRIANGLE_SHIFT: u32 = 1;
 /// The gain of the filtered noise as Wheel-Mod has it, in Q28.
 ///
@@ -270,8 +271,8 @@ impl Modulator {
     /// [`WHEEL_MOD`].
     const SHIFT: u32 = 32 - law::OCTAVE_BITS;
 
-    /// One tick: the sum of the shapes that are on, in Q24, and the
-    /// phase moves on. The sawtooth and the square stand on zero: TM3
+    /// One tick: what Wheel-Mod has of the shapes that are on, in Q24,
+    /// and the phase moves on. The sawtooth and the square stand on zero: TM3
     /// section 2-4 (page 21), "All 3340 outputs are positive-going", and
     /// only the triangle is shifted to stand about zero (sheet SD334).
     /// The triangle is lowest where the sawtooth falls, and the square
@@ -281,19 +282,45 @@ impl Modulator {
         let phase = self.phase;
         self.phase = phase.wrapping_add(self.step);
         let rise = (phase >> Self::SHIFT).cast_signed();
-        let mut sum = 0i32;
-        if patch.on(Switch::LfoSawtooth) {
-            sum = sum.saturating_add(rise);
+        let (sawtooth, triangle, square) =
+            (patch.on(Switch::LfoSawtooth), patch.on(Switch::LfoTriangle), patch.on(Switch::LfoSquare));
+        // From -1/2 at the cycle's start to 1/2 at its middle.
+        let folded = if phase < Self::HALF { rise } else { UNIT.saturating_sub(rise) };
+        let turning = (folded << 2).saturating_sub(UNIT) >> LFO_TRIANGLE_SHIFT;
+        let high = phase.wrapping_add(Self::HALF >> 1) < Self::HALF;
+        let level = if high { law::gain(UNIT, law.lfo.2) } else { 0 };
+        match law.mixing {
+            // Revision 3: each shape through its own resistor into a
+            // summer (TM3 sheet SD334).
+            Mixing::Currents => {
+                let mut sum = 0i32;
+                if sawtooth {
+                    sum = sum.saturating_add(rise);
+                }
+                if triangle {
+                    sum = sum.saturating_add(turning);
+                }
+                if square {
+                    sum = sum.saturating_add(level);
+                }
+                sum
+            }
+            // Source: TM2 sheet SD312 (page 75). The sawtooth and the
+            // pulse each through 10 kΩ (R385, R386) to a node with
+            // 200 kΩ to ground (R384), as an oscillator's in a voice
+            // ([`law::node`]); a follower reads it (a quarter of U372)
+            // and feeds Wheel-Mod's amplifier through 10 kΩ (R387),
+            // where the triangle comes in through its switch and 10 kΩ
+            // (R373). With the triangle on, each side is halved, the
+            // follower standing there whether or not it carries a shape:
+            // the triangle alone is half of its 10 V, a quarter of the
+            // sawtooth's swing either way.
+            Mixing::Node => {
+                let [sawtooth_share, square_share, _] = law::node(sawtooth, square);
+                let followed = law::gain(rise, sawtooth_share).saturating_add(law::gain(level, square_share));
+                if triangle { (followed >> 1).saturating_add(turning >> 1) } else { followed }
+            }
         }
-        if patch.on(Switch::LfoTriangle) {
-            // From -1 at the cycle's start to 1 at its middle.
-            let folded = if phase < Self::HALF { rise } else { UNIT.saturating_sub(rise) };
-            sum = sum.saturating_add((folded << 2).saturating_sub(UNIT) >> LFO_TRIANGLE_SHIFT);
-        }
-        if patch.on(Switch::LfoSquare) && phase.wrapping_add(Self::HALF >> 1) < Self::HALF {
-            sum = sum.saturating_add(law::gain(UNIT, law.lfo.2));
-        }
-        sum
     }
 }
 
