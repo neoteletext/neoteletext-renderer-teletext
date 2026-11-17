@@ -93,10 +93,10 @@ fn the_cutoff_follows_the_service_notes_figures() {
 
 #[test]
 fn the_key_follow_tracks_the_keyboard_and_turns_about_middle_c() {
-    // Adjustment 13: the key C4 rings at four times the key C2's
-    // frequency, 100%. The slider's top is 120%, so 100% is 106 of its
-    // 127 steps.
-    let followed = Patch::DEFAULT.with(Param::VcfCutoff, position(40)).with(Param::VcfKeyFollow, 128 + 106);
+    // Adjustment 13: with the KEY FOLLOW slider where its drawing has
+    // it, at 7.5, the key C4 rings at four times the key C2's frequency:
+    // 100%.
+    let followed = Patch::DEFAULT.with(Param::VcfCutoff, position(40)).at(Param::VcfKeyFollow, 75);
     let (low, high) = (ringing(&followed, C2), ringing(&followed, C4));
     println!("C2 {low:.1} Hz, C4 {high:.1} Hz: {:.3} octaves", (high / low).log2());
     assert!(((high / low).log2() - 2.0).abs() < 0.06);
@@ -104,11 +104,21 @@ fn the_key_follow_tracks_the_keyboard_and_turns_about_middle_c() {
     // the slider changes nothing.
     let unfollowed = ringing(&followed.with(Param::VcfKeyFollow, 128), C2);
     assert!(cents(unfollowed, low).abs() < 40.0);
-    // At its top, 120%.
+    // At its top, the specifications' 120%; and half way to 7.5, half
+    // of all.
     let most = followed.with(Param::VcfKeyFollow, 255);
     let octaves = (ringing(&most, C4) / ringing(&most, C2)).log2();
     println!("at the slider's top: {octaves:.3} octaves for two");
     assert!((octaves - 2.4).abs() < 0.06);
+    let half = followed.at(Param::VcfKeyFollow, 37);
+    let octaves = (ringing(&half, C4) / ringing(&half, C2)).log2();
+    println!("at 3.7: {octaves:.3} octaves for two");
+    assert!((octaves - 1.0).abs() < 0.06);
+    // Upside down, the table's other half: as far the other way.
+    let down = followed.with(Param::VcfKeyFollow, 128 - 95);
+    let octaves = (ringing(&down, C4) / ringing(&down, C2)).log2();
+    println!("upside down at 7.5: {octaves:.3} octaves for two");
+    assert!((octaves + 2.0).abs() < 0.06);
 }
 
 #[test]

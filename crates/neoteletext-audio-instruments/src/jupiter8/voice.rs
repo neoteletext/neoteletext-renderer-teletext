@@ -440,7 +440,7 @@ impl Settings {
             cutoff_envelope: law::signed_share(law::CUTOFF_ENVELOPE, patch.signed(Param::VcfEnvMod)),
             cutoff_from_second: patch.on(Param::VcfEnvSource),
             cutoff_lfo: law::signed_share(law::CUTOFF_LFO, patch.signed(Param::VcfLfoMod)),
-            key_follow: law::signed_share(law::KEY_FOLLOW_PERCENT, patch.signed(Param::VcfKeyFollow)),
+            key_follow: law::key_follow(patch.signed(Param::VcfKeyFollow)),
             level: law::level(patch.get(Param::VcaLevel)),
             level_lfo: law::signed_share(LEVEL_LFO, patch.signed(Param::VcaLfoMod)),
             inverted: patch.on(Param::Env1Polarity),

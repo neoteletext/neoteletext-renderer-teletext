@@ -233,15 +233,33 @@ pub const CUTOFF_ENVELOPE: i32 = 6 * OCTAVE;
 /// are marked 1 and 2, with no frequency given; it is taken here as half
 /// the envelope's six octaves.
 pub const CUTOFF_LFO: i32 = 3 * OCTAVE;
-/// The share of the key's interval from middle C that the cutoff follows
-/// with KEY FOLLOW at 10, in hundredths.
+/// The cutoff's key follow, as points of the slider's 127 steps and the
+/// share of the key's interval from middle C that the cutoff follows
+/// there, in hundredths: none at 0, all of it at 7.5 and 120% at 10.
 ///
-/// Source: Roland's specifications (service notes, page 1; owner's
-/// manual, printed page 29): "Key Follow: 0 - 120%". Own choice: a
-/// straight line between. Service notes, adjustment 13, VCF KEY
-/// FOLLOWER, trims the key C4 to four times the key C2's frequency, 100%,
-/// at a position of the slider its drawing does not show legibly.
-pub const KEY_FOLLOW_PERCENT: i32 = 120;
+/// Source: service notes, adjustment 13, VCF KEY FOLLOWER: the filter
+/// oscillating, the key C2 is set to "display one complete cycle" and a
+/// trimmer then makes the key C4 "display 4 complete cycles", two
+/// octaves for two; the adjustment's drawing of the panel has the KEY
+/// FOLLOW slider's knob marked "7.5". Roland's specifications (service
+/// notes, page 1; owner's manual, printed page 29): "Key Follow: 0 -
+/// 120%". Own choice: straight lines between the three.
+pub const KEY_FOLLOW_LAW: [(i32, i32); 3] = [(0, 0), (95, 100), (SIGNED_MAX, 120)];
+const _: () = assert!(KEY_FOLLOW_LAW[1].0 == (SIGNED_MAX * 75) / 100);
+
+/// The share of the key's interval from middle C that the cutoff follows
+/// for a signed slider's position, in hundredths, signed as the slider
+/// is.
+#[must_use]
+pub fn key_follow(slider: i32) -> i32 {
+    let [first, middle, last] = KEY_FOLLOW_LAW;
+    let position = slider.clamp(-SIGNED_MAX, SIGNED_MAX);
+    let size = position.saturating_abs();
+    let (from, to) = if size <= middle.0 { (first, middle) } else { (middle, last) };
+    let along = share_of(to.1.saturating_sub(from.1), size.saturating_sub(from.0), to.0.saturating_sub(from.0));
+    let share = from.1.saturating_add(along);
+    if position < 0 { share.saturating_neg() } else { share }
+}
 
 /// The octaves the low-frequency oscillator at its peak moves the pitch
 /// either way with the VCO modulator's LFO MOD at 10.
