@@ -711,17 +711,18 @@ impl Voice {
         let mut cutoff = 0u32;
         let stretches = settings.poly_pitch != 0 || settings.poly_width != 0;
         let mut now = u32::MAX;
+        // What B has still to run in the sample, to the unit.
+        let mut left = step;
         for _ in 0..STRETCHES {
-            // What B runs in what is left of the sample.
-            let left = if now == u32::MAX { step } else { mul_high_unsigned(step, now) };
             let mark = self.to_the_mark(settings, phase).filter(|&distance| distance <= left);
             let run = mark.unwrap_or(left);
-            let until = if run >= left { 0 } else { ratio(left.wrapping_sub(run), step) };
             let end = phase.wrapping_add(run);
             // Before a jump the voltage is as it was a unit of phase
             // short of it.
             let (to, pitch_to, cutoff_to) =
                 self.under(settings, if mark.is_some() { end.wrapping_sub(1) } else { end });
+            left = left.saturating_sub(run);
+            let until = if left == 0 { 0 } else { ratio(left, step) };
             if stretches {
                 if settings.poly_width != 0 {
                     self.oscillator_a.set_width(self.width_under(settings, to));
@@ -730,7 +731,7 @@ impl Voice {
             }
             // The whole sample is one stretch more often than not.
             let middle = (cutoff_from >> 1).wrapping_add(cutoff_to >> 1);
-            let span = now.wrapping_sub(until);
+            let span = now.saturating_sub(until);
             cutoff = if span == u32::MAX { middle } else { cutoff.saturating_add(mul_high_unsigned(middle, span)) };
             phase = end;
             (from, pitch_from, cutoff_from) = (to, pitch_to, cutoff_to);
@@ -744,7 +745,7 @@ impl Voice {
                 }
             }
             now = until;
-            if now == 0 {
+            if left == 0 {
                 break;
             }
         }
@@ -848,7 +849,51 @@ const _: () = assert!(SEMITONES == 12 && ONE_Q28 == 1 << 28 && UNIT == LEVEL);
 #[cfg(test)]
 #[allow(clippy::cast_precision_loss, clippy::arithmetic_side_effects, reason = "a test, in f64")]
 mod tests {
-    use super::{RATE, STEP_OF_C0};
+    use super::{Controls, RATE, STEP_OF_C0, Settings, Voice};
+    use crate::prophet5::Model;
+    use crate::prophet5::patch::{Knob, Patch, Switch};
+
+    #[test]
+    fn a_cycle_of_oscillator_b_that_starts_as_a_sample_ends_synchronises_oscillator_a() {
+        // Oscillator B's pulse falls a quarter of the way through a
+        // sample and its cycle starts exactly where the sample ends.
+        // What was left of the sample after the fall was worked out
+        // again from a rounded share of it, came out a unit short of
+        // the start, and the start was then seen by no sample: oscillator
+        // A ran on unsynchronised for a cycle of B.
+        let (step, fall) = (0x0400_0000u32, 0x0100_0000u32);
+        let patch = Patch::DEFAULT
+            .with_switch(Switch::Sync, true)
+            .with_switch(Switch::OscAPulse, true)
+            .with_switch(Switch::OscBPulse, true)
+            .with_switch(Switch::PolyModPulseWidthA, true)
+            .with(Knob::PolyModOscB, 120);
+        for model in [Model::Rev3, Model::Rev2] {
+            let settings = Settings::new(&patch, model);
+            let mut voice = Voice::new(model, [0; 3]);
+            voice.configure(&settings);
+            voice.start(24);
+            voice.tick(&settings, Controls { wheel: 0, pitch: 0, unison: None, pedal: false });
+            for _ in 0..7 {
+                let _ = voice.sample(&settings, 0);
+            }
+            assert_ne!(voice.oscillator_a.phase(), 0, "{model:?}: oscillator A is under way");
+            // Oscillator B a sample short of its cycle's start.
+            voice.oscillator_b.set_step(step);
+            voice.oscillator_b.restart();
+            voice.oscillator_b.rewind(step);
+            voice.width_b = step.wrapping_neg() + fall;
+            voice.oscillator_b.set_width(voice.width_b);
+            voice.carried = None;
+            let _ = voice.sample(&settings, 0);
+            assert_eq!(voice.oscillator_b.phase(), 0, "{model:?}: oscillator B's cycle starts with the sample");
+            assert_eq!(
+                (voice.oscillator_a.phase(), voice.oscillator_a.started()),
+                (0, Some(0)),
+                "{model:?}: oscillator A starts its cycle there too"
+            );
+        }
+    }
 
     #[test]
     fn the_step_of_c0_is_the_number_its_source_gives() {
