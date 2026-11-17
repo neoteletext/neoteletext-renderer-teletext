@@ -56,11 +56,15 @@ const AMP_MOD_SHIFTS: [u32; 3] = [9, 7, 5];
 const REST_FADE_STEP: u32 = ATTENUATION_SILENT / 750;
 
 /// What is added each block to the attenuation of the carriers of a note
-/// that is cut (all sound off): silence in 8 blocks, 5.3 milliseconds,
-/// which is short and makes no click.
+/// that is cut (all sound off): silence in 32 blocks, 21 milliseconds,
+/// and a 250th of the level in 12.
 ///
-/// Source: own choice.
-const CUT_FADE_STEP: u32 = ATTENUATION_SILENT / 8;
+/// Source: own choice, measured (`tests/dx7_control_sweep.rs`). The
+/// attenuation is a logarithm, so the level falls by the same share at
+/// every sample: in 8 blocks, as it first was, by 3.7% a sample, which
+/// under a plain sine on middle C was a step 2.3 times the sine's own
+/// largest; in 32 blocks by 0.9%.
+const CUT_FADE_STEP: u32 = ATTENUATION_SILENT / 32;
 
 /// What the part gives each of its notes for a block.
 #[derive(Clone, Copy, Debug)]
@@ -145,7 +149,13 @@ impl Note {
         if !continues {
             self.voice.silence();
         }
-        if params.oscillator_key_sync != 0 {
+        // A voice that goes on sounding keeps its phases. Set to zero
+        // under a level that is there already, they would step the
+        // signal by as much as all of it: a key struck again while its
+        // last note dies away is the commonest case. Own choice: the
+        // instrument, with a voice to spare, gives a new key another
+        // voice and leaves the old one to die away.
+        if params.oscillator_key_sync != 0 && !continues {
             self.voice.reset_phases();
         }
         let operators = self.envelopes.iter_mut().zip(&mut self.base_pitch).zip(&mut self.amp_mod_sensitivity);
@@ -203,9 +213,11 @@ impl Note {
         }
     }
 
-    /// Ends the note within a few milliseconds.
+    /// Ends the note within 21 milliseconds. Its envelopes are left
+    /// where they are: let go, a release at its quickest would take the
+    /// level down sooner than the fade does, and more suddenly.
     pub(crate) fn cut(&mut self) {
-        self.release();
+        self.released = true;
         self.fade_step = CUT_FADE_STEP;
     }
 

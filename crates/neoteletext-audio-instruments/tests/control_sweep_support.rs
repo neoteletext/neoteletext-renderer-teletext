@@ -25,7 +25,8 @@
 //! and a state emptied or a gain moved in one sample stands well above
 //! it. Where both sounds are silent a floor stands in for them, so that
 //! a ratio is of something. A change that starts a note is also held
-//! against the start of that note on an instrument at rest.
+//! against the start of that note on an instrument at rest, added to
+//! the sound's own, since the new note sounds over the old.
 //!
 //! A sustained sound is played up to a crest of its wave, where a gain
 //! that jumps steps the signal most; changed at a crossing of zero it
@@ -313,7 +314,9 @@ pub fn measure<I: Instrument>(sound: &Sound<I>, change: &Change<I>) -> Row {
         let mut fresh = (sound.make)();
         (change.before)(&mut fresh);
         onset(&mut fresh);
-        there = there.max(largest_step(0, &run(&mut fresh, ALONE)));
+        // The new note sounds over the old: at the most their steps
+        // fall together.
+        there = there.max(own + largest_step(0, &run(&mut fresh, ALONE)));
     }
     Row { control: change.control.clone(), what: change.what.clone(), sound: sound.name, own, there, step }
 }

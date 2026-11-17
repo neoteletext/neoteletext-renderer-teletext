@@ -54,6 +54,10 @@ fn sounding(rack: &Rack, part: u8) -> Vec<u8> {
     (0..128).filter(|&key| rack.is_sounding(part, key)).collect()
 }
 
+/// How long all sound off takes to silence a note: the rack's fade of 32
+/// blocks of 32 samples (`src/dx7/note.rs`, `CUT_FADE_STEP`), 21.3
+/// milliseconds, and a block more for the block in which it is heard.
+const CUT_SAMPLES: usize = 33 * 32;
 #[test]
 fn a_note_sounds_until_its_key_goes_up() {
     let mut rack = Rack::new();
@@ -162,7 +166,7 @@ fn a_key_already_sounding_is_retriggered_in_place() {
     rack.event(0x80, 60, 0);
     rack.event(0xb0, 120, 0);
     rack.event(0xb1, 120, 0);
-    render(&mut rack, 960);
+    render(&mut rack, CUT_SAMPLES);
     assert_eq!(rack.sounding_notes(), 0);
 }
 
@@ -228,7 +232,7 @@ fn all_notes_off_releases_a_parts_keys() {
 }
 
 #[test]
-fn all_sound_off_silences_a_part_within_ten_milliseconds() {
+fn all_sound_off_silences_a_part_within_twenty_two_milliseconds() {
     let mut rack = rack_with(&[lingering()]);
     rack.event(0xb0, 64, 127);
     for key in [60, 64, 67] {
@@ -239,7 +243,7 @@ fn all_sound_off_silences_a_part_within_ten_milliseconds() {
     let before = render(&mut rack, 960);
     let step = |samples: &[i16]| samples.windows(2).map(|pair| (i32::from(pair[0]) - i32::from(pair[1])).abs()).max();
     rack.event(0xb0, 120, 0);
-    let fading = render(&mut rack, 480);
+    let fading = render(&mut rack, CUT_SAMPLES);
     assert_eq!(sounding(&rack, 0), [] as [u8; 0], "the pedal does not hold against all sound off");
     assert_eq!(sounding(&rack, 2), [60, 64, 67]);
     // No click: no step between two samples larger than the chords' own.
