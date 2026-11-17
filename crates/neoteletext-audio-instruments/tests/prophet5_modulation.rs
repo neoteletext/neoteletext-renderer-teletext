@@ -196,6 +196,32 @@ fn poly_mod_from_oscillator_b_sweeps_oscillator_a_and_the_filter() {
 }
 
 #[test]
+fn oscillator_bs_triangle_is_as_large_as_its_sawtooth_on_revision_3() {
+    // TM3 SD431: the triangle's 5 V pass a level shifter of a gain of two
+    // (U451: R4254 and R4255, 100 kΩ each, about the reference) and leave
+    // it 10 V from peak to peak about zero, into 150 kΩ (R4285) as the
+    // sawtooth's 10 V are (R4241). Of two waves of one size the
+    // triangle's fundamental is 8 / π² of half the size and the
+    // sawtooth's 2 / π of it: 4 / π between them.
+    let alone = |shape: Switch| {
+        let patch = plain(Model::Rev3)
+            .with(Knob::MixerOscA, 0)
+            .with(Knob::MixerOscB, 120)
+            .with_switch(Switch::OscASawtooth, false)
+            .with_switch(shape, true);
+        let signal = play(Model::Rev3, &patch, 60, 1.0, 0.0);
+        let steady = &signal[samples(0.2)..];
+        amplitude(steady, pitch(steady))
+    };
+    let (sawtooth, triangle) = (alone(Switch::OscBSawtooth), alone(Switch::OscBTriangle));
+    let ratio = triangle / sawtooth;
+    println!(
+        "revision 3: fundamental of the sawtooth {sawtooth:.4}, of the triangle {triangle:.4}: {ratio:.3} (4 / π: 1.273)"
+    );
+    assert!((ratio - 4.0 / std::f64::consts::PI).abs() < 0.04, "{ratio}");
+}
+
+#[test]
 fn the_pulse_is_square_at_five_and_gone_at_the_ends() {
     // OM section 2-3: a square "by setting the knob to approximately 5";
     // "At the extreme knob settings the pulses ... degenerate to dc".

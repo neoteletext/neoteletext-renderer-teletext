@@ -233,11 +233,18 @@ pub const REV3: Law = Law {
     // sawtooth through 150 kΩ, the pulse through 200 kΩ, the triangle
     // through 150 kΩ. CEM3340 data sheet, page 2: the sawtooth is 0 to
     // 10 V, the triangle 0 to 5 V, and "the pulse peak is 1.5 volts
-    // below the supply", 13.5 V: currents of 67, 67.5 and 33 µA peak to
-    // peak, so the pulse is as large as the sawtooth and the triangle
-    // half.
+    // below the supply", 13.5 V. The triangle does not reach its
+    // resistor as the chip makes it: the "DC level-shifter" of the same
+    // sheet (U451) takes it at its non-inverting input and has 100 kΩ
+    // from its inverting input to the 5 V reference and 100 kΩ back
+    // (R4254, R4255), a gain of two less the reference, so what leaves
+    // it is 10 V from peak to peak about zero (TM3 section 2-4, page 21:
+    // "shifts down the dc-level of the triangle to be symmetrical about
+    // ground"). Currents of 67, 67.5 and 67 µA peak to peak: the pulse
+    // and the triangle are each as large as the sawtooth, in the mixer
+    // and, through the same 150 kΩ (R4243, R4260), in Poly-Mod.
     mixing: Mixing::Currents,
-    levels: (ONE_Q30_LEVEL, ONE_Q30_LEVEL / 2),
+    levels: (ONE_Q30_LEVEL, ONE_Q30_LEVEL),
     // Source: TM3 adjustment 4-20 (pages 70 and 71): with the cutoff
     // voltage "as close to 2.000V as the quantized voltage steps will
     // allow", 24 steps, and the filter oscillating, "Alternately play A3
