@@ -318,10 +318,12 @@ pub const MIXER_CORNER: u32 = 482;
 ///
 /// Source: own choice. The preamplifier is "a three transistor high-gain
 /// amplifier" (Folkman, section II) whose gain was not worked out from
-/// figure 9-11; six times lets the instrument's own output, returned,
-/// overdrive the filter from about 3 on the dial, as players of the
-/// patch describe. The corner is 1 µF, the preamplifier's output
-/// capacitor C20, into 10 kΩ taken for what follows it.
+/// figure 9-11, and no document read describes the patch; six times,
+/// with the knob's law taken as a square, brings the loop's gain to one
+/// near 4 on the dial, below which the returned output thickens the
+/// sound and above which it overdrives the filter. The corner is 1 µF,
+/// the preamplifier's output capacitor C20, into 10 kΩ taken for what
+/// follows it.
 pub const EXTERNAL_GAIN: i32 = 6 * ONE_Q28;
 /// See [`EXTERNAL_GAIN`].
 pub const EXTERNAL_CORNER: u32 = 15_900;
