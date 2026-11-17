@@ -94,12 +94,14 @@ fn the_low_frequency_oscillator_runs_at_the_documents_rates() {
 fn wheel_mod_bends_pitch_through_182_kilohms_and_the_shapes_stand_as_the_chip_makes_them() {
     // One unit of Wheel-Mod is 100 / 182 octave, 659 cents: the sawtooth
     // from 0 to that, the square from 0 to its level against the
-    // sawtooth, the triangle a quarter either way.
+    // sawtooth, the triangle a half either way: its 5 V are doubled about
+    // their reference before the 160 kΩ the sawtooth's 10 V pass (TM3
+    // SD334: U380 with R3147 and R3148, 100 kΩ each, and R3131).
     for model in MODELS {
         let unit = 1200.0 * 100.0 / 182.0;
         let square = if model == Model::Rev3 { 1.08 } else { 0.75 };
         for (shape, low, high) in [
-            (Switch::LfoTriangle, -0.25 * unit, 0.25 * unit),
+            (Switch::LfoTriangle, -0.5 * unit, 0.5 * unit),
             (Switch::LfoSawtooth, 0.0, unit),
             (Switch::LfoSquare, 0.0, square * unit),
         ] {
