@@ -20,8 +20,8 @@
 //!   state-variable filter of 12 dB an octave with its own resonance
 //!   ([`StateVariable`](crate::analog::filter::StateVariable)). Their
 //!   cutoffs follow the key, and move an octave for each volt. The
-//!   resonance reaches a Q of 5 by its lever and 12.5 at most; the
-//!   filters do not oscillate by themselves.
+//!   resonance reaches a Q of 5 by its lever and 9.5 with the overall
+//!   lever's help; the filters do not oscillate by themselves.
 //! - **Envelopes.** The filters' (IG00152) starts at an initial level
 //!   below the levers' setting, rises to an attack level above it, decays
 //!   to the setting and on release returns to the initial level. The

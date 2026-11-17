@@ -54,9 +54,10 @@ fn cutoff(which: Which, key: u8, lever: u8, more: f64) -> f64 {
 }
 
 /// The Q of a resonance lever with the overall lever: 0.5 to 5 by the one
-/// lever, tenfold again by the other, and never above 12.5.
+/// lever in a straight line, as far again by the other, and never above
+/// 12.5.
 fn q(lever: u8, overall: u8) -> f64 {
-    (0.5 * 10.0f64.powf(f64::from(lever) / 127.0 + f64::from(overall) / 127.0)).min(12.5)
+    (0.5 + 4.5 * (f64::from(lever) + f64::from(overall)) / 127.0).min(12.5)
 }
 
 /// The gain of the high-pass then the low-pass at a frequency, each a
@@ -132,7 +133,10 @@ fn the_cutoffs_are_the_alignments_two_points_and_follow_the_keys() {
 }
 
 #[test]
-fn the_resonance_is_a_q_of_a_half_to_five_and_twelve_and_a_half_at_most() {
+fn the_resonance_is_a_q_of_a_half_to_five_in_a_straight_line_and_nine_and_a_half_at_most() {
+    // Service manual, page 42, VCF IC, pin 7: a Q of 0.5 at the lever's
+    // foot and 5 at its top. Half way it is 2.77, where a real
+    // instrument's BRASS 1 has it (`cs80::law::damping`).
     for (hpf_resonance, lpf_resonance, overall) in
         [(0u8, 127u8, 0u8), (127, 0, 0), (64, 64, 0), (127, 127, 0), (0, 0, 127), (127, 127, 127), (40, 90, 60)]
     {
@@ -162,7 +166,7 @@ fn at_the_most_resonance_the_filters_ring_and_do_not_oscillate() {
     let signal = play(&patch, 48, 100, 2.0, 0.0);
     let level = |from: usize| cs80_support::rms(&signal[from..from + 24_000]);
     let (early, late) = (level(24_000), level(72_000));
-    println!("noise through both filters at a Q of 12.5: {early:.4} then {late:.4} of full scale");
+    println!("noise through both filters at a Q of 9.5: {early:.4} then {late:.4} of full scale");
     // Steady, and far from what an oscillation would settle at.
     assert!((late / early - 1.0).abs() < 0.25 && late < 0.3);
     // With nothing going in, nothing comes out.

@@ -349,10 +349,9 @@ impl Channel {
                 .saturating_add(law::scaled(brilliance, brilliance_weight))
         };
         // The overall lever adds its travel to each filter's own.
-        let resonance = law::share(law::DAMPING_SPAN, patch.get(Global::Resonance));
+        let resonance = u32::from(patch.get(Global::Resonance));
         let damping = |control: Control| {
-            let down = law::share(law::DAMPING_SPAN, lever(control)).saturating_add(resonance);
-            let damping = law::raise(law::DAMPING_FOOT, down.saturating_neg()).max(law::DAMPING_LEAST);
+            let damping = law::damping(u32::from(lever(control)).saturating_add(resonance));
             i32::try_from(damping).unwrap_or(i32::MAX)
         };
         let initial = law::share(ENVELOPE_REACH, lever(Control::InitialLevel)).saturating_neg();
