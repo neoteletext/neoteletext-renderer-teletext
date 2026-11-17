@@ -360,9 +360,13 @@ pub const REV2: Law = Law {
     // a hundredth of a volt for each volt, 1.27 semitones at the top.
     fine_step: octaves(1, SEMITONES * 100),
     // Source: TM2 section 2-8 (page 27): "For LO FREQ operation, a
-    // switch applies negative voltage to the SMR"; sheet SD312: -15 V
-    // through two 100 kΩ (R3133, R3134) and a third (R3103) into the
-    // summer, which was read as 5 V, five octaves, and is not certain.
+    // switch applies negative voltage to the SMR"; sheet SD312 (page
+    // 76): -15 V through 100 kΩ (R3134) to a node with 100 kΩ to ground
+    // (R3133), and from that node through the switch and 100 kΩ (R3103)
+    // into oscillator B's summer of 100 kΩ back (R3109): 7.5 V behind
+    // 150 kΩ, which is 5 V through 100 kΩ, five octaves down. The
+    // frequency knob enters as it always does (R3110): nothing on the
+    // sheet changes its range.
     low_frequency: (octaves(-5, 1), None),
     // Source: TM2 section 2-23 (page 45): "Control sensitivity is 10%/V
     // (100% @ 0V decreasing to 0% at 10V)".
@@ -420,16 +424,21 @@ pub const REV2: Law = Law {
     // gain of 4/3, and its output reaches the SSM2030's base through
     // 54.9 kΩ over 1 kΩ (R377, R381), 17.9 mV to the volt, an octave
     // (SSM2030 data sheet, page 2, the basic connection's 54.9 kΩ and
-    // 1 kΩ): 4/3 octave to the volt, a ninth of an octave a step. Where on that slope the knob stands is from Sequential's
-    // original patch sheet 1-1, "Brass": the vibrato is "approximately
+    // 1 kΩ): 4/3 octave to the volt, a ninth of an octave a step. Where
+    // on that slope the knob stands is from Sequential's original patch
+    // sheet 1-1, "Brass": the vibrato is "approximately
     // 5 cycles per second" with the knob drawn at 6.6 (the pointer's
     // angle measured on the scan), 79 steps: 11 thousandths of a hertz
     // at 0, 4.8 Hz at 79 steps and 195 Hz at the top. The manual gives
-    // no range, and the components do not bear the sheet out: 15 V
+    // no range, and the components do not bear the sheet out: -15 V
     // through 100 kΩ (R370) offset the summer, and with 2.21 MΩ of
     // reference and 0.01 µF (R382, C335) the data sheet's 10 V sawtooth
-    // would run at 0.9 Hz at that knob and 37 Hz at the top. The sheet's
-    // words are kept, as the nearer to the instrument. The pulse is
+    // would run at 0.9 Hz at that knob and 37 Hz at the top, if the
+    // chip's current mirror passed the reference current one for one.
+    // The SSM2030 data sheet does not say that it does: it draws a box
+    // marked "CURRENT MIRROR" and gives no ratio, no formula of
+    // frequency and no frequency for its basic connection's parts. The
+    // sheet's words are kept, as the nearer to the instrument. The pulse is
     // 7.5 V against the sawtooth's 10 V (section 2-23).
     lfo: (11, octaves(1, 9), (ONE_Q30_LEVEL as i64 * 3 / 4) as i32),
     // Source: TM2 section 2-21 (page 43): diodes "clamp the difference

@@ -129,8 +129,10 @@ const WHEEL_CUTOFF: i32 = ((1_000i64 << 28) / 133) as i32;
 const POLY_MOD_PITCH: i32 = ((100i64 << 28) / 301) as i32;
 /// The octaves of cutoff for each volt of Poly-Mod: 100 / 54.9, in Q28.
 ///
-/// Source: TM3 SD431: R4181, 54.9 kΩ; TM2 SD411: R4105, 54.9 kΩ (the
-/// reading of which of two resistors it is was not certain).
+/// Source: TM3 SD431: R4181, 54.9 kΩ; TM2 SD411 (page 85): R4105,
+/// 54.9 kΩ, from the switch that Poly-Mod's filter switch closes into
+/// the cutoff's summer (the 100 kΩ beside it, R4109, is the filter
+/// envelope amount's).
 const POLY_MOD_CUTOFF: i32 = ((1_000i64 << 28) / 549) as i32;
 
 /// The volts of Poly-Mod that oscillator B's sawtooth makes, peak to
