@@ -17,6 +17,7 @@ mod cs80_support;
 
 use cs80_support::{
     CONTROL, NOTE_OFF, NOTE_ON, PITCH_BEND, SINE, cents, component, decibels, instrument, panel, pitch, play, render,
+    samples,
 };
 use neoteletext_audio_instruments::cs80::{Control, Global, Patch};
 
@@ -255,4 +256,25 @@ fn the_sine_is_a_sine() {
     assert!((decibels(fundamental) + 18.06).abs() < 0.1);
     assert!(decibels(worst / fundamental) < -60.0);
     let _ = Control::Sine;
+}
+
+#[test]
+fn with_the_glide_lever_at_its_foot_a_voice_takes_its_key_at_once() {
+    // Service manual, page 15, the D-A converter's pin 3: the glide works
+    // "when the portament VR is turned on". With the lever at its foot a
+    // voice that last played the lowest C went up to the highest in
+    // semitones of 0.17 ms, a chirp of 10 ms from 65 Hz to 2,093 Hz.
+    let patch = panel(&SINE);
+    let mut cs80 = instrument(&patch);
+    for key in 36..44 {
+        cs80.event(NOTE_ON, key, 100);
+        let _ = render(&mut cs80, 0.01);
+        cs80.event(NOTE_OFF, key, 0);
+    }
+    let _ = render(&mut cs80, 0.5);
+    // The ninth key takes the first voice again.
+    cs80.event(NOTE_ON, 96, 100);
+    let start = render(&mut cs80, 0.006);
+    let found = pitch(&start[samples(0.001)..]);
+    assert!(cents(tempered(96), found).abs() < 5.0, "{found} Hz");
 }

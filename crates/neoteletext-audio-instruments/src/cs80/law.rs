@@ -161,6 +161,10 @@ pub const VOLT: i32 = OCTAVE;
 /// its control currents meet ([`LPF_LEVER`]). The chip's own figure
 /// agrees within 5%: page 42, pin 4, "When the VK is 0.25V and Vf is 5V,
 /// the cut off frequency is set to just 1KHz"; this law gives 1,046 Hz.
+/// Yamaha's CS-series servicing guide (the page "Operational principle of
+/// LSI (IG00156)") states the law itself: "fc = 125 Kv · 2^Vfc", in
+/// proportion to the key voltage and an octave to the volt, 31.25 Hz
+/// here for this constant's 32.70 Hz.
 pub const CUTOFF_AT_NOTHING: u32 = 32_703;
 /// The key whose voltage is the 0.25 V of [`CUTOFF_AT_NOTHING`].
 ///
@@ -222,25 +226,50 @@ pub const CUTOFF_FLOOR: u32 = 21_277;
 /// reaches.
 pub const CUTOFF_CEILING: u32 = 20_000_000;
 
-/// The damping, 1 / Q, at a resonance lever's foot, in Q28: a Q of 0.5.
+/// The Q at a resonance lever's foot, in Q28: 0.5.
 ///
 /// Source: service manual, page 42, "VCF IC (IG00156)", pin 7, VQ: "When
 /// the control voltage is 10V (Min.), Q=0.5".
-pub const DAMPING_FOOT: u32 = 2 << 28;
-/// The octaves by which the damping falls over the lever's travel: a
-/// tenfold, to a Q of 5.
+pub const Q_FOOT: u64 = 1 << 27;
+/// The Q at a resonance lever's top, in Q28: 5.
 ///
 /// Source: the same pin: "When the control voltage is 0V (Max.), Q=5".
-/// Own choice: the Q is exponential in the voltage between the two, as a
-/// transconductance cell's current is in its control. log₂ 10 = 3.321928.
-pub const DAMPING_SPAN: i32 = octaves(3_321_928, 1_000_000);
+pub const Q_TOP: u64 = 5 << 28;
+
+/// A filter's damping, 1 / Q, in Q28, for the sum of the positions of
+/// its own resonance lever and the overall one: the Q rises in a straight
+/// line with the levers, from [`Q_FOOT`] to [`Q_TOP`] over one lever's
+/// travel and as far again over the other's, 9.5 with both at their tops,
+/// and never past [`DAMPING_LEAST`].
+///
+/// Source: own choice of the line between the chip's two stated ends,
+/// which no document read draws, made by twelve recordings of a real
+/// instrument's BRASS 1, whose low-pass resonance row stands at 5.19 V:
+/// their filters' peaks fit a Q of 1.8 to 3.3, 2.7 in the middle
+/// (`~/devel/teletext-reference/synthesizers/cs-80/validation/table.py`).
+/// A Q in a straight line with the voltage is 2.66 there; a damping
+/// falling tenfold in equal ratios for equal steps, as this was first
+/// written, 1.51, and a damping in a straight line 0.88. That the overall
+/// lever adds its travel is a reading of the service manual, page 39,
+/// R51-52 circuit diagram: each voice's Q line is fed by its filter's
+/// lever (QH or QL) and by the overall lever (RES) through 220 kΩ each.
+#[must_use]
+pub fn damping(levers: u32) -> u32 {
+    const FULL: u64 = LEVER_MAX as u64;
+    /// One in Q28, squared: a Q28 over a Q28 in Q28.
+    const ONE_SQUARED: u64 = 1 << 56;
+    let q = Q_FOOT.saturating_add(Q_TOP.saturating_sub(Q_FOOT).saturating_mul(u64::from(levers)) / FULL);
+    let damping = ONE_SQUARED.checked_div(q).unwrap_or(u64::MAX);
+    u32::try_from(damping).unwrap_or(u32::MAX).max(DAMPING_LEAST)
+}
 /// The least damping the filter reaches whatever is added to the
 /// resonance, in Q28: a Q of 12.5.
 ///
-/// Source: Haible, the same sheet: "maximum Q is limited by 1.2M
-/// resistors across damping gm cells", and "approx. 20uS == minimum Q":
-/// 1 / 1.2 MΩ is 0.833 µS against the 20.833 µS of a Q of 0.5, a Q 25
-/// times higher. The filter therefore never oscillates by itself.
+/// Source: Haible, "Analyzing the CS-80 VCF" (2001): "maximum Q is
+/// limited by 1.2M resistors across damping gm cells", and "approx. 20uS
+/// == minimum Q": 1 / 1.2 MΩ is 0.833 µS against the 20.833 µS of a Q of
+/// 0.5, a Q 25 times higher. The filter therefore never oscillates by
+/// itself.
 pub const DAMPING_LEAST: u32 = (1 << 28) * 2 / 25;
 
 /// The shortest attack of either envelope, in millionths of a second, the

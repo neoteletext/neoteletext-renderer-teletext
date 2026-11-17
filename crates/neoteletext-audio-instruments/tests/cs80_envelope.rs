@@ -79,8 +79,15 @@ fn the_decay_and_the_release_are_ten_milliseconds_to_ten_seconds() {
     for lever in [0u8, 64, 100, 127] {
         let expected = time(0.010, lever);
         let decay = levels(&shaped(0, lever, 0, 0), expected * 1.3 + 0.1, 0.0);
-        let peak = reaches(&decay, 0, 0.99 * FULL, true);
-        let fallen = reaches(&decay, samples(peak), 0.1 * FULL, false);
+        // The peak is where the level is largest: a decay of 10 ms has
+        // taken a hundredth of it within the two cycles a level is
+        // taken over.
+        let peak = decay
+            .iter()
+            .enumerate()
+            .fold((0, 0.0), |peak, (at, &level)| if level > peak.1 { (at, level) } else { peak });
+        assert!(peak.1 > 0.97 * FULL, "{lever}: a peak of {}", peak.1);
+        let fallen = reaches(&decay, peak.0, 0.1 * FULL, false);
         let held = 0.05;
         let release = levels(&shaped(0, 0, 127, lever), held, expected * 1.3 + 0.1);
         let released = reaches(&release, samples(held), 0.1 * FULL, false);

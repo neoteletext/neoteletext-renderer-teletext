@@ -112,8 +112,9 @@ const DRIVE_SHIFT: u32 = 2;
 ///
 /// Source: adjustment procedure, page 15, VCA, steps 1 and 2: the sine at
 /// 10 alone is trimmed to "1.00 ± .02 Vp-p" at the amplifier, and the
-/// square wave through open filters with VCF LEVEL at 10 to "800 ± 20
-/// mVp-p".
+/// square wave through open filters to "800 ± 20 mVp-p" (the page has
+/// "VCA LEVEL ... 10" there, read as the VCF LEVEL lever, which step 1
+/// has at 0).
 const VCF_GAIN: i32 = (ONE_Q28 as i64 * (1 << DRIVE_SHIFT) * 8 / 10) as i32;
 
 /// The amplifier's gain with every level at nominal, in Q30: an eighth,
@@ -349,10 +350,9 @@ impl Channel {
                 .saturating_add(law::scaled(brilliance, brilliance_weight))
         };
         // The overall lever adds its travel to each filter's own.
-        let resonance = law::share(law::DAMPING_SPAN, patch.get(Global::Resonance));
+        let resonance = u32::from(patch.get(Global::Resonance));
         let damping = |control: Control| {
-            let down = law::share(law::DAMPING_SPAN, lever(control)).saturating_add(resonance);
-            let damping = law::raise(law::DAMPING_FOOT, down.saturating_neg()).max(law::DAMPING_LEAST);
+            let damping = law::damping(u32::from(lever(control)).saturating_add(resonance));
             i32::try_from(damping).unwrap_or(i32::MAX)
         };
         let initial = law::share(ENVELOPE_REACH, lever(Control::InitialLevel)).saturating_neg();
@@ -444,7 +444,9 @@ pub struct Shared {
 /// oscillator: ".17ms" with the lever at SHORT and ".16s" at LONG. Owner's
 /// manual, page 12, A: at LONG "about 2 seconds per octave", which twelve
 /// periods of 0.16 s are. log₂ (160 / 0.17) = 9.878. Own choice: the
-/// period is exponential in the lever between the two.
+/// period is exponential in the lever between the two. The lever's foot
+/// itself switches the glide off ([`Shared::new`]): the 0.17 ms is the
+/// clock there, which then moves nothing.
 const GLIDE_CLOCK: (u32, i32) = (170_000, law::octaves(9_878, 1_000));
 /// Billionths of a second in a second.
 const NANOSECONDS: u64 = 1_000_000_000;
@@ -472,7 +474,15 @@ impl Shared {
             touch_vco: law::share(TOUCH_VCO_REACH, lever(Global::TouchVco)),
             touch_vcf: law::share(TOUCH_VCF_REACH, lever(Global::TouchVcf)),
             touch_bend: law::share(TOUCH_BEND.0, lever(Global::TouchPitchBend)),
-            glide_step: i32::try_from(step).unwrap_or(i32::MAX).max(1),
+            // At the lever's foot the glide is off, and a voice takes its
+            // key's voltage at once: service manual, page 15, "D-A
+            // CONVERTER LSI (YM26700)", pin 3, POR: "When the portament
+            // VR is turned on, +8.5V is supplied to the pin and actuate".
+            glide_step: if lever(Global::GlideTime) == 0 {
+                i32::MAX
+            } else {
+                i32::try_from(step).unwrap_or(i32::MAX).max(1)
+            },
             glissando: patch.on(Global::Glissando),
             bend_return: time_constant(TOUCH_BEND.1, TICK_RATE),
             damp: coefficient(DAMP_TIME, TIME_CONSTANT_THOUSANDTHS.1),

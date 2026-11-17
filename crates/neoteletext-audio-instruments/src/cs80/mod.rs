@@ -20,8 +20,8 @@
 //!   state-variable filter of 12 dB an octave with its own resonance
 //!   ([`StateVariable`](crate::analog::filter::StateVariable)). Their
 //!   cutoffs follow the key, and move an octave for each volt. The
-//!   resonance reaches a Q of 5 by its lever and 12.5 at most; the
-//!   filters do not oscillate by themselves.
+//!   resonance reaches a Q of 5 by its lever and 9.5 with the overall
+//!   lever's help; the filters do not oscillate by themselves.
 //! - **Envelopes.** The filters' (IG00152) starts at an initial level
 //!   below the levers' setting, rises to an attack level above it, decays
 //!   to the setting and on release returns to the initial level. The
@@ -59,7 +59,8 @@
 //!
 //! It is written under the clean-room procedure of DEC-6428, from
 //! Yamaha's service manual (KEC-4223), its adjustment procedure and its
-//! owner's manual, and Jürgen Haible's analysis of the filter, with no
+//! owner's manual, the pages of its CS-series servicing guide that Jürgen
+//! Haible published, and Haible's analysis of the filter, with no
 //! code and no table from any emulator or plugin. One reference program
 //! was run as a sealed program and its output measured. Each constant
 //! names its source where it is defined, in [`law`], the voice and here.
@@ -71,19 +72,70 @@
 //!   wherever its `Source:` line says so: above all how many octaves or
 //!   decibels a volt of touch, of the keyboard control and of the sub
 //!   oscillator is, and how far the overall levers reach.
-//! - **BRASS 1 is brighter than the one real instrument heard**, at
-//!   every stroke: on middle C its filter comes to rest near 2 kHz at the
-//!   softest stroke and near 12 kHz at the hardest, where a recording of
-//!   a real instrument, struck no one knows how hard, has it near 0.9
-//!   kHz. The touch response is not the cause of the softest stroke's
-//!   octave, since it adds nothing there; that octave lies in what the
-//!   preset's low-pass row was read as, in where the recorded
-//!   instrument's overall levers stood, or in its trim, and no document
-//!   read says which. How many volts a stroke gives is in no document
-//!   either: a velocity of 127 is taken as the most the detector can
-//!   pass, in a straight line below (own choice), and a pressure of 127
-//!   as the firm pressure the after-touch is trimmed with
+//! - **BRASS 1 is brighter than the one real instrument heard.** Twelve
+//!   keys of a real instrument's BRASS 1 come to rest 1.39 to 2.00
+//!   octaves above their notes; this reading rests at 2.92 on every key
+//!   at the softest stroke, 1.19 octaves above them in the mean, and
+//!   higher at a harder stroke. The real filter's peak also comes sooner
+//!   (116 to 260 ms after the key for 390 ms), and it falls back more
+//!   slowly (6.5 to 8.3 s to a tenth for 3.3 s). The figures, and a test
+//!   that states them and fails, are in `tests/cs80_filter.rs`
+//!   (`brass_1_rests_where_a_real_instruments_does`, ignored). What the
+//!   documents were asked:
+//!   - *The preset's parts* are as drawn (T51, column C: 5.1 kΩ on the
+//!     low-pass row), their supply is the diode's drop above ten volts,
+//!     and the row's load is counted ([`presets`]). The gap would need
+//!     the row at 3.0 V where the parts put it at 4.04 V.
+//!   - *The filter's law* is the servicing guide's own formula
+//!     ([`law::CUTOFF_AT_NOTHING`]), and the alignment fixes it at 3.3 V,
+//!     two octaves above the note: the real instrument rests *below* its
+//!     alignment point, so no slope of the lever's law closes the gap.
+//!   - *The envelope* rests at zero (service manual, page 42, IG00152,
+//!     pin 15: the sustain level is "normally fixed to zero(0) volt", and
+//!     page 41 ties the pin to earth), starts at the initial level and
+//!     returns to it: as it is here.
+//!   - *The stroke's voltage is not held for ever* in the instrument: the
+//!     touch board keeps it on 0.33 µF behind a FET, with 10 MΩ from
+//!     the capacitor to the FET's gate as the drawing was read (service
+//!     manual, page 17, TWS circuit diagram), a time constant of 3.3 s,
+//!     which is the time constant the recordings' filters fall with. Here a stroke's
+//!     brilliance and level last the whole note. Where the held voltage
+//!     ends (nothing, or below nothing, which would lower a held note's
+//!     brilliance by the INITIAL BRILLIANCE lever's share and could be
+//!     the whole gap) the drawing does not say without the FET's
+//!     pinch-off voltage, so it is not built.
+//!   - *The overall BRILLIANCE lever* of the recorded instrument would
+//!     have to stand a third of its travel from its centre.
+//!
+//!   How many volts a stroke gives is in no document either: a velocity
+//!   of 127 is taken as the most the detector can pass, in a straight
+//!   line below (own choice), and a pressure of 127 as the firm pressure
+//!   the after-touch is trimmed with
 //!   (`~/devel/teletext-reference/synthesizers/cs-80/validation/`).
+//! - **The resonance between its ends** follows the same recordings and
+//!   not a document ([`law::damping`]). The drawings leave one thing
+//!   open: each voice's Q input is fed by its filter's lever and by the
+//!   overall RESONANCE lever through 220 kΩ each, with no resistor to
+//!   earth (service manual, pages 39 and 41), so that the chip may see
+//!   the mean of the two and not their sum, and the alignment sets both
+//!   to their most for the chip's Q of 5 (adjustment procedure, page
+//!   11). Read so, with the overall lever at its nominal least, no
+//!   preset would have a Q above 1.6 to 2.8, and BRASS 1's would be
+//!   under 1.5, which the recordings' 2.7 does not bear out; the sum is
+//!   kept.
+//! - **The real sine is not pure**: recordings have its second and third
+//!   harmonics 20 to 25 dB down, where the sine here has them 77 dB
+//!   down. The documents give no figure for it: the waveshaper's sheet
+//!   (service manual, page 42, IG00158) only names the pins and the
+//!   sine's 3 V, and the adjustment procedure has no step for it.
+//! - **The effect leaves the dry sound in.** On the OE1 board the input
+//!   reaches both output amplifiers through 100 kΩ whether the effect is
+//!   on or off, and the delayed sound joins it, inverted, through 68 kΩ
+//!   (service manual, page 55); the levels at the two are not printed.
+//!   Here the delayed sound takes the dry sound's place. Both of the
+//!   effect's oscillators also run in both modes, CHORUS being the same
+//!   pair at about a sixth of TREMOLO's speed voltage (pages 55 and 66);
+//!   here one runs for each tab.
 //! - **The filters do not distort**, and the loss of resonance at high
 //!   frequencies that Haible finds (180 pF across the damping) is left
 //!   out.
@@ -97,7 +149,7 @@
 //!   PITCH knob, no HIGH/LOW output switch.
 //! - **Portamento is per voice**, each from the pitch it last had; the
 //!   instrument's key assigner was not read closely enough to say that
-//!   this is what it does.
+//!   this is what it does. With the lever at its foot there is none.
 //! - **The four memories** are not kept: a memory is a tone, and
 //!   [`Patch`] holds two.
 
@@ -261,12 +313,12 @@ const EFFECT_FILTER: u32 = 14_400_000;
 ///
 /// Source: adjustment procedure, page 21, step 4: the four modulation
 /// amplifiers are trimmed to ".65", ".58", ".58" and ".65 Vp-p"; service
-/// manual, pages 55 and 57, as read: the left output is the first line
-/// through the first two amplifiers, the right the second line through
-/// the other two, and each oscillator drives one amplifier of each side
-/// oppositely. In the sum of the two outputs an oscillator's share is
-/// (0.65 - 0.58) / (2 × (0.65 + 0.58)). Own choice: the amplifiers swing
-/// their whole gain at full depth.
+/// manual, pages 55 to 58: the first line feeds the two amplifiers of
+/// 0.65 V and the second the two of 0.58 V; each output is one amplifier
+/// of each line; each oscillator drives one amplifier of each output,
+/// oppositely. The lines carry the same sound, so in the sum of the two
+/// outputs an oscillator's share is (0.65 - 0.58) / (2 × (0.65 + 0.58)).
+/// Own choice: the amplifiers swing their whole gain at full depth.
 const EFFECT_MONO_SHARE: i32 = (ENVELOPE_ONE as i64 * 7 / 246) as i32;
 /// The level with the effect on, in Q30: nine tenths.
 ///
@@ -319,6 +371,14 @@ const fn sine_level(phase: u32) -> i32 {
 fn coefficient(time: u32, thousandths: u64) -> i32 {
     let constant = u64::from(time).saturating_mul(thousandths) / THOUSAND;
     time_constant(u32::try_from(constant).unwrap_or(u32::MAX), TICK_RATE)
+}
+
+/// The effect's delay lines and their filters, empty.
+fn effect_line() -> Chorus {
+    let mut line = Chorus::new(SAMPLE_RATE);
+    line.set_filter_cutoff(frequency(EFFECT_FILTER, SAMPLE_RATE));
+    line.set_delay(EFFECT_DELAY, 0);
+    line
 }
 
 /// The CS-80.
@@ -378,9 +438,6 @@ impl Cs80 {
             number = number.wrapping_add(1);
             voice
         });
-        let mut line = Chorus::new(SAMPLE_RATE);
-        line.set_filter_cutoff(frequency(EFFECT_FILTER, SAMPLE_RATE));
-        line.set_delay(EFFECT_DELAY, 0);
         let mut cs80 = Self {
             patch: Patch::DEFAULT,
             channels: [Channel::new(&Patch::DEFAULT, 0), Channel::new(&Patch::DEFAULT, 1)],
@@ -402,7 +459,7 @@ impl Cs80 {
             ring_modulation: 0,
             effect: [Wave::default(); 2],
             effect_depth: [0; 2],
-            line,
+            line: effect_line(),
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
@@ -428,6 +485,12 @@ impl Cs80 {
     /// once, on the voices that are sounding too, as moving the panel's
     /// levers does.
     pub fn set_patch(&mut self, patch: &Patch) {
+        // The effect's lines are fed only while it is on, so what they
+        // held when it was switched off is not let out when it is
+        // switched on again.
+        if !self.patch.on(Global::Effect) && patch.on(Global::Effect) {
+            self.line = effect_line();
+        }
         self.patch = *patch;
         self.apply_patch();
     }

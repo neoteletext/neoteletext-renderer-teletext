@@ -17,8 +17,8 @@
 mod cs80_support;
 
 use cs80_support::{
-    CHANNEL_PRESSURE, KEY_PRESSURE, NOTE_ON, SINE, component, decibels, envelope, instrument, panel, pitch, play,
-    render, rms,
+    CHANNEL_PRESSURE, CONTROL, KEY_PRESSURE, NOTE_ON, SINE, component, decibels, envelope, instrument, panel, pitch,
+    play, render, rms,
 };
 use neoteletext_audio_instruments::cs80::{Control, Function, Global, Patch};
 
@@ -188,7 +188,7 @@ fn the_touch_moves_the_level_and_the_brilliance() {
         const VOLUME: u8 = 64;
         let quieter = (f64::from(VOLUME) / 127.0).powi(2);
         let mut cs80 = instrument(patch);
-        cs80.event(cs80_support::CONTROL, 7, VOLUME);
+        cs80.event(CONTROL, 7, VOLUME);
         cs80.event(NOTE_ON, 69, velocity);
         cs80.event(KEY_PRESSURE, 69, pressure);
         decibels(rms(&render(&mut cs80, 0.5)[12_000..]) * 2.0f64.sqrt() / 0.125 / quieter)
@@ -312,12 +312,16 @@ fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     println!("the keyboard's level levers at their trimmed keys: {low:.2} dB and {high:.2} dB");
     assert!((low + 8.28).abs() < 0.1 && (high - 8.28).abs() < 0.1);
     // Each lever has its own half of the keyboard, and the middle none.
-    assert!(
-        level(Global::KeyboardLevelLow, 0, 85).abs() < 0.01 && level(Global::KeyboardLevelHigh, 127, 48).abs() < 0.01
-    );
-    assert!(
-        level(Global::KeyboardLevelLow, 0, 66).abs() < 0.01 && level(Global::KeyboardLevelHigh, 0, 66).abs() < 0.01
-    );
+    // The level is taken over a quarter of a second, which on the key 48
+    // is 32.7 cycles: the part of a cycle left over moves it by up to
+    // 1 / (4 π 32.7) of itself, 0.021 dB.
+    let none = [
+        level(Global::KeyboardLevelLow, 0, 85),
+        level(Global::KeyboardLevelHigh, 127, 48),
+        level(Global::KeyboardLevelLow, 0, 66),
+        level(Global::KeyboardLevelHigh, 0, 66),
+    ];
+    assert!(none.iter().all(|level| level.abs() < 0.03), "{none:?}");
     // The curve is the square of the distance: half way, a quarter.
     assert!((level(Global::KeyboardLevelLow, 0, 57) + 8.28 / 4.0).abs() < 0.1);
     // The brilliance levers move the filters: 2.76 V at the same keys,
@@ -432,4 +436,24 @@ fn the_tremolo_and_the_chorus_are_what_the_mono_output_has_of_them() {
     let drop = decibels(component(&run(0, 0, 0)[48_000..], 880.0) / component(&plain[48_000..], 880.0));
     println!("the effect on: the level {drop:.2} dB");
     assert!(drop < -0.5 && drop > -2.0);
+}
+
+#[test]
+fn the_effect_switched_on_in_silence_lets_nothing_out() {
+    // The effect's delay lines are fed only while it is on. Switched off
+    // in the middle of a note they kept their 2.56 ms of it, and gave it
+    // back whenever the effect was next switched on.
+    let mut on = panel(&SINE);
+    on.set(Global::Effect, 1);
+    let off = panel(&SINE);
+    let mut cs80 = instrument(&on);
+    cs80.event(NOTE_ON, 72, 127);
+    let _ = render(&mut cs80, 0.5);
+    cs80.set_patch(&off);
+    cs80.event(CONTROL, 120, 0);
+    let _ = render(&mut cs80, 1.0);
+    cs80.set_patch(&on);
+    let after = render(&mut cs80, 0.05);
+    let peak = after.iter().fold(0.0f64, |peak, &value| peak.max(value.abs()));
+    assert!(peak < 1.0e-4, "{peak}");
 }
