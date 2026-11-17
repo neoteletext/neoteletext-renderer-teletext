@@ -760,7 +760,9 @@ impl Juno {
     ///   the sustain pedal (64: down at any value but 0 on the Juno-106,
     ///   as its owner's manual has it, MIDI Implementation 2.1, and from
     ///   64 on the Juno-60, which has no MIDI of its own and is given MIDI
-    ///   1.0's rule), all sound off (120), reset
+    ///   1.0's rule), all sound off (120, which closes every voice's
+    ///   amplifier as the end of a gate does, over a few thousandths of
+    ///   a second, so that nothing is cut off in one step), reset
     ///   all controllers (121, which leaves the volume), all notes off
     ///   (123) and the four mode messages (124 to 127), which are an all
     ///   notes off and nothing more: the instrument stays one part that
@@ -812,9 +814,16 @@ impl Juno {
             }
             CONTROL_ALL_SOUND_OFF => {
                 self.allocator.all_keys_up();
-                for (index, voice) in self.voices.iter_mut().enumerate() {
-                    voice.cut(&self.settings);
-                    self.allocator.finished(index);
+                let keys = *self.allocator.voices();
+                for (voice, key) in self.voices.iter_mut().zip(&keys) {
+                    if key.stage == Stage::Rest {
+                        voice.empty(&self.settings);
+                    } else {
+                        // Its amplifier closes over a few thousandths of
+                        // a second, and the voice is emptied and comes to
+                        // rest at the frame that finds it closed.
+                        voice.cut();
+                    }
                 }
             }
             CONTROL_RESET_CONTROLLERS => {
@@ -867,6 +876,9 @@ impl Juno {
                 }
                 voice.frame(&self.settings, controls);
                 if key.stage == Stage::Released && voice.silent() {
+                    if voice.cutting() {
+                        voice.empty(&self.settings);
+                    }
                     self.allocator.finished(index);
                 }
             }

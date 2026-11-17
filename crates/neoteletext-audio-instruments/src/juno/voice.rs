@@ -344,11 +344,22 @@ pub struct Voice {
     gain_step: i32,
     /// The voice's own offset of the cutoff, in octaves.
     trim: i32,
-    /// Where the VCA switch stood when the voice last took a patch, and
-    /// whether the amplifier is still on its way from what the switch's
-    /// other position asked of it.
+    /// Where the VCA switch stood when the voice last took a patch.
     vca_gate: bool,
-    settling: bool,
+    amplifier: Amplifier,
+}
+
+/// What the amplifier is doing besides following its control.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Amplifier {
+    /// Nothing else.
+    Following,
+    /// It is still on its way from what the VCA switch's other position
+    /// asked of it.
+    Settling,
+    /// The voice is being silenced: the amplifier closes whatever the
+    /// envelope does, and closed, the voice is emptied.
+    Closing,
 }
 
 impl Voice {
@@ -370,7 +381,7 @@ impl Voice {
             gain_step: 0,
             trim,
             vca_gate: false,
-            settling: false,
+            amplifier: Amplifier::Following,
         }
     }
 
@@ -381,7 +392,9 @@ impl Voice {
         if settings.vca_gate != self.vca_gate {
             self.vca_gate = settings.vca_gate;
             // With the amplifier closed there is nothing to step.
-            self.settling = self.level.value != 0 || self.gain != 0;
+            if self.amplifier == Amplifier::Following && (self.level.value != 0 || self.gain != 0) {
+                self.amplifier = Amplifier::Settling;
+            }
         }
         let fall = |time: u32| fall_time_constant(time);
         match self.model {
@@ -415,6 +428,15 @@ impl Voice {
 
     /// A key for this voice: the envelope starts again.
     pub fn start(&mut self, key: u8, settings: &Settings) {
+        if self.amplifier == Amplifier::Closing {
+            // A key before the amplifier has closed: the envelope starts
+            // from rest, as that of a voice that was silenced does, and
+            // the amplifier goes on from where it is.
+            self.amplifier = Amplifier::Following;
+            self.stepped = SteppedEnvelope::new();
+            self.analogue = RcEnvelope::new();
+            self.configure(settings);
+        }
         self.key = key;
         self.gate = true;
         self.stepped.retrigger();
@@ -429,10 +451,30 @@ impl Voice {
         self.gate = false;
     }
 
-    /// Silences the voice at once.
-    pub fn cut(&mut self, settings: &Settings) {
+    /// Silences the voice: its amplifier closes as it does when a gate
+    /// ends, whatever the envelope is doing, and [`Voice::silent`] then
+    /// says so. A voice emptied in one sample instead is a step as large
+    /// as its signal at that instant.
+    ///
+    /// Source: own choice of the time, the 1 ms that rounds a gate's edge
+    /// ([`HOLD_SMOOTHING_MICROSECONDS`]): neither instrument has a message
+    /// that silences it.
+    pub const fn cut(&mut self) {
+        self.amplifier = Amplifier::Closing;
+        self.gate = false;
+        self.level.target = 0;
+    }
+
+    /// Puts the voice back as it was made, with a patch's settings: for a
+    /// voice that is not heard.
+    pub fn empty(&mut self, settings: &Settings) {
         *self = Self::new(self.model, self.trim);
         self.configure(settings);
+    }
+
+    /// Whether the voice is being silenced ([`Voice::cut`]).
+    pub const fn cutting(&self) -> bool {
+        matches!(self.amplifier, Amplifier::Closing)
     }
 
     /// Whether the voice, its key up, has fallen silent and its envelope
@@ -447,7 +489,7 @@ impl Voice {
             Model::Juno106 => self.stepped.stage() == Stage::Rest,
             Model::Juno60 => self.analogue.stage() == Stage::Rest,
         };
-        !self.gate && self.level.value < REST_LEVEL && self.gain < REST_LEVEL && at_rest
+        !self.gate && self.level.value < REST_LEVEL && self.gain < REST_LEVEL && (at_rest || self.cutting())
     }
 
     /// A frame: the envelope moves on, and the pitch, the pulse's width
@@ -500,6 +542,9 @@ impl Voice {
             (true, false) => 0,
             (false, _) => envelope,
         };
+        if self.cutting() {
+            self.level.target = 0;
+        }
     }
 
     /// The Juno-106's oscillator: the clock over the nearest divisor to
@@ -558,14 +603,17 @@ impl Voice {
             // amplifier's control by way of R47, 5.6 kΩ, onto C9, 0.22
             // µF, 1.2 ms, so the instrument's amplifier cannot step
             // either.
-            Model::Juno60 => (IMMEDIATE, if settings.vca_gate || self.settling { smoothing } else { IMMEDIATE }),
+            Model::Juno60 => {
+                let rounded = settings.vca_gate || self.amplifier != Amplifier::Following;
+                (IMMEDIATE, if rounded { smoothing } else { IMMEDIATE })
+            }
         };
         let octaves = self.cutoff.tick(cutoff_smoothing);
         let hertz = law::raise(law.cutoff_base, octaves).clamp(law.cutoff_bounds.0, law.cutoff_bounds.1);
         self.filter.set(frequency(hertz, RATE), settings.resonance);
         let level = self.level.tick(level_smoothing);
-        if self.settling && self.level.target.saturating_sub(level).saturating_abs() < SETTLED {
-            self.settling = false;
+        if self.amplifier == Amplifier::Settling && self.level.target.saturating_sub(level).saturating_abs() < SETTLED {
+            self.amplifier = Amplifier::Following;
         }
         self.gain_step = level.saturating_sub(self.gain) >> TICK_BITS;
     }

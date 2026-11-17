@@ -668,10 +668,7 @@ fn sweep() -> Vec<Row> {
 /// The rows that are above the bound and no fault, each with why: what
 /// the control and the change begin with, the model if it is true of one
 /// only, the sound, and the reason.
-const THE_INSTRUMENTS_OWN: [(&str, &str, Option<Model>, &str, &str); 8] = [
-    // A fault, and no behaviour of the instrument: the voices are emptied
-    // in one sample. It is listed until it is mended.
-    ("CC 120 all sound off", "", None, "", "A FAULT STILL OPEN: all sound off empties the voices in one sample"),
+const THE_INSTRUMENTS_OWN: [(&str, &str, Option<Model>, &str, &str); 7] = [
     // Not a control of the instrument at all.
     (
         "reset()",
@@ -812,4 +809,37 @@ fn every_control_moved_under_every_sound_steps_no_more_than_the_instrument_does(
     }
     println!("{} rows, {} above the bound as the instrument is, {} faults", rows.len(), explained, faults.len());
     assert!(faults.is_empty(), "{} rows click:\n{}", faults.len(), faults.join("\n"));
+}
+
+#[test]
+fn all_sound_off_closes_the_voices_in_a_fiftieth_of_a_second_and_a_key_struck_meanwhile_sounds() {
+    for model in MODELS {
+        // Six keys whose release would last twelve seconds.
+        let (chord, keys) = sound(model, "chord");
+        let mut juno = instrument(model, &chord.with(Slider::Release, 127));
+        for &key in keys {
+            juno.event(NOTE_ON, key, 100);
+        }
+        let mut before = vec![0i16; samples(0.5)];
+        juno.render(&mut before);
+        let before: Vec<i32> = before.iter().map(|&sample| i32::from(sample)).collect();
+        let own = largest_step(&before[before.len() - samples(BEFORE)..]);
+        juno.event(CONTROL, 120, 0);
+        // A key in the same instant takes a voice that is still closing.
+        juno.event(NOTE_ON, 72, 100);
+        let after = following(&juno, *before.last().expect("half a second") as i16);
+        let step = largest_step(&after);
+        println!("{model:?}: all sound off and a key at once: a step of {step:.5} at most, {own:.5} before");
+        assert!(step < BOUND * own, "{model:?}: {step} against {own}");
+        juno.render(&mut vec![0i16; samples(0.02)]);
+        assert_eq!(juno.sounding_voices(), 1, "{model:?}: the six have closed and the new key sounds");
+        let mut note = vec![0i16; samples(0.1)];
+        juno.render(&mut note);
+        let peak = note.iter().map(|sample| sample.unsigned_abs()).max().unwrap_or(0);
+        assert!(peak > 1_000, "{model:?}: the key struck with all sound off is not heard: {peak}");
+        // And silenced in its turn, with nothing left sounding.
+        juno.event(CONTROL, 120, 0);
+        juno.render(&mut vec![0i16; samples(0.02)]);
+        assert_eq!(juno.sounding_voices(), 0, "{model:?}");
+    }
 }
