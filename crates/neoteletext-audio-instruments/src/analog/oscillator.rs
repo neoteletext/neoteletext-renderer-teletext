@@ -49,7 +49,12 @@
 //! rate, through the decimators, it is 91 dB down at worst for the
 //! sawtooth, the pulse, the triangle and the sub-oscillator; 106 dB down
 //! for a pulse whose width swings at audio rate; and 111 dB down for an
-//! oscillator synchronised to another.
+//! oscillator synchronised to another. From 6 kHz to 12.5 kHz, the
+//! highest key MIDI has, it is 92 dB down at worst, and 100 dB for the
+//! sawtooth: neither the residual's table nor the decimator lets back
+//! what a high note has above the rate's half. (A sawtooth of 7 kHz
+//! played through an instrument measures 77 dB: that is its filter,
+//! `tests/analog_filter_aliasing.rs`.)
 //!
 //! At the output rate itself it is 48 dB down for fundamentals to 1 kHz
 //! and 34 dB down at 4 kHz, the narrow pulse being the worst: the table's

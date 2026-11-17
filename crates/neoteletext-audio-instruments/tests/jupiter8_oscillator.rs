@@ -220,7 +220,9 @@ fn switching_the_cross_modulation_during_a_note_does_not_click() {
 /// the slider at 5 or less and keys to the A of 880 Hz, and at any
 /// setting: the worst measured (-77.2 dB and -38.8 dB), and 3 dB. Both
 /// are where VCO-2's pulse holds VCO-1 a steady three and six octaves
-/// up, and are the plain sawtooth's own figures at 7 kHz and 28 kHz.
+/// up, and are what the filter after the oscillators, its cutoff at
+/// 20 kHz, folds back of a plain sawtooth of 7 kHz and of 28 kHz
+/// (`tests/analog_filter_aliasing.rs`).
 const MODERATE_ALIASING: f64 = -74.0;
 /// See [`MODERATE_ALIASING`].
 const DEEPEST_ALIASING: f64 = -35.0;

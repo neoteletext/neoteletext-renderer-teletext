@@ -123,6 +123,23 @@ fn aliasing_is_80_db_down_at_four_times_the_output_rate() {
     assert!(worst < -80.0, "{worst}");
 }
 
+/// Fundamentals above those, as bins: 6 kHz, 7 kHz, 8.4 kHz and 12.5 kHz,
+/// the highest key MIDI has. Each is odd.
+const HIGH_FUNDAMENTALS: [usize; 4] = [8_191, 9_557, 11_469, 17_067];
+
+#[test]
+fn aliasing_is_80_db_down_to_the_top_of_the_keyboard() {
+    // A fundamental this high has two or three harmonics below 20 kHz,
+    // and its harmonics from 76 kHz up are few and strong: if the
+    // residual's table or the decimator let any of them back, it would
+    // show here first. The sawtooth alone is 100 dB down at 12.5 kHz.
+    for factor in [2, 4] {
+        let worst = worst_aliasing(factor, &HIGH_FUNDAMENTALS);
+        println!("worst from 6 kHz to 12.5 kHz at {factor} times the rate: {worst:.1} dB");
+        assert!(worst < -88.0, "{factor}x: {worst}");
+    }
+}
+
 #[test]
 fn aliasing_at_the_output_rate_is_what_the_module_says() {
     // The table's low-pass falls between 0.3 and 0.7 of the sampling

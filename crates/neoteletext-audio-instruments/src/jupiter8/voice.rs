@@ -84,7 +84,11 @@
 //! never falling before VCO-1 starts it again: what is measured there is
 //! a plain sawtooth at 3.5 kHz, 7 kHz and 14 kHz through the voice, 84 dB,
 //! 77 dB and 68 dB; a key of 3.5 kHz or 7 kHz with no cross modulation
-//! measures the same.
+//! measures the same. It is the filter's doing, not the oscillator's:
+//! the building block's sawtooth through its decimator leaves 100 dB to
+//! 12.5 kHz (`tests/analog_oscillator.rs`), and the filter by itself,
+//! its cutoff at the slider's 20 kHz, folds back 85 dB, 78 dB and 70 dB
+//! of the same three sawtooths (`tests/analog_filter_aliasing.rs`).
 //!
 //! Without the sync the partials are sums of multiples of two unrelated
 //! frequencies and lie everywhere, so nothing can be told apart and
