@@ -98,6 +98,8 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio-instruments", features: "minimoog" },
     // Sequential Circuits' Prophet-5 (TODO-6433), which no codec uses yet.
     Build { package: "neoteletext-audio-instruments", features: "prophet5" },
+    // Roland's Jupiter-8 (TODO-6435), which no codec uses yet.
+    Build { package: "neoteletext-audio-instruments", features: "jupiter8" },
     Build { package: "neoteletext-opus", features: "" },
     Build { package: "neoteletext-opus", features: "error-trait" },
     Build { package: "neoteletext-audio-mix", features: "" },

@@ -35,6 +35,9 @@ minimoog = ["analog"]
 # from the analogue building blocks (TODO-6433). No codec carries it yet,
 # so it is not on by default.
 prophet5 = ["analog"]
+# Roland's Jupiter-8, made from the analogue building blocks (TODO-6435).
+# No codec carries it yet, so it is not on by default.
+jupiter8 = ["analog"]
 
 # Each example plays or builds one instrument, so it is built only with it.
 [[example]]
@@ -76,6 +79,14 @@ required-features = ["prophet5"]
 [[example]]
 name = "prophet5_render"
 required-features = ["prophet5"]
+
+[[example]]
+name = "jupiter8_demo"
+required-features = ["jupiter8"]
+
+[[example]]
+name = "jupiter8_render"
+required-features = ["jupiter8"]
 
 [lints]
 workspace = true

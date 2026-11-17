@@ -20,6 +20,7 @@
 //! Juno-106 and Juno-60 ([`juno`]). Behind the feature `minimoog`, not on
 //! by default either, is Moog's Minimoog Model D ([`minimoog`]).
 //! Behind the feature `prophet5`, also not on by default, is Sequential Circuits' Prophet-5 ([`prophet5`]).
+//! Behind the feature `jupiter8`, not on by default either, is Roland's Jupiter-8 ([`jupiter8`]).
 //!
 //! # Whose code this is
 //!
@@ -79,6 +80,8 @@ pub mod analog;
 pub mod dx7;
 #[cfg(feature = "juno")]
 pub mod juno;
+#[cfg(feature = "jupiter8")]
+pub mod jupiter8;
 #[cfg(feature = "minimoog")]
 pub mod minimoog;
 #[cfg(feature = "prophet5")]
