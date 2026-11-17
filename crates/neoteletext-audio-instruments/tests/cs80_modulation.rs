@@ -154,6 +154,29 @@ fn the_pulse_widths_oscillator_is_150_ms_at_five_volts_and_5_ms_at_its_fastest()
 }
 
 #[test]
+fn the_pulse_width_moves_between_the_ticks_and_not_in_their_steps() {
+    // The width set once a tick is a staircase of 6,000 steps a second,
+    // and a staircase adds, beside the sidebands the modulation itself
+    // gives, components the ticks' rate away from them: at 6,000 Hz less
+    // the modulation's 200 Hz, where the sound itself has nothing (the
+    // nearest of its own are the note's harmonics and their sidebands
+    // at multiples of 200 Hz from them, none within 100 Hz of 5,800 Hz
+    // for this G).
+    let patch = panel(&[
+        (Control::Sawtooth, 0),
+        (Control::Square, 1),
+        (Control::PulseWidth, 64),
+        (Control::Pwm, 127),
+        (Control::PwmSpeed, 127),
+    ]);
+    let signal = &play(&patch, 79, 100, 2.5, 0.0)[24_000..];
+    let strongest = (1..=8).map(|harmonic| component(signal, 783.99 * f64::from(harmonic))).fold(0.0, f64::max);
+    let added = decibels(component(signal, 5_800.0) / strongest);
+    println!("the ticks' rate less the modulation's, against the strongest harmonic: {added:.1} dB");
+    assert!(added < -60.0, "{added} dB");
+}
+
+#[test]
 fn the_touch_moves_the_level_and_the_brilliance() {
     // The level: 6.4 V at 3 dB to the volt, 19.2 dB, from the softest
     // stroke to the hardest, and as much again under pressure, held to
@@ -243,6 +266,35 @@ fn pressure_on_one_key_moves_that_key_alone() {
     render(&mut cs80, 0.05);
     let released = render(&mut cs80, 0.25);
     assert!(decibels(component(&released, 659.26) / component(&before, 659.26)).abs() < 0.1);
+}
+
+#[test]
+fn a_key_that_is_up_is_no_longer_pressed() {
+    // The sensor is under the key: once the key is up nothing presses
+    // it, whatever pressure the last message before the note off gave.
+    // A long release, so that the tail is there to measure.
+    let mut patch = panel(&SINE);
+    patch.tones[0].set(Control::PressureLevel, 127);
+    patch.tones[0].set(Control::Release, 100);
+    patch.tones[0].set(Control::Level, 32);
+    let tail = |pressure: Option<u8>| {
+        let mut cs80 = instrument(&patch);
+        cs80.event(NOTE_ON, 69, 100);
+        render(&mut cs80, 0.2);
+        if let Some(pressure) = pressure {
+            cs80.event(KEY_PRESSURE, 69, pressure);
+        }
+        render(&mut cs80, 0.2);
+        cs80.event(cs80_support::NOTE_OFF, 69, 0);
+        render(&mut cs80, 0.05);
+        component(&render(&mut cs80, 0.1), 440.0)
+    };
+    let (plain, pressed) = (tail(None), tail(Some(127)));
+    println!(
+        "the tail of a key pressed until it was let go: {:.2} dB against one never pressed",
+        decibels(pressed / plain)
+    );
+    assert!(plain > 1.0e-3 && decibels(pressed / plain).abs() < 0.1);
 }
 
 #[test]

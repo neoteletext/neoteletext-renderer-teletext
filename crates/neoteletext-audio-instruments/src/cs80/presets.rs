@@ -61,8 +61,15 @@
 //! - **Doubtful figures**, each the likeliest reading: T53 B row 14 (75
 //!   kΩ) and row 15 (3.9 kΩ); T52 D row 13 (510 Ω), row 14 (3 kΩ) and row
 //!   25 (390 Ω).
-//! - **The diode's own drop** is taken as made up by the column's supply:
-//!   a row with a diode alone is taken as the full ten volts.
+//! - **The diode's own drop** is made up by the column's supply: a row
+//!   with a diode alone is taken as the full ten volts. Service manual,
+//!   page 27, BA circuit diagram: each column is driven by a transistor
+//!   whose collector is on a rail marked "+10.6", a diode's drop above
+//!   ten volts. The drop is therefore not what makes BRASS 1 brighter
+//!   than the recorded instrument ([`super`], "What is not here").
+//! - **One 10 kΩ for each row of a channel.** They are on T51 (page 31);
+//!   T52's rows join T51's and have none (page 33, whose primed
+//!   terminals are struck out). T53 and T54 are taken to be alike.
 
 use super::patch::Tone;
 

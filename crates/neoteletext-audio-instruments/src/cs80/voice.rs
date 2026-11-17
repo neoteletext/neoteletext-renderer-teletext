@@ -91,6 +91,9 @@ const PULSE_WIDTH: (u32, u32) = (1 << 31, ((40u64 << 32) / 100) as u32);
 /// top the effect "is identical to manually moving the PW slider back
 /// and forth all the way". Own choice of the swing from that.
 const PWM_SWING: u32 = ((20u64 << 32) / 100) as u32;
+// The whole of the width's travel is under half a cycle, so the
+// difference of any two widths is a signed word ([`Line::tick`]).
+const _: () = assert!(PULSE_WIDTH.1 < 1 << 31);
 
 /// The noise at NOISE 10 against a waveform, in Q30: 3.0 V of 3.5 V.
 ///
@@ -137,9 +140,14 @@ const ENVELOPE_REACH: i32 = 5 * law::VOLT;
 /// 15 V, which [`law::BRILLIANCE`] makes 0.86 octave of the high-pass
 /// filter and 3.25 of the low-pass.
 ///
-/// Source: own choice of the voltage: the lever "adds voltage to the
-/// VCF's high pass and low pass control inputs" (owner's manual, page 38,
-/// item 7), and what stands across it was not read.
+/// Source: service manual, page 64, Panel 2 circuit diagram: the lever
+/// (VR13, B 10 kΩ) has its end 3 on the tone selector's +15 V, its centre
+/// tap (5) on earth and its wiper on BR, so that it rests at exactly
+/// nothing; its end 1 is on the line of the other levers that rest at
+/// their centres (DETUNE and the keyboard control), whose supply the
+/// page does not name. Own reading: that line is the -15 V. The lever
+/// "adds voltage to the VCF's high pass and low pass control inputs"
+/// (owner's manual, page 38, item 7).
 const BRILLIANCE_REACH: i32 = 15 * law::VOLT;
 /// The volts the touch response's amplifiers give at their levers' tops
 /// for the voltage they are trimmed with: 6.4 V, which
@@ -544,6 +552,14 @@ struct Line {
     /// The amplifier's gain in Q30 and what it gains each sample.
     gain: i32,
     gain_step: i32,
+    /// The pulse's width and what it gains each sample, in units of 2⁻³²
+    /// cycle: the width moves in a straight line from one tick to the
+    /// next, as the gain does. Set once a tick it would be a staircase,
+    /// which adds components the ticks' rate away from the sound's own
+    /// (36 dB below the strongest harmonic with PWM and its SPEED at
+    /// their tops, `tests/cs80_modulation.rs`).
+    width: u32,
+    width_step: i32,
     /// The oscillator's own offset of pitch, in octaves.
     trim: i32,
     /// What the oscillator and the filters were last set from, so that a
@@ -574,6 +590,8 @@ impl Line {
             amp_envelope: RcEnvelope::new(),
             gain: 0,
             gain_step: 0,
+            width: PULSE_WIDTH.0,
+            width_step: 0,
             trim: variation.offset(PITCH_TOLERANCE),
             set: [UNSET; 3],
         }
@@ -643,7 +661,9 @@ impl Line {
             .width
             .saturating_add_signed(swing)
             .clamp(PULSE_WIDTH.0, PULSE_WIDTH.0.saturating_add(PULSE_WIDTH.1));
-        self.oscillator.set_width(width);
+        // Both are inside the lever's travel, 40% of a cycle, so their
+        // difference is a signed word.
+        self.width_step = width.wrapping_sub(self.width).cast_signed() >> TICK_BITS;
 
         let envelope = channel.initial.saturating_add(law::scaled(channel.span, filter_level));
         let filters = [
@@ -674,6 +694,8 @@ impl Line {
     /// One sample. `noise` is the channel's noise generator.
     #[inline]
     fn sample(&mut self, channel: &Channel, noise: i32) -> i32 {
+        self.width = self.width.wrapping_add_signed(self.width_step);
+        self.oscillator.set_width(self.width);
         let waves = self.oscillator.tick(None);
         let mut signal = 0;
         if channel.filtered {
@@ -760,9 +782,15 @@ impl Voice {
         }
     }
 
-    /// The key is up.
+    /// The key is up, and with it whatever pressed it: the after-touch
+    /// answers "when you press down on a key after it hits bottom"
+    /// (owner's manual, page 36, items 44 and 45), and a key that is up
+    /// is not at the bottom. A note therefore dies away as one that was
+    /// never pressed; no message is needed, or could be given, to take
+    /// the pressure off a key that is up.
     pub const fn release(&mut self) {
         self.gate = false;
+        self.pressure = 0;
     }
 
     /// Ends the voice's sustain: the next key of a sustain of the second
