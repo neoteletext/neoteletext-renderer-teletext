@@ -155,7 +155,7 @@ fn the_cross_modulation_at_five_moves_vco_1_three_octaves() {
 
 /// What the cross modulation's aliasing is held below, in decibels, with
 /// the slider at 5 or less and keys to the A of 880 Hz, and at any
-/// setting: the worst measured (-77.1 dB and -37.9 dB), and 3 dB. Both
+/// setting: the worst measured (-77.2 dB and -38.8 dB), and 3 dB. Both
 /// are where VCO-2's pulse holds VCO-1 a steady three and six octaves
 /// up, and are the plain sawtooth's own figures at 7 kHz and 28 kHz.
 const MODERATE_ALIASING: f64 = -74.0;
@@ -163,9 +163,10 @@ const MODERATE_ALIASING: f64 = -74.0;
 const DEEPEST_ALIASING: f64 = -35.0;
 /// The same with VCO-2's sine or sawtooth moving VCO-1, the slider at 5
 /// or less and keys to the A of 880 Hz, for VCO-1's sawtooth, triangle
-/// and square: the worst measured (-86.0 dB, -91.8 dB and -82.4 dB), and
-/// 3 dB. Before the edges of VCO-1 were placed by its moving frequency
-/// and its corners rounded, these were -70.5 dB, -64.5 dB and -69.7 dB.
+/// and square: the worst measured (-87.1 dB, -91.1 dB and -83.1 dB), and
+/// 3 dB or more. Before the edges of VCO-1 were placed by its moving
+/// frequency and its corners rounded, these were -70.5 dB, -64.5 dB and
+/// -69.7 dB.
 const SMOOTH_ALIASING: [(u8, f64); 3] = [(1, -83.0), (0, -88.5), (3, -79.0)];
 
 /// How near a line of the sound a bin must be to count as it: six bins,
