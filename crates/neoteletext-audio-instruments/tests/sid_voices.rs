@@ -239,9 +239,9 @@ fn the_envelope_holds_each_sustain_level() {
         sid.write(third + 4, SAWTOOTH | 0x01);
         let level = amplitude(&settled(&mut sid), 440.0);
         // A sawtooth of 4,095 * 255 units is 2/π of half that at its
-        // fundamental, and 65,536 / 32 units, the 8580's output gain, are
+        // fundamental, and 65,536 / 31 units, the 8580's output gain, are
         // one of a sample at each of the volume's fifteen steps.
-        let full = 4095.0 * 255.0 / std::f64::consts::PI * 15.0 * 32.0 / 65536.0;
+        let full = 4095.0 * 255.0 / std::f64::consts::PI * 15.0 * 31.0 / 65536.0;
         let expected = full * f64::from(nibble) / 15.0;
         assert!((level - expected).abs() < full * 0.01, "sustain {nibble}: {level} for {expected}");
     }

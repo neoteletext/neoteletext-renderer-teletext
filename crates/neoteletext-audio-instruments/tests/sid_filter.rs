@@ -259,8 +259,8 @@ fn the_volume_register_plays_samples_on_a_6581_and_quietly_on_an_8580() {
     // fundamental.
     let expected = (3.0 * 0.26 + 0.08) / 1.05 * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((old / expected - 1.0).abs() < 0.05, "6581: {old} for {expected}");
-    // The 8580's add 3 * 0.05 of it, at an output gain of 32 / 65,536.
-    let expected = 0.15 * 4095.0 * 255.0 * 15.0 * 32.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    // The 8580's add 3 * 0.05 of it, at an output gain of 31 / 65,536.
+    let expected = 0.15 * 4095.0 * 255.0 * 15.0 * 31.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((new / expected - 1.0).abs() < 0.05, "8580: {new} for {expected}");
 }
 

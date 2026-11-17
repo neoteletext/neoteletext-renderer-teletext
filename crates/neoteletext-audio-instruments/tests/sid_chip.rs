@@ -135,9 +135,15 @@ fn every_byte_at_every_address_is_valid() {
 
 #[test]
 fn the_output_level_leaves_headroom_for_three_voices() {
-    // TODO-6427 fault 5: the output was 4 dB (6581) and 6 dB (8580) above
-    // the reference program's and clipped three of nine tunes.
-    for (model, span) in [(ChipModel::Mos6581, 9_530.0), (ChipModel::Mos8580, 7_437.0)] {
+    // TODO-6427 fault 5: at first the output clipped three of nine tunes.
+    // The scale is an own choice; no real chip was measured for it. One
+    // triangle at full envelope and full volume spans the middle of what
+    // it spans in two emulators run as separate programs (sidplayfp
+    // 2.16.0, both engines, measured from their output on 17 November
+    // 2026): 9,271 and 9,530 output units on a 6581, 7,017 and 7,437 on
+    // an 8580. Before, the 8580's span was 7,534, above both.
+    const NEAR_DB: f64 = 0.25;
+    for (model, spans) in [(ChipModel::Mos6581, (9_271.0, 9_530.0)), (ChipModel::Mos8580, (7_017.0, 7_437.0))] {
         let clock = ChipClock::Pal;
         let register = frequency_register(440.0, clock);
         let extremes = |sid: &mut Sid| {
@@ -147,15 +153,13 @@ fn the_output_level_leaves_headroom_for_three_voices() {
             let highest = i32::from(*samples.iter().max().unwrap());
             (lowest, highest)
         };
-        // One triangle at full envelope and full volume spans what the
-        // reference program's does, measured from its output on 17
-        // November 2026 (`span`, in output units), within half a decibel.
         let mut sid = Sid::new(model, clock);
         sid.write(MODE_VOLUME, FULL_VOLUME);
         start(&mut sid, 0, register, TRIANGLE);
         let (lowest, highest) = extremes(&mut sid);
-        let found = decibels(f64::from(highest - lowest) / span);
-        assert!(found.abs() < 0.5, "{model:?}: a triangle spans {} units, {found} dB", highest - lowest);
+        let middle = f64::midpoint(spans.0, spans.1);
+        let found = decibels(f64::from(highest - lowest) / middle);
+        assert!(found.abs() < NEAR_DB, "{model:?}: a triangle spans {} units, {found} dB", highest - lowest);
         // Three pulses in step, the loudest the three voices can be with
         // no filter, stay under half of a sample's range.
         let mut sid = Sid::new(model, clock);
