@@ -386,6 +386,29 @@ fn the_same_messages_give_the_same_samples_however_they_are_rendered() {
 }
 
 #[test]
+fn the_factory_programs_have_their_knobs_where_the_sheets_draw_them() {
+    // Seven pointers measured again on the scans of Sequential's patch
+    // sheets (the disc's middle and the direction of what stands out of
+    // it, on the dial's 300 degrees), in tenths of the dial: each is at
+    // a printed number or between two, and the fixture is within two
+    // tenths of it. A knob that is not entered stands at 0.
+    let drawn: [(usize, Knob, u8); 7] = [
+        (0, Knob::FilterEnvelopeAmount, 70),
+        (2, Knob::AmplifierRelease, 65),
+        (4, Knob::SourceMix, 0),
+        (4, Knob::Resonance, 20),
+        (4, Knob::AmplifierAttack, 1),
+        (6, Knob::FilterRelease, 74),
+        (7, Knob::FilterRelease, 69),
+    ];
+    for (sheet, knob, tenths) in drawn {
+        let sheet = SHEETS[sheet];
+        let entered = sheet.knobs.iter().find(|&&(entry, _)| entry == knob).map_or(0, |&(_, tenths)| tenths);
+        assert!(entered.abs_diff(tenths) <= 2, "{}: {knob:?} is entered at {entered}, drawn at {tenths}", sheet.name);
+    }
+}
+
+#[test]
 fn the_factory_programs_sound_and_keep_inside_full_scale() {
     for model in MODELS {
         for sheet in SHEETS {

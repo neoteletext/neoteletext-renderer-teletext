@@ -100,7 +100,7 @@ pub const BRASS: Sheet = Sheet {
         (WidthB, 20),
         (MixerOscA, 99),
         (MixerOscB, 98),
-        (Amount, 74),
+        (Amount, 70),
         (FA, 45),
         (FD, 56),
         (FS, 50),
@@ -176,7 +176,7 @@ pub const MUTED_CLAV: Sheet = Sheet {
         (FS, 60),
         (FR, 64),
         (AD, 60),
-        (AR, 67),
+        (AR, 65),
     ],
     switches: &[Switch::LfoTriangle, Switch::WheelFilter, Switch::OscAPulse, Switch::OscBPulse, Switch::OscBKeyboard],
 };
@@ -221,26 +221,27 @@ pub const FLUTES: Sheet = Sheet {
 /// 1-7, Sync I. Oscillator A "up 1 octave + a minor 3rd", oscillator B
 /// "up 1 octave (basic pitch)"; "Although the filter ENVELOPE AMOUNT is
 /// set at 0, the filter envelope generator settings are programmed for
-/// use as a modulation source for the POLY-MOD section". The source mix
-/// is drawn one mark from its end at the low-frequency oscillator. `?`:
-/// the low-frequency oscillator's frequency.
+/// use as a modulation source for the POLY-MOD section". The source mix,
+/// whose dial is marked from 5 at the low-frequency oscillator through 0
+/// to 5 at the noise, is drawn at the oscillator's 5: no noise. `?`: the
+/// low-frequency oscillator's frequency.
 pub const SYNC: Sheet = Sheet {
     name: "1-7 Sync I",
     semitones: (15, 12),
     knobs: &[
         (PolyEnvelope, 61),
         (Lfo, 66),
-        (Mix, 10),
+        (Mix, 0),
         (WidthA, 50),
         (WidthB, 49),
         (MixerOscA, 50),
         (MixerOscB, 50),
         (Cutoff, 55),
-        (Resonance, 23),
+        (Resonance, 20),
         (FA, 40),
         (FD, 60),
         (FR, 69),
-        (AA, 2),
+        (AA, 1),
         (AS, 100),
         (AR, 69),
         (Glide, 60),
@@ -307,7 +308,7 @@ pub const UNISON_GLIDE: Sheet = Sheet {
         (Amount, 99),
         (FD, 99),
         (FS, 100),
-        (FR, 66),
+        (FR, 74),
         (AD, 51),
         (AS, 100),
         (AR, 80),
@@ -345,7 +346,7 @@ pub const BELLS: Sheet = Sheet {
         (Amount, 29),
         (FD, 70),
         (FS, 30),
-        (FR, 75),
+        (FR, 69),
         (AD, 75),
         (AR, 80),
     ],
