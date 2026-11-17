@@ -252,14 +252,15 @@ fn the_volume_register_plays_samples_on_a_6581_and_quietly_on_an_8580() {
         amplitude(&samples[4800..], 1000.0)
     };
     let (old, new) = (played(ChipModel::Mos6581), played(ChipModel::Mos8580));
-    // The 6581's three silent voices and its mixer add 3 * 0.26 / 1.05 +
-    // 0.77 of a voice's full swing, 4,095 * 255 units, which the volume's
-    // fifteen steps and the 6581's output gain, 40 / 65,536, bring to
-    // samples; a square wave of that has 2/π of it at its fundamental.
-    let expected = (3.0 * 0.26 / 1.05 + 0.77) * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    // The 6581's three silent voices and its mixer add (3 * 0.26 + 0.08)
+    // / 1.05 of a voice's full swing, 4,095 * 255 units, which the
+    // volume's fifteen steps and the 6581's output gain, 40 / 65,536,
+    // bring to samples; a square wave of that has 2/π of it at its
+    // fundamental.
+    let expected = (3.0 * 0.26 + 0.08) / 1.05 * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((old / expected - 1.0).abs() < 0.05, "6581: {old} for {expected}");
-    // The 8580's add 4 * 0.07 of it, at an output gain of 32 / 65,536.
-    let expected = 0.28 * 4095.0 * 255.0 * 15.0 * 32.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    // The 8580's add 3 * 0.05 of it, at an output gain of 32 / 65,536.
+    let expected = 0.15 * 4095.0 * 255.0 * 15.0 * 32.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((new / expected - 1.0).abs() < 0.05, "8580: {new} for {expected}");
 }
 
@@ -271,13 +272,18 @@ fn step(sid: &mut Sid) -> f64 {
 }
 
 #[test]
-fn the_volume_registers_step_is_as_loud_as_the_references() {
-    // TODO-6427 fault 4: the step heard when only the volume changes, as
-    // a share of the span of one triangle at full volume, was 0.73 on the
-    // 6581 and 0.05 on the 8580. Measured from the reference program's
-    // output on 17 November 2026 the same way, it is 1.59 and 0.28; with
-    // its voices out of the mixer, 0.77 and 0.07.
-    for (model, silent, mixer) in [(ChipModel::Mos6581, 1.59, 0.77), (ChipModel::Mos8580, 0.28, 0.07)] {
+fn the_volume_registers_step_is_as_loud_as_real_chips_play_samples() {
+    // The step heard when only the volume changes, as a share of the span
+    // of one triangle at full volume. Four real 6581s have 0.57, 0.69,
+    // 0.98 and 1.53 (the chip of "The C64 Digi", and Stone Oakvalley's
+    // R4, R2 and R3 from his recordings of "Arkanoid"), and the middle is
+    // 0.82; his 8580 R5 has 0.15 (measured 17 November 2026; the figures
+    // are at the constants). With the voices out of the mixer, what is
+    // left is the mixer's own: 0.08 of the span on the 6581, nothing on
+    // the 8580. TODO-6427 fault 4: 0.73 and 0.05 at first, then 1.57 and
+    // 0.29 when fitted to one emulator.
+    const NEAR: f64 = 0.1;
+    for (model, silent, mixer) in [(ChipModel::Mos6581, 0.82, 0.076), (ChipModel::Mos8580, 0.15, 0.0)] {
         let clock = ChipClock::Pal;
         let mut sid = Sid::new(model, clock);
         sid.write(MODE_VOLUME, FULL_VOLUME);
@@ -290,7 +296,7 @@ fn the_volume_registers_step_is_as_loud_as_the_references() {
         let _ = render(&mut sid, 0.5);
         sid.write(MODE_VOLUME, FULL_VOLUME);
         let found = step(&mut sid) / span;
-        assert!((found / silent - 1.0).abs() < 0.1, "{model:?}: a step of {found} for {silent}");
+        assert!((found - silent).abs() < NEAR * silent, "{model:?}: a step of {found} for {silent}");
 
         // The three voices sent to the filter, and no output of it heard.
         let mut sid = Sid::new(model, clock);
@@ -298,7 +304,7 @@ fn the_volume_registers_step_is_as_loud_as_the_references() {
         let _ = render(&mut sid, 0.5);
         sid.write(MODE_VOLUME, FULL_VOLUME);
         let found = step(&mut sid) / span;
-        assert!((found / mixer - 1.0).abs() < 0.1, "{model:?}: the mixer's step of {found} for {mixer}");
+        assert!((found - mixer).abs() < NEAR * silent, "{model:?}: the mixer's step of {found} for {mixer}");
     }
 }
 

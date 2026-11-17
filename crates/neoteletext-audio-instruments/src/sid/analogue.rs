@@ -31,48 +31,67 @@ const FULL_SWING_MILLIVOLTS: i32 = 6_340 - 5_290;
 /// the 5.29 V of waveform $FFF at an open envelope: a higher waveform
 /// value is a lower voltage, and the envelope has no effect at (6.34 -
 /// 5.70) / (6.34 - 5.29) of the waveform's range. Each voice with a closed
-/// envelope raises the output by 0.26 V ("5.69 - 5.43 = 0.26 volts").
-/// These offsets are what the volume register multiplies when it is used
-/// to play samples (Yannes interview: "By stopping an Oscillator, it was
-/// possible to apply a DC voltage to this D/A"). The reference program's
-/// 6581 agrees on the voices: measured from its output on 17 November
-/// 2026, taking each silent voice out of the mixer lowers the volume
-/// register's step by 0.22 to 0.26 of a voice's full swing, against the
-/// 0.26 / 1.05 here.
+/// envelope raises the output by 0.26 V ("5.69 - 5.43 = 0.26 volts"),
+/// 0.25 of a voice's full swing. These offsets are what the volume
+/// register multiplies when it is used to play samples (Yannes interview:
+/// "By stopping an Oscillator, it was possible to apply a DC voltage to
+/// this D/A"). Two emulators run as separate programs (sidplayfp 2.16.0,
+/// both engines, measured 17 November 2026) have each silent voice add
+/// 0.21 to 0.36 of a full swing.
 const WAVEFORM_ZERO_6581: i32 = (6_340 - 5_700) * WAVEFORM_MAX as i32 / FULL_SWING_MILLIVOLTS;
 const VOICE_OFFSET_6581: i32 = 260 * FULL_SWING / FULL_SWING_MILLIVOLTS;
-/// What a 6581's mixer adds by itself, in voice units: 0.77 of a voice's
-/// full swing.
+/// What a 6581's mixer adds by itself, in millivolts at the output of the
+/// chip of "The C64 Digi", and in voice units: 0.08 of a voice's full
+/// swing.
 ///
-/// Source: fitted to the output of reSIDfp's default 6581, measured 17
-/// November 2026: with the chip silent, the step heard when the volume
-/// goes from 0 to 15 is 1.59 times the span of a triangle at full volume,
-/// and 0.77 times it with all three voices taken out of the mixer; with
-/// this offset the two are 1.57 and 0.80 here. The chip of "The C64 Digi"
-/// measured far less, 0.72 V from volume 0 to 15 against the 1.05 V of a
-/// voice, and its mixer alone 0.04 V the other way; chips differ in how
-/// loudly they play samples, and the offset before, taken from that
-/// article, gave a step of 0.73 (TODO-6427 fault 4).
-const MIXER_OFFSET_6581: i32 = FULL_SWING / 100 * 77;
+/// Source: fitted so that the step heard when the volume goes from 0 to
+/// 15 with the chip silent, three voices' offsets and this one, is 0.82
+/// of the span of a triangle at full volume: the middle of four real
+/// chips, which have 0.57, 0.69, 0.98 and 1.53.
+///
+/// - 0.69 is the chip of "The C64 Digi": 0.72 V from volume 0 to 15
+///   against the 1.05 V of a voice, its mixer alone 0.04 V the other way.
+/// - The others are Stone Oakvalley's 6581 R4, R2 and R3, from his
+///   recordings of Martin Galway's "Arkanoid" (6581-8580.com), which
+///   opens with samples played by the volume register while the voices
+///   are next to silent. Measured 17 November 2026: the loudness of that
+///   opening against the loudness of the music from 8 to 22 s is -16.9,
+///   -12.2 and -8.3 dB on the three chips, and -11.5 and -7.9 dB in two
+///   emulators run as separate programs on the same tune (sidplayfp
+///   2.16.0, both engines), whose own steps, measured from their output,
+///   are 1.08 and 1.58 of a triangle's span. Each chip's step is an
+///   emulator's times the ratio of the two loudnesses; the two emulators
+///   give the same within 0.05.
+///
+/// Chips differ threefold in how loudly they play samples, and this is
+/// the middle. (TODO-6427 fault 4: the offset at first, the -0.04 V of
+/// "The C64 Digi", gave a step of 0.73; the second, fitted to one
+/// emulator, 1.57.)
+const MIXER_OFFSET_6581_MILLIVOLTS: i32 = 80;
+const MIXER_OFFSET_6581: i32 = MIXER_OFFSET_6581_MILLIVOLTS * FULL_SWING / FULL_SWING_MILLIVOLTS;
 
-/// The same for an 8580: the waveform swings about its middle, and each
-/// voice and the mixer add 0.07 of a voice's full swing.
+/// The same for an 8580: the waveform swings about its middle, each voice
+/// adds a twentieth of a voice's full swing, and the mixer nothing.
 ///
-/// Source: fitted to the output of reSIDfp's default 8580, measured 17
-/// November 2026: with the chip silent, the step heard when the volume
-/// goes from 0 to 15 is 0.28 times the span of a triangle at full volume,
-/// and it falls by 0.07 for each voice taken out of the mixer, to 0.07.
-/// A voice held at waveform $FFF and at 0 with its envelope open moves
-/// the step by 0.46 one way and 0.57 the other: the middle of the
-/// waveform, less the voice's 0.07. That is five times quieter than the
-/// 6581, as public accounts have it: "There is no (or no significant) DC
-/// offset on the master volume D/A in the 8580" ("The C64 Digi", "The
-/// 8580"), and samples played by the volume register are "very quiet" on
-/// it (retroisle.com). (TODO-6427 fault 4: the offsets before, the
-/// mixer's alone at 0.05, gave a step of 0.05.)
+/// Source: fitted so that the step heard when the volume goes from 0 to
+/// 15 with the chip silent is 0.15 of the span of a triangle at full
+/// volume, as on the one real chip measured: Stone Oakvalley's 8580 R5,
+/// from his recording of "Arkanoid" (at [`MIXER_OFFSET_6581`]), whose
+/// opening is 27.3 dB below its music where two emulators' are 24.6 and
+/// 22.4 dB below with steps of 0.21 and 0.28; either gives the R5 0.15 to
+/// 0.16. That the offset is the voices' and not the mixer's is public:
+/// "There is no (or no significant) DC offset on the master volume D/A in
+/// the 8580" ("The C64 Digi", "The 8580"), and samples played by the
+/// volume register are "very quiet" on it (retroisle.com); both
+/// emulators have each voice add 0.07, and one of them the mixer as much
+/// again. That the waveform swings about its middle is from the two
+/// emulators only: a voice held at waveform $FFF and at 0 with its
+/// envelope open moves the step by half a swing one way and the other.
+/// (TODO-6427 fault 4: a step of 0.05 at first, and 0.29 when fitted to
+/// one emulator.)
 const WAVEFORM_ZERO_8580: i32 = (WAVEFORM_MAX as i32 + 1) / 2;
-const VOICE_OFFSET_8580: i32 = FULL_SWING / 100 * 7;
-const MIXER_OFFSET_8580: i32 = FULL_SWING / 100 * 7;
+const VOICE_OFFSET_8580: i32 = FULL_SWING / 20;
+const MIXER_OFFSET_8580: i32 = 0;
 
 /// The levels of a chip model's converters.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -739,12 +758,14 @@ mod tests {
     fn levels_are_the_measured_ones() {
         let levels = Levels::of(ChipModel::Mos6581);
         assert_eq!(levels.waveform_zero, 2496);
-        // 0.26 V of the 1.05 V that 4095 * 255 units are, and 0.77 of
-        // those units.
+        // 0.26 V and 0.08 V of the 1.05 V that 4095 * 255 units are:
+        // three voices and the mixer are 0.82 of them.
         assert_eq!(levels.voice_offset, 258_570);
-        assert_eq!(levels.mixer_offset, 804_034);
+        assert_eq!(levels.mixer_offset, 79_560);
+        assert_eq!((3 * levels.voice_offset + levels.mixer_offset) * 100 / FULL_SWING, 81);
+        // The 8580's: three voices of a twentieth each, 0.15.
         let levels = Levels::of(ChipModel::Mos8580);
-        assert_eq!((levels.waveform_zero, levels.voice_offset, levels.mixer_offset), (2048, 73_094, 73_094));
+        assert_eq!((levels.waveform_zero, levels.voice_offset, levels.mixer_offset), (2048, 52_211, 0));
     }
 
     #[test]
