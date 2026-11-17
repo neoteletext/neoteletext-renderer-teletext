@@ -61,9 +61,9 @@ pub fn instrument(patch: &Patch) -> Cs80 {
 }
 
 /// The panel at rest with channel I's tone changed: each control given
-/// is set. The overall RESONANCE lever, which rests at its centre, is put
-/// at its foot, so that a filter whose own lever is at its foot has the
-/// chip's least Q, 0.5.
+/// is set. The overall RESONANCE lever is at its foot, where it rests,
+/// so that a filter whose own lever is at its foot has the chip's least
+/// Q, 0.5.
 #[must_use]
 pub fn panel(controls: &[(Control, u8)]) -> Patch {
     let mut patch = Patch::DEFAULT;

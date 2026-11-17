@@ -39,7 +39,8 @@
 //! - **After the voices**, at the output rate: the ring modulator, whose
 //!   own oscillator an attack and decay envelope speeds up; the
 //!   tremolo/chorus, which adds the sound delayed by 2.56 ms, inverted
-//!   and dulled, to the sound itself; the volume.
+//!   and dulled, to the sound itself, and is switched in and out over 22
+//!   ms; the volume.
 //!
 //! # What MIDI's controls are on this instrument
 //!
@@ -73,9 +74,12 @@
 //!
 //! - **The custom chips' insides** are not published. What a control
 //!   voltage does between a chip's documented ends is an own choice
-//!   wherever its `Source:` line says so: above all how many octaves or
-//!   decibels a volt of touch, of the keyboard control and of the sub
-//!   oscillator is, and how far the overall levers reach.
+//!   wherever its `Source:` line says so: above all how many octaves a
+//!   volt of the sub oscillator is, how many volts a stroke gives, and
+//!   how far the overall levers reach. The level is not among them: the
+//!   touch and the keyboard control add their voltages to the LEVEL
+//!   lever's at the amplifier's linear input, through resistors that are
+//!   drawn (`voice`, `LEVEL_RESISTORS`).
 //! - **BRASS 1 is brighter than the one real instrument heard.** Twelve
 //!   keys of a real instrument's BRASS 1, struck hard, come to rest 1.39
 //!   to 2.00 octaves above their notes; this reading comes to rest at
@@ -84,9 +88,10 @@
 //!   The real filter's peak also comes sooner (116 to 260 ms after the
 //!   key for 170 to 390 ms). The fall from the peak agrees since the
 //!   stroke's voltage drains away as the touch board drains it: on
-//!   middle C a time constant of 2.73 s for the recording's 2.80 s, and
-//!   the fundamental 4.0 dB down from 1 s to 10 s for the recordings'
-//!   4.3 dB in the mean. The figures, and a test that states the rest
+//!   middle C a time constant of 2.73 s for the recording's 2.80 s. The
+//!   fundamental falls 5.4 dB from 1 s to 10 s for the recordings' 4.0 dB
+//!   in the mean (3.0 to 5.3 dB), by the drawings' resistors and a
+//!   hardest stroke of 7.9 V. The figures, and a test that states the rest
 //!   level and fails, are in `tests/cs80_filter.rs`
 //!   (`brass_1_rests_where_a_real_instruments_does`, ignored). What the
 //!   documents were asked:
@@ -123,10 +128,15 @@
 //!   manual, pages 39 and 41), and its Q of 5 with both at their most
 //!   (page 42; adjustment procedure, page 11). So one lever alone reaches
 //!   a Q of 2.75, and where the overall lever stands matters to every
-//!   sound: the recordings' Q of 2.7 for BRASS 1 is met with it at its
-//!   centre, where the owner's manual pictures it and the panel at rest
-//!   here has it, and is out of reach with it at its foot. That the
-//!   recorded instrument's lever stood at its centre is not known.
+//!   sound. It rests with the lever up, at its least (owner's manual,
+//!   page 38, item 8: "Nominal setting is always with the lever up for
+//!   minimum additional resonance"; page 31 draws it so), and so does
+//!   the panel at rest here. BRASS 1's Q is then 1.58 by the straight
+//!   line, where the recordings fit 2.7; it would be 2.71 with the lever
+//!   at its centre, but where the recorded instrument's lever stood is
+//!   not known, and the fundamental's fall on the same twelve keys is
+//!   met with the lever up and not with it at its centre (5.4 dB and 8.3
+//!   dB for the recordings' 4.0 dB).
 //! - **The real sine is not pure**: recordings have its second and third
 //!   harmonics 20 to 25 dB down, where the sine here has them 77 dB
 //!   down. The documents give no figure for it: the waveshaper's sheet
@@ -139,13 +149,20 @@
 //!   both oscillators run under either tab. What no page prints is how
 //!   large the sound is where it enters the board, so how large the
 //!   delayed sound is against the dry is a reading of the adjustment
-//!   procedure's trimming figures ([`EFFECT_WET`]); and how many octaves
+//!   procedure's trimming figures (`EFFECT_WET`); and how many octaves
 //!   a volt is at the oscillators' chip is taken from the pulse width's
 //!   oscillator, which is the same chip behind another pair of resistors
-//!   ([`EFFECT_OCTAVES_A_VOLT`]). The drawings also carry later changes
-//!   by hand (the delayed sound's coupling capacitors of 1 µF made 0.01
-//!   µF, among others) that the boards as printed do not have; the
-//!   boards as printed are what is built.
+//!   (`EFFECT_OCTAVES_A_VOLT`). The drawings also carry changes by
+//!   hand. The OE1 board as printed (page 56) has one of them, 150 kΩ in
+//!   place of 39 kΩ at its two output amplifiers, which makes the board
+//!   louder with the effect on and off alike and is nothing here; it
+//!   does not have the others: the delayed sound's coupling capacitors
+//!   are 1 µF on it where a hand has written 0.01 µF, which with their
+//!   10 kΩ would keep the delayed sound to what is above 1.6 kHz and
+//!   leave almost nothing of the comb below it. No page says which
+//!   instruments have that change, and the one bulletin filed (E-46,
+//!   January 1978) is about the pitch: the board as printed is what is
+//!   built, and an instrument with the change would sound otherwise.
 //! - **The filters do not distort**, and the loss of resonance at high
 //!   frequencies that Haible finds (180 pF across the damping) is left
 //!   out.
@@ -408,15 +425,37 @@ const EFFECT_DRY: i32 = (ENVELOPE_ONE as i64 * 68 / 168) as i32;
 /// C1 is the lowest key, so 987.8 Hz at 8') the four amplifiers are
 /// trimmed to ".65", ".58", ".58" and ".65 Vp-p" at the OE2 board's
 /// outputs; each side sums one of 0.65 V and one of 0.58 V (page 58, the
-/// wiring to I2 to I5), times 82 / 100, 1.009 Vp-p. The sine at 10 is
-/// trimmed to "1.00 ± .02 Vp-p" at a voice's amplifier (page 15, VCA,
-/// step 1), and the delayed sound is taken to be trimmed to stand as
-/// large as the dry at that key: that the tone enters the board at that
-/// 1 V is not printed anywhere. At that key the amplifiers' low-pass
+/// wiring to I2 to I5), times 82 / 100, 1.009 Vp-p. The delayed sound is
+/// taken to be trimmed to stand as large as the dry at that key, which
+/// is to say that the tone enters the board at 1 Vp-p: no page prints
+/// the level there, and the documents do not settle it. The "1.00 ± .02
+/// Vp-p" of the same tone (page 15, VCA, step 1) is at CP4, behind the
+/// first of a voice's amplifiers; two amplifiers on, the voice leaves
+/// its board at "80 ± 5 mVp-p" (step 4, terminal O), and the amplifier
+/// that brings the mixed voices on to the effect (service manual, page
+/// 53, PRA, IC7) is drawn without its feedback resistor. For 1 Vp-p:
+/// the effect on is then as loud as off at the trimmed key, 68 / 168 +
+/// 100 / 168 × 1.009 = 1.005, which reads as what the 0.65 and 0.58 are
+/// for; and the wah's output, which is the board's input when the wah
+/// is on, is trimmed to "1.0 ± .1 Vp-p" (adjustment procedure, page 29).
+/// Against it: the board as printed has a 27 kΩ beside IC7 that the
+/// drawing does not place (page 54); were that the feedback of its two
+/// 10 kΩ inputs, the tone would enter at 0.22 Vp-p, and the delayed
+/// sound would be 4.7 times the dry at that key. At that key the amplifiers' low-pass
 /// filter ([`EFFECT_WET_FILTER`]) has taken the delayed sound down by
 /// √(1 + (987.8 / 499.1)²), 2.2176, which low frequencies are spared:
 /// 1.0086 × 2.2176 = 2.2365 (`tests/cs80_modulation.rs` works it out).
 const EFFECT_WET: i32 = 357_360_555;
+/// What the effect's switches move by in a sample, in Q30: from off to on
+/// or back in 22 ms, in a straight line.
+///
+/// Source: service manual, page 55, OE1 circuit diagram: the two pairs
+/// of switches (FET2 and FET3 for the sound itself, FET1 and FET4 for the
+/// delayed sound) have their gates from the lines G1 and G2 through 10 kΩ
+/// into 2.2 µF, 22 ms, so that one pair closes as the other opens and the
+/// ON-OFF switch does not click. Own choice: the straight line, in place
+/// of what a FET makes of its gate's voltage.
+const EFFECT_SWITCH_STEP: i32 = (ENVELOPE_ONE as i64 * 1_000_000 / (22_000 * SAMPLE_RATE as i64)) as i32;
 /// How far the effect at full depth under the CHORUS tab moves the
 /// delayed sound's level in the mono output either way for each of its
 /// two oscillators, in Q30: 7 / 246.
@@ -552,6 +591,9 @@ pub struct Cs80 {
     /// sound's level, in Q30.
     effect: [Wave; 2],
     effect_depth: i32,
+    /// How far the effect's switches have gone over, in Q30: nothing with
+    /// the effect off, one with it on ([`EFFECT_SWITCH_STEP`]).
+    effect_on: i32,
     line: Chorus,
     /// The low-pass filter of the modulation amplifiers' outputs.
     wet_filter: OnePole,
@@ -603,6 +645,7 @@ impl Cs80 {
             ring_modulation: 0,
             effect: [Wave::default(); 2],
             effect_depth: 0,
+            effect_on: 0,
             line: effect_line(),
             wet_filter: OnePole::new(),
             bend: 0,
@@ -630,12 +673,18 @@ impl Cs80 {
     /// once, on the voices that are sounding too, as moving the panel's
     /// levers does.
     pub fn set_patch(&mut self, patch: &Patch) {
-        // The effect's lines are fed only while it is on, so what they
-        // held when it was switched off is not let out when it is
-        // switched on again.
-        if !self.patch.on(Global::Effect) && patch.on(Global::Effect) {
+        // The effect's lines are fed only while its switches are over at
+        // all, so what they held when the switches came to rest at off is
+        // not let out when it is switched on again. Switched on again
+        // before that, they have been fed all along.
+        if self.effect_on == 0 && patch.on(Global::Effect) {
             self.line = effect_line();
             self.wet_filter.reset();
+        }
+        // With nothing sounding there is nothing for the switches to
+        // click on: they are where the patch has them at once.
+        if self.allocator.sounding() == 0 {
+            self.effect_on = if patch.on(Global::Effect) { ENVELOPE_ONE } else { 0 };
         }
         self.patch = *patch;
         self.apply_patch();
@@ -947,14 +996,25 @@ impl Cs80 {
                 let gain = ENVELOPE_ONE.saturating_sub(ring).saturating_add(apply(carrier, ring));
                 signal = apply(signal, gain);
             }
-            if effect {
+            if effect || self.effect_on != 0 {
                 // The dry sound's share, less the delayed sound, whose
                 // level the two oscillators move against each other.
                 let [first, second] = &mut self.effect;
                 let moved = apply(sine_level(first.tick()).saturating_sub(sine_level(second.tick())), depth);
                 let [line, _] = self.line.process(signal);
                 let delayed = amplify(self.wet_filter.low_pass(line), EFFECT_WET);
-                signal = apply(signal, EFFECT_DRY).saturating_sub(apply(delayed, ENVELOPE_ONE.saturating_add(moved)));
+                let delayed = apply(delayed, ENVELOPE_ONE.saturating_add(moved));
+                let step = if effect { EFFECT_SWITCH_STEP } else { EFFECT_SWITCH_STEP.saturating_neg() };
+                self.effect_on = self.effect_on.saturating_add(step).clamp(0, ENVELOPE_ONE);
+                signal = if self.effect_on == ENVELOPE_ONE {
+                    apply(signal, EFFECT_DRY).saturating_sub(delayed)
+                } else {
+                    // On the way over, the second path has the sound
+                    // itself by what one pair of switches still passes
+                    // and the delayed sound by what the other does.
+                    let through = apply(ENVELOPE_ONE.saturating_sub(EFFECT_DRY), self.effect_on);
+                    apply(signal, ENVELOPE_ONE.saturating_sub(through)).saturating_sub(apply(delayed, self.effect_on))
+                };
             }
             *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
         }

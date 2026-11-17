@@ -228,12 +228,15 @@ fn the_pitch_set_at_the_ticks_leaves_little_at_their_rate() {
 
 #[test]
 fn the_touch_moves_the_level_and_the_brilliance() {
-    // The level: 6.4 V at 0.9 dB to the volt, 5.76 dB, under the firmest
-    // pressure; the hardest stroke gives 7.9 / 8.5 of it, 5.35 dB above
-    // the softest, and what a stroke gives drains away with a time
-    // constant of 3.3 s (service manual, page 17: 10 MΩ across 0.33 µF),
-    // so that over the quarter of a second measured, 0.375 s after the
-    // key in the middle, 0.8926 of it is left.
+    // The level: the amplifier's linear input has the LEVEL lever's 10 V
+    // through 560 kΩ and the touch's voltages through 270 kΩ (service
+    // manual, pages 39, 41 and 54), so the firmest pressure's 6.4 V make
+    // the gain 1 + 0.64 × 560 / 270 = 2.327 times the lever's own, and
+    // the hardest stroke's 7.9 / 8.5 of them 2.234 times, which is taken
+    // as nominal. What a stroke gives drains away with a time constant of
+    // 3.3 s (service manual, page 17: 10 MΩ across 0.33 µF), so that over
+    // the quarter of a second measured, 0.375 s after the key in the
+    // middle, 0.8926 of it is left.
     let level = |patch: &Patch, velocity: u8, pressure: u8| {
         // The firmest pressure brings one line to the whole of the mixed
         // output, which the output's limiter would bend: the volume is
@@ -246,12 +249,14 @@ fn the_touch_moves_the_level_and_the_brilliance() {
         cs80.event(KEY_PRESSURE, 69, pressure);
         decibels(rms(&render(&mut cs80, 0.5)[12_000..]) * 2.0f64.sqrt() / 0.125 / quieter)
     };
-    let mut touch = panel(&SINE);
-    touch.tones[0].set(Control::TouchLevel, 127);
-    let (soft, middle, hard) = (level(&touch, 1, 0), level(&touch, 64, 0), level(&touch, 127, 0));
+    let mut struck = panel(&SINE);
+    struck.tones[0].set(Control::TouchLevel, 127);
+    let (soft, middle, hard) = (level(&struck, 1, 0), level(&struck, 64, 0), level(&struck, 127, 0));
     println!("INITIAL LEVEL at 10: {soft:.1} dB, {middle:.1} dB and {hard:.1} dB at velocities 1, 64 and 127");
     let left = (-0.375f64 / 3.3).exp();
-    let stroke = |velocity: f64| -5.76 * 7.9 / 8.5 * (1.0 - left * velocity / 127.0);
+    let touch = 0.64 * 560.0 / 270.0;
+    let hardest = touch * 7.9 / 8.5;
+    let stroke = |velocity: f64| decibels((1.0 + hardest * left * velocity / 127.0) / (1.0 + hardest));
     assert!(
         (soft - stroke(1.0)).abs() < 0.1 && (middle - stroke(64.0)).abs() < 0.1 && (hard - stroke(127.0)).abs() < 0.1,
         "{soft} {middle} {hard}"
@@ -259,18 +264,28 @@ fn the_touch_moves_the_level_and_the_brilliance() {
     // Held, the hardest stroke's level comes down to the softest's: 4 s
     // on, three tenths of it are left.
     let held = {
-        let mut cs80 = instrument(&touch);
+        let mut cs80 = instrument(&struck);
         cs80.event(NOTE_ON, 69, 127);
         let _ = render(&mut cs80, 3.875);
         decibels(rms(&render(&mut cs80, 0.25)) * 2.0f64.sqrt() / 0.125)
     };
     println!("INITIAL LEVEL at 10, the hardest stroke 4 s on: {held:.2} dB");
-    assert!((held + 5.76 * 7.9 / 8.5 * (1.0 - (-4.0f64 / 3.3).exp())).abs() < 0.1, "{held}");
+    let expected = decibels((1.0 + hardest * (-4.0f64 / 3.3).exp()) / (1.0 + hardest));
+    assert!((held - expected).abs() < 0.1 && expected < -3.0, "{held} for {expected}");
     let mut after = panel(&SINE);
     after.tones[0].set(Control::PressureLevel, 127);
     let (light, half, full) = (level(&after, 100, 0), level(&after, 100, 64), level(&after, 100, 127));
     println!("AFTER LEVEL at 10: {light:.1} dB, {half:.1} dB and {full:.1} dB at pressures 0, 64 and 127");
-    assert!(light.abs() < 0.1 && (half - 5.76 * 64.0 / 127.0).abs() < 0.1 && (full - 5.76).abs() < 0.1);
+    let pressed = |pressure: f64| decibels(1.0 + touch * pressure / 127.0);
+    assert!(
+        light.abs() < 0.1 && (half - pressed(64.0)).abs() < 0.1 && (full - pressed(127.0)).abs() < 0.1,
+        "{light} {half} {full} for 0, {} and {}",
+        pressed(64.0),
+        pressed(127.0)
+    );
+    // The firmest pressure is 7.3 dB, and in a straight line, not in
+    // decibels: half of it is more than half of that.
+    assert!((pressed(127.0) - 7.34).abs() < 0.01 && pressed(64.0) > 4.4);
     // With the levers down the touch does nothing.
     assert!((level(&panel(&SINE), 1, 127) - level(&panel(&SINE), 127, 0)).abs() < 0.01);
 
@@ -316,7 +331,9 @@ fn the_touch_moves_the_level_and_the_brilliance() {
 fn pressure_on_one_key_moves_that_key_alone() {
     let mut patch = panel(&SINE);
     patch.tones[0].set(Control::PressureLevel, 127);
-    // Quiet enough that the pressed key's 5.8 dB stay below full scale.
+    // Quiet enough that the pressed key stays below full scale: on a
+    // LEVEL lever at 32 of 127 the pressure's 6.4 V through 270 kΩ make
+    // the gain (32 / 127 + 1.327) / (32 / 127) times, 15.9 dB.
     patch.tones[0].set(Control::Level, 32);
     let mut cs80 = instrument(&patch);
     cs80.event(NOTE_ON, 69, 100);
@@ -328,7 +345,9 @@ fn pressure_on_one_key_moves_that_key_alone() {
     let after = render(&mut cs80, 0.25);
     let change = |hertz: f64| decibels(component(&after, hertz) / component(&before, hertz));
     println!("pressure on the upper key: the lower moves {:.2} dB, the upper {:.2} dB", change(440.0), change(659.26));
-    assert!(change(440.0).abs() < 0.1 && (change(659.26) - 5.76).abs() < 0.1);
+    let lever = 32.0 / 127.0;
+    let expected = decibels((lever + 0.64 * 560.0 / 270.0) / lever);
+    assert!(change(440.0).abs() < 0.1 && (change(659.26) - expected).abs() < 0.1, "{expected}");
     // Channel pressure presses every key that is down.
     cs80.event(CHANNEL_PRESSURE, 0, 0);
     render(&mut cs80, 0.05);
@@ -369,7 +388,10 @@ fn a_key_that_is_up_is_no_longer_pressed() {
 fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     // Adjustment procedure, page 27: -2.76 V at the key 48 with a low
     // lever at its foot, +2.76 V at the key 85 with a high lever at its
-    // top; nothing at the centre. A volt is 0.9 dB of level.
+    // top; nothing at the centre. They reach the amplifier's linear
+    // input through 270 kΩ beside the LEVEL lever's 10 V through 560 kΩ
+    // (service manual, pages 39 and 41): 1 ∓ 0.276 × 560 / 270 of the
+    // gain, 7.39 dB down and 3.93 dB up.
     let level = |global: Global, lever: u8, key: u8| {
         let mut patch = panel(&SINE);
         patch.set(global, lever);
@@ -378,7 +400,9 @@ fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     let low = level(Global::KeyboardLevelLow, 0, 48);
     let high = level(Global::KeyboardLevelHigh, 127, 85);
     println!("the keyboard's level levers at their trimmed keys: {low:.2} dB and {high:.2} dB");
-    assert!((low + 2.484).abs() < 0.05 && (high - 2.484).abs() < 0.05);
+    let by = |volts: f64| decibels(1.0 + volts / 10.0 * 560.0 / 270.0);
+    assert!((low - by(-2.76)).abs() < 0.05 && (high - by(2.76)).abs() < 0.05, "{} {}", by(-2.76), by(2.76));
+    assert!((by(-2.76) + 7.39).abs() < 0.01 && (by(2.76) - 3.93).abs() < 0.01);
     // Each lever has its own half of the keyboard, and the middle none.
     // The level is taken over a quarter of a second, which on the key 48
     // is 32.7 cycles: the part of a cycle left over moves it by up to
@@ -391,7 +415,7 @@ fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     ];
     assert!(none.iter().all(|level| level.abs() < 0.03), "{none:?}");
     // The curve is the square of the distance: half way, a quarter.
-    assert!((level(Global::KeyboardLevelLow, 0, 57) + 2.484 / 4.0).abs() < 0.05);
+    assert!((level(Global::KeyboardLevelLow, 0, 57) - by(-2.76 / 4.0)).abs() < 0.05);
     // The brilliance levers move the filters: 2.76 V at the same keys,
     // 3.37 octaves of the low-pass filter. Its lever at 2.99 V puts it at
     // 412 Hz on this key, and the fourth harmonic's gain at a Q of 0.5 is
@@ -647,6 +671,49 @@ fn the_effect_switched_on_in_silence_lets_nothing_out() {
     assert!(peak < 1.0e-4, "{peak}");
 }
 
+#[test]
+fn the_effects_switch_does_not_click_on_a_note() {
+    // Service manual, page 55: the switches that put the delayed sound in
+    // the sound's place have their gates through 10 kΩ into 2.2 µF, so
+    // one pair closes over 22 ms as the other opens. Switched at once,
+    // the output stepped by up to nine tenths of the note's peak: 14 to
+    // 40 times the largest step between two samples of the note itself.
+    let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    let off = panel(&SINE);
+    let mut on = off;
+    on.set(Global::Effect, 1);
+    for key in [45u8, 60] {
+        let mut cs80 = instrument(&off);
+        cs80.event(NOTE_ON, key, 100);
+        let _ = render(&mut cs80, 0.25);
+        let plain = step(&render(&mut cs80, 0.25));
+        let mut combed = 0.0f64;
+        // Seven switches each way, at different places in the cycle.
+        for turn in 0..14 {
+            let before = render(&mut cs80, 0.2 + 0.0137 * f64::from(turn));
+            let patch = if turn % 2 == 0 { on } else { off };
+            cs80.set_patch(&patch);
+            let mut after = vec![before[before.len() - 1]];
+            after.extend(render(&mut cs80, 0.1));
+            if turn % 2 == 0 {
+                combed = step(&after[2_400..]);
+            }
+            let (worst, bound) = (step(&after), 1.1 * plain.max(combed));
+            assert!(worst < bound, "key {key}, turn {turn}: a step of {worst} for the note's own {bound}");
+        }
+        // And the switch does go over: on is the comb, off is the note.
+        cs80.set_patch(&on);
+        let _ = render(&mut cs80, 0.1);
+        let hertz = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
+        let with = component(&render(&mut cs80, 0.5), hertz);
+        cs80.set_patch(&off);
+        let _ = render(&mut cs80, 0.1);
+        let without = component(&render(&mut cs80, 0.5), hertz);
+        let found = with / without;
+        assert!((decibels(found / comb(hertz, 2.6e-3))).abs() < 0.3, "key {key}: {found}");
+    }
+}
+
 /// The level in decibels of each octave band of a signal, from the band
 /// centred on 125 Hz to the one on 8 kHz, and of the whole: the mean
 /// square of the samples, by a discrete Fourier transform of 32,768 of
@@ -706,7 +773,7 @@ const RATE_HZ: f64 = 48_000.0;
 /// octave band's level and the whole's with the effect on, against off,
 /// and how far the level swings.
 #[test]
-fn the_effect_on_a_held_string_chord_in_figures() {
+fn the_effect_on_a_held_string_chord_lifts_the_bottom_and_takes_the_top() {
     use neoteletext_audio_instruments::cs80::presets::PRESETS;
     assert_eq!(PRESETS[0].0, "STRING 1");
     let chord = |effect: u8, tremolo: u8, chorus: u8| {
@@ -732,15 +799,42 @@ fn the_effect_on_a_held_string_chord_in_figures() {
         decibels(most / least)
     };
     println!("STRING 1 chord, effect off: the level over tenths of a second swings {:.2} dB", spread(&off));
+    // The comb of `the_effect_is_the_comb_the_drawings_make` on the
+    // chord's own partials: the band about 125 Hz holds the comb's first
+    // crest (163 Hz, +4.4 dB), the bands from 2 kHz up have little of the
+    // delayed sound left behind its filter of 499 Hz and come down
+    // towards the dry sound's share alone, 68 / 168, -7.9 dB; the whole
+    // loses under a decibel. The figures are this chord's, measured, and
+    // held to half a decibel.
+    let expected_bands: [f64; 7] = [4.3, -1.6, 1.1, -2.1, -6.1, -7.3, -7.9];
+    let expected_whole = -0.8;
+    let mut still = [0.0; 7];
     for (name, signal) in [("neither tab", chord(1, 0, 0)), ("TREMOLO", chord(1, 1, 0)), ("CHORUS", chord(1, 0, 1))] {
         let (on_bands, on_whole) = bands(&signal);
-        let differences: Vec<String> =
-            on_bands.iter().zip(&off_bands).map(|(on, off)| format!("{:+.1}", on - off)).collect();
+        let moved: Vec<f64> = on_bands.iter().zip(&off_bands).map(|(on, off)| on - off).collect();
+        let differences: Vec<String> = moved.iter().map(|moved| format!("{moved:+.1}")).collect();
         println!(
             "STRING 1 chord, effect on with {name}: whole {:+.2} dB; octave bands 125 Hz to 8 kHz {} dB; the level over tenths of a second swings {:.2} dB",
             on_whole - off_whole,
             differences.join(" "),
             spread(&signal)
         );
+        assert!((on_whole - off_whole - expected_whole).abs() < 0.5, "{name}: whole {}", on_whole - off_whole);
+        for ((moved, expected), still) in moved.iter().zip(&expected_bands).zip(&mut still) {
+            assert!((moved - expected).abs() < 0.5, "{name}: {moved} for {expected}");
+            // In the mono sum a tab moves the delayed sound's level by
+            // 7 / 246 for each oscillator at the most, a quarter of a
+            // decibel: the bands stay where they are with neither tab.
+            if name == "neither tab" {
+                *still = *moved;
+            }
+            assert!((moved - *still).abs() < 0.4, "{name}: {moved} for {still} with neither tab");
+        }
+        // The effect adds no swing of its own beyond the oscillators'
+        // few per cent: the chord's own beating is what swings.
+        assert!(spread(&signal) < spread(&off) + 2.0, "{name}: {} dB", spread(&signal));
     }
+    // The top band is the dry sound's share alone, within the delayed
+    // sound's last tenth.
+    assert!((expected_bands[6] - decibels(EFFECT.0)).abs() < 0.2);
 }

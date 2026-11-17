@@ -207,7 +207,8 @@ pub enum Global {
     Mix = 3,
     /// Overall BRILLIANCE, duller to brighter about the centre.
     Brilliance = 4,
-    /// Overall RESONANCE, added to both filters of both channels.
+    /// Overall RESONANCE, added to both filters of both channels; it
+    /// rests at 0, the instrument's lever up.
     Resonance = 5,
     /// KEYBOARD CONTROL, BRILLIANCE LOW: the lower keys duller or
     /// brighter about the centre.
@@ -402,12 +403,16 @@ pub struct Patch {
 impl Patch {
     /// The panel at rest: [`Tone::DEFAULT`] on both channels, channel I
     /// alone, both at 8', every lever that rests at its centre there, and
-    /// everything else off or at its foot.
+    /// everything else off or at its foot, the overall RESONANCE lever
+    /// among them: its foot here is the instrument's lever up, where it
+    /// adds least.
     ///
     /// Source: owner's manual, page 31, the diagram of the nominal
-    /// settings; page 8, items 7 and 8: BRILLIANCE's "nominal lever
-    /// position for all patches is centered", RESONANCE's "is always
-    /// with the lever up". Own choice: the mix at channel I alone, where
+    /// settings, which draws MIX and BRILLIANCE at their centres and
+    /// RESONANCE at its top; page 8, item 7: BRILLIANCE's "nominal lever
+    /// position for all patches is centered"; page 38, item 8:
+    /// RESONANCE's "Nominal setting is always with the lever up for
+    /// minimum additional resonance". Own choice: the mix at channel I alone, where
     /// the diagram has it at the centre, so that the two channels' equal
     /// tones do not merely add.
     #[allow(
@@ -420,7 +425,6 @@ impl Patch {
         globals[Global::FeetTwo as usize] = Feet::Eight as u8;
         globals[Global::Detune as usize] = super::law::LEVER_CENTRE;
         globals[Global::Brilliance as usize] = super::law::LEVER_CENTRE;
-        globals[Global::Resonance as usize] = super::law::LEVER_CENTRE;
         globals[Global::KeyboardBrillianceLow as usize] = super::law::LEVER_CENTRE;
         globals[Global::KeyboardBrillianceHigh as usize] = super::law::LEVER_CENTRE;
         globals[Global::KeyboardLevelLow as usize] = super::law::LEVER_CENTRE;

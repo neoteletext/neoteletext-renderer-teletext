@@ -256,10 +256,13 @@ pub const Q_TOP: u64 = 5 << 28;
 /// instrument's BRASS 1, whose low-pass resonance row stands at 5.19 V:
 /// their filters' peaks fit a Q of 1.8 to 3.3, 2.7 in the middle
 /// (`~/devel/teletext-reference/synthesizers/cs-80/validation/table.py`).
-/// With the overall lever at its centre, as the owner's manual pictures
-/// the two overall levers (page 8) and as [`super::Patch::DEFAULT`] has
-/// it, the straight line gives BRASS 1 a Q of 2.71; with it at its foot
-/// 1.58, and no law that keeps the chip's two ends reaches 2.7 there.
+/// That fit is not met where the overall lever rests: the owner's manual
+/// has its "Nominal setting ... always with the lever up for minimum
+/// additional resonance" (page 38, item 8, and the diagram on page 31),
+/// which is its foot here and where [`super::Patch::DEFAULT`] has it, and
+/// there the straight line gives BRASS 1 a Q of 1.58. It gives 2.71 with
+/// the overall lever at its centre; where the recorded instrument's
+/// lever stood is not known, and the law is not bent to the one point.
 #[must_use]
 pub fn damping(levers: u32) -> u32 {
     /// The two levers' tops together.

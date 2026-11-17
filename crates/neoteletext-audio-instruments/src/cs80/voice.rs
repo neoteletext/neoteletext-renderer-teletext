@@ -117,14 +117,16 @@ const DRIVE_SHIFT: u32 = 2;
 /// has at 0).
 const VCF_GAIN: i32 = (ONE_Q28 as i64 * (1 << DRIVE_SHIFT) * 8 / 10) as i32;
 
-/// The amplifier's gain with every level at nominal, in Q30: an eighth,
-/// which leaves 18 dB for what pressure and the keyboard control add,
-/// 8.2 dB with every lever at its top.
+/// The right shift from the level input's share in Q28 to the
+/// amplifier's gain in Q30: the gain with the LEVEL lever alone at its top
+/// is an eighth, which leaves 18 dB for what the touch and the keyboard
+/// control add, 9.3 dB with every lever at its top ([`LEVEL_RESISTORS`]).
 ///
 /// Source: own choice.
-const GAIN_NOMINAL: u32 = (ENVELOPE_ONE >> 3) as u32;
+const GAIN_SHIFT: u32 = 1;
+const _: () = assert!((ONE_Q28 >> GAIN_SHIFT) == ENVELOPE_ONE >> 3);
 /// The right shift of a line's output into the sum of sixteen: with
-/// [`GAIN_NOMINAL`], one line's sine at full level peaks 18 dB below the
+/// [`GAIN_SHIFT`], one line's sine at full level peaks 18 dB below the
 /// mixed output's full scale, before the instrument's output gain.
 ///
 /// Source: own choice.
@@ -183,31 +185,58 @@ const TOUCH_BRILLIANCE: i32 = law::octaves(64, 10);
 /// "increases the brightness of any note when you play harder", so the
 /// softest stroke adds nothing.
 const STROKE_HARDEST: (i32, i32) = (79, 85);
-/// What a volt at an amplifier's level input is, as a fraction of an
-/// octave of amplitude: 0.9 dB of the 6.02 dB that an octave is. The
-/// touch response's two level voltages and the keyboard control's reach
-/// that input alike (service manual, page 39, R51-52 circuit diagram:
-/// TI, TA and KB through 270 kΩ each to a voice's level line).
+/// The resistors through which the LEVEL lever and each of the touch
+/// response's two level voltages and the keyboard control's reach a
+/// voice's level input, in thousands of ohms: 560 and 270. The input is
+/// the amplifier's linear one, so the gain is in proportion to the sum of
+/// the currents: a volt of the touch or of the keyboard control is 560 /
+/// 270 of a volt of the LEVEL lever, and 6.4 V of touch on a LEVEL lever at
+/// its top (10 V, [`law::LEVER_VOLTS`]) make the gain 2.33 times what the
+/// lever gives alone, 7.3 dB.
 ///
-/// Source: own choice by twelve recordings of a real instrument's BRASS
-/// 1, whose INITIAL LEVEL row stands at the top; no document read gives
-/// the scale ("the level exponentially", service manual, page 52, "VCA IC
-/// (IG00151)", pin 1, EI). A stroke's voltage drains away in 3.3 s
-/// ([`TOUCH_HOLD`]), and with it the level it gave: from 1 s to 10 s
-/// after the key the recordings' fundamentals fall 2.7 to 6.8 dB, 4.3 dB
-/// in the mean, of which this instrument's envelope is 0.6 dB and the
-/// drain of the hardest stroke the rest. Each key by itself gives 0.5 to
-/// 1.4 dB to the volt
-/// (`~/devel/teletext-reference/synthesizers/cs-80/validation/`). At 3 dB
-/// to the volt, as this was first chosen, the same notes fell 13.5 dB.
-const LEVEL_A_VOLT: (i32, i32) = (90, 602);
-/// The octaves of amplitude the touch response's level levers reach: the
-/// 6.4 V that the brilliance levers reach, 5.8 dB. Pressure reaches it;
-/// a stroke does not ([`STROKE_HARDEST`]).
+/// Source: service manual, page 39, R51-52 circuit diagram: each voice's
+/// line LC is fed by LV (the LEVEL lever) through 560 kΩ, by TI, TA and
+/// KB (the touch response's initial and after level and the keyboard
+/// control's) through 270 kΩ each, and by AM (the sub oscillator) through
+/// 180 kΩ; page 41, M circuit diagram: LC (terminal 31) goes, with 0.01 µF
+/// to earth, to pin 2 of IC5, the third of the voice's four amplifiers
+/// (IG00151); page 54, "VCA IC (IG00151)": pin 2 is LI, "Input of the
+/// control voltage is provided for linear change of the level", drawn as
+/// a straight line through nothing, where pin 1, EI, changes "the level
+/// exponentially" and has only the trimmer here. Until this was read the
+/// scale was an own choice in decibels to the volt, last 0.9 dB by twelve
+/// recordings of a real instrument's BRASS 1, whose INITIAL LEVEL row
+/// stands at the top: a stroke's voltage drains away in 3.3 s
+/// ([`TOUCH_HOLD`]) and its level with it, and the recordings'
+/// fundamentals fall 3.0 to 5.3 dB from 1 s to 10 s after the key, 4.0 dB
+/// in the mean (`~/devel/teletext-reference/synthesizers/cs-80/validation/`,
+/// `h1.py`). By this law, the hardest stroke taken as 7.9 V and the
+/// overall RESONANCE lever at its foot, the same notes fall 5.3 to 5.6 dB
+/// here, 5.4 dB in the mean, of which 2.3 dB are the amplifier's envelope
+/// and 0.9 dB the filter's (`tests/cs80_filter.rs`); at 0.9 dB to the
+/// volt they fell 4.0 dB.
+const LEVEL_RESISTORS: (i64, i64) = (560, 270);
+/// What a voltage at the touch's or the keyboard control's level
+/// terminals adds to the level input, as a share in Q28 of what the LEVEL
+/// lever gives at its top.
+const fn level_share(volts: i32) -> i32 {
+    /// A volt in Q28 over a volt in the units of an octave to the volt.
+    const FINER: i64 = 1 << (28 - law::OCTAVE_BITS);
+    let (lever, other) = LEVEL_RESISTORS;
+    let product = (volts as i64).wrapping_mul(lever).wrapping_mul(FINER);
+    match product.checked_div(other.wrapping_mul(law::LEVER_VOLTS as i64)) {
+        Some(share) => share as i32,
+        None => 0,
+    }
+}
+const _: () = assert!(ONE_Q28 == 1 << 28 && law::VOLT == 1 << law::OCTAVE_BITS);
+/// What the touch response's level levers add at their tops, as a share
+/// in Q28 of the LEVEL lever's top: 6.4 V, 1.327. Pressure reaches it; a
+/// stroke does not ([`STROKE_HARDEST`]).
 ///
-/// Source: adjustment procedure, page 23, steps 2 and 4: "+6.4 ± .3V",
-/// at [`LEVEL_A_VOLT`].
-const TOUCH_LEVEL: i32 = law::octaves(64 * LEVEL_A_VOLT.0, 10 * LEVEL_A_VOLT.1);
+/// Source: adjustment procedure, page 23, steps 2 and 4: "+6.4 ± .3V" at
+/// the terminals L11 to L28, through [`LEVEL_RESISTORS`].
+const TOUCH_LEVEL: i32 = level_share(law::octaves(64, 10));
 /// The volts the sub oscillator at its peak adds to the brilliance
 /// either way with its VCF lever at the top: 1.6 V, which
 /// [`law::MODULATION`] makes 0.52 octave of the high-pass filter and 1.96
@@ -284,12 +313,10 @@ const KEYBOARD_TRIM_KEYS: (i32, i32) = (KEYBOARD_CENTRE - 48, 85 - KEYBOARD_CENT
 /// choice: the control grows as the square of the distance from the
 /// centre, for the "smooth curve" of the owner's manual (page 38, item 9).
 const KEYBOARD_BRILLIANCE: i32 = law::octaves(276, 100);
-/// The same for the level levers, in octaves of amplitude: 2.5 dB, at
-/// [`LEVEL_A_VOLT`].
-const KEYBOARD_LEVEL: i32 = law::octaves(276 * LEVEL_A_VOLT.0, 100 * LEVEL_A_VOLT.1);
-/// The most the keyboard and the touch may lift a level above nominal,
-/// in octaves of amplitude: what [`GAIN_NOMINAL`] leaves.
-const LEVEL_LIFT: i32 = 3 * OCTAVE;
+/// The same for the level levers, as a share in Q28 of the LEVEL lever's
+/// top: 2.76 V through [`LEVEL_RESISTORS`], 0.572 either way, which on a
+/// LEVEL lever at its top is 3.9 dB up and 7.4 dB down.
+const KEYBOARD_LEVEL: i32 = level_share(law::octaves(276, 100));
 
 /// Thousandths of a time that are its time constant: for an attack, the
 /// envelope block's 1,466 thousandths of a time constant to the peak; for
@@ -348,8 +375,12 @@ pub struct Channel {
     amp_sustain: i32,
     /// The amplifier's release while the foot switch holds the sustain.
     amp_sustained: i32,
-    /// The level lever times the mix, in Q30.
-    level: i32,
+    /// The LEVEL lever's share of its top, and the mix's, in Q30.
+    lever: i32,
+    mix: i32,
+    /// What the level input's sum is scaled by, in Q30, so that the
+    /// hardest stroke on the LEVEL lever's top is nominal.
+    nominal: i32,
     touch_brilliance: i32,
     pressure_brilliance: i32,
     touch_level: i32,
@@ -375,7 +406,17 @@ impl Channel {
         // line from all at its own end to none at the other (own choice).
         let mix = patch.get(Global::Mix);
         let share = if second { mix } else { LEVER_MAX.saturating_sub(mix) };
-        let loudness = apply(law::level(lever(Control::Level)), law::level(share));
+        let mix = law::level(share);
+        // The stroke's one voltage makes its level as its brilliance.
+        let touch_level =
+            law::share_of(law::share(TOUCH_LEVEL, lever(Control::TouchLevel)), STROKE_HARDEST.0, STROKE_HARDEST.1);
+        let pressure_level = law::share(TOUCH_LEVEL, lever(Control::PressureLevel));
+        // The hardest stroke with the LEVEL lever at its top is nominal
+        // (own choice of where nominal is: the levels of the presets,
+        // which all have INITIAL LEVEL at 10, against the panel's): the
+        // sum is divided by what that stroke makes it.
+        let nominal = (i64::from(ONE_Q28) << 30).checked_div(i64::from(ONE_Q28).saturating_add(i64::from(touch_level)));
+        let nominal = i32::try_from(nominal.unwrap_or(0)).unwrap_or(ENVELOPE_ONE);
         let noise = lever(Control::Noise);
         let vcf_level = lever(Control::VcfLevel);
         let filtered = (waves != 0 || noise != 0) && vcf_level != 0;
@@ -413,7 +454,10 @@ impl Channel {
         Self {
             waves,
             filtered,
-            audible: loudness != 0 && (filtered || sine != 0),
+            // The touch and the keyboard control reach the level input
+            // beside the LEVEL lever, so the lever at its foot does not
+            // by itself silence a line.
+            audible: mix != 0 && (filtered || sine != 0),
             noise_level: apply(law::level(noise), NOISE_LEVEL),
             sine_level: law::level(sine),
             vcf_gain: law::share(VCF_GAIN, vcf_level),
@@ -433,20 +477,17 @@ impl Channel {
             amp_times: times(Control::Attack, Control::Decay, Control::Release),
             amp_sustain: law::level(lever(Control::Sustain)),
             amp_sustained: coefficient(law::time(law::FALL_SHORTEST, sustained), fall),
-            level: loudness,
+            lever: law::level(lever(Control::Level)),
+            mix,
+            nominal,
             touch_brilliance: law::share_of(
                 law::share(TOUCH_BRILLIANCE, lever(Control::TouchBrilliance)),
                 STROKE_HARDEST.0,
                 STROKE_HARDEST.1,
             ),
             pressure_brilliance: law::share(TOUCH_BRILLIANCE, lever(Control::PressureBrilliance)),
-            // The stroke's one voltage makes its level as its brilliance.
-            touch_level: law::share_of(
-                law::share(TOUCH_LEVEL, lever(Control::TouchLevel)),
-                STROKE_HARDEST.0,
-                STROKE_HARDEST.1,
-            ),
-            pressure_level: law::share(TOUCH_LEVEL, lever(Control::PressureLevel)),
+            touch_level,
+            pressure_level,
         }
     }
 }
@@ -461,8 +502,8 @@ fn level_q32(lever: u8) -> u32 {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Shared {
     /// The keyboard control's levers at their trimmed keys: brilliance
-    /// low and high in octaves, level low and high in octaves of
-    /// amplitude.
+    /// low and high in octaves, level low and high as shares of the
+    /// LEVEL lever's top in Q28.
     keyboard: [i32; 4],
     sub_vco: i32,
     sub_vcf: i32,
@@ -535,8 +576,8 @@ impl Shared {
         }
     }
 
-    /// The keyboard control at a key: octaves of brilliance and octaves
-    /// of amplitude.
+    /// The keyboard control at a key: octaves of brilliance, and the share
+    /// of the LEVEL lever's top that it adds to the level input, in Q28.
     fn keyboard(&self, key: u8) -> (i32, i32) {
         let [brilliance_low, brilliance_high, level_low, level_high] = self.keyboard;
         let distance = i32::from(key).saturating_sub(KEYBOARD_CENTRE);
@@ -679,8 +720,8 @@ impl Line {
     /// A tick. `pitch` is the oscillator's interval from the A and `key`
     /// the key voltage's from the filters' reference key, in octaves;
     /// `brilliance` is what the keys, the touch and the sub oscillator
-    /// add to the filters' control, in volts; `lift` is what they add to
-    /// the level, in octaves of amplitude.
+    /// add to the filters' control, in volts; `added` is what they add to
+    /// the level input, as a share in Q28 of the LEVEL lever's top.
     #[allow(clippy::too_many_arguments, reason = "one line's share of a voice's tick, taken apart once")]
     fn tick(
         &mut self,
@@ -690,7 +731,7 @@ impl Line {
         pitch: i32,
         key: i32,
         brilliance: i32,
-        lift: i32,
+        added: i32,
         ribbon: u32,
         pwm: i32,
         tremolo: i32,
@@ -740,9 +781,12 @@ impl Line {
             }
         }
 
-        let gain = law::raise(GAIN_NOMINAL, lift.min(LEVEL_LIFT)).min(ENVELOPE_ONE.cast_unsigned()).cast_signed();
+        // The level input has the sum of the lever and what is added,
+        // and nothing below nothing ([`LEVEL_RESISTORS`]).
+        let sum = (channel.lever >> LEVER_SHIFT).saturating_add(added).max(0);
+        let gain = apply(sum, channel.nominal) >> GAIN_SHIFT;
         // The tremolo's factor is given as its half.
-        let level = apply(apply(amp_level, channel.level), gain);
+        let level = apply(apply(amp_level, channel.mix), gain);
         let level = apply(level, tremolo).min(ENVELOPE_ONE >> 1) << 1;
         self.gain_step = level.saturating_sub(self.gain) >> TICK_BITS;
     }
@@ -769,6 +813,9 @@ impl Line {
     }
 }
 
+/// The right shift from a level in Q30 to a share in Q28.
+const LEVER_SHIFT: u32 = 2;
+const _: () = assert!(ENVELOPE_ONE >> LEVER_SHIFT == ONE_Q28);
 /// Ticks that leave a new oscillator at a place of its own and let the
 /// edges on the way out of its rings.
 const PLACING_TICKS: u32 = 3 + 2 * Oscillator::DELAY as u32;
@@ -933,12 +980,10 @@ impl Voice {
                 .saturating_add(law::scaled(channel.touch_brilliance, self.velocity))
                 .saturating_add(law::scaled(channel.pressure_brilliance, self.pressure))
                 .saturating_add(law::scaled(wah, sub));
-            // A soft stroke lowers the level from what the hardest
-            // gives, which is nominal (own choice of where nominal is);
-            // pressure raises it.
-            let soft = ENVELOPE_ONE.saturating_sub(self.velocity);
-            let lift = keyboard_level
-                .saturating_sub(law::scaled(channel.touch_level, soft))
+            // What is left of the stroke, the pressure and the keyboard
+            // control add their voltages to the LEVEL lever's.
+            let added = keyboard_level
+                .saturating_add(law::scaled(channel.touch_level, self.velocity))
                 .saturating_add(law::scaled(channel.pressure_level, self.pressure));
             let release = if self.damped {
                 shared.damp
@@ -948,7 +993,7 @@ impl Voice {
                 let [_, _, release] = channel.amp_times;
                 release
             };
-            line.tick(channel, self.gate, release, pitch, key, brilliance, lift, controls.ribbon, pwm, tremolo);
+            line.tick(channel, self.gate, release, pitch, key, brilliance, added, controls.ribbon, pwm, tremolo);
         }
     }
 

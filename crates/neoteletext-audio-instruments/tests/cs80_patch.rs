@@ -135,3 +135,13 @@ fn the_presets_are_twenty_two_tones_eleven_for_each_channel() {
     let patch = Patch::with_tones(PRESETS[2].1, PRESETS[13].1);
     assert_eq!((patch.tones[0], patch.get(Global::Mix)), (PRESETS[2].1, 64));
 }
+
+#[test]
+fn the_panel_at_rest_has_the_overall_resonance_lever_up() {
+    // Owner's manual, page 38, item 8: "Nominal setting is always with
+    // the lever up for minimum additional resonance"; page 31 draws the
+    // nominal panel with MIX and BRILLIANCE at their centres and
+    // RESONANCE at its top. Up is the least, 0 here.
+    let patch = Patch::DEFAULT;
+    assert_eq!((patch.get(Global::Resonance), patch.get(Global::Brilliance)), (0, 64));
+}
