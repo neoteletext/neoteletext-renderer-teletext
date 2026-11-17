@@ -53,14 +53,17 @@ pub fn lo_strings() -> Patch {
             (Param::VcfLfoMod, 5),
             (Param::VcfKeyFollow, 10),
             (Param::VcaLevel, 45),
-            (Param::Env1Attack, 45),
-            (Param::Env1Decay, 60),
-            (Param::Env1Sustain, 60),
-            (Param::Env1Release, 43),
-            (Param::Env2Attack, 45),
-            (Param::Env2Decay, 55),
-            (Param::Env2Sustain, 55),
-            (Param::Env2Release, 45),
+            // The eight envelope sliders as measured on the scan at 300
+            // dots an inch, the middle of each drawn knob between the
+            // scale's end marks, which are 82 dots apart.
+            (Param::Env1Attack, 50),
+            (Param::Env1Decay, 67),
+            (Param::Env1Sustain, 67),
+            (Param::Env1Release, 46),
+            (Param::Env2Attack, 54),
+            (Param::Env2Decay, 62),
+            (Param::Env2Sustain, 61),
+            (Param::Env2Release, 51),
         ],
     );
     switches(
