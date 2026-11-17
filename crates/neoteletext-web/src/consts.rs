@@ -10,8 +10,6 @@ use neoteletext_core::consts::{FIELD_PERIOD_US, FLASH_CYCLE_US, FLASH_UNITS};
 
 /// Microseconds in one second.
 pub const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
-/// Seconds in one day, for cookie lifetimes.
-pub const SECONDS_PER_DAY: u64 = 86_400;
 
 // ---------------------------------------------------------------------------
 // Addresses (REQ-WEB-015, REQ-WEB-016, RFC 3986)
@@ -120,8 +118,7 @@ pub const DEFAULT_PUSH_LIMIT: usize = 64 * 1024;
 pub const DEFAULT_DESCRIPTOR_LIMIT: usize = 16 * 1024;
 /// Default limit of the headers of one response (REQ-WEB-008).
 pub const DEFAULT_HEADER_LIMIT: usize = 16 * 1024;
-/// Default room for one outgoing request: request line, headers and
-/// cookies.
+/// Default room for one outgoing request: its request line and headers.
 pub const DEFAULT_REQUEST_LIMIT: usize = 16 * 1024;
 
 /// Header names this client sends or reads (REQ-WEB-014). Compared without
@@ -135,11 +132,6 @@ pub mod header {
     pub const ACCEPT: &[u8] = b"Accept";
     /// `Accept-Encoding` (RFC 9110 section 12.5.3).
     pub const ACCEPT_ENCODING: &[u8] = b"Accept-Encoding";
-    /// `Cookie` (RFC 6265bis section 5.7).
-    pub const COOKIE: &[u8] = b"Cookie";
-    /// RFC 9110 section 11.6.2: sent only with a device-bound session's
-    /// registration, when the server gave the value (REQ-WEB-017).
-    pub const AUTHORIZATION: &[u8] = b"Authorization";
     /// `If-None-Match` (RFC 9110 section 13.1.2).
     pub const IF_NONE_MATCH: &[u8] = b"If-None-Match";
     /// `If-Modified-Since` (RFC 9110 section 13.1.3).
@@ -156,10 +148,6 @@ pub mod header {
     pub const CONNECTION: &[u8] = b"Connection";
     /// `Location` (RFC 9110 section 10.2.2).
     pub const LOCATION: &[u8] = b"Location";
-    /// `Set-Cookie` (RFC 6265bis section 4.1).
-    pub const SET_COOKIE: &[u8] = b"Set-Cookie";
-    /// `Clear-Site-Data` (W3C Clear Site Data section 3.1, decision E.104).
-    pub const CLEAR_SITE_DATA: &[u8] = b"Clear-Site-Data";
     /// `ETag` (RFC 9110 section 8.8.3).
     pub const ETAG: &[u8] = b"ETag";
     /// `Last-Modified` (RFC 9110 section 8.8.2).
@@ -200,11 +188,6 @@ pub const CHUNKED: &[u8] = b"chunked";
 /// The `Connection` option that ends a persistent connection (RFC 9112
 /// section 9.6).
 pub const CONNECTION_CLOSE: &[u8] = b"close";
-/// The `Clear-Site-Data` types that clear cookies, each a quoted string
-/// compared exactly (W3C Clear Site Data sections 3.1 and 3.2).
-pub const CLEAR_COOKIES: &[u8] = b"\"cookies\"";
-/// The wildcard type, which clears every type.
-pub const CLEAR_EVERYTHING: &[u8] = b"\"*\"";
 /// The `Connection` option of a protocol upgrade (RFC 6455 section 4.1).
 pub const CONNECTION_UPGRADE: &[u8] = b"Upgrade";
 /// The upgrade token for WebSocket (RFC 6455 section 4.1).
@@ -393,55 +376,6 @@ pub const PUSH_UNSENT_BOUND: usize = 1024;
 /// The round trip is measured by a ping at most this often, while keys go
 /// to the channel (REQ-RCH-016).
 pub const ROUND_TRIP_EVERY_US: u64 = MICROSECONDS_PER_SECOND;
-
-// ---------------------------------------------------------------------------
-// Cookies (RFC 6265bis draft of 30 September 2026, REQ-WEB-006)
-// ---------------------------------------------------------------------------
-
-/// The longest name and value together (RFC 6265bis section 5.6 step 4).
-pub const MAX_COOKIE_NAME_VALUE: usize = 4096;
-/// The longest attribute value (RFC 6265bis section 5.6 step 6).
-pub const MAX_COOKIE_ATTRIBUTE_VALUE: usize = 1024;
-/// The longest lifetime, in days (RFC 6265bis section 5.6.1 and 5.6.2).
-pub const MAX_COOKIE_AGE_DAYS: u64 = 400;
-/// Default cookies per host (REQ-WEB-006).
-pub const DEFAULT_COOKIES_PER_HOST: usize = 50;
-/// Default cookies in total (REQ-WEB-006).
-pub const DEFAULT_COOKIES_TOTAL: usize = 100;
-/// The `__Secure-` prefix (RFC 6265bis section 4.1.3.1).
-pub const PREFIX_SECURE: &[u8] = b"__Secure-";
-/// The `__Host-` prefix (RFC 6265bis section 4.1.3.2).
-pub const PREFIX_HOST: &[u8] = b"__Host-";
-/// The `__Http-` prefix (RFC 6265bis section 4.1.3.3).
-pub const PREFIX_HTTP: &[u8] = b"__Http-";
-/// The `__Host-Http-` prefix (RFC 6265bis section 4.1.3.4).
-pub const PREFIX_HOST_HTTP: &[u8] = b"__Host-Http-";
-
-/// Cookie attribute names (RFC 6265bis section 5.6).
-pub mod cookie_attribute {
-    /// `Expires`.
-    pub const EXPIRES: &[u8] = b"expires";
-    /// `Max-Age`.
-    pub const MAX_AGE: &[u8] = b"max-age";
-    /// `Domain`.
-    pub const DOMAIN: &[u8] = b"domain";
-    /// `Path`.
-    pub const PATH: &[u8] = b"path";
-    /// `Secure`.
-    pub const SECURE: &[u8] = b"secure";
-    /// `HttpOnly`.
-    pub const HTTP_ONLY: &[u8] = b"httponly";
-    /// `SameSite`.
-    pub const SAME_SITE: &[u8] = b"samesite";
-    /// `Partitioned`.
-    pub const PARTITIONED: &[u8] = b"partitioned";
-    /// `SameSite` value `Strict`.
-    pub const STRICT: &[u8] = b"strict";
-    /// `SameSite` value `Lax`.
-    pub const LAX: &[u8] = b"lax";
-    /// `SameSite` value `None`.
-    pub const NONE: &[u8] = b"none";
-}
 
 // ---------------------------------------------------------------------------
 // Encodings

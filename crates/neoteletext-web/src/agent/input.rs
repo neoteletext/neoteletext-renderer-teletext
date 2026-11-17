@@ -10,7 +10,7 @@ use crate::map::{MapAddress, MapError};
 use crate::port::{ConnectionId, NetInput, RandomSource};
 use crate::url::{Url, UrlError};
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     /// Handles one input. Outputs go to `sink` before this returns.
     pub fn handle(&mut self, now: Instant, input: Input<'_>, sink: &mut Sink<'_>) {
         let ticked = matches!(input, Input::Tick);
@@ -22,12 +22,12 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Input::Tick => self.tick(now, sink),
             Input::Net(net) => self.net(now, net, sink),
             Input::OpenService(address) => match Url::parse(address) {
-                Ok(url) if !url.scheme().is_websocket() => self.open_by_descriptor(&url, false),
+                Ok(url) if !url.scheme().is_websocket() => self.open_by_descriptor(&url),
                 Ok(_) => event(sink, Event::DescriptorFailed(Failure::Address(UrlError::Scheme))),
                 Err(error) => event(sink, Event::DescriptorFailed(Failure::Address(error))),
             },
             Input::OpenChannel(address) => match MapAddress::read_opened(address) {
-                Ok(found) => self.open_channel(&found.folder, false),
+                Ok(found) => self.open_channel(&found.folder),
                 Err(MapError::Channel(channel::ChannelError::Address(error))) => {
                     event(sink, Event::DescriptorFailed(Failure::Address(error)));
                 }
@@ -43,8 +43,6 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Input::FetchPage { page, subcode } => self.enqueue(page, subcode, Want::Page, sink),
             Input::FetchSubPages { page, part } => self.enqueue(page, None, Want::SubPages(part), sink),
             Input::Subscribe(subscription) => self.subscribe(subscription, sink),
-            Input::WipeCookies => self.wipe_cookies(),
-            Input::WallClock(unix) => self.wall_clock = Some((now, unix)),
             Input::Send(message) => self.send_input(message, sink),
             Input::MeasureRoundTrip(on) => self.measure_round_trip(on),
             Input::FetchResource { role, address } => self.request_resource(role, address, sink),
@@ -68,7 +66,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     /// Gives a connection's input to the connection it concerns.
     fn net(&mut self, now: Instant, net: NetInput<'_>, sink: &mut Sink<'_>) {
         match net {
-            NetInput::Connected(ConnectionId::Fetch, peer) => self.fetch_connected(now, peer, sink),
+            NetInput::Connected(ConnectionId::Fetch, peer) => self.fetch_connected(peer, sink),
             NetInput::ConnectFailed(ConnectionId::Fetch) => self.fetch_lost(now, Failure::Network, sink),
             NetInput::Received(ConnectionId::Fetch, bytes) => self.fetch_received(now, bytes, sink),
             NetInput::Closed(ConnectionId::Fetch) => self.fetch_closed(now, sink),

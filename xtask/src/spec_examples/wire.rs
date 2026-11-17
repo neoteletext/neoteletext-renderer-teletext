@@ -20,8 +20,6 @@ use neoteletext_input::event::{
     Action, Device, Event, Item, Key, KeyCode, Mouse, MouseAction, Point, Resume, Select, Stamp, Touch, Wheel, write,
 };
 use neoteletext_input::{MAX_MESSAGE, VERSION};
-use neoteletext_web::cookie::SameSite;
-use neoteletext_web::records::cookie::SetCookie;
 use neoteletext_web::records::denied::{self, DeniedRecord, STATUS_NOT_FOUND, STATUS_UNAVAILABLE};
 use neoteletext_web::records::index::{self, IndexMagazine, IndexPage};
 use neoteletext_web::records::redirect::{self, RedirectRecord};
@@ -67,8 +65,6 @@ const INDEX_GENERATION: u16 = 1;
 const RECORD_PAGE: u16 = 0x302;
 /// The sub-code the example records name.
 const RECORD_SUB: u16 = 2;
-/// The example cookie's life in seconds.
-const COOKIE_AGE: u32 = 3_600;
 /// A sub-page of the LINKS example, as a page file writes it, with each kind
 /// of link: `LN`, `LK` and `LT` (the engine's Appendix E).
 const LINKS_PAGE: &str = "PN,30002\nSC,0002\nLN,R,200,More\nLK,303,news:100\nLT,5,2,8,https://b.example/n/\n";
@@ -539,28 +535,6 @@ fn log_record() -> Result<Example, String> {
     })
 }
 
-fn set_cookie() -> Result<Example, String> {
-    let cookie = SetCookie {
-        name: "score",
-        value: "12",
-        path: None,
-        max_age: Some(COOKIE_AGE),
-        same_site: SameSite::Lax,
-        secure: true,
-        http_only: true,
-    };
-    let packets = collected(|out| cookie.encode(SERVICE, 0, out))?;
-    let bytes = record_of(&packets)?;
-    let body = bytes.len() - neoteletext_audio::record::record_length(0);
-    let fields = vec![field(4, body, "the line", "one Set-Cookie header value")];
-    Ok(Example {
-        name: "record-set-cookie",
-        caption: "A SET_COOKIE record",
-        bytes,
-        fields: framed(body, fields, "8, SET_COOKIE"),
-    })
-}
-
 fn links_record() -> Result<Example, String> {
     let mut reader = TtiReader::new();
     let mut packets = None;
@@ -735,7 +709,6 @@ pub(super) fn examples() -> Result<Vec<Example>, String> {
         index_record()?,
         index_fragments()?,
         log_record()?,
-        set_cookie()?,
         links_record()?,
         subpages_record()?,
         redirect_place()?,

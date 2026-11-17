@@ -16,7 +16,7 @@ neoteletext-image = { workspace = true, features = ["alloc"] }
 # Detection and `--format` reach every reader; live mode reads TTI and T42.
 neoteletext-formats = { workspace = true, features = ["std", "transport", "sliced", "pages", "tti", "ep1", "edittf", "dump", "bdf"] }
 neoteletext-slicer = { workspace = true, optional = true }
-# Under `live`: the whole user agent, with push and cookies.
+# Under `live`: the whole user agent, with push.
 neoteletext-web = { workspace = true, optional = true, features = ["default", "std"] }
 # DEC-2445: a one-shot command selects its page on a live channel.
 neoteletext-input = { workspace = true, optional = true }

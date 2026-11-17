@@ -7,10 +7,10 @@ use super::head::{self, HeadError};
 use super::{Framing, HttpError, MediaType};
 use crate::bytes::{TextBuf, copy_prefix, parse_decimal, split_once, trim_ows};
 use crate::consts::{
-    CHUNKED, CLEAR_COOKIES, CLEAR_EVERYTHING, CONNECTION_CLOSE, CONNECTION_UPGRADE, HTTP_MAJOR, HTTP_MINOR_0,
-    HTTP_MINOR_1, IDENTITY, MAX_CONTENT_LENGTH_DIGITS, MAX_URL_LENGTH, MAX_VALIDATOR_LENGTH,
-    STATUS_INFORMATIONAL_FIRST, STATUS_LIMIT, STATUS_NO_CONTENT, STATUS_NOT_MODIFIED, STATUS_SUCCESS_FIRST,
-    STATUS_SWITCHING_PROTOCOLS, UPGRADE_WEBSOCKET, WEBSOCKET_ACCEPT_TEXT, cache, header,
+    CHUNKED, CONNECTION_CLOSE, CONNECTION_UPGRADE, HTTP_MAJOR, HTTP_MINOR_0, HTTP_MINOR_1, IDENTITY,
+    MAX_CONTENT_LENGTH_DIGITS, MAX_URL_LENGTH, MAX_VALIDATOR_LENGTH, STATUS_INFORMATIONAL_FIRST, STATUS_LIMIT,
+    STATUS_NO_CONTENT, STATUS_NOT_MODIFIED, STATUS_SUCCESS_FIRST, STATUS_SWITCHING_PROTOCOLS, UPGRADE_WEBSOCKET,
+    WEBSOCKET_ACCEPT_TEXT, cache, header,
 };
 
 /// The empty line that ends a head (RFC 9112 section 2.1).
@@ -114,8 +114,6 @@ pub struct ResponseHead {
     /// `Sec-WebSocket-Protocol`, as the server named it; empty when longer
     /// than any name this client asks for, so that it matches none.
     pub websocket_protocol: Option<TextBuf<MAX_SUBPROTOCOL_LENGTH>>,
-    /// `Clear-Site-Data` names `"cookies"` or `"*"` (decision E.104).
-    pub clear_cookies: bool,
 }
 
 /// True when a comma-separated header value contains `token`, ignoring
@@ -157,7 +155,6 @@ fn read_header(
     framing: &mut FramingHeaders,
     name: &[u8],
     raw_value: &[u8],
-    on_set_cookie: &mut dyn FnMut(&[u8]),
 ) -> Result<(), HttpError> {
     let value = trim_ows(raw_value);
     let is = |known: &[u8]| name.eq_ignore_ascii_case(known);
@@ -200,13 +197,6 @@ fn read_header(
         head.websocket_extensions = true;
     } else if is(header::SEC_WEBSOCKET_PROTOCOL) {
         head.websocket_protocol = Some(TextBuf::from_bytes(value).unwrap_or_default());
-    } else if is(header::SET_COOKIE) {
-        on_set_cookie(raw_value);
-    } else if is(header::CLEAR_SITE_DATA) {
-        // A list of quoted types; an unknown type is ignored (W3C Clear
-        // Site Data section 3.1).
-        head.clear_cookies |=
-            value.split(|&b| b == b',').map(trim_ows).any(|item| item == CLEAR_COOKIES || item == CLEAR_EVERYTHING);
     }
     Ok(())
 }
@@ -224,8 +214,10 @@ pub fn is_interim(bytes: &[u8]) -> bool {
     })
 }
 
-/// Parses and checks a complete response head held in `bytes`.
-/// `on_set_cookie` receives each `Set-Cookie` value in order.
+/// Parses and checks a complete response head held in `bytes`. A
+/// `Set-Cookie` or `Clear-Site-Data` field is ignored like any other field
+/// this client does not read: NeoTeletext keeps no cookies (the viewer-state
+/// design, VS-201).
 ///
 /// # Errors
 /// The response is refused when:
@@ -246,10 +238,7 @@ pub fn is_interim(bytes: &[u8]) -> bool {
 ///   `identity`;
 /// - [`HttpError::AmbiguousFraming`]: both `Content-Length` and chunked
 ///   transfer coding.
-///
-/// `Set-Cookie` values before the faulty field may already have been
-/// passed to `on_set_cookie`.
-pub fn parse_head(bytes: &[u8], on_set_cookie: &mut dyn FnMut(&[u8])) -> Result<ResponseHead, HttpError> {
+pub fn parse_head(bytes: &[u8]) -> Result<ResponseHead, HttpError> {
     let parsed = head::parse(bytes).map_err(|error| match error {
         HeadError::TooManyFields => HttpError::TooManyHeaders,
         // A partial head, trailing bytes, or any syntax error, obsolete line
@@ -294,11 +283,10 @@ pub fn parse_head(bytes: &[u8], on_set_cookie: &mut dyn FnMut(&[u8])) -> Result<
         websocket_accept: None,
         websocket_extensions: false,
         websocket_protocol: None,
-        clear_cookies: false,
     };
     let mut framing = FramingHeaders::default();
     for field in parsed.fields() {
-        read_header(&mut head, &mut framing, field.name, field.value, on_set_cookie)?;
+        read_header(&mut head, &mut framing, field.name, field.value)?;
     }
     let FramingHeaders { content_length, chunked, .. } = framing;
     if chunked && content_length.is_some() {
@@ -320,7 +308,7 @@ pub fn parse_head(bytes: &[u8], on_set_cookie: &mut dyn FnMut(&[u8])) -> Result<
 /// Calls `each` with the value of every field of a complete response head
 /// named `name` (compared without regard to case), in the order received;
 /// a head that does not parse gives none. For the fields [`parse_head`]
-/// does not keep, such as those of Device Bound Session Credentials.
+/// does not keep, such as discovery's `Link`.
 pub fn each_field(bytes: &[u8], name: &[u8], each: &mut dyn FnMut(&[u8])) {
     let Ok(parsed) = head::parse(bytes) else { return };
     for field in parsed.fields().filter(|field| field.name.eq_ignore_ascii_case(name)) {

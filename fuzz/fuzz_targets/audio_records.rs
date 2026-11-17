@@ -28,7 +28,11 @@ impl VoiceSink for Checker {
         assert!(pcm.len() <= neoteletext_audio::MAX_BLOCK_SAMPLES);
     }
     fn start(&mut self, channel: u8, start: Start) {
-        assert!(channel < neoteletext_audio::CHANNELS && start.gain <= 100 && start.fade_ms >= neoteletext_audio::MIN_FADE_MS);
+        assert!(
+            channel < neoteletext_audio::CHANNELS
+                && start.gain <= 100
+                && start.fade_ms >= neoteletext_audio::MIN_FADE_MS
+        );
     }
     fn stop(&mut self, channel: u8, _: u16) {
         assert!(channel < neoteletext_audio::CHANNELS);

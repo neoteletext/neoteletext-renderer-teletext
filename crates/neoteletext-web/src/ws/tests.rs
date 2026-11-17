@@ -74,7 +74,7 @@ fn a_handshake_must_name_the_subprotocol_asked_for() {
     let key = *b"dGhlIHNhbXBsZSBub25jZQ==";
     let head_naming = |name: &str| {
         let text = accepting_head(name);
-        let head = http::parse_head(text.as_bytes(), &mut |_| {}).unwrap();
+        let head = http::parse_head(text.as_bytes()).unwrap();
         (check_handshake(&head, &key, Some(PUSH_SUBPROTOCOL)), check_handshake(&head, &key, None))
     };
     assert_eq!(head_naming("Sec-WebSocket-Protocol: neottx.7\r\n"), (Ok(()), Err(WsError::Handshake)));
@@ -109,7 +109,7 @@ fn handshake_response_checks() {
     let key = *b"dGhlIHNhbXBsZSBub25jZQ==";
     let good = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
                      Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n";
-    let head = http::parse_head(good, &mut |_| {}).unwrap();
+    let head = http::parse_head(good).unwrap();
     assert_eq!(check_handshake(&head, &key, None), Ok(()));
     let bad: [&[u8]; 5] = [
             b"HTTP/1.1 200 OK\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\nContent-Length: 0\r\n\r\n",
@@ -119,7 +119,7 @@ fn handshake_response_checks() {
             b"HTTP/1.1 101 OK\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n",
         ];
     for text in bad {
-        let head = http::parse_head(text, &mut |_| {}).unwrap();
+        let head = http::parse_head(text).unwrap();
         assert_eq!(check_handshake(&head, &key, None), Err(WsError::Handshake));
     }
 }

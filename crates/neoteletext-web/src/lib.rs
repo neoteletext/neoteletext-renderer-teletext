@@ -15,8 +15,7 @@
 //!
 //! - Foundation: [`consts`], [`bytes`], [`base64`], [`sha1`], [`json`];
 //! - addresses and origins: [`url`];
-//! - protocols: [`http`], [`ws`], [`cookie`], and `dbsc` (feature
-//!   `dbsc`): Device Bound Session Credentials (REQ-WEB-017);
+//! - protocols: [`http`] and [`ws`];
 //! - content: [`channel`], [`contents`], [`font_library`] (a font
 //!   library's `fonts.txt` and a font's checksum), [`subpages`] (a page's list
 //!   of sub-pages, and with `std` a page written as a channel's files),
@@ -85,9 +84,6 @@ pub mod proxy;
 pub mod url;
 pub mod user_agent;
 
-pub mod cookie;
-#[cfg(feature = "dbsc")]
-pub mod dbsc;
 pub mod http;
 pub mod ws;
 
@@ -132,7 +128,6 @@ mod error_trait {
         crate::agent::Failure,
         crate::url::UrlError,
         crate::zxnet::ChannelError,
-        crate::cookie::CookieRejected,
         crate::contents::ContentsError,
         crate::contents::Fault,
         crate::contents::LineFault,
@@ -149,8 +144,6 @@ mod error_trait {
     );
     #[cfg(feature = "std")]
     error_trait!(crate::subpages::LayoutError);
-    #[cfg(feature = "dbsc")]
-    error_trait!(crate::dbsc::InstructionsError, crate::dbsc::ImportError, crate::dbsc::ProofError);
 
     #[cfg(test)]
     mod tests {
@@ -166,7 +159,6 @@ mod error_trait {
             is_error::<crate::agent::Failure>();
             is_error::<crate::url::UrlError>();
             is_error::<crate::zxnet::ChannelError>();
-            is_error::<crate::cookie::CookieRejected>();
             is_error::<crate::contents::ContentsError>();
             is_error::<crate::contents::Fault>();
             is_error::<crate::contents::LineFault>();
@@ -180,12 +172,6 @@ mod error_trait {
             is_error::<crate::records::index::IndexError>();
             is_error::<crate::user_agent::UserAgentError>();
             is_error::<crate::zxnet::Malformed>();
-            #[cfg(feature = "dbsc")]
-            {
-                is_error::<crate::dbsc::InstructionsError>();
-                is_error::<crate::dbsc::ImportError>();
-                is_error::<crate::dbsc::ProofError>();
-            }
             #[cfg(feature = "std")]
             {
                 is_error::<crate::proxy::TunnelError>();

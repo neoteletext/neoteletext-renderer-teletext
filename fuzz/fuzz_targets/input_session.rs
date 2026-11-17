@@ -37,7 +37,9 @@ fuzz_target!(|data: &[u8]| {
             2 => {
                 let taken = (value & 1 == 1).then_some(value >> 1);
                 let resume = Some(Resumption { token: [op; TOKEN_BYTES], taken });
-                if let Ok(Welcomed::Resumed) = session.welcome(neoteletext_input::VERSION, SELECT_CAP | RESUME_CAP, resume) {
+                if let Ok(Welcomed::Resumed) =
+                    session.welcome(neoteletext_input::VERSION, SELECT_CAP | RESUME_CAP, resume)
+                {
                     let mut again = Vec::new();
                     session.resend(&mut |message| again.push(message.to_vec()));
                     // What goes again is the end of what was sent, whole messages in order.

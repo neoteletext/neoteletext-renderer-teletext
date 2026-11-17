@@ -2,8 +2,9 @@
 """A local web teletext test server (REQ-WEB-013, REQ-WEB-012).
 
 Test code, not part of the library. Serves a service descriptor, TTI pages
-with ETag validators, a versioned session cookie (and, at /sessions, how many
-requests brought it back; at /requests, the paths asked for), WebSocket push,
+with ETag validators, a versioned session cookie that a NeoTeletext receiver
+must ignore (and, at /sessions, how many requests brought it back, which must
+stay none: the viewer-state design, VS-201; at /requests, the paths asked for), WebSocket push,
 an ordinary web page at /web/ that points to the regional channel by a Link
 header field, a <link> element and, for a receiver asking for teletext, a 303
 that varies by Accept (REQ-501), a channel published as a folder at /channel/
@@ -311,8 +312,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.requested.append(path)
         if path == "/sessions":
-            # How many requests have brought the session cookie back
-            # (REQ-502: a test sees that the cookie returns).
+            # How many requests have brought the session cookie back: none
+            # may, since a receiver keeps no cookies (VS-201).
             return self.send(200, str(self.server.sessions_returned), "text/plain")
         if path == "/web/":
             return self.web_page()

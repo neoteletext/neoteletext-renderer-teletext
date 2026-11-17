@@ -27,10 +27,6 @@ use std::net::IpAddr;
 use std::sync::mpsc::Sender;
 use std::time::Instant as StdInstant;
 
-/// Cookie slots and bytes of the jar: REQ-WEB-006's default total.
-const COOKIE_SLOTS: usize = 100;
-const COOKIE_BYTES: usize = 32 * 1024;
-
 /// Microseconds in a second.
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 /// The window of a report of invalid packets, in the clock's microseconds.
@@ -41,7 +37,7 @@ const _: () = assert!(pipe::MAX_LIST_ROWS == subpages::ROWS_PER_PART);
 const _: () = assert!(pipe::MAX_LIST_VERSION == subpages::MAX_VALIDATOR);
 
 /// The agent the loop runs.
-type Agent<'a> = UserAgent<'a, SystemRandom, COOKIE_SLOTS, COOKIE_BYTES>;
+type Agent<'a> = UserAgent<'a, SystemRandom>;
 
 pub(super) fn run_web(
     address: &str,

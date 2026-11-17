@@ -22,7 +22,7 @@ pub(super) const fn cached_as(file: PageFile) -> Cached {
     }
 }
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     pub(super) fn enqueue(&mut self, page: PageAddress, subcode: Option<SubCode>, want: Want, sink: &mut Sink<'_>) {
         let wanted = Queued { page, subcode, want };
         if self.queue.iter().flatten().any(|&queued| queued == wanted) {

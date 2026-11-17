@@ -55,13 +55,12 @@ pub enum HttpError {
     NoFraming,
 }
 
-/// The request methods of the profile (REQ-WEB-014).
+/// The request methods of the profile (REQ-WEB-014): GET alone, since
+/// nothing the agent sends has a body.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Method {
     /// GET
     Get,
-    /// POST, for Device Bound Session Credentials only (REQ-WEB-017).
-    Post,
 }
 
 impl Method {
@@ -70,7 +69,6 @@ impl Method {
     pub const fn token(self) -> &'static [u8] {
         match self {
             Self::Get => b"GET",
-            Self::Post => b"POST",
         }
     }
 }

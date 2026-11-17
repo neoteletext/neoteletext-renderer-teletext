@@ -1,6 +1,6 @@
 //! The channel's records on its push connection beside its pages
 //! (DOC-1951): the index (type 6), LOG
-//! (type 7), `SET_COOKIE` (type 8), LINKS (type 9), SUBPAGES (type 10),
+//! (type 7), LINKS (type 9), SUBPAGES (type 10),
 //! REDIRECT (type 11) and DENIED (type 12), in the audio profile's record frame
 //! (REQ-AUD-003) on data channel 12, packet 4/31, cut into as many
 //! fragments as a record needs (DOC-1952).
@@ -15,7 +15,6 @@ use neoteletext_audio::idl::{FRAGMENT_DATA, MAX_FRAGMENTS, Reassembler, fragment
 use neoteletext_audio::record::{RecordError, record_length, split, write};
 use neoteletext_core::packet::Packet;
 
-pub mod cookie;
 pub mod denied;
 pub mod drawing_links;
 pub mod index;
@@ -28,7 +27,7 @@ pub mod subpages;
 
 pub use neoteletext_audio::record::{
     TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_NAPLPS, TYPE_REDIRECT, TYPE_REGIS,
-    TYPE_REGIS_CURSOR, TYPE_SET_COOKIE, TYPE_SUBPAGES,
+    TYPE_REGIS_CURSOR, TYPE_SUBPAGES,
 };
 
 /// Why a record was refused: it is discarded whole, and its packets are
@@ -86,8 +85,6 @@ pub enum ChannelRecord<'a> {
     Index(index::IndexRecord<'a>),
     /// A log line for the channel's author (DOC-1956).
     Log(log::LogRecord<'a>),
-    /// A cookie's `Set-Cookie` value (DOC-1957).
-    SetCookie(&'a [u8]),
     /// A sub-page's Link Extension links (DOC-1958).
     Links(links::LinksRecord<'a>),
     /// A part of a page's list of sub-pages (DOC-1959).
@@ -121,7 +118,7 @@ pub enum Read<'a> {
     Invalid(usize),
 }
 
-/// Reassembles the index, LOG, `SET_COOKIE`, LINKS, SUBPAGES, REDIRECT and DENIED records from a push stream's
+/// Reassembles the index, LOG, LINKS, SUBPAGES, REDIRECT and DENIED records from a push stream's
 /// packets (DOC-1952). A record is followed from its fragment 0, which
 /// names its type, so the audio profile's records and the one-fragment
 /// cursor and control records, which other readers take, are never copied
@@ -169,7 +166,6 @@ impl RecordReader {
                 kind,
                 TYPE_INDEX
                     | TYPE_LOG
-                    | TYPE_SET_COOKIE
                     | TYPE_LINKS
                     | TYPE_SUBPAGES
                     | TYPE_REDIRECT
@@ -206,7 +202,6 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
     match kind {
         TYPE_INDEX => index::read(body).map(ChannelRecord::Index),
         TYPE_LOG => log::read(body).map(ChannelRecord::Log),
-        TYPE_SET_COOKIE => cookie::read(body).map(ChannelRecord::SetCookie),
         TYPE_LINKS => links::read(body).map(ChannelRecord::Links),
         TYPE_SUBPAGES => subpages::read(body).map(ChannelRecord::SubPages),
         TYPE_REDIRECT => redirect::read(body).map(ChannelRecord::Redirect),

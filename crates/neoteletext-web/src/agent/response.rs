@@ -10,11 +10,11 @@ use crate::consts::{
     STATUS_PERMANENT_REDIRECT, STATUS_SEE_OTHER, STATUS_TEMPORARY_REDIRECT,
 };
 use crate::descriptor::Descriptor;
-use crate::http::{MediaType, Method, ResponseHead};
+use crate::http::{MediaType, ResponseHead};
 use crate::port::{ConnectionId, RandomSource};
 use crate::url::{Url, UrlError};
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     pub(super) fn complete(&mut self, now: Instant, sink: &mut Sink<'_>) {
         let (Some(exchange), Some(head)) = (self.fetch.exchange, self.fetch.response) else { return };
         self.fetch.deadline = None;
@@ -34,12 +34,6 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         }
         let status = head.status;
         self.report_exchange(now, &exchange, status, sink);
-        // A bound session's exchange is never redirected (REQ-WEB-017).
-        if matches!(exchange.purpose, Purpose::Register | Purpose::Refresh { .. }) {
-            self.fetch.exchange = None;
-            self.bound_complete(now, &exchange, &head, sink);
-            return;
-        }
         let redirect = matches!(
             status,
             STATUS_MOVED_PERMANENTLY
@@ -57,11 +51,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             return;
         }
         match exchange.purpose {
-            // complete_channel handled every one of these, and
-            // bound_complete the bound sessions'.
-            Purpose::FrontDoor | Purpose::Contents | Purpose::Register | Purpose::Refresh { .. } => {}
-            Purpose::Descriptor { via_link, channel } => {
-                self.complete_descriptor(now, &exchange, &head, (via_link, channel), sink);
+            // complete_channel handled every one of these.
+            Purpose::FrontDoor | Purpose::Contents => {}
+            Purpose::Descriptor { channel } => {
+                self.complete_descriptor(now, &exchange, &head, channel, sink);
             }
             Purpose::Page { page, subcode, file } => {
                 self.complete_page(now, &exchange, &head, (page, subcode, file), sink);
@@ -78,7 +71,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         now: Instant,
         exchange: &Exchange,
         head: &ResponseHead,
-        (via_link, channel): (bool, bool),
+        channel: bool,
         sink: &mut Sink<'_>,
     ) {
         let status = head.status;
@@ -102,7 +95,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             };
             match parsed {
                 Ok(descriptor) => {
-                    self.open_descriptor(now, descriptor, via_link, sink);
+                    self.open_descriptor(now, descriptor, sink);
                     if channel && self.push.url.is_some() {
                         // REQ-WEB-018 (DEC-1467): a live channel's
                         // connection brings its pages and contents.
@@ -122,38 +115,30 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     fn redirect(&mut self, now: Instant, mut exchange: Exchange, head: &ResponseHead, sink: &mut Sink<'_>) {
         self.fetch.exchange = None;
         if exchange.redirects >= MAX_REDIRECTS {
-            self.finish_purpose(exchange.purpose, Err(Failure::TooManyRedirects), sink);
+            Self::finish_purpose(exchange.purpose, Err(Failure::TooManyRedirects), sink);
             return;
         }
         let next = match redirect_location(&exchange.url, head) {
             Ok(next) => next,
             Err(failure) => {
-                self.finish_purpose(exchange.purpose, Err(failure), sink);
+                Self::finish_purpose(exchange.purpose, Err(failure), sink);
                 return;
             }
         };
         // REQ-SEC-007: a redirect from HTTPS to plain HTTP is refused,
         // whichever host it names.
         let downgrade = exchange.url.is_secure() && !next.is_secure();
-        let failure = if downgrade { Some(Failure::Downgrade) } else { self.refusal(now, &next) };
+        let failure = if downgrade { Some(Failure::Downgrade) } else { self.refusal(&next) };
         if let Some(failure) = failure {
             Self::report_refusal(ConnectionId::Fetch, &next, failure, sink);
-            self.finish_purpose(exchange.purpose, Err(failure), sink);
+            Self::finish_purpose(exchange.purpose, Err(failure), sink);
             return;
         }
-        // RFC 9110 section 15.4: 303 always becomes GET, and 301 and 302
-        // do for POST, as browsers do; 307 and 308 keep the method.
-        let status = head.status;
-        // The same address with the same method is the same request again.
-        let method_changes = status == STATUS_SEE_OTHER
-            || ((status == STATUS_MOVED_PERMANENTLY || status == STATUS_FOUND) && exchange.method == Method::Post);
-        let next_method = if method_changes { Method::Get } else { exchange.method };
-        if next.as_str() == exchange.url.as_str() && next_method == exchange.method {
-            self.finish_purpose(exchange.purpose, Err(Failure::BadRedirect), sink);
+        // Every request is a GET, which every redirect keeps (RFC 9110
+        // section 15.4), so the same address is the same request again.
+        if next.as_str() == exchange.url.as_str() {
+            Self::finish_purpose(exchange.purpose, Err(Failure::BadRedirect), sink);
             return;
-        }
-        if method_changes {
-            exchange.method = Method::Get;
         }
         // Another channel is confirmed before anything from it is shown
         // (REQ-WEB-021).
@@ -162,7 +147,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         let resource = matches!(exchange.purpose, Purpose::Resource(_));
         if !resource && self.config.redirects_within_channel && !self.redirect_keeps_channel(&exchange.url, &next) {
             event(sink, Event::RedirectToOtherChannel { location: next.as_str() });
-            self.finish_purpose(exchange.purpose, Err(Failure::RedirectToOtherChannel), sink);
+            Self::finish_purpose(exchange.purpose, Err(Failure::RedirectToOtherChannel), sink);
             return;
         }
         exchange.url = next;

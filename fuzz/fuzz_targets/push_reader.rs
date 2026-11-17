@@ -60,7 +60,7 @@ fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
 fuzz_target!(|data: &[u8]| {
     // Boxed, as a port keeps it, and dropped with the agent each run.
     let mut storage: Box<Storage> = Box::new(Storage::new());
-    let mut agent: Box<UserAgent<'_, Counter, 16, 4096>> =
+    let mut agent: Box<UserAgent<'_, Counter>> =
         Box::new(UserAgent::new(Config::default(), storage.buffers(), Counter(0)));
     let now = Instant(1_000_000_000);
     // The fuzzer's bytes become the server's messages: a length byte, then

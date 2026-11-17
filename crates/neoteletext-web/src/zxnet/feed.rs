@@ -139,7 +139,7 @@ impl<R: RandomSource> ZxnetFeed<'_, R> {
                     input = input.get(used..).unwrap_or(&[]);
                     if complete {
                         let head = self.buffers.head.get(..self.head.len()).unwrap_or(&[]);
-                        let accepted = http::parse_head(head, &mut |_| {})
+                        let accepted = http::parse_head(head)
                             .is_ok_and(|head| ws::check_handshake(&head, &self.key, None).is_ok());
                         if !accepted {
                             self.dropped(now, true, sink);

@@ -167,7 +167,7 @@ pub struct Url {
     query_start: Option<u16>,
     /// Start of the fragment, after `#`, when there is one. Everything
     /// from its `#` on is left out of [`Url::as_str`], so that no fragment
-    /// can reach a request, a cookie or a channel's identity (REQ-WEB-016).
+    /// can reach a request or a channel's identity (REQ-WEB-016).
     fragment_start: Option<u16>,
 }
 

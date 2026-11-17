@@ -19,7 +19,7 @@ neoteletext-core = { path = "../crates/neoteletext-core" }
 # target writes back.
 neoteletext-formats = { path = "../crates/neoteletext-formats", features = ["default", "std"] }
 neoteletext-slicer = { path = "../crates/neoteletext-slicer" }
-neoteletext-web = { path = "../crates/neoteletext-web", features = ["default", "dbsc"] }
+neoteletext-web = { path = "../crates/neoteletext-web" }
 # `encode` for the Ogg Opus reader of the publishing tools (TODO-1228).
 neoteletext-audio = { path = "../crates/neoteletext-audio", features = ["default", "encode"] }
 neoteletext-opus = { path = "../crates/neoteletext-opus" }
@@ -127,20 +127,6 @@ bench = false
 [[bin]]
 name = "channel_log"
 path = "fuzz_targets/channel_log.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "dbsc"
-path = "fuzz_targets/dbsc.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "cookie"
-path = "fuzz_targets/cookie.rs"
 test = false
 doc = false
 bench = false

@@ -40,7 +40,7 @@ pub(super) fn channel_file_media(t42: bool, media: MediaType, body: &[u8]) -> Re
     Ok(format)
 }
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     /// Forgets the open channel: what follows is a service opened by its
     /// descriptor.
     pub(super) fn leave_channel(&mut self) {
@@ -64,21 +64,21 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     }
 
     /// Starts opening a channel: its settings first (REQ-WEB-018).
-    pub(super) fn open_channel(&mut self, folder: &Url, via_link: bool) {
+    pub(super) fn open_channel(&mut self, folder: &Url) {
         self.leave_channel();
         self.t42_first = false;
         self.sub_page_t42_first = true;
         // The folder is checked, so its settings' address always joins.
         if let Ok(settings) = channel::file_url(folder, ChannelFile::Settings) {
-            self.pending_descriptor = Some((settings, via_link, true));
+            self.pending_descriptor = Some((settings, true));
         }
         self.channel = Some(*folder);
     }
 
     /// The open service's identity, with its origin (REQ-507): a channel's
     /// folder, or the folder holding a service's descriptor, from the moment
-    /// the descriptor is asked for. Cookies are kept to it and a redirect out
-    /// of it leaves the service.
+    /// the descriptor is asked for. A redirect out of it leaves the
+    /// service.
     pub(super) const fn identity(&self) -> Option<&Url> {
         match &self.channel {
             Some(folder) => Some(folder),
@@ -88,10 +88,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
 
     /// A service is opened by the descriptor at `url`: its identity is the
     /// folder that holds the descriptor (REQ-507).
-    pub(super) fn open_by_descriptor(&mut self, url: &Url, via_link: bool) {
+    pub(super) fn open_by_descriptor(&mut self, url: &Url) {
         self.leave_channel();
         self.service_folder = url.join(".").ok();
-        self.pending_descriptor = Some((*url, via_link, false));
+        self.pending_descriptor = Some((*url, false));
     }
 
     /// The open service's folder: its channel's, or the folder holding its
@@ -122,9 +122,9 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         match address.map(Url::parse) {
             Some(Ok(url)) => {
                 if to_channel {
-                    self.open_channel(&url, true);
+                    self.open_channel(&url);
                 } else {
-                    self.open_by_descriptor(&url, true);
+                    self.open_by_descriptor(&url);
                 }
                 self.queue = [None; PAGE_QUEUE];
                 if let Some(slot) = self.queue.first_mut() {
@@ -150,10 +150,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         let missing = status == STATUS_NOT_FOUND || status == STATUS_GONE;
         let body = self.buffers.body.get(..self.fetch.body_len).unwrap_or(&[]);
         match exchange.purpose {
-            Purpose::Descriptor { channel: true, via_link } if missing => {
+            Purpose::Descriptor { channel: true } if missing => {
                 let Some(folder) = self.channel else { return true };
                 event(sink, Event::ChannelDefaults);
-                self.open_descriptor(now, Descriptor::channel_defaults(&folder), via_link, sink);
+                self.open_descriptor(now, Descriptor::channel_defaults(&folder), sink);
                 self.front_door = channel::file_url(&folder, ChannelFile::Bundle).ok();
                 true
             }
@@ -193,16 +193,9 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         }
     }
 
-    pub(super) fn open_descriptor(
-        &mut self,
-        now: Instant,
-        descriptor: Descriptor,
-        via_link: bool,
-        sink: &mut Sink<'_>,
-    ) {
+    pub(super) fn open_descriptor(&mut self, now: Instant, descriptor: Descriptor, sink: &mut Sink<'_>) {
         self.cache = [None; CACHE_ENTRIES];
         self.forget_catalogues();
-        self.navigation_pending = via_link;
         if !matches!(self.push.phase, PushPhase::Idle | PushPhase::Stopped) {
             self.close_push(sink);
         }

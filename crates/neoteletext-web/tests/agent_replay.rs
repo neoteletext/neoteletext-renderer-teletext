@@ -22,7 +22,6 @@ use neoteletext_core::types::{Instant, PageAddress, SubCode};
 #[cfg(feature = "push")]
 use neoteletext_web::agent::InputMessage;
 use neoteletext_web::agent::{Config, Input, Output, ResourceRole, Source, Storage, Subscription, UserAgent};
-use neoteletext_web::bytes::Writer;
 #[cfg(feature = "std")]
 use neoteletext_web::channel::ChannelFile;
 use neoteletext_web::channel::SETTINGS_FILE;
@@ -30,9 +29,6 @@ use neoteletext_web::channel::SETTINGS_FILE;
 use neoteletext_web::consts::{
     CLOSE_BROKE_PROTOCOL, CLOSE_RESTARTING, CLOSE_RETRY_LAST, CLOSE_STOP_FIRST, CLOSE_STOP_LAST, CLOSE_WRONG_VERSION,
 };
-use neoteletext_web::cookie::{CookieJar, Cookies};
-#[cfg(feature = "cookies")]
-use neoteletext_web::cookie::{CookieRejected, Site};
 use neoteletext_web::http::MediaType;
 use neoteletext_web::port::{ConnectionId, Pump, Security};
 #[cfg(feature = "push")]
@@ -59,7 +55,7 @@ enum Rec {
 struct Harness {
     // Boxed, as a port keeps it: it holds many addresses of 8,000 octets
     // (REQ-1661), and a test thread has 2 MB of stack.
-    agent: Box<UserAgent<'static, Counter, 100, 32768>>,
+    agent: Box<UserAgent<'static, Counter>>,
     pump: Pump<Replay>,
     now: Instant,
     out: Vec<Rec>,
@@ -82,16 +78,8 @@ fn record(output: Output<'_>) -> Rec {
 
 impl Harness {
     fn new(config: Config, replay: Replay) -> Self {
-        Self::keeping(config, replay, None)
-    }
-
-    /// A harness whose agent's cookies `cookies` keeps (decision E.104).
-    fn keeping(config: Config, replay: Replay, cookies: Option<&'static mut dyn Cookies>) -> Self {
         let storage: &'static mut Storage = Box::leak(Box::new(Storage::new()));
-        let agent = match cookies {
-            Some(cookies) => UserAgent::with_cookies(config, storage.buffers(), Counter(0), cookies),
-            None => UserAgent::new(config, storage.buffers(), Counter(0)),
-        };
+        let agent = UserAgent::new(config, storage.buffers(), Counter(0));
         Self { agent: Box::new(agent), pump: Pump::new(replay), now: Instant(1_000 * SECOND), out: Vec::new() }
     }
 
@@ -268,8 +256,9 @@ fn descriptor_page_and_conditional_request() {
     let requests = harness.replay().requests_to("tt.example:80");
     let last = requests.last().unwrap();
     assert_eq!(header_value(last, "If-None-Match").as_deref(), Some("\"v1\""));
-    #[cfg(feature = "cookies")]
-    assert_eq!(header_value(last, "Cookie").as_deref(), Some("session=v1-abc"));
+    // VS-201: the `Set-Cookie` the page came with is ignored, and no
+    // request carries a `Cookie`.
+    assert_eq!(header_value(last, "Cookie"), None);
     // One persistent connection served all three requests.
     assert_eq!(harness.replay().connects.len(), 1);
     assert_profile_headers(harness.replay(), &[]);
@@ -347,8 +336,8 @@ fn the_timer_is_told_on_a_change_and_after_a_tick() {
     let records = harness.fetch(0x102);
     assert!(records.iter().any(|record| matches!(record, Rec::Timer(at) if at.0 >= harness.now.0 + 29 * SECOND)));
     // Inputs that move no deadline are told no timer.
-    harness.input(Input::WallClock(1_700_000_000));
-    harness.input(Input::WallClock(1_700_000_000));
+    harness.input(Input::MeasureRoundTrip(false));
+    harness.input(Input::MeasureRoundTrip(false));
     assert_eq!(timers(&harness.take()), 0, "nothing changed");
     // A tick spends the deadline the port had: it is told the next, once.
     harness.advance(SECOND);
@@ -538,14 +527,10 @@ fn allowed_local_service() {
 }
 
 fn secure_service() -> Harness {
-    secure_service_keeping(None)
-}
-
-fn secure_service_keeping(cookies: Option<&'static mut dyn Cookies>) -> Harness {
     let mut replay = Replay::new(&[("secure.example", PUBLIC)]);
     let json = br#"{"name":"S","initial_page":"100","page_template":"/p/{mpp}"}"#;
     replay.reply("secure.example:443", json_response(json));
-    let mut harness = Harness::keeping(Config::default(), replay, cookies);
+    let mut harness = Harness::new(Config::default(), replay);
     let records = harness.open("https://secure.example/d.json");
     assert!(has_event(&records, "ServiceReady { name: \"S\""), "{records:?}");
     assert_eq!(harness.replay().connects[0].3, Security::Tls);
@@ -883,168 +868,11 @@ fn push_to_blocked_peer_is_refused() {
     assert_eq!(harness.replay().requests_to("push.example:80"), Vec::<Vec<u8>>::new());
 }
 
-/// REQ-495: cookies go only to the host that set them, and the store can be wiped.
+/// VS-201: no cookie goes with the WebSocket upgrade, whatever the
+/// channel's responses set (REQ-495 withdrawn with cookies).
 #[test]
-#[cfg(feature = "cookies")]
-fn cookies_round_trip_and_wipe() {
-    let mut harness = secure_service();
-    harness.replay().reply(
-        "secure.example:443",
-        tti_response(&["Set-Cookie: id=1; Secure; Path=/; Max-Age=60", "Set-Cookie: __Host-x=1; Secure; Path=/"]),
-    );
-    harness.fetch(0x100);
-    harness.advance(SECOND);
-    harness.replay().reply("secure.example:443", tti_response(&["Set-Cookie: id=evil; Path=/"]));
-    harness.replay().reply("secure.example:443", tti_response(&[]));
-    harness.fetch(0x101);
-    harness.advance(SECOND);
-    harness.fetch(0x102);
-    let last = harness.replay().requests_to("secure.example:443").pop().unwrap();
-    assert_eq!(
-        header_value(&last, "Cookie").as_deref(),
-        Some("id=evil; __Host-x=1"),
-        "over HTTPS a new cookie replaces it"
-    );
-    assert!(harness.agent.cookies().reached_securely("secure.example", harness.now.0 / SECOND));
-    harness.input(Input::WipeCookies);
-    assert!(harness.agent.cookies().is_empty());
-}
-
-/// What a port's cookie store was asked and given.
-#[cfg(feature = "cookies")]
-#[derive(Debug, Default)]
-struct PortLog {
-    asked: Vec<String>,
-    set: Vec<String>,
-    cleared: Vec<String>,
-}
-
-/// A port's cookie store: the engine's jar, recording each call.
-#[cfg(feature = "cookies")]
-#[derive(Debug)]
-struct PortCookies {
-    jar: CookieJar<100, 32768>,
-    log: std::rc::Rc<std::cell::RefCell<PortLog>>,
-}
-
-#[cfg(feature = "cookies")]
-impl Cookies for PortCookies {
-    fn header_for(
-        &mut self,
-        host: &str,
-        path: &str,
-        scope: Option<&str>,
-        secure: bool,
-        site: Site,
-        now: u64,
-        out: &mut Writer<'_>,
-    ) -> (usize, bool) {
-        self.log.borrow_mut().asked.push(std::format!("{host}{path}"));
-        self.jar.header_for(host, path, scope, secure, site, now, out)
-    }
-
-    fn store_within(
-        &mut self,
-        header: &[u8],
-        host: &str,
-        request_path: &str,
-        scope: Option<&str>,
-        secure: bool,
-        now: u64,
-        wall_clock: bool,
-    ) -> Result<(), CookieRejected> {
-        self.log.borrow_mut().set.push(String::from_utf8_lossy(header).into_owned());
-        self.jar.store_within(header, host, request_path, scope, secure, now, wall_clock)
-    }
-
-    fn reached_securely(&self, host: &str, now: u64) -> bool {
-        self.jar.reached_securely(host, now)
-    }
-
-    fn clear_site_data(&mut self, host: &str, scope: Option<&str>) {
-        self.log.borrow_mut().cleared.push(host.to_string());
-        self.jar.clear_site_data(host, scope);
-    }
-
-    fn wipe(&mut self) {
-        self.jar.wipe();
-    }
-}
-
-#[cfg(feature = "cookies")]
-fn port_cookies() -> (&'static mut dyn Cookies, std::rc::Rc<std::cell::RefCell<PortLog>>) {
-    let log = std::rc::Rc::new(std::cell::RefCell::new(PortLog::default()));
-    let store: &'static mut PortCookies =
-        Box::leak(Box::new(PortCookies { jar: CookieJar::new(), log: std::rc::Rc::clone(&log) }));
-    (store, log)
-}
-
-/// Decision E.104: a port that keeps the cookies is asked for each
-/// request's and given each response's; the agent keeps none.
-/// REQ-495: a port may keep the store itself.
-#[test]
-#[cfg(feature = "cookies")]
-fn a_port_keeps_the_cookies() {
-    let (store, log) = port_cookies();
-    let mut harness = secure_service_keeping(Some(store));
-    harness.replay().reply("secure.example:443", tti_response(&["Set-Cookie: id=1; Secure; Path=/"]));
-    harness.replay().reply("secure.example:443", tti_response(&[]));
-    harness.fetch(0x100);
-    harness.advance(SECOND);
-    harness.fetch(0x101);
-    let last = harness.replay().requests_to("secure.example:443").pop().unwrap();
-    assert_eq!(header_value(&last, "Cookie").as_deref(), Some("id=1"), "the port's header");
-    assert_eq!(log.borrow().set, ["id=1; Secure; Path=/"]);
-    assert!(log.borrow().asked.iter().any(|asked| asked == "secure.example/p/101"), "{:?}", log.borrow().asked);
-    assert!(harness.agent.cookies().is_empty(), "the agent's own jar holds nothing");
-}
-
-/// Decision E.104 (W3C Clear Site Data section 4.2): `Clear-Site-Data:
-/// "cookies"` over HTTPS clears the host's cookies before the same
-/// response's are stored; over plain HTTP it is ignored.
-/// REQ-495: `Clear-Site-Data`.
-#[test]
-#[cfg(feature = "cookies")]
-fn clear_site_data_clears_before_the_response_sets() {
-    let (store, log) = port_cookies();
-    let mut harness = secure_service_keeping(Some(store));
-    harness.replay().reply("secure.example:443", tti_response(&["Set-Cookie: old=1; Secure; Path=/"]));
-    harness.replay().reply(
-        "secure.example:443",
-        tti_response(&["Clear-Site-Data: \"cache\", \"cookies\"", "Set-Cookie: fresh=1; Secure; Path=/"]),
-    );
-    harness.replay().reply("secure.example:443", tti_response(&[]));
-    harness.fetch(0x100);
-    harness.advance(SECOND);
-    harness.fetch(0x101);
-    harness.advance(SECOND);
-    harness.fetch(0x102);
-    let last = harness.replay().requests_to("secure.example:443").pop().unwrap();
-    assert_eq!(header_value(&last, "Cookie").as_deref(), Some("fresh=1"));
-    assert_eq!(log.borrow().cleared, ["secure.example"]);
-
-    // Over plain HTTP nothing is cleared.
-    let mut replay = Replay::new(&[("plain.example", PUBLIC)]);
-    let json = br#"{"name":"P","initial_page":"100","page_template":"/p/{mpp}"}"#;
-    replay.reply("plain.example:80", json_response(json));
-    let mut plain = Harness::new(Config::default(), replay);
-    plain.open("http://plain.example/d.json");
-    plain.replay().reply("plain.example:80", tti_response(&["Set-Cookie: kept=1; Path=/"]));
-    plain.replay().reply("plain.example:80", tti_response(&["Clear-Site-Data: \"*\""]));
-    plain.replay().reply("plain.example:80", tti_response(&[]));
-    plain.fetch(0x100);
-    plain.advance(SECOND);
-    plain.fetch(0x101);
-    plain.advance(SECOND);
-    plain.fetch(0x102);
-    let last = plain.replay().requests_to("plain.example:80").pop().unwrap();
-    assert_eq!(header_value(&last, "Cookie").as_deref(), Some("kept=1"));
-}
-
-/// REQ-495: cookies go with WebSocket upgrades.
-#[test]
-#[cfg(all(feature = "push", feature = "cookies"))]
-fn cookies_go_with_websocket_upgrades() {
+#[cfg(feature = "push")]
+fn no_cookie_goes_with_the_websocket_upgrade() {
     let mut replay = Replay::new(&[("tt.example", PUBLIC)]);
     let json = descriptor(r#","push":{"address":"ws://tt.example/push"}"#);
     replay.reply(
@@ -1056,7 +884,7 @@ fn cookies_go_with_websocket_upgrades() {
     assert!(has_event(&harness.open("http://tt.example/service.json"), "PushConnected"));
     let handshake = &harness.replay().requests_to("tt.example:80")[1];
     assert_eq!(header_value(handshake, "Upgrade").as_deref(), Some("websocket"));
-    assert_eq!(header_value(handshake, "Cookie").as_deref(), Some("s=v1"));
+    assert_eq!(header_value(handshake, "Cookie"), None);
 }
 
 /// REQ-WEB-031: the port's product names the agent on every request and
@@ -1151,54 +979,6 @@ fn stale_kept_alive_connection_is_retried_once_for_a_get() {
     assert_eq!(harness.replay().connects.len(), 2, "a fresh connection for the retry");
 }
 
-#[derive(Default)]
-struct MemoryStorage(Vec<u8>);
-
-impl neoteletext_web::port::CookieStorage for MemoryStorage {
-    type Error = ();
-
-    fn save(&mut self, data: &[u8]) -> Result<(), ()> {
-        self.0 = data.to_vec();
-        Ok(())
-    }
-
-    fn load(&mut self, buffer: &mut [u8]) -> Result<usize, ()> {
-        buffer[..self.0.len()].copy_from_slice(&self.0);
-        Ok(self.0.len())
-    }
-}
-
-/// REQ-495: persistence only as REQ-SEC-013 allows.
-#[test]
-#[cfg(feature = "cookies")]
-fn cookies_are_saved_only_when_enabled_and_never_session_ones() {
-    const UNIX_NOW: u64 = 1_791_590_400;
-    let setup = |persist: bool| {
-        let mut replay = Replay::new(&[("tt.example", PUBLIC)]);
-        replay.reply("tt.example:80", json_response(&descriptor("")));
-        replay.reply(
-            "tt.example:80",
-            tti_response(&["Set-Cookie: keep=1; Path=/; Max-Age=3600", "Set-Cookie: session=1; Path=/"]),
-        );
-        let mut harness = Harness::new(Config { persist_cookies: persist, ..Config::default() }, replay);
-        harness.input(Input::WallClock(UNIX_NOW));
-        harness.open("http://tt.example/service.json");
-        harness.fetch(0x100);
-        harness
-    };
-    let mut scratch = [0u8; 4096];
-    let mut storage = MemoryStorage::default();
-    let off = setup(false);
-    assert_eq!(off.agent.save_cookies(off.now, &mut storage, &mut scratch), Ok(0), "not saved by default");
-    assert_eq!(storage.0, Vec::<u8>::new());
-    let on = setup(true);
-    assert_eq!(on.agent.save_cookies(on.now, &mut storage, &mut scratch), Ok(1), "the session cookie is not saved");
-    let mut fresh = Harness::new(Config { persist_cookies: true, ..Config::default() }, Replay::new(&[]));
-    fresh.input(Input::WallClock(UNIX_NOW));
-    assert_eq!(fresh.agent.load_cookies(fresh.now, &mut storage, &mut scratch), Ok(1));
-    assert_eq!(fresh.agent.cookies().len(), 1);
-}
-
 // Decision E.61: a build without a feature answers whatever needs it with a
 // value that says so, and never acts as if the missing part had worked.
 
@@ -1220,41 +1000,6 @@ fn push_not_compiled_in_is_reported_and_never_connects() {
         !harness.replay().connects.iter().any(|(connection, ..)| *connection == ConnectionId::Push),
         "no push connection is opened"
     );
-}
-
-#[test]
-#[cfg(not(feature = "cookies"))]
-fn cookies_not_compiled_in_are_reported_and_never_kept() {
-    const UNIX_NOW: u64 = 1_791_590_400;
-    let mut replay = Replay::new(&[("tt.example", PUBLIC)]);
-    replay.reply("tt.example:80", json_response(&descriptor("")));
-    replay.reply("tt.example:80", tti_response(&["Set-Cookie: keep=1; Path=/; Max-Age=3600"]));
-    replay.reply("tt.example:80", tti_response(&[]));
-    let config = Config { persist_cookies: true, ..Config::default() };
-    let mut harness = Harness::new(config, replay);
-    harness.input(Input::WallClock(UNIX_NOW));
-    harness.open("http://tt.example/service.json");
-    let records = harness.fetch(0x100);
-    assert_eq!(pages(&records).len(), 1, "the page still arrives");
-    assert!(has_event(&records, "CookieRejected(NotCompiledIn)"), "{records:?}");
-    harness.advance(SECOND);
-    harness.fetch(0x101);
-    for request in harness.replay().requests_to("tt.example:80") {
-        assert_eq!(header_value(&request, "Cookie"), None);
-    }
-    assert!(harness.agent.cookies().is_empty());
-
-    // Cookies saved by a build that has them are not restored.
-    let mut jar = CookieJar::<4, 1024>::new();
-    jar.store(b"keep=1; Max-Age=3600", "tt.example", "/", false, UNIX_NOW, true).unwrap();
-    let mut saved = [0u8; 1024];
-    let mut writer = Writer::new(&mut saved);
-    assert_eq!(jar.export(UNIX_NOW, &mut writer), Ok(1));
-    let mut storage = MemoryStorage(writer.written().to_vec());
-    let mut scratch = [0u8; 4096];
-    assert_eq!(harness.agent.load_cookies(harness.now, &mut storage, &mut scratch), Ok(0));
-    assert!(harness.agent.cookies().is_empty());
-    assert_eq!(harness.agent.save_cookies(harness.now, &mut storage, &mut scratch), Ok(0));
 }
 
 // ---------------------------------------------------------------------
@@ -1810,119 +1555,6 @@ fn a_part_of_a_list_past_its_bound_is_refused() {
     assert!(has_event(&harness.take(), "SubPagesFailed"));
 }
 
-#[test]
-#[cfg(feature = "cookies")]
-fn a_channel_cookie_set_for_the_whole_host_stays_in_its_folder() {
-    let mut harness = site_harness(Config::default());
-    harness
-        .replay()
-        .reply("site.example:80", Reply::Bytes(response("404 Not Found", &["Set-Cookie: s=1; Path=/"], b"")));
-    harness.replay().reply("site.example:80", not_found());
-    harness.open_channel("http://site.example/one/");
-    harness.replay().reply("site.example:80", tti_response(&[]));
-    harness.fetch(0x100);
-    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
-    assert_eq!(header_value(&last, "Cookie").as_deref(), Some("s=1"), "sent inside the folder");
-    let mut store = CookieJar::<8, 1024>::new();
-    let out = &mut [0u8; 64];
-    store.store_within(b"s=1; Path=/", "h.example", "/one/x", Some("/one/"), false, 0, false).unwrap();
-    let mut writer = Writer::new(out);
-    let (count, _) =
-        store.header_for("h.example", "/two/100.tti", Some("/two/"), false, Site::SameService, 0, &mut writer);
-    assert_eq!(count, 0, "never sent to another folder");
-}
-
-/// Finding F-15 (REQ-WEB-026; the review's probe A): a cookie a channel's
-/// push handshake sets for the whole host stays in the channel's folder,
-/// as one a page sets does. It was stored with no scope, so `Path=/`
-/// reached every other channel on the host.
-#[test]
-#[cfg(all(feature = "push", feature = "cookies"))]
-fn a_push_handshake_cookie_stays_in_its_channel_folder() {
-    let mut harness = site_harness(Config::default());
-    let settings = br#"{"push":{}}"#;
-    harness.replay().reply("site.example:80", json_response(settings));
-    let headers = "Set-Cookie: s=1; Path=/\r\n".to_owned();
-    // A live channel asks for no bundle (REQ-WEB-018).
-    harness.replay().reply("site.example:80", Reply::WebSocketWith { interim: Vec::new(), headers });
-    let records = harness.open_channel("http://site.example/a/");
-    assert!(has_event(&records, "PushConnected"), "{records:?}");
-    harness.replay().reply("site.example:80", not_found());
-    harness.replay().reply("site.example:80", not_found());
-    harness.open_channel("http://site.example/b/");
-    harness.replay().reply("site.example:80", tti_response(&[]));
-    harness.fetch(0x100);
-    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
-    assert_eq!(request_path(&last), "/b/100.tti");
-    assert_eq!(header_value(&last, "Cookie"), None, "not sent to another channel's folder");
-}
-
-/// The `Cookie` header the agent sends for page 100 of the channel at
-/// `asked`, after a page of the channel at `setter` answered with
-/// `Set-Cookie: set_cookie`.
-#[cfg(feature = "cookies")]
-fn cookie_sent_across(setter: &str, set_cookie: &str, asked: &str) -> Option<String> {
-    let mut harness = site_harness(Config::default());
-    harness.replay().reply("site.example:80", not_found());
-    harness.replay().reply("site.example:80", not_found());
-    harness.open_channel(setter);
-    let header = std::format!("Set-Cookie: {set_cookie}");
-    harness.replay().reply("site.example:80", tti_response(&[header.as_str()]));
-    harness.fetch(0x100);
-    assert_eq!(harness.agent.cookies().len(), 1, "the setting channel kept its cookie");
-    harness.replay().reply("site.example:80", not_found());
-    harness.replay().reply("site.example:80", not_found());
-    harness.open_channel(asked);
-    harness.replay().reply("site.example:80", tti_response(&[]));
-    harness.fetch(0x100);
-    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
-    let folder = asked.strip_prefix("http://site.example").unwrap();
-    assert_eq!(request_path(&last), std::format!("{folder}100.tti"), "the asked channel's page");
-    header_value(&last, "Cookie")
-}
-
-/// REQ-1883, REQ-515 (DOC-1863: a folder inside a channel's folder is a
-/// different channel, and each channel has its own cookie store): a cookie
-/// of the channel at `/one/` never reaches the channel at `/one/sub/`. Path
-/// matching alone sent it, since `/one/sub/100.tti` lies under `/one/`.
-#[test]
-#[cfg(feature = "cookies")]
-fn a_channel_cookie_never_reaches_a_channel_nested_in_its_folder() {
-    let outer = "http://site.example/one/";
-    let inner = "http://site.example/one/sub/";
-    assert_eq!(cookie_sent_across(outer, "s=1", outer).as_deref(), Some("s=1"), "sent in its own channel");
-    assert_eq!(cookie_sent_across(outer, "s=1", inner), None, "the default path, the outer folder");
-    assert_eq!(cookie_sent_across(outer, "s=1; Path=/", inner), None, "narrowed to the outer folder");
-    // A `Path` inside its folder is kept (REQ-515), and names the inner
-    // folder: the outer channel may not set the inner one's cookies so.
-    assert_eq!(cookie_sent_across(outer, "s=1; Path=/one/sub/", inner), None, "a path naming the nested folder");
-}
-
-/// REQ-1883, REQ-515: a cookie of the channel at `/one/sub/` never reaches
-/// the channel at `/one/` that holds its folder.
-#[test]
-#[cfg(feature = "cookies")]
-fn a_nested_channel_cookie_never_reaches_the_channel_around_it() {
-    let outer = "http://site.example/one/";
-    let inner = "http://site.example/one/sub/";
-    assert_eq!(cookie_sent_across(inner, "s=1", inner).as_deref(), Some("s=1"), "sent in its own channel");
-    assert_eq!(cookie_sent_across(inner, "s=1", outer), None, "the default path");
-    assert_eq!(cookie_sent_across(inner, "s=1; Path=/", outer), None, "narrowed to the inner folder");
-}
-
-/// REQ-1883, REQ-515: two sibling channels on one origin share no cookie,
-/// whatever `Path` either sets.
-#[test]
-#[cfg(feature = "cookies")]
-fn sibling_channels_share_no_cookie() {
-    let one = "http://site.example/one/";
-    let two = "http://site.example/two/";
-    for set_cookie in ["s=1", "s=1; Path=/", "s=1; Path=/two/"] {
-        assert_eq!(cookie_sent_across(one, set_cookie, two), None, "{set_cookie} from one to two");
-        assert_eq!(cookie_sent_across(two, set_cookie, one), None, "{set_cookie} from two to one");
-    }
-}
-
 /// The target of the push connection of the channel at `address`.
 #[cfg(feature = "push")]
 fn push_target(address: &str) -> String {
@@ -1960,34 +1592,6 @@ fn the_push_connection_carries_no_query_and_no_page() {
     ] {
         assert_eq!(push_target(address), "/a/push", "{address}");
     }
-}
-
-/// Finding F-42 (decision E.114 item 2): a response from outside the
-/// channel's folder, here a page redirected to another origin, stores no
-/// cookies; it was stored under the channel's folder on that origin. A
-/// response after an upgrade to `https` on the channel's host and folder is
-/// inside the channel, and stores its cookies.
-#[test]
-#[cfg(feature = "cookies")]
-fn a_response_from_outside_the_channel_stores_no_cookies() {
-    let mut harness = site_harness(following());
-    harness.replay().reply("site.example:80", not_found());
-    harness.replay().reply("site.example:80", not_found());
-    harness.open_channel("http://site.example/one/");
-    let away = response("302 Found", &["Location: http://other.example/in/100.tti"], b"");
-    harness.replay().reply("site.example:80", Reply::Bytes(away));
-    harness.replay().reply("other.example:80", tti_response(&["Set-Cookie: t=1; Path=/"]));
-    harness.fetch(0x100);
-    assert_eq!(paths(&mut harness, "other.example:80"), ["/in/100.tti"], "the redirect was followed");
-    assert!(
-        harness.agent.cookies().cookies().all(|cookie| cookie.host != b"other.example"),
-        "nothing stored from outside the channel"
-    );
-    let upgrade = response("301 Moved", &["Location: https://site.example/one/100.tti"], b"");
-    harness.replay().reply("site.example:80", Reply::Bytes(upgrade));
-    harness.replay().reply("site.example:443", tti_response(&["Set-Cookie: u=1; Path=/"]));
-    harness.fetch(0x100);
-    assert!(harness.agent.cookies().cookies().any(|cookie| cookie.host == b"site.example"), "the upgrade stores");
 }
 
 #[cfg(feature = "push")]
@@ -2384,44 +1988,6 @@ fn log_lines_are_limited_for_each_page_frame() {
     assert_eq!(logged, 2 * MAX_LOG_LINES_PER_PAGE, "{records:?}");
 }
 
-// Verifies REQ-WEB-006, REQ-515 and DOC-1957 through the agent: a SET_COOKIE
-// record on a live channel's connection is kept in the channel's folder, as
-// the push handshake's cookies are, and so is sent to that channel's pages
-// and never another's.
-#[test]
-#[cfg(all(feature = "push", feature = "cookies"))]
-fn a_set_cookie_record_stays_in_its_channel_folder() {
-    use neoteletext_web::records::cookie::SetCookie;
-    let mut harness = site_harness(Config::default());
-    harness.replay().reply("site.example:80", json_response(br#"{"push":{}}"#));
-    let cookie = SetCookie {
-        name: "s",
-        value: "1",
-        path: Some("/"),
-        max_age: None,
-        same_site: neoteletext_web::cookie::SameSite::Default,
-        secure: false,
-        http_only: false,
-    };
-    let message = packets_of(|out| {
-        cookie.encode(3, 1, out).unwrap();
-    });
-    harness.replay().reply("site.example:80", Reply::WebSocket(server_frame(0x2, &message)));
-    let records = harness.open_channel("http://site.example/a/");
-    assert!(!has_event(&records, "CookieRejected"), "{records:?}");
-    assert_eq!(harness.agent.cookies().len(), 1, "the record's cookie is kept");
-    harness.replay().reply("site.example:80", not_found());
-    harness.replay().reply("site.example:80", not_found());
-    // A channel in a folder inside the first is another channel, whose
-    // requests the cookie's path alone would match.
-    harness.open_channel("http://site.example/a/b/");
-    harness.replay().reply("site.example:80", tti_response(&[]));
-    harness.fetch(0x100);
-    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
-    assert_eq!(request_path(&last), "/a/b/100.tti");
-    assert_eq!(header_value(&last, "Cookie"), None, "not sent to another channel's folder");
-}
-
 // Verifies REQ-1462 item 3: packet 1/30 among good packets is discarded and
 // counted alone, the good ones delivered in order, the connection kept.
 #[test]
@@ -2617,14 +2183,12 @@ fn a_channel_address_that_breaks_a_rule_names_it() {
 
 // Verifies REQ-433 (REQ-SEC-020): every security setting of the web
 // agent's configuration defaults to the safer choice: no local-network
-// address allowed, no cookies saved between runs, redirects kept inside the
-// channel, the connection direct rather than through a proxy, and TLS
+// address allowed, redirects kept inside the channel, the connection direct rather than through a proxy, and TLS
 // offered, so that HTTPS is used where an address asks for it.
 #[test]
 fn the_default_configuration_is_the_safer_choice() {
     let config = Config::default();
     assert!(config.allowed_local.iter().all(Option::is_none), "no local address is allowed");
-    assert!(!config.persist_cookies, "cookies are not saved");
     assert!(config.redirects_within_channel, "redirects stay inside the channel");
     assert!(!config.proxied, "no proxy");
     assert!(config.tls_available, "TLS is offered");
@@ -2660,14 +2224,12 @@ fn discovery_answer(padding: usize) -> Reply {
     ))
 }
 
-// REQ-2476: discovery's request carries no cookie, keeps none of the
-// answer's, reads the pointers of the headers and then the elements in the
+// REQ-2476: discovery reads the pointers of the headers and then the elements in the
 // first 8,192 bytes, refuses a target with `&`, and closes its connection.
-#[cfg(feature = "cookies")]
 #[test]
-fn discovery_reads_pointers_and_touches_no_cookie() {
+fn discovery_reads_pointers() {
     let mut harness = secure_service();
-    harness.replay().reply("secure.example:443", tti_response(&["Set-Cookie: id=1; Secure; Path=/"]));
+    harness.replay().reply("secure.example:443", tti_response(&[]));
     harness.fetch(0x100);
     harness.replay().reply("secure.example:443", discovery_answer(64 * 1024));
     let connects = harness.replay().connects.len();
@@ -2685,14 +2247,14 @@ fn discovery_reads_pointers_and_touches_no_cookie() {
     assert_eq!(header_value(&request, "Cookie"), None, "a cookie went with discovery");
     assert_eq!(header_value(&request, "Accept").as_deref(), Some("text/html"));
     assert_eq!(harness.replay().connects.len(), connects + 1, "discovery opened a connection of its own");
-    // The next page request opens another, and sends the channel's cookie
-    // alone: discovery's `Set-Cookie` was never kept.
+    // The next page request opens another, and carries no cookie: the
+    // `Set-Cookie` discovery's answer came with was never kept (VS-201).
     harness.advance(SECOND);
     harness.replay().reply("secure.example:443", tti_response(&[]));
     harness.fetch(0x101);
     assert_eq!(harness.replay().connects.len(), connects + 2, "discovery's connection was used again");
     let last = harness.replay().requests_to("secure.example:443").pop().unwrap();
-    assert_eq!(header_value(&last, "Cookie").as_deref(), Some("id=1"));
+    assert_eq!(header_value(&last, "Cookie"), None);
     assert_profile_headers(harness.replay(), &[]);
 }
 
@@ -2778,55 +2340,6 @@ fn a_fonts_accept_header_names_the_font_media_types() {
         names,
         [std::str::from_utf8(media::FONT_BDF).unwrap(), std::str::from_utf8(media::OCTET_STREAM).unwrap()]
     );
-}
-
-/// The `Cookie` header the agent sends for page 100 of the service whose
-/// descriptor is `asked`, after page 100 of the service whose descriptor is
-/// `setter` answered with `Set-Cookie: set_cookie`. Each descriptor keeps
-/// its pages in its own folder.
-#[cfg(feature = "cookies")]
-fn cookie_sent_across_descriptors(setter: &str, set_cookie: &str, asked: &str) -> Option<String> {
-    let folder = |address: &str| {
-        let path = address.strip_prefix("http://site.example").unwrap();
-        path[..=path.rfind('/').unwrap()].to_owned()
-    };
-    let descriptor = |address: &str| {
-        let template = std::format!("{}{{mpp}}.tti", folder(address));
-        json_response(std::format!(r#"{{"name":"Test","initial_page":"100","page_template":"{template}"}}"#).as_bytes())
-    };
-    let mut harness = site_harness(Config::default());
-    harness.replay().reply("site.example:80", descriptor(setter));
-    harness.open(setter);
-    let header = std::format!("Set-Cookie: {set_cookie}");
-    harness.replay().reply("site.example:80", tti_response(&[header.as_str()]));
-    harness.fetch(0x100);
-    assert_eq!(harness.agent.cookies().len(), 1, "the setting service kept its cookie");
-    harness.replay().reply("site.example:80", descriptor(asked));
-    harness.open(asked);
-    harness.replay().reply("site.example:80", tti_response(&[]));
-    harness.fetch(0x100);
-    let last = harness.replay().requests_to("site.example:80").last().unwrap().clone();
-    assert_eq!(request_path(&last), std::format!("{}100.tti", folder(asked)), "the asked service's page");
-    header_value(&last, "Cookie")
-}
-
-/// REQ-507: a service opened by its descriptor is identified by its origin
-/// and the folder that holds the descriptor, so two descriptors in two
-/// folders of one origin share no cookie, whatever `Path` either sets, and
-/// one in a folder inside the other's is a service of its own; a service's
-/// cookie still reaches its own pages.
-#[test]
-#[cfg(feature = "cookies")]
-fn services_opened_by_descriptors_in_two_folders_share_no_cookie() {
-    let one = "http://site.example/one/service.json";
-    let two = "http://site.example/two/service.json";
-    let inner = "http://site.example/one/sub/service.json";
-    assert_eq!(cookie_sent_across_descriptors(one, "s=1", one).as_deref(), Some("s=1"), "its own pages");
-    for set_cookie in ["s=1", "s=1; Path=/", "s=1; Path=/two/"] {
-        assert_eq!(cookie_sent_across_descriptors(one, set_cookie, two), None, "{set_cookie} from one to two");
-        assert_eq!(cookie_sent_across_descriptors(two, set_cookie, one), None, "{set_cookie} from two to one");
-    }
-    assert_eq!(cookie_sent_across_descriptors(one, "s=1", inner), None, "a folder inside is another service");
 }
 
 /// REQ-507, REQ-WEB-021: once a service's descriptor is asked for, a

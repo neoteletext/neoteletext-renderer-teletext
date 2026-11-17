@@ -4,7 +4,6 @@
 
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 
-use crate::cookie::CookieRejected;
 use crate::descriptor::DescriptorError;
 use crate::http::{HttpError, MediaType, Method};
 use crate::port::{ConnectionId, NetInput, NetOutput, Security};
@@ -47,8 +46,7 @@ pub enum Input<'a> {
     /// contents view of a static channel asks for it (DEC-2377).
     FetchContents,
     /// Follow a link to a page of another service named in the current
-    /// descriptor (Appendix E). The request is a cross-service navigation
-    /// for cookies (REQ-WEB-006).
+    /// descriptor (Appendix E).
     FollowLink {
         /// The service's short name.
         service: &'a str,
@@ -83,11 +81,6 @@ pub enum Input<'a> {
     },
     /// Change the push subscription.
     Subscribe(Subscription<'a>),
-    /// Erase every cookie (REQ-SEC-013).
-    WipeCookies,
-    /// Calendar time now, in seconds since 1970, so cookie `Expires` dates
-    /// can be compared and cookies saved.
-    WallClock(u64),
     /// One message of the input profile (area INT, decision E.90), sent as
     /// a binary WebSocket message on the push connection: only while it is
     /// open and the channel's descriptor declares `push.input`, and only up
@@ -96,8 +89,7 @@ pub enum Input<'a> {
     /// what is fetched.
     Send(InputMessage<'a>),
     /// Fetch one resource outside any channel, in the role given
-    /// (REQ-2476, REQ-123): one `GET` with no cookie and no `Referer`,
-    /// whose `Set-Cookie` fields are ignored, redirected at most
+    /// (REQ-2476, REQ-123): one `GET` with no `Referer`, redirected at most
     /// [`crate::consts::MAX_REDIRECTS`] times to any origin, each address
     /// checked for the local network and a fall from `https` to `http`,
     /// and the connection closed when it ends. Answered by the role's
@@ -506,10 +498,6 @@ pub enum Event<'a> {
         /// Why.
         failure: Failure,
     },
-    /// A `Set-Cookie` header was ignored.
-    CookieRejected(CookieRejected),
-    /// Not every matching cookie fitted in a request.
-    CookiesTruncated,
     /// A pointer found by discovery ([`ResourceRole::Discovery`],
     /// REQ-2476), checked and resolved against the final address by
     /// [`crate::discovery::resolve`]; the `Link` header fields' pointers come
@@ -549,14 +537,6 @@ pub enum Event<'a> {
         /// Why.
         failure: Failure,
     },
-    /// A device-bound session changed (REQ-WEB-017, feature `dbsc`).
-    BoundSession {
-        /// The session's identifier, empty when a registration failed
-        /// before the server named one.
-        session: &'a str,
-        /// What happened.
-        change: BoundChange,
-    },
 }
 
 /// What a resource fetched outside any channel is for ([`Input::FetchResource`]).
@@ -573,23 +553,6 @@ pub enum ResourceRole {
     /// `application/octet-stream`, and at most the core's
     /// [`FONT_MAX_FILE_BYTES`](neoteletext_core::consts::FONT_MAX_FILE_BYTES).
     Font,
-}
-
-/// What happened to a device-bound session (REQ-WEB-017).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum BoundChange {
-    /// The server registered it: its cookies are kept bound to a key on
-    /// this device.
-    Registered,
-    /// Its cookies were refreshed with a proof of the key.
-    Refreshed,
-    /// It ended: the server said so, refused it, it lapsed, or its site's
-    /// data was cleared. Its key is deleted.
-    Ended,
-    /// A registration the server asked for was not made, or not accepted.
-    RegistrationFailed,
-    /// A refresh did not bring new cookies; the request it held went on.
-    RefreshFailed,
 }
 
 /// An output of the agent.

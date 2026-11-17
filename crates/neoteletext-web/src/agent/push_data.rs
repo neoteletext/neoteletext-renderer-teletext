@@ -7,11 +7,9 @@ use neoteletext_core::consts::PACKET_HEADER;
 use neoteletext_core::packet::{Packet, decode_address, is_valid_stream_packet};
 use neoteletext_core::types::Instant;
 
-use super::cookies::cookie_store;
 use super::{Event, Output, PageBytes, PushProblem, PushStop, Sink, Source, T42_PACKET, UserAgent, event};
 use crate::bytes::copy_prefix;
 use crate::consts::OPCODE_PONG;
-use crate::cookie::CookieRejected;
 use crate::http::MediaType;
 use crate::port::RandomSource;
 use crate::records::index::Step;
@@ -22,7 +20,7 @@ use crate::records::{ChannelRecord, Read};
 use crate::url::Url;
 use crate::ws::WsMessage;
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     /// Reads WebSocket frames. Returns the bytes used, or `None` when the
     /// connection ended.
     pub(super) fn push_frames(&mut self, now: Instant, input: &[u8], sink: &mut Sink<'_>) -> Option<usize> {
@@ -42,7 +40,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             // DEC-1459: a server sends a channel's receiver T42 alone, so a
             // text message is discarded and counted, never read as a page.
             Some(WsMessage::Text(_)) => self.count_invalid(1, sink),
-            Some(WsMessage::Binary(len)) => self.push_packets(now, len, sink),
+            Some(WsMessage::Binary(len)) => self.push_packets(len, sink),
             Some(WsMessage::Ping) => {
                 let mut payload = [0u8; crate::consts::WS_CONTROL_MAX];
                 let len = copy_prefix(&mut payload, self.push.frames.control_payload());
@@ -82,7 +80,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     /// the stream may not carry is discarded (REQ-1462); the channel's
     /// records among them are read; and the packets kept are passed on.
     /// None of this closes the connection.
-    fn push_packets(&mut self, now: Instant, len: usize, sink: &mut Sink<'_>) {
+    fn push_packets(&mut self, len: usize, sink: &mut Sink<'_>) {
         if !len.is_multiple_of(T42_PACKET) {
             self.count_invalid(len.div_ceil(T42_PACKET), sink);
             return;
@@ -106,7 +104,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 page = true;
                 self.push.log_lines = 0;
             }
-            invalid = invalid.saturating_add(self.read_record(now, &packet, sink));
+            invalid = invalid.saturating_add(self.read_record(&packet, sink));
             // REQ-GEN-019: not `copy_within`, whose range check links a panic
             // path into the image.
             let place = self.buffers.push_message.get_mut(kept..kept.saturating_add(T42_PACKET));
@@ -126,10 +124,9 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     }
 
     /// Reads one packet into the channel's records and acts on a record it
-    /// completes (DOC-1955, DOC-1956 and DOC-1957). Returns the packets found
+    /// completes (DOC-1955 and DOC-1956). Returns the packets found
     /// invalid.
-    fn read_record(&mut self, now: Instant, packet: &Packet, sink: &mut Sink<'_>) -> usize {
-        let (seconds, calendar) = self.seconds(now);
+    fn read_record(&mut self, packet: &Packet, sink: &mut Sink<'_>) -> usize {
         let (record, packets) = match self.records.push_counted(packet) {
             (Read::Nothing, _) => return 0,
             (Read::Invalid(packets), _) => return packets,
@@ -176,23 +173,6 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             | ChannelRecord::Naplps(_)
             | ChannelRecord::DrawingLinks(_)
             | ChannelRecord::RegisCursor(_) => {}
-            ChannelRecord::SetCookie(line) => {
-                if !cfg!(feature = "cookies") {
-                    event(sink, Event::CookieRejected(CookieRejected::NotCompiledIn));
-                    return 0;
-                }
-                let Some(url) = self.push.url else { return 0 };
-                // As the push handshake's own cookies: host-only, in the
-                // channel's folder (REQ-WEB-026, DOC-1957).
-                let identity = self.channel.as_ref().or(self.service_folder.as_ref());
-                let scope = identity.map(Url::path);
-                let store = cookie_store(&mut self.jar, &mut self.port_cookies);
-                if let Err(rejected) =
-                    store.store_within(line, url.host_text(), url.path(), scope, url.is_secure(), seconds, calendar)
-                {
-                    event(sink, Event::CookieRejected(rejected));
-                }
-            }
         }
         0
     }
