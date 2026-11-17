@@ -88,7 +88,7 @@ use crate::analog::drift::Variation;
 use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::amplify;
 use crate::analog::oscillator::Noise;
-use crate::analog::volume::VolumeGain;
+use crate::analog::volume::{self, VolumeGain};
 use crate::analog::{frequency, to_sample};
 
 use law::{Law, Mixing, OCTAVE, UNIT};
@@ -193,6 +193,41 @@ const PINK_GAIN: i32 = 3 * ONE_Q28;
 /// section 2-21 (page 43) calls the result pink noise.
 const PINK_CORNER: u32 = 159_155;
 
+/// Ticks in one loop of the instrument's computer: six thousandths of a
+/// second. Once a loop the computer compares each knob with the number
+/// it holds for it and moves the number one step towards the knob, and
+/// then sends every number through the converter to the voices: a knob
+/// that is turned moves its control voltage one step of the converter's
+/// seven bits each loop, however far and fast it was turned.
+///
+/// Source: TM3 section 2-12 (page 29): "outputting one of 24 entries
+/// from a Scratchpad RAM table of pot settings, at the same time the
+/// actual pot is being sampled through the ADC "window" comparator
+/// ... As long as the voltages don't match, the table value is
+/// decremented or incremented until they do match. Once all the pots
+/// have been checked ... the DAC again converts the pot values, this
+/// time distributing them and the oscillator and filter CVs to the
+/// synth. Thus, the DAC output, Vdac, steps between 62 values (24 pots
+/// and 38 CVs) during each 6-ms loop". Own reading of it: one value of
+/// the converter for each knob in a loop is one comparison, which says
+/// only higher or lower, and so one step. Page 31 gives 11 ms as "the
+/// longest loop time", which keys held lengthen; the shortest is taken.
+/// Each voltage is there at once when its turn comes: "a few
+/// microseconds for each S/H to acquire a specific value of Vdac"
+/// (page 31), so a step of the number is a step of the voltage. The
+/// voice sheets were not searched for a capacitor on any one voltage's
+/// way from its S/H, and the manual of revisions 1 and 2 was not read
+/// for the loop; their computer is taken to do the same.
+const LOOP_TICKS: u32 = TICK_RATE * 6 / 1_000;
+const _: () = assert!(LOOP_TICKS == 36);
+
+/// Messages kept while all sound off takes the sound out, to be taken
+/// when it has gone: more than come in the 5.3 ms that lasts but from
+/// a stream that means to flood, whose next message ends the wait.
+///
+/// Source: own choice.
+const DEFERRED: usize = 16;
+
 /// The pitch bend value that bends nothing.
 ///
 /// Source: MIDI 1.0: a pitch bend is 14 bits and its centre is 0x2000.
@@ -239,9 +274,6 @@ const SEED: u32 = 0x5072_6f35;
 /// output's half, as it was first, the note stood 0.1 dB above it on a
 /// rev 3 and 0.3 dB below it on a rev 2.
 const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 506 / 1000) as i32;
-/// The square of the largest volume, which the volume's square is a share
-/// of.
-const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
 
 /// The low-frequency oscillator: a sawtooth, a triangle and a square
 /// from one phase, each with its own switch, added together.
@@ -322,6 +354,12 @@ impl Modulator {
 pub struct Prophet5 {
     model: Model,
     patch: Patch,
+    /// The numbers the computer holds for the knobs, each on its way to
+    /// where the patch has its knob ([`LOOP_TICKS`]), with the patch's
+    /// switches: what the voices are given.
+    panel: Patch,
+    /// Ticks until the computer's next loop.
+    loop_wait: u32,
     settings: Settings,
     allocator: Allocator<VOICES>,
     voices: [Voice; VOICES],
@@ -339,6 +377,12 @@ pub struct Prophet5 {
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
     volume_gain: VolumeGain,
+    /// All sound off has come and the sound is on its way out: the gain
+    /// that takes it there, which the voices are cut at the end of.
+    cut: Option<VolumeGain>,
+    /// The messages that came meanwhile, in order, and how many.
+    deferred: [(u8, u8, u8); DEFERRED],
+    deferred_count: usize,
     pedal: bool,
     /// The master tune, in octaves.
     tune: i32,
@@ -367,6 +411,8 @@ impl Prophet5 {
         let mut prophet = Self {
             model,
             patch: Patch::DEFAULT,
+            panel: Patch::DEFAULT,
+            loop_wait: 0,
             settings: Settings::new(&Patch::DEFAULT, model),
             allocator: Allocator::new(Self::mode(&Patch::DEFAULT)),
             voices,
@@ -379,6 +425,9 @@ impl Prophet5 {
             wheel: 0,
             volume: DATA_MAX,
             volume_gain: VolumeGain::full(),
+            cut: None,
+            deferred: [(0, 0, 0); DEFERRED],
+            deferred_count: 0,
             pedal: false,
             tune: 0,
             glide: 0,
@@ -429,12 +478,45 @@ impl Prophet5 {
         self.set_patch(&patch);
     }
 
-    /// Gives the instrument a patch, which it copies. It takes effect at
-    /// once, on the voices that are sounding too, as moving the panel's
-    /// controls does; switching unison on or off lets go of every key,
-    /// and leaves the pedal as it is.
+    /// Gives the instrument a patch, which it copies. It takes effect on
+    /// the voices that are sounding too, as moving the panel's controls
+    /// does: the switches at once, and each knob one step of its 128
+    /// every six thousandths of a second, as the instrument's computer
+    /// follows a knob that is turned. With no voice sounding, all of it
+    /// is there at once. Switching unison on or off lets go of every
+    /// key, and leaves the pedal as it is.
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
+        if self.sounding_voices() == 0 {
+            self.panel = *patch;
+        } else {
+            // The switches, which are the top bit of each byte.
+            let mut bytes = patch.to_bytes();
+            for (byte, held) in bytes.iter_mut().zip(self.panel.to_bytes()) {
+                *byte = (*byte & !patch::KNOB_MAX) | (held & patch::KNOB_MAX);
+            }
+            self.panel = Patch::from_bytes(&bytes);
+        }
+        self.apply_patch();
+    }
+
+    /// A loop of the computer: the number it holds for each knob goes
+    /// one step towards where the patch has the knob.
+    fn scan(&mut self) {
+        if self.panel == self.patch {
+            return;
+        }
+        let mut bytes = self.panel.to_bytes();
+        for (byte, wanted) in bytes.iter_mut().zip(self.patch.to_bytes()) {
+            let (held, wanted) = (*byte & patch::KNOB_MAX, wanted & patch::KNOB_MAX);
+            let next = match held.cmp(&wanted) {
+                core::cmp::Ordering::Less => held.saturating_add(1),
+                core::cmp::Ordering::Equal => held,
+                core::cmp::Ordering::Greater => held.saturating_sub(1),
+            };
+            *byte = (*byte & !patch::KNOB_MAX) | next;
+        }
+        self.panel = Patch::from_bytes(&bytes);
         self.apply_patch();
     }
 
@@ -452,7 +534,7 @@ impl Prophet5 {
 
     fn apply_patch(&mut self) {
         let law = self.model.law();
-        self.settings = Settings::new(&self.patch, self.model);
+        self.settings = Settings::new(&self.panel, self.model);
         for voice in &mut self.voices {
             voice.configure(&self.settings);
         }
@@ -463,7 +545,7 @@ impl Prophet5 {
             self.allocator.set_mode(mode);
             self.allocator.sustain(self.pedal);
         }
-        let steps = i32::from(self.patch.get(Knob::LfoFrequency).min(law.knob_top));
+        let steps = i32::from(self.panel.get(Knob::LfoFrequency).min(law.knob_top));
         let rate = law::raise(law.lfo.0, steps.saturating_mul(law.lfo.1));
         self.lfo.step = frequency(rate, TICK_RATE);
     }
@@ -494,8 +576,10 @@ impl Prophet5 {
     /// - Control change (0xBn) of the modulation wheel (1), volume (7),
     ///   the pedal (64, down from 64), all sound off (120), reset all
     ///   controllers (121, which leaves the volume) and all notes off
-    ///   (123). All sound off silences every voice at once and leaves
-    ///   the pedal where it is. The pedal holds the notes whose keys go up while it is
+    ///   (123). All sound off takes the sound out over five thousandths
+    ///   of a second, then silences every voice, and leaves the pedal
+    ///   where it is; a message that comes before then is taken when
+    ///   the sound has gone. The pedal holds the notes whose keys go up while it is
     ///   down, as a MIDI instrument's does, and is besides the
     ///   instrument's release footswitch: while it is down the
     ///   envelopes' releases are as the knobs say though the release
@@ -506,6 +590,16 @@ impl Prophet5 {
     /// ([`Prophet5::ignored_events`]): any other status or controller, a
     /// data byte above 127. Nothing is an error.
     pub fn event(&mut self, status: u8, data1: u8, data2: u8) {
+        // While all sound off takes the sound out, a message waits for
+        // it to have gone; with no room to wait, the sound is cut now.
+        if self.cut.is_some() {
+            if let Some(slot) = self.deferred.get_mut(self.deferred_count) {
+                *slot = (status, data1, data2);
+                self.deferred_count = self.deferred_count.saturating_add(1);
+                return;
+            }
+            self.cut();
+        }
         if data1 > DATA_MAX || data2 > DATA_MAX {
             self.ignore();
             return;
@@ -534,16 +628,17 @@ impl Prophet5 {
                 self.pedal = value >= PEDAL_DOWN;
                 self.allocator.sustain(self.pedal);
             }
+            // The sound goes out over the 5.3 ms a volume's gain takes,
+            // and the voices are cut when it has gone: cut where they
+            // stood, the signal would fall to nothing in one sample.
+            // The keys are let go then and not before: a release at its
+            // shortest is quicker than the fade.
             CONTROL_ALL_SOUND_OFF => {
-                self.allocator.all_keys_up();
-                for (index, voice) in self.voices.iter_mut().enumerate() {
-                    voice.cut();
-                    voice.configure(&self.settings);
-                    self.allocator.finished(index);
+                if self.sounding_voices() == 0 {
+                    self.cut();
+                } else if self.cut.is_none() {
+                    self.cut = Some(VolumeGain::full());
                 }
-                // The allocator lets go of the pedal with the keys; the
-                // pedal has not moved, and is given back.
-                self.allocator.sustain(self.pedal);
             }
             CONTROL_RESET_CONTROLLERS => {
                 self.wheel = 0;
@@ -569,6 +664,30 @@ impl Prophet5 {
         }
     }
 
+    /// Silences every voice at once: what all sound off comes to.
+    fn cut(&mut self) {
+        self.cut = None;
+        self.allocator.all_keys_up();
+        // The allocator lets go of the pedal with the keys; the pedal
+        // has not moved, and is given back.
+        self.allocator.sustain(self.pedal);
+        for (index, voice) in self.voices.iter_mut().enumerate() {
+            voice.cut();
+            voice.configure(&self.settings);
+            self.allocator.finished(index);
+        }
+        self.take_deferred();
+    }
+
+    /// Takes the messages that waited for the sound to go, in order.
+    fn take_deferred(&mut self) {
+        let (deferred, count) = (self.deferred, self.deferred_count);
+        self.deferred_count = 0;
+        for &(status, data1, data2) in deferred.iter().take(count) {
+            self.event(status, data1, data2);
+        }
+    }
+
     /// Releases every voice, held by a key or by the pedal, and lifts
     /// the pedal: for when the input stops and no note off will come.
     pub fn release_all(&mut self) {
@@ -585,7 +704,7 @@ impl Prophet5 {
     /// and within the law's zone of it along an exponential.
     fn glide(&mut self, target: i32) -> i32 {
         let law = self.model.law();
-        let steps = i32::from(self.patch.get(Knob::Glide).min(law.knob_top));
+        let steps = i32::from(self.panel.get(Knob::Glide).min(law.knob_top));
         if steps == 0 {
             self.glide = target;
             return target;
@@ -605,12 +724,17 @@ impl Prophet5 {
 
     /// A tick: the voices take what the keys and the controls ask.
     fn control(&mut self) {
+        if self.loop_wait == 0 {
+            self.loop_wait = LOOP_TICKS;
+            self.scan();
+        }
+        self.loop_wait = self.loop_wait.saturating_sub(1);
         let law = self.model.law();
         let lfo = self.lfo.tick(&self.patch, law);
         let pink = amplify(self.pink.low_pass(self.wheel_noise.tick()), PINK_GAIN);
         // The source mix moves the two levels opposite ways (TM3 section
         // 2-3, page 20), and the wheel is the amount of their sum.
-        let mix = i32::from(self.patch.get(Knob::SourceMix).min(law.knob_top));
+        let mix = i32::from(self.panel.get(Knob::SourceMix).min(law.knob_top));
         let top = i32::from(law.knob_top);
         let source = law::share(lfo, top.saturating_sub(mix), top).saturating_add(law::share(pink, mix, top));
         let wheel = law::share(source, i32::from(self.wheel), i32::from(DATA_MAX));
@@ -668,13 +792,22 @@ impl Prophet5 {
     /// second. The work of a sample is at most that of five voices,
     /// whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        // The square of the controller's share, in Q28 (own choice of
-        // the law, as a volume control's taper).
-        let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
-        let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
+        let mut volume = volume::wanted(self.volume);
         for sample in out {
-            let earlier = self.voices_sample();
-            let later = self.voices_sample();
+            let mut earlier = self.voices_sample();
+            let mut later = self.voices_sample();
+            // Faded before the decimator, which then ends on silence:
+            // what it still holds when the voices are cut is nothing.
+            if let Some(cut) = &mut self.cut {
+                let gain = cut.towards(0);
+                (earlier, later) = (amplify(earlier, gain), amplify(later, gain));
+                if gain == 0 {
+                    // The messages that waited are taken now, the
+                    // volume's among them.
+                    self.cut();
+                    volume = volume::wanted(self.volume);
+                }
+            }
             let signal = amplify(self.decimator.process(earlier, later), self.volume_gain.towards(volume));
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));
         }

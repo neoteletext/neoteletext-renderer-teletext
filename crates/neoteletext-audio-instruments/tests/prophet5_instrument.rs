@@ -15,6 +15,7 @@
 mod prophet5_programs;
 mod prophet5_support;
 
+use neoteletext_audio_instruments::SAMPLE_RATE;
 use neoteletext_audio_instruments::prophet5::patch::PATCH_BYTES;
 use neoteletext_audio_instruments::prophet5::{Knob, Model, Patch, Prophet5, Switch, VOICES};
 use prophet5_programs::SHEETS;
@@ -230,26 +231,60 @@ fn random_patches_and_random_messages_neither_panic_nor_leave_the_bounds() {
 
 #[test]
 fn a_volume_message_between_two_renders_does_not_step_the_signal() {
-    // A low, nearly pure tone moves little from one sample to the next.
-    // The volume falling from full to a quarter between two calls moved
-    // the gain all at once: a step of most of the signal's height.
+    // The largest step from one sample to the next.
+    let step = |signal: &[i16]| signal.windows(2).map(|pair| (pair[1] - pair[0]).unsigned_abs()).max().unwrap_or(0);
     for model in MODELS {
-        let mut prophet = instrument(model, &pure(model));
-        prophet.event(NOTE_ON, 45, 100);
-        render(&mut prophet, 0.5);
-        let largest = |signal: &[f64]| signal.windows(2).fold(0.0f64, |most, pair| most.max((pair[1] - pair[0]).abs()));
-        let steady = render(&mut prophet, 0.2513);
-        let (peak, step) = (steady.iter().fold(0.0f64, |peak, &value| peak.max(value.abs())), largest(&steady));
-        let mut worst = 0.0f64;
-        // Twenty changes, each where the last call happened to end.
-        for turn in 0..20 {
-            let before = *render(&mut prophet, 0.0137).last().unwrap_or(&0.0);
-            prophet.event(CONTROL, 7, if turn % 2 == 0 { 64 } else { 127 });
-            let after = render(&mut prophet, 0.05);
-            worst = worst.max((after[0] - before).abs()).max(largest(&after));
-        }
-        println!("{model:?}: peak {peak:.4}, largest step steady {step:.5}, across volume changes {worst:.5}");
-        assert!(worst < 1.5 * step, "{model:?}: {worst} against {step}");
+        // A low, nearly pure tone moves little from one sample to the
+        // next, and anything sudden is larger. The volume's gain was
+        // worked out once for each call to render, so a volume message
+        // moved it between one sample and the next (TODO-6438).
+        let patch = pure(model);
+        // Half a second for the note to settle; then twenty changes of
+        // the volume 3,058 samples apart, the calls to render cut at
+        // `cut` samples; then the volume at its half.
+        let lead = SAMPLE_RATE as usize / 2;
+        let run = |cut: usize| {
+            let mut prophet = instrument(model, &patch);
+            prophet.event(NOTE_ON, 45, 100);
+            let mut out = vec![0i16; 21 * 3_058 + SAMPLE_RATE as usize / 2];
+            prophet.render(&mut vec![0i16; lead]);
+            for (turn, piece) in out.chunks_mut(3_058).enumerate() {
+                prophet.event(CONTROL, 7, [127, 64, 127, 0][turn.min(21) % 4]);
+                for part in piece.chunks_mut(cut) {
+                    prophet.render(part);
+                }
+            }
+            out
+        };
+        let out = run(3_058);
+        assert_eq!(out, run(7), "{model:?}: the calls' lengths change the samples");
+        // The note alone, at the full volume of the first 3,058 samples.
+        let (alone, changes) = (&out[..3_058], &out[3_058..21 * 3_058]);
+        let (steady, worst) = (step(alone), step(changes));
+        println!("{model:?}: a step of {worst} units at most across the volume's changes, {steady} in the note");
+        assert!(worst * 5 < steady * 6, "{model:?}: the volume clicks: {worst} against {steady}");
+        // And the volume arrives: half the controller, to the sample of
+        // an instrument that had it from the first.
+        let mut there = instrument(model, &patch);
+        there.event(CONTROL, 7, 64);
+        there.event(NOTE_ON, 45, 100);
+        let mut same = vec![0i16; lead + out.len()];
+        there.render(&mut same);
+        let settled = out.len() - SAMPLE_RATE as usize / 4;
+        assert_eq!(out[settled..], same[lead + settled..], "{model:?}: the volume does not arrive");
+        // A reset puts the gain back at once: the first sample of a note
+        // is then the first sample of a new instrument's.
+        let mut again = instrument(model, &patch);
+        again.event(CONTROL, 7, 0);
+        again.render(&mut vec![0i16; lead]);
+        again.reset();
+        again.event(NOTE_ON, 45, 100);
+        let mut fresh = instrument(model, &patch);
+        fresh.event(NOTE_ON, 45, 100);
+        let (mut after_reset, mut from_new) = (vec![0i16; lead], vec![0i16; lead]);
+        again.render(&mut after_reset);
+        fresh.render(&mut from_new);
+        assert_eq!(after_reset, from_new, "{model:?}: a reset leaves the volume on its way");
     }
 }
 

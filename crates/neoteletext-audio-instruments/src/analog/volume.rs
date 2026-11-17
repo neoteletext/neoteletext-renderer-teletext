@@ -17,6 +17,25 @@ use super::filter::ONE_Q28;
 /// on a volume control.
 pub const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
 
+/// The largest value of a volume controller.
+///
+/// Source: MIDI 1.0: a data byte is seven bits.
+const CONTROLLER_FULL: i64 = 0x7f;
+/// Its square, which the square of a controller is a share of.
+const CONTROLLER_FULL_SQUARED: i64 = CONTROLLER_FULL * CONTROLLER_FULL;
+
+/// The gain a volume controller asks for, in Q28: the square of its
+/// share of [`CONTROLLER_FULL`], so half the controller is a quarter of
+/// the level. A value above the controller's largest, which no message
+/// carries, asks for as much more.
+///
+/// Source: own choice of the law, as a volume control's taper.
+#[must_use]
+pub fn wanted(controller: u8) -> i32 {
+    let square = i64::from(controller).saturating_mul(i64::from(controller));
+    i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / CONTROLLER_FULL_SQUARED).unwrap_or(ONE_Q28)
+}
+
 /// A volume's gain as it stands, in Q28.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct VolumeGain {
@@ -52,7 +71,18 @@ impl Default for VolumeGain {
 
 #[cfg(test)]
 mod tests {
-    use super::{ONE_Q28, VOLUME_SLEW, VolumeGain};
+    use super::{ONE_Q28, VOLUME_SLEW, VolumeGain, wanted};
+
+    #[test]
+    fn a_controller_asks_for_the_square_of_its_share() {
+        assert_eq!(wanted(0), 0);
+        assert_eq!(wanted(127), ONE_Q28);
+        // 64 squared of 127 squared, cut to a whole number of Q28.
+        assert_eq!(wanted(64), 68_169_857);
+        assert_eq!(i64::from(wanted(64)), 4_096 * i64::from(ONE_Q28) / 16_129);
+        // Each step of the controller is more gain than the last.
+        assert!((1..=127u8).all(|value| wanted(value) > wanted(value - 1)));
+    }
 
     #[test]
     fn it_stays_where_it_is_wanted() {

@@ -31,7 +31,7 @@ const LN2_Q32: u32 = 2_977_044_472;
 /// 2^(k/256) in Q31 for k from 0 to 255, each a product of the square
 /// root of two taken one to eight times.
 ///
-/// Source: computed here, as [`SIXTEENTHS`] is.
+/// Source: computed here, as `SIXTEENTHS` is.
 #[allow(
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,

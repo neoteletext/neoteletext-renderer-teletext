@@ -379,9 +379,6 @@ const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 494 / 1000) as i32;
 const LFO_FADE_SHARE: u32 = 2;
 /// Millionths of a second in a second.
 const MICROSECONDS: u64 = 1_000_000;
-/// The square of the largest volume, which the volume's square is a share
-/// of.
-const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
 
 /// The Juno.
 ///
@@ -933,10 +930,7 @@ impl Juno {
     /// second. The work of a sample is at most that of six voices and
     /// the chorus, whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        // The square of the controller's share, in Q28 (own choice of
-        // the law, as a volume control's taper).
-        let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
-        let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
+        let volume = crate::analog::volume::wanted(self.volume);
         let lift = self.bass_lift();
         let chorus = self.chorus_mode();
         for sample in out {
