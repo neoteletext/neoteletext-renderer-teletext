@@ -402,8 +402,23 @@ impl Jupiter8 {
     /// Sets how the keyboard is shared between the patches. A change
     /// releases every voice.
     pub fn set_key_mode(&mut self, key_mode: KeyMode) {
+        let moved = (self.key_mode == KeyMode::Whole) != (key_mode == KeyMode::Whole);
         self.key_mode = key_mode;
         self.apply();
+        if moved {
+            // The last four voices now read another assigner's slots,
+            // which count their triggers by themselves: what each voice
+            // last acted on is its new slot as it stands, released, or a
+            // key whose count and number happened to match the old
+            // slot's would not start its voice.
+            for index in 0..VOICES {
+                let (half, place) = self.place(index);
+                let slot = self.assigners.get(half).and_then(|assigner| assigner.slots().get(place));
+                if let (Some(seen), Some(slot)) = (self.seen.get_mut(index), slot) {
+                    *seen = (slot.triggers, slot.key);
+                }
+            }
+        }
     }
 
     /// The key mode.

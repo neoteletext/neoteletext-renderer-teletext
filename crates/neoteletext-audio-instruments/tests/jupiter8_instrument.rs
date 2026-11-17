@@ -306,6 +306,37 @@ fn dual_layers_the_two_patches_and_split_shares_the_keyboard() {
 }
 
 #[test]
+fn a_key_plays_both_halves_whatever_was_played_before_the_key_mode_changed() {
+    // The last four voices read the upper half's assigner in whole and
+    // the lower's in dual, and each assigner counts its triggers by
+    // itself: the fifth key of whole and the first of dual are both a
+    // slot's first trigger. Every key of the first five, played again
+    // in dual, sounds on a voice of each half.
+    for again in &KEYS[..5] {
+        let mut jupiter = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, 0));
+        for &key in &KEYS[..5] {
+            jupiter.event(NOTE_ON, key, 100);
+            render(&mut jupiter, 0.05);
+            jupiter.event(NOTE_OFF, key, 0);
+            render(&mut jupiter, 0.05);
+        }
+        assert_eq!(jupiter.sounding_voices(), 0);
+        jupiter.set_key_mode(KeyMode::Dual);
+        jupiter.event(NOTE_ON, *again, 100);
+        render(&mut jupiter, 0.05);
+        assert_eq!(jupiter.sounding_voices(), 2, "key {again} in dual after whole");
+        // And back: the fifth voice of whole after the lower half's first.
+        jupiter.event(CONTROL, 120, 0);
+        jupiter.set_key_mode(KeyMode::Whole);
+        for &key in &KEYS[..5] {
+            jupiter.event(NOTE_ON, key, 100);
+        }
+        render(&mut jupiter, 0.05);
+        assert_eq!(jupiter.sounding_voices(), 5, "five keys in whole after dual");
+    }
+}
+
+#[test]
 fn the_hold_holds_and_the_controllers_do_what_midi_says() {
     let mut jupiter = instrument(&square().with(Param::Env2Release, 0));
     jupiter.event(CONTROL, 64, 127);
