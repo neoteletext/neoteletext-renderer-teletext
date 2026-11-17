@@ -95,6 +95,12 @@
 //!   the hold is the pedal alone, without the panel's two selectors: it
 //!   holds both halves in whole and dual and the lower half in split, as
 //!   the instrument's pedal does.
+//! - **Of the bender panel**, which every factory patch sheet draws
+//!   beside its patch, the LFO MOD RISE TIME knob is not here: the
+//!   instrument's touch pad switches the panel's modulation on, and the
+//!   knob lets it rise (owner's manual, printed page 14); the modulation
+//!   wheel that stands in for the pad is moved by hand. Nor is the
+//!   MASTER TUNE knob.
 //! - **Velocity is ignored**, as the instrument's keyboard has none.
 
 mod assign;
