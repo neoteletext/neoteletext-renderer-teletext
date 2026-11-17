@@ -322,9 +322,13 @@ impl SteppedEnvelope {
         }
     }
 
-    /// Sets the samples between updates; zero is taken as one.
+    /// Sets the samples between updates; zero is taken as one. A wait
+    /// that is running is held to the new interval.
     pub const fn set_interval(&mut self, samples: u32) {
         self.interval = if samples == 0 { 1 } else { samples };
+        if self.wait > self.interval {
+            self.wait = self.interval;
+        }
     }
 
     /// Sets the attack's rise at each update, in Q30.

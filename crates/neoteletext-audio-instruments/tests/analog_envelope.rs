@@ -286,3 +286,18 @@ fn an_envelope_scales_a_signal() {
     assert_eq!(apply(-LEVEL, ENVELOPE_ONE / 2), -LEVEL / 2);
     assert_eq!(apply(LEVEL, 0), 0);
 }
+
+#[test]
+fn a_shorter_interval_shortens_the_wait_that_is_running() {
+    // An update every 1,000 samples; ten samples after one, the interval
+    // is set to four. The next update comes when four samples have
+    // passed, not 990, and the one after it four later.
+    let mut envelope = SteppedEnvelope::new();
+    envelope.set_interval(1_000);
+    envelope.set_attack(ENVELOPE_ONE / 64);
+    envelope.gate(true);
+    let before: Vec<i32> = (0..10).map(|_| envelope.tick()).collect();
+    envelope.set_interval(4);
+    let after: Vec<i32> = (0..10).map(|_| envelope.tick()).collect();
+    assert!(after[3] == before[9] && after[4] > after[3] && after[8] > after[7], "{before:?} then {after:?}");
+}
