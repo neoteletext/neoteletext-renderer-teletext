@@ -246,6 +246,35 @@ fn pressure_on_one_key_moves_that_key_alone() {
 }
 
 #[test]
+fn a_key_that_is_up_is_no_longer_pressed() {
+    // The sensor is under the key: once the key is up nothing presses
+    // it, whatever pressure the last message before the note off gave.
+    // A long release, so that the tail is there to measure.
+    let mut patch = panel(&SINE);
+    patch.tones[0].set(Control::PressureLevel, 127);
+    patch.tones[0].set(Control::Release, 100);
+    patch.tones[0].set(Control::Level, 32);
+    let tail = |pressure: Option<u8>| {
+        let mut cs80 = instrument(&patch);
+        cs80.event(NOTE_ON, 69, 100);
+        render(&mut cs80, 0.2);
+        if let Some(pressure) = pressure {
+            cs80.event(KEY_PRESSURE, 69, pressure);
+        }
+        render(&mut cs80, 0.2);
+        cs80.event(cs80_support::NOTE_OFF, 69, 0);
+        render(&mut cs80, 0.05);
+        component(&render(&mut cs80, 0.1), 440.0)
+    };
+    let (plain, pressed) = (tail(None), tail(Some(127)));
+    println!(
+        "the tail of a key pressed until it was let go: {:.2} dB against one never pressed",
+        decibels(pressed / plain)
+    );
+    assert!(plain > 1.0e-3 && decibels(pressed / plain).abs() < 0.1);
+}
+
+#[test]
 fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     // Adjustment procedure, page 27: -2.76 V at the key 48 with a low
     // lever at its foot, +2.76 V at the key 85 with a high lever at its

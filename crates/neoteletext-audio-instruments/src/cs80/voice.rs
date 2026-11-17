@@ -760,9 +760,15 @@ impl Voice {
         }
     }
 
-    /// The key is up.
+    /// The key is up, and with it whatever pressed it: the after-touch
+    /// answers "when you press down on a key after it hits bottom"
+    /// (owner's manual, page 36, items 44 and 45), and a key that is up
+    /// is not at the bottom. A note therefore dies away as one that was
+    /// never pressed; no message is needed, or could be given, to take
+    /// the pressure off a key that is up.
     pub const fn release(&mut self) {
         self.gate = false;
+        self.pressure = 0;
     }
 
     /// Ends the voice's sustain: the next key of a sustain of the second
