@@ -17,8 +17,8 @@
 mod support;
 
 use neoteletext_audio_instruments::SAMPLE_RATE;
-use neoteletext_audio_instruments::juno::{ChorusMode, Model, Patch, Slider, VOICES};
-use support::{MODELS, NOTE_OFF, NOTE_ON, flat, instrument, play, render, rms, samples, square, whistle};
+use neoteletext_audio_instruments::juno::{ChorusMode, Juno, Model, Patch, Slider, VOICES};
+use support::{CONTROL, MODELS, NOTE_OFF, NOTE_ON, flat, instrument, play, render, rms, samples, square, whistle};
 
 #[test]
 fn a_voice_on_the_gate_starts_its_next_note_with_its_envelope_at_rest() {
@@ -513,6 +513,123 @@ fn the_high_pass_switch_moved_at_random_however_fast_does_not_click() {
     }
 }
 
+/// The largest step of what a patch set at this instant changes in the
+/// next `within` samples, in units of a 16-bit sample: the instrument's
+/// output with the patch set, less its output left alone, from nothing
+/// before the instant on.
+fn difference_step(juno: &Juno, patch: &Patch, within: usize) -> i32 {
+    let (mut moved, mut alone) = (juno.clone(), juno.clone());
+    moved.set_patch(patch);
+    let (mut first, mut second) = (vec![0i16; within], vec![0i16; within]);
+    moved.render(&mut first);
+    alone.render(&mut second);
+    let mut last = 0i32;
+    let mut worst = 0i32;
+    for (a, b) in first.iter().zip(&second) {
+        let difference = i32::from(*a) - i32::from(*b);
+        worst = worst.max((difference - last).abs());
+        last = difference;
+    }
+    worst
+}
+
+#[test]
+fn a_switch_moved_while_the_signal_hovers_about_the_quiet_level_steps_by_a_unit_at_the_most() {
+    // What is switched at once is switched on the word of two counts of
+    // quiet samples. Here the signal lies about the level they count
+    // under, half a unit of a 16-bit sample, for a long time: whichever
+    // way each count falls at each instant, at once or by the fade,
+    // nothing steps by more than a unit or two (TODO-6438).
+    let modes = [ChorusMode::Off, ChorusMode::One, ChorusMode::Two, ChorusMode::Both];
+    for model in MODELS {
+        for chorus in modes {
+            // The coupling capacitor's charge after a wide pulse, running
+            // out through the level; six notes held with no waveform, the
+            // filter's hiss alone, a unit or two for ever; a release
+            // dying away through the level; and a loud note under a
+            // volume of 1 to 3.
+            let mut pulse = flat(model, Patch::DEFAULT).with(Slider::DcoPwm, 127);
+            pulse.sawtooth = false;
+            pulse.pulse = true;
+            pulse.vca_gate = true;
+            pulse.chorus = chorus;
+            let mut capacitor = instrument(model, &pulse);
+            capacitor.event(NOTE_ON, 60, 100);
+            render(&mut capacitor, 0.5);
+            capacitor.event(NOTE_OFF, 60, 0);
+            render(&mut capacitor, 2.6);
+
+            let mut silent = flat(model, Patch::DEFAULT);
+            silent.sawtooth = false;
+            silent.vca_gate = true;
+            silent.chorus = chorus;
+            let mut hiss = instrument(model, &silent);
+            for key in 60..66 {
+                hiss.event(NOTE_ON, key, 100);
+            }
+            render(&mut hiss, 0.3);
+
+            let mut dying = flat(model, Patch::DEFAULT).with(Slider::Release, 64);
+            dying.chorus = chorus;
+            let mut release = instrument(model, &dying);
+            release.event(NOTE_ON, 60, 100);
+            render(&mut release, 0.2);
+            release.event(NOTE_OFF, 60, 0);
+            // Until it has died away to eight units.
+            while render(&mut release, 0.1).iter().any(|&sample| sample.abs() > 8.0 / 32_768.0) {
+                assert_eq!(release.sounding_voices(), 1, "{model:?}: the release ended above eight units");
+            }
+
+            let mut loud = flat(model, Patch::DEFAULT);
+            loud.chorus = chorus;
+            let mut faint = instrument(model, &loud);
+            faint.event(CONTROL, 7, 2);
+            faint.event(NOTE_ON, 60, 100);
+            render(&mut faint, 0.3);
+
+            for (name, juno, every) in [
+                ("the capacitor's charge", &mut capacitor, 1_201usize),
+                ("the hiss", &mut hiss, 331),
+                ("a release", &mut release, 1_201),
+                ("a volume of 2", &mut faint, 331),
+            ] {
+                let (mut worst, mut loudest, mut faintest) = (0i32, 0u16, u16::MAX);
+                for instant in 0..40usize {
+                    let mut out = vec![0i16; every + instant % 7];
+                    juno.render(&mut out);
+                    let peak = out.iter().map(|sample| sample.unsigned_abs()).max().unwrap_or(0);
+                    (loudest, faintest) = (loudest.max(peak), faintest.min(peak));
+                    let patch = *juno.patch();
+                    // Each other setting of the chorus: a line cut out or
+                    // a sweep changed shows at once, a line let in within
+                    // the 300 samples of its delay.
+                    for mode in modes.into_iter().filter(|&mode| mode != chorus) {
+                        let mut switched = patch;
+                        switched.chorus = mode;
+                        worst = worst.max(difference_step(juno, &switched, 300));
+                    }
+                    // The amplifier's level to either end, and the
+                    // high-pass switch to each other position: what is
+                    // moved at once shows in the first samples.
+                    for level in [0, 127] {
+                        worst = worst.max(difference_step(juno, &patch.with(Slider::VcaLevel, level), 4));
+                    }
+                    for position in (0..=3u8).filter(|&position| position != patch.hpf) {
+                        let mut switched = patch;
+                        switched.hpf = position;
+                        worst = worst.max(difference_step(juno, &switched, 4));
+                    }
+                }
+                println!(
+                    "{model:?} {chorus:?}: {name}, peaks of {faintest} to {loudest} units: a switch steps {worst} at most"
+                );
+                assert!(loudest <= 40, "{model:?} {chorus:?}: {name} is no faint signal: {loudest}");
+                assert!(worst <= 2, "{model:?} {chorus:?}: {name}: a switch steps the output by {worst} units");
+            }
+        }
+    }
+}
+
 #[test]
 fn the_chorus_comes_back_whole_and_keeps_nothing_of_how_it_was_switched() {
     for model in MODELS {
@@ -605,6 +722,69 @@ fn the_chorus_comes_back_whole_and_keeps_nothing_of_how_it_was_switched() {
             waited.render(&mut same);
             assert_eq!(out, same, "{model:?}: {last:?} keeps something of the switching before it");
             assert_ne!(out[4_800..], same[..4_800], "{model:?}: {last:?} has no chorus");
+        }
+    }
+}
+
+#[test]
+fn the_amplifiers_level_arrives_exactly_wherever_it_was_sent_on_the_way() {
+    // The largest step from one sample to the next.
+    let step = |signal: &[i16]| signal.windows(2).map(|pair| (pair[1] - pair[0]).unsigned_abs()).max().unwrap_or(0);
+    for model in MODELS {
+        let cutoff = match model {
+            Model::Juno106 => 62,
+            Model::Juno60 => 44,
+        };
+        let sine = flat(model, whistle(cutoff));
+        // From end to end and back, and sent elsewhere 1, 20, 64 and 300
+        // samples into the move: the level ends where it was last sent,
+        // to the sample of an instrument that had it from the first, and
+        // nothing steps on the way.
+        for (first, then) in [(127u8, 0u8), (0, 127), (127, 64), (0, 64), (100, 101), (65, 64)] {
+            for after in [1usize, 20, 64, 300] {
+                let mut juno = instrument(model, &sine);
+                let mut there = instrument(model, &sine.with(Slider::VcaLevel, then));
+                let mut loudest = instrument(model, &sine.with(Slider::VcaLevel, 127));
+                for juno in [&mut juno, &mut there, &mut loudest] {
+                    juno.event(NOTE_ON, 60, 100);
+                }
+                let mut out = vec![0i16; 24_000 + after + 9_600];
+                let mut same = out.clone();
+                let mut loud = out.clone();
+                there.render(&mut same);
+                loudest.render(&mut loud);
+                let (lead, rest) = out.split_at_mut(24_000);
+                juno.render(lead);
+                juno.set_patch(&sine.with(Slider::VcaLevel, first));
+                let (between, rest) = rest.split_at_mut(after);
+                juno.render(between);
+                juno.set_patch(&sine.with(Slider::VcaLevel, then));
+                juno.render(rest);
+                let (worst, steady) = (step(&out[23_999..]), step(&loud[12_000..]));
+                assert!(
+                    worst * 5 < steady * 6,
+                    "{model:?}: {first} then {then} after {after}: {worst} against {steady}"
+                );
+                assert_eq!(out[28_800..], same[28_800..], "{model:?}: {first} then {then} after {after} is not {then}");
+            }
+        }
+        // In silence the level is set at once: a note struck straight
+        // after begins at its level, as on an instrument that had it
+        // from the first.
+        for level in [0u8, 127] {
+            let mut juno = instrument(model, &flat(model, square()));
+            let mut there = instrument(model, &flat(model, square()).with(Slider::VcaLevel, level));
+            for juno in [&mut juno, &mut there] {
+                juno.event(NOTE_ON, 45, 100);
+                render(juno, 0.3);
+                juno.event(NOTE_OFF, 45, 0);
+                render(juno, 4.0);
+            }
+            juno.set_patch(&flat(model, square()).with(Slider::VcaLevel, level));
+            for juno in [&mut juno, &mut there] {
+                juno.event(NOTE_ON, 40, 100);
+            }
+            assert_eq!(render(&mut juno, 0.1), render(&mut there, 0.1), "{model:?}: the level {level} is on its way");
         }
     }
 }

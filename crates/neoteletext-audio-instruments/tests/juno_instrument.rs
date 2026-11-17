@@ -378,3 +378,41 @@ fn rendering_speed() {
         println!("{model:?}: six voices with chorus render {:.1} times faster than real time", seconds as f64 / taken);
     }
 }
+
+/// Six voices whose keys are up, the amplifier on the gate and the
+/// release at its longest: silent within thousandths of a second, and
+/// their envelopes run on for 54 s, with their oscillators and filters
+/// (TODO-6438).
+#[test]
+#[ignore = "a measurement, not a check: run it by name, in a release build, for the figure"]
+fn the_cost_of_voices_that_linger_unheard() {
+    for model in MODELS {
+        let mut patch = flat(model, Patch::DEFAULT).with(Slider::Release, 127);
+        patch.vca_gate = true;
+        let seconds = 20;
+        let speed = |juno: &mut Juno| {
+            let mut out = vec![0i16; BLOCK_SAMPLES];
+            let start = Instant::now();
+            for _ in 0..seconds * SAMPLE_RATE as usize / BLOCK_SAMPLES {
+                juno.render(&mut out);
+            }
+            seconds as f64 / start.elapsed().as_secs_f64()
+        };
+        let mut juno = instrument(model, &patch);
+        let rest = speed(&mut juno);
+        for key in [36u8, 48, 55, 60, 64, 67] {
+            juno.event(NOTE_ON, key, 100);
+        }
+        let held = speed(&mut juno);
+        assert_eq!(juno.sounding_voices(), VOICES);
+        for key in [36u8, 48, 55, 60, 64, 67] {
+            juno.event(NOTE_OFF, key, 0);
+        }
+        render(&mut juno, 0.5);
+        let lingering = speed(&mut juno);
+        assert_eq!(juno.sounding_voices(), VOICES, "{model:?}: the envelopes still run");
+        println!(
+            "{model:?}: times faster than real time: {rest:.0} with every voice at rest, {held:.1} with six keys held, {lingering:.1} with six voices lingering unheard"
+        );
+    }
+}
