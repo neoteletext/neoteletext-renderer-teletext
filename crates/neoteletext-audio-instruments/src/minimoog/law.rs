@@ -225,13 +225,17 @@ const fn percent(percent: u64) -> u32 {
 pub const SHARK_SAWTOOTH: i32 = ((10i64 << 31) / 57) as i32;
 
 /// The level of the noise in the mixer against an oscillator at the same
-/// volume, in Q31: 2 dB down at the voice's rate, which is 5 dB down in
-/// the half of its band that the output carries.
+/// volume, in Q31: 2 dB down over the whole band of the rate its
+/// generators run at, twice the output rate, which is 5 dB down in the
+/// half of that band that the output carries.
 ///
 /// Source: Folkman, section VII, "Noise Level": "factory-set to yield
 /// -5dB maximum in the white position". Own reading of what the 5 dB are
 /// below: an oscillator's sawtooth, by root mean square, in the band
-/// that is heard.
+/// that is heard, at the mixer. `tests/minimoog_instrument.rs` measures
+/// 5.2 dB with the filter opened beyond the band; with the CUTOFF
+/// FREQUENCY dial alone at 5, 28 kHz, the ladder's four poles take
+/// another 2.3 dB off the noise and next to nothing off the sawtooth.
 pub const NOISE_LEVEL: i32 = 1_705_806_895;
 
 /// The right shift of the white noise that is always in the mixer,

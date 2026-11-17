@@ -237,19 +237,33 @@ fn a_loud_mixer_is_bent_and_a_quiet_one_is_not() {
 
 #[test]
 fn the_noise_is_five_decibels_below_an_oscillator_and_pink_falls_three_decibels_an_octave() {
+    // The noise's level and colour are the generators'; the ladder is
+    // taken out of the measurement by opening it as far as it goes, with
+    // the contour at 10 holding it 8.5 octaves above the dial. With the
+    // dial alone, at 28 kHz, the four poles take 7 dB off the white noise
+    // at 20 kHz and a third of a decibel off the pink noise's top octave,
+    // and the reading is the filter's.
+    let open = |patch: &Patch| {
+        let mut patch = *patch;
+        patch.contour_amount = 100;
+        patch
+    };
     let mut patch = Patch::DEFAULT;
-    let sawtooth = rms(&play(&patch, 69, 2.0, 0.0)[samples(0.5)..]);
+    let sawtooth = rms(&play(&open(&patch), 69, 2.0, 0.0)[samples(0.5)..]);
     patch.oscillators[0].on = false;
     patch.noise_on = true;
     patch.noise_volume = 100;
-    let white = play(&patch, 69, 12.0, 0.0);
-    println!("white noise {:.2} dB below the sawtooth", decibels(sawtooth / rms(&white)));
-    // In the band the output carries; the open filter, at 28 kHz, takes
-    // a little more off its top.
-    assert!((decibels(sawtooth / rms(&white)) - 5.0 - 1.0).abs() < 1.5);
+    let white = play(&open(&patch), 69, 12.0, 0.0);
+    let below = decibels(sawtooth / rms(&white));
+    // What the dial's 28 kHz takes off the band the output carries: four
+    // poles there take 2.7 dB off white noise to 24 kHz.
+    let dial = decibels(sawtooth / rms(&play(&patch, 69, 12.0, 0.0))) - below;
+    println!("white noise {below:.2} dB below the sawtooth; the filter at 28 kHz takes {dial:.2} dB more");
+    assert!((below - 5.0).abs() < 0.5, "{below}");
+    assert!((1.5..3.0).contains(&dial), "{dial}");
 
     patch.noise_pink = true;
-    let pink = play(&patch, 69, 12.0, 0.0);
+    let pink = play(&open(&patch), 69, 12.0, 0.0);
     // The power in each octave band, from the spectrum's bins.
     let bands = |signal: &[f64]| -> Vec<f64> {
         let spectrum = analog::spectrum(&signal[..1 << 19]);
@@ -266,10 +280,20 @@ fn the_noise_is_five_decibels_below_an_oscillator_and_pink_falls_three_decibels_
     for (index, (white, pink)) in white_bands.windows(2).zip(pink_bands.windows(2)).enumerate() {
         let (white, pink) = (10.0 * (white[1] / white[0]).log10(), 10.0 * (pink[1] / pink[0]).log10());
         println!("octave {index}: white {white:+.2} dB, pink {pink:+.2} dB");
-        // Equal power in each octave for pink, twice it for white; the
-        // open filter takes a little off the top octave of the five.
-        assert!((white - 3.0).abs() < 0.8 && pink.abs() < 0.9);
+        // Equal power in each octave for pink, twice it for white.
+        assert!((white - 3.0).abs() < 0.8 && pink.abs() < 0.8);
     }
+    // Each of the generators' samples is held for two of the voice's,
+    // which takes 0.6 dB off the white noise at 20 kHz and no more.
+    let spectrum = analog::spectrum(&white[..1 << 19]);
+    let bin = RATE / f64::from(1u32 << 19);
+    let about = |hertz: f64| -> f64 {
+        let (from, to) = (((hertz - 500.0) / bin) as usize, ((hertz + 500.0) / bin) as usize);
+        spectrum[from..to].iter().map(|value| value * value).sum::<f64>()
+    };
+    let top = 10.0 * (about(19_500.0) / about(1_000.0)).log10();
+    println!("white noise at 19.5 kHz: {top:+.2} dB of what it is at 1 kHz");
+    assert!((-1.0..0.0).contains(&top), "{top}");
 }
 
 #[test]
