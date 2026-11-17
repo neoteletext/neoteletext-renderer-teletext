@@ -277,6 +277,14 @@ impl Settings {
     }
 }
 
+/// How near the amplifier comes to the level a moved VCA switch asks
+/// before it follows that level at once again: a thousandth of the peak,
+/// 60 dB below the note.
+///
+/// Source: own choice: a step too small to hear under the note it is a
+/// thousandth of.
+const SETTLED: i32 = ENVELOPE_ONE >> 10;
+
 /// What every voice is given at a frame: the instrument's modulation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Controls {
@@ -336,6 +344,11 @@ pub struct Voice {
     gain_step: i32,
     /// The voice's own offset of the cutoff, in octaves.
     trim: i32,
+    /// Where the VCA switch stood when the voice last took a patch, and
+    /// whether the amplifier is still on its way from what the switch's
+    /// other position asked of it.
+    vca_gate: bool,
+    settling: bool,
 }
 
 impl Voice {
@@ -356,6 +369,8 @@ impl Voice {
             gain: 0,
             gain_step: 0,
             trim,
+            vca_gate: false,
+            settling: false,
         }
     }
 
@@ -363,6 +378,11 @@ impl Voice {
     /// oscillator's waveforms.
     pub fn configure(&mut self, settings: &Settings) {
         self.oscillator.enable(settings.waves);
+        if settings.vca_gate != self.vca_gate {
+            self.vca_gate = settings.vca_gate;
+            // With the amplifier closed there is nothing to step.
+            self.settling = self.level.value != 0 || self.gain != 0;
+        }
         let fall = |time: u32| fall_time_constant(time);
         match self.model {
             Model::Juno106 => {
@@ -527,12 +547,26 @@ impl Voice {
             // The Juno-60's controls are continuous; only the gate's
             // edge is rounded, by as much (own choice: a bare edge on
             // the amplifier is a click the instrument does not make).
-            Model::Juno60 => (IMMEDIATE, if settings.vca_gate { smoothing } else { IMMEDIATE }),
+            //
+            // The VCA switch moved under a note takes the amplifier from
+            // the gate's level to the envelope's, which may be far from
+            // it: in one tick that is a step of the whole note. It goes
+            // there as the gate's edge does, and follows the envelope at
+            // once again when it has arrived. Source: JUNO-60 service
+            // notes, CPU board schematic (printed page 9), as far as it
+            // was read: whatever the switch chooses reaches the
+            // amplifier's control by way of R47, 5.6 kΩ, onto C9, 0.22
+            // µF, 1.2 ms, so the instrument's amplifier cannot step
+            // either.
+            Model::Juno60 => (IMMEDIATE, if settings.vca_gate || self.settling { smoothing } else { IMMEDIATE }),
         };
         let octaves = self.cutoff.tick(cutoff_smoothing);
         let hertz = law::raise(law.cutoff_base, octaves).clamp(law.cutoff_bounds.0, law.cutoff_bounds.1);
         self.filter.set(frequency(hertz, RATE), settings.resonance);
         let level = self.level.tick(level_smoothing);
+        if self.settling && self.level.target.saturating_sub(level).saturating_abs() < SETTLED {
+            self.settling = false;
+        }
         self.gain_step = level.saturating_sub(self.gain) >> TICK_BITS;
     }
 
