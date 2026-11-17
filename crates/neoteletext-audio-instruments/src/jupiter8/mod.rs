@@ -181,9 +181,13 @@ impl Performance {
     /// The most the bender and the wheel move the pitch: an octave.
     ///
     /// Source: service notes, adjustment 25-1, BENDER LEVEL: with the
-    /// bender "at extreme left" the key A3 is trimmed to show the one
-    /// cycle that A2 showed, and with it "at extreme right" the key A1:
-    /// an octave either way with the sensitivity at its top. Own choice:
+    /// bender "at extreme left" on the key A3, "adjust VCO BEND to
+    /// display 1 cycle", the one cycle that A2 showed, and with it "at
+    /// extreme right" on the key A1 a trimmer is set for the same: an
+    /// octave either way. The adjustment moves the panel's own VCO BEND
+    /// slider to reach the octave, and its drawing has that slider's
+    /// knob below the top, so the slider's top is an octave or more, by
+    /// how much no document says. Own choice: the octave is the top; and
     /// the wheel's share of the oscillator the same, which adjustment
     /// 22's octave for the panel's own LFO MOD agrees with.
     pub const BEND_MAX: u16 = 1_200;
