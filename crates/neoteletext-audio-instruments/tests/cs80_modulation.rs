@@ -202,6 +202,31 @@ fn the_pulse_width_moves_between_the_ticks_and_not_in_their_steps() {
 }
 
 #[test]
+fn the_pitch_set_at_the_ticks_leaves_little_at_their_rate() {
+    // A vibrato at the sub oscillator's fastest, 55.6 Hz, a tenth of an
+    // octave either way. The pitch is set once a tick, a staircase of
+    // 6,000 steps a second, which adds components the ticks' rate away
+    // from the note, at 880 + 6,000 Hz and the vibrato's rate about it,
+    // where the vibrato's own sidebands, 55.6 Hz apart about the note,
+    // have long died away: 83 dB below the note's strongest part.
+    //
+    // Moving the frequency through every sample was tried and is not
+    // done: by the oscillator's `run` it left 90 dB and cost a seventh
+    // of the instrument's speed with everything on (16.7 to 14.1 times
+    // real time) and more than two fifths with sixteen sines (50 to 28);
+    // by setting the step each sample, 89 dB for a tenth and a quarter.
+    let mut patch = panel(&SINE);
+    patch.set(Global::SubSpeed, 127);
+    patch.set(Global::SubVco, 40);
+    let signal = &play(&patch, 81, 100, 2.5, 0.0)[24_000..];
+    let rate = 1_000.0 / 18.0;
+    let strongest = (-3..=3).map(|side| component(signal, 880.0 + rate * f64::from(side))).fold(0.0, f64::max);
+    let added = (-2..=2).map(|side| component(signal, 880.0 + 6_000.0 + rate * f64::from(side))).fold(0.0, f64::max);
+    println!("the ticks' rate above a fast vibrato, against its strongest part: {:.1} dB", decibels(added / strongest));
+    assert!(decibels(added / strongest) < -80.0, "{} dB", decibels(added / strongest));
+}
+
+#[test]
 fn the_touch_moves_the_level_and_the_brilliance() {
     // The level: 6.4 V at 0.9 dB to the volt, 5.76 dB, under the firmest
     // pressure; the hardest stroke gives 7.9 / 8.5 of it, 5.35 dB above
