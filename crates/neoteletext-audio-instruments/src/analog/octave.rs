@@ -136,6 +136,8 @@ pub fn raise(value: u32, octaves: i32) -> u32 {
         ..=-64 => 0,
         -63..=-1 => scaled >> whole.unsigned_abs().saturating_add(30),
         0..=31 => (scaled << whole.unsigned_abs()) >> 30,
+        // Nothing raised is still nothing.
+        _ if value == 0 => 0,
         _ => u128::MAX,
     };
     u32::try_from(shifted).unwrap_or(u32::MAX)
@@ -158,6 +160,8 @@ mod tests {
         }
         assert!(worst < 0.001 * 2.0f64.ln() / 1200.0, "{worst}");
         assert_eq!((raise(5, 40 * OCTAVE), raise(u32::MAX, -70 * OCTAVE), raise(8, -3 * OCTAVE)), (u32::MAX, 0, 1));
+        // Nothing stays nothing however far it is raised.
+        assert_eq!((raise(0, 0), raise(0, 31 * OCTAVE), raise(0, 32 * OCTAVE), raise(0, i32::MAX)), (0, 0, 0, 0));
     }
 
     #[test]
