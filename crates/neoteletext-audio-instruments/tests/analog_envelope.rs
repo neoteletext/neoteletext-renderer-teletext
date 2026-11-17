@@ -14,8 +14,8 @@
 
 use neoteletext_audio_instruments::analog::LEVEL;
 use neoteletext_audio_instruments::analog::envelope::{
-    ATTACK_TARGET, ENVELOPE_ONE, Fall, IMMEDIATE, REST_LEVEL, RcEnvelope, Stage, SteppedEnvelope, apply, linear_step,
-    time_constant,
+    ATTACK_TARGET, ATTACK_TARGET_FLOOR, ENVELOPE_ONE, Fall, IMMEDIATE, REST_LEVEL, RcEnvelope, Stage, SteppedEnvelope,
+    apply, linear_step, time_constant,
 };
 
 const RATE: u32 = 48_000;
@@ -74,6 +74,26 @@ fn the_analogue_attack_overshoots_its_peak_and_takes_1_466_time_constants() {
         }
         assert_eq!(levels[levels.len() - 1], ENVELOPE_ONE);
     }
+}
+
+#[test]
+fn an_instruments_own_attack_target_sets_how_long_the_attack_takes() {
+    // Towards twice the peak the attack takes ln 2 time constants; the
+    // target is held between its floor and the largest level.
+    let time = |target: i32| {
+        let mut envelope = RcEnvelope::new();
+        envelope.set_attack_target(target);
+        envelope.set_attack(time_constant(100_000, RATE));
+        envelope.gate(true);
+        samples_until(&mut envelope, |envelope, _| envelope.stage() == Stage::Decay) as f64 / f64::from(RATE)
+    };
+    let twice = time(i32::MAX);
+    assert!((twice - 0.1 * f64::ln(2.0)).abs() < 0.0002, "{twice}");
+    let floor = 0.1 * (f64::from(ATTACK_TARGET_FLOOR) / f64::from(ATTACK_TARGET_FLOOR - ENVELOPE_ONE)).ln();
+    assert!((time(0) - floor).abs() < 0.0002 && (time(ENVELOPE_ONE) - floor).abs() < 0.0002);
+    // Unset, it is the block's own.
+    let unset = 0.1 * (f64::from(ATTACK_TARGET) / f64::from(ATTACK_TARGET - ENVELOPE_ONE)).ln();
+    assert!((time(ATTACK_TARGET) - unset).abs() < 0.0002);
 }
 
 #[test]

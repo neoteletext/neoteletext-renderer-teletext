@@ -19,6 +19,12 @@ pub const ENVELOPE_ONE: i32 = 1 << 30;
 /// "Attack Asymptote Voltage 6.5 V", "Attack Peak Voltage 5.0 V" (typical).
 pub const ATTACK_TARGET: i32 = (ENVELOPE_ONE as i64 * 65 / 50) as i32;
 
+/// The lowest level [`RcEnvelope::set_attack_target`] takes: a sixty-fourth
+/// above the peak, so that an attack always ends.
+///
+/// Source: own choice.
+pub const ATTACK_TARGET_FLOOR: i32 = ENVELOPE_ONE + ENVELOPE_ONE / 64;
+
 /// The level below which a released envelope is at rest: 90 dB below the
 /// peak.
 ///
@@ -123,6 +129,8 @@ pub struct RcEnvelope {
     decay: i32,
     release: i32,
     sustain: i32,
+    /// The level the attack charges towards.
+    target: i32,
 }
 
 impl Default for RcEnvelope {
@@ -150,7 +158,17 @@ impl RcEnvelope {
             decay: IMMEDIATE,
             release: IMMEDIATE,
             sustain: ENVELOPE_ONE,
+            target: ATTACK_TARGET,
         }
+    }
+
+    /// Sets the level the attack charges towards, for an instrument whose
+    /// circuit is not the CEM3310's: [`ATTACK_TARGET`] until it is set.
+    /// It is held between [`ATTACK_TARGET_FLOOR`] and the largest level,
+    /// one unit short of twice the peak. The attack then takes the
+    /// natural logarithm of target / (target - peak) time constants.
+    pub const fn set_attack_target(&mut self, target: i32) {
+        self.target = if target < ATTACK_TARGET_FLOOR { ATTACK_TARGET_FLOOR } else { target };
     }
 
     /// Sets the attack, as [`time_constant`] gives it; a negative
@@ -208,7 +226,7 @@ impl RcEnvelope {
     pub const fn tick(&mut self) -> i32 {
         let (target, coefficient) = match self.stage {
             Stage::Rest => return 0,
-            Stage::Attack => (ATTACK_TARGET, self.attack),
+            Stage::Attack => (self.target, self.attack),
             Stage::Decay => (self.sustain, self.decay),
             Stage::Release => (0, self.release),
         };
