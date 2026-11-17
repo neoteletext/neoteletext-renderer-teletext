@@ -271,7 +271,8 @@ impl Modulator {
     /// only the triangle is shifted to stand about zero (sheet SD334).
     /// The triangle is lowest where the sawtooth falls, and the square
     /// is high about that fall, as the CEM3340 makes its pulse of the
-    /// triangle (data sheet, page 4, figure 1).
+    /// triangle (data sheet, page 4, figure 1); on revisions 1 and 2 the
+    /// triangle is highest there ([`Law::triangle_from_top`]).
     fn tick(&mut self, patch: &Patch, law: &Law) -> i32 {
         let phase = self.phase;
         self.phase = phase.wrapping_add(self.step);
@@ -281,6 +282,7 @@ impl Modulator {
         // From -1/2 at the cycle's start to 1/2 at its middle.
         let folded = if phase < Self::HALF { rise } else { UNIT.saturating_sub(rise) };
         let turning = (folded << 2).saturating_sub(UNIT) >> LFO_TRIANGLE_SHIFT;
+        let turning = if law.triangle_from_top { turning.saturating_neg() } else { turning };
         let high = phase.wrapping_add(Self::HALF >> 1) < Self::HALF;
         let level = if high { law::gain(UNIT, law.lfo.2) } else { 0 };
         match law.mixing {

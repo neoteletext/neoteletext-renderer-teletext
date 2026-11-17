@@ -162,6 +162,9 @@ pub struct Law {
     pub pulse_width_modulation: (i32, i32, i32),
     /// How one oscillator's waveforms come together.
     pub mixing: Mixing,
+    /// Whether an oscillator's triangle is at its top where its sawtooth
+    /// falls, and not at its foot.
+    pub triangle_from_top: bool,
     /// The levels of the pulse and of the triangle against the
     /// sawtooth's, in Q30.
     pub levels: (i32, i32),
@@ -262,6 +265,10 @@ pub const REV3: Law = Law {
     // and the triangle are each as large as the sawtooth, in the mixer
     // and, through the same 150 kΩ (R4243, R4260), in Poly-Mod.
     mixing: Mixing::Currents,
+    // Source: CEM3340 data sheet, page 4, figure 1: the triangle is the
+    // chip's own wave and the sawtooth is made of it, falling where the
+    // triangle is lowest.
+    triangle_from_top: false,
     levels: (ONE_Q30_LEVEL, ONE_Q30_LEVEL),
     // Source: TM3 adjustment 4-20 (pages 70 and 71): with the cutoff
     // voltage "as close to 2.000V as the quantized voltage steps will
@@ -415,6 +422,23 @@ pub const REV2: Law = Law {
     // makes 10 V from peak to peak of the sawtooth's 10 V: as large as
     // the sawtooth.
     mixing: Mixing::Node,
+    // Source: TM2 section 2-23 (page 45): "The sawtooth and psuedo-
+    // triangle output pins are both emitter-followers from the internal
+    // sawtooth", and the converter "produces the actual bipolar triangle
+    // by subtracting the sawtooth from the half-sawtooth obtained by
+    // biasing the psuedo-triangle emitter follower and amplifying by
+    // X2". Sheet SD411 (page 85): that follower (the SSM2030's pin 5) is
+    // held at 5 V by R489, 15 kΩ, from 15 V and R487, 7.5 kΩ, to ground,
+    // so the converter's other input has the sawtooth where it is above
+    // 5 V and 5 V below; with R445, 10 kΩ, from the sawtooth, R446,
+    // 20 kΩ, from 15 V and R447, 20 kΩ, back, what leaves is four times
+    // that input less twice the sawtooth less 15 V: 5 V where the
+    // sawtooth is at 0 V and at 10 V, -5 V where it is at 5 V. The
+    // triangle is at its top where the sawtooth falls. The SSM2030 data
+    // sheet's page 2 draws the same converter with the same values, and
+    // no waveform. The low-frequency oscillator's is the same (sheet
+    // SD312, page 75).
+    triangle_from_top: true,
     levels: ((ONE_Q30_LEVEL as i64 * 3 / 4) as i32, ONE_Q30_LEVEL),
     // Source: TM2 adjustment 4-17 (pages 114 and 115): with the cutoff
     // voltage "as close to +3.083-V reading as the quantized voltage

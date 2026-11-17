@@ -154,6 +154,30 @@ fn wheel_mod_bends_pitch_through_182_kilohms_and_the_shapes_stand_as_the_chip_ma
 }
 
 #[test]
+fn the_triangle_starts_at_its_foot_on_revision_3_and_at_its_top_on_revision_2() {
+    // CEM3340 data sheet, figure 1: the sawtooth falls where the
+    // triangle is lowest. TM2 section 2-23 and sheet SD411: revision 2's
+    // converter takes twice the sawtooth from four times a follower that
+    // 15 kΩ and 7.5 kΩ hold at 5 V, which is 5 V where the sawtooth
+    // falls and -5 V at its middle. A new instrument's low-frequency
+    // oscillator starts where its sawtooth has just fallen: at 0.17 Hz
+    // and 0.21 Hz the first 0.3 s is a sixteenth of a cycle or less.
+    for (model, knob, sharp) in [(Model::Rev3, 27u8, false), (Model::Rev2, 38, true)] {
+        let patch = vibrato(model, Switch::LfoTriangle, knob);
+        let mut prophet = instrument(model, &patch);
+        prophet.event(CONTROL, 1, 127);
+        prophet.event(NOTE_ON, KEY, 100);
+        let early = pitch(&render(&mut prophet, 0.3));
+        let mut plain = instrument(model, &patch);
+        plain.event(NOTE_ON, KEY, 100);
+        let base = pitch(&render(&mut plain, 0.3));
+        let above = cents(base, early);
+        println!("{model:?}: the triangle's first 0.3 s is {above:.0} cents from the pitch");
+        assert!(if sharp { above > 100.0 } else { above < -100.0 }, "{model:?}: {above}");
+    }
+}
+
+#[test]
 fn poly_mod_from_the_filter_envelope_raises_oscillator_a_through_301_kilohms() {
     // Five volts of envelope (own choice) through 301 kΩ: 1.661 octaves
     // at the top of the amount; half the amount at full sustain is half.
