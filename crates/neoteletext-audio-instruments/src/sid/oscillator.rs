@@ -64,9 +64,22 @@ const NOISE_WAVEFORM_SHIFT: u32 = WAVEFORM_BITS - 8;
 /// Source: Alstrup, "Examination of SID noise waveform": "the reseting of
 /// a waveform with the TEST-bit does not reset the waveform immediately,
 /// but rather $2000-$8000 cycles later (this figure varies greatly)". The
-/// low end of the measured range is the own choice, so that a player
-/// holding the bit for one 50 Hz frame (19,656 cycles) gets its reset.
-const NOISE_RESET_CYCLES: u16 = 0x2000;
+/// top of the measured range is taken, because three real chips do not
+/// reset within the fiftieth of a second between two calls of a tune's
+/// player, some 19,700 cycles. In Stone Oakvalley's recordings of his
+/// 6581 R3 and R4 and his 8580 R5 playing the tune "R-Type"
+/// (6581-8580.com), voice 1 holds the test bit for one frame before each
+/// burst of noise at frequency $7514. Were the register
+/// reset in that frame, every burst would be the same samples; on each of
+/// the three chips the bursts are no more alike than unrelated noise.
+/// Measured 17 November 2026 on 65 bursts above 6 kHz, the best
+/// correlation between pairs of them: 0.23 on each chip, where this chip
+/// playing the same registers gives 0.99 with the reset inside the frame
+/// and 0.24 with it outside. (TODO-6427: $2000 before, the low end of the
+/// range, which made each such burst begin from the reset register, and
+/// that voice 2.3 semitones darker by its spectrum's centroid than an
+/// emulator run as a separate program; it is now within 0.1.)
+const NOISE_RESET_CYCLES: u16 = 0x8000;
 
 /// Cycles between each fall of one unit of a waveform value held with no
 /// waveform selected.
@@ -474,6 +487,7 @@ mod tests {
         ChipModel, NOISE_RESET, NOISE_RESET_CYCLES, NOISE_RESET_WAVEFORM, Oscillator, PULL_REACH_MAX, WAVEFORM_MAX,
         control, noise_waveform, pull_reach_6581, pulled_6581,
     };
+    use crate::sid::ChipClock;
     use std::collections::BTreeSet;
     use std::vec::Vec;
 
@@ -666,6 +680,25 @@ mod tests {
         assert_eq!(oscillator.noise, NOISE_RESET);
         oscillator.write_control(control::NOISE);
         assert!(run(&mut oscillator, 20_000, ChipModel::Mos8580).iter().any(|&value| value != 0));
+    }
+
+    #[test]
+    fn a_test_bit_held_for_one_frame_does_not_reset_the_noise() {
+        // What a drum of the tune "R-Type" does: the test bit for one
+        // block of register images, a fiftieth of a second, then noise at
+        // frequency $7514. Three real chips play a different burst each
+        // time (NOISE_RESET_CYCLES).
+        let frame = ChipClock::Pal.hz() as usize * crate::BLOCK_SAMPLES / crate::SAMPLE_RATE as usize;
+        let mut oscillator = oscillator(0x7514, control::NOISE);
+        run(&mut oscillator, frame, ChipModel::Mos6581);
+        let before = oscillator.noise;
+        assert_ne!(before, NOISE_RESET);
+        oscillator.write_control(control::TEST);
+        run(&mut oscillator, frame, ChipModel::Mos6581);
+        assert_eq!(oscillator.noise, before, "one frame of the test bit reset the noise");
+        // A second frame of it is past the top of the measured range.
+        run(&mut oscillator, frame, ChipModel::Mos6581);
+        assert_eq!(oscillator.noise, NOISE_RESET);
     }
 
     #[test]
