@@ -313,8 +313,19 @@ impl Settings {
             [(saw, saw_size), (pulse, pulse_size), (triangle, triangle_size)]
                 .map(|(share, size)| law::gain(law::gain(share, size), level))
         };
-        let [mix_a_saw, mix_a_pulse, _] = weigh(shares_a, amount(Knob::MixerOscA));
-        let mix_b = weigh(shares_b, amount(Knob::MixerOscB));
+        // Source: TM3 sheet SD431 (page 50): each oscillator's mixer
+        // amplifier, half of U464, takes the sawtooth at the input
+        // marked "+" (R4364; R4241) and the pulse and the triangle at
+        // the other (R4366; R4250 and R4285), so those two are upside
+        // down against the sawtooth in the mix. Poly-Mod's own node
+        // (R4243, R4251, R4260) takes all three one way round. Revision
+        // 2's waveforms meet at one node before the mixer (TM2 SD411).
+        let turned = |[saw, pulse, triangle]: [i32; 3]| match law.mixing {
+            Mixing::Currents => [saw, pulse.saturating_neg(), triangle.saturating_neg()],
+            Mixing::Node => [saw, pulse, triangle],
+        };
+        let [mix_a_saw, mix_a_pulse, _] = turned(weigh(shares_a, amount(Knob::MixerOscA)));
+        let mix_b = turned(weigh(shares_b, amount(Knob::MixerOscB)));
         // Poly-Mod takes the waveforms as they stand, the sawtooth and
         // the pulse above zero and so at half their swing either side of
         // their own middle; the triangle is about zero already.
