@@ -18,7 +18,8 @@ mod cs80_support;
 
 use std::f64::consts::PI;
 
-use cs80_support::{component, decibels, panel, pitch, play};
+use cs80_support::{component, decibels, panel, pitch, play, samples};
+use neoteletext_audio_instruments::cs80::presets::PRESETS;
 use neoteletext_audio_instruments::cs80::{Control, Global, Patch, RATE};
 
 /// A filter of the documents: its cutoff in hertz and its Q.
@@ -217,4 +218,21 @@ fn the_square_is_eight_tenths_of_the_sine_and_the_levels_are_straight() {
     mixed.tones[1].set(Control::Level, 0);
     let share = component(&play(&mixed, 57, 100, 1.5, 0.0)[24_000..], hertz) / found;
     assert!((share - 95.0 / 127.0).abs() < 0.01, "{share}");
+}
+
+#[test]
+fn the_flutes_high_pass_filter_stands_below_its_note() {
+    // Service manual, page 31, T51 circuit diagram, column D, row 7: the
+    // high-pass row's part is 51 kΩ, written with no point, which leaves
+    // the row at 0.63 V and the filter's cutoff 1.4 octaves below the
+    // note. Read as 5.1 kΩ it stood two octaves above the note, on the
+    // fourth harmonic, and a flute had lost its fundamental.
+    let patch = Patch::with_tones(PRESETS[3].1, PRESETS[3].1);
+    assert_eq!(PRESETS[3].0, "FLUTE");
+    let signal = play(&patch, 60, 64, 2.0, 0.0);
+    let steady = &signal[samples(1.0)..];
+    let note = 261.626;
+    let fundamental = component(steady, note);
+    let fourth = component(steady, 4.0 * note);
+    assert!(decibels(fundamental / fourth) > 6.0, "{:.1} dB", decibels(fundamental / fourth));
 }

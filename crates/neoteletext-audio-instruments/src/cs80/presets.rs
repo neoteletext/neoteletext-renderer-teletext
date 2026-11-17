@@ -60,7 +60,10 @@
 //!   C row 25).
 //! - **Doubtful figures**, each the likeliest reading: T53 B row 14 (75
 //!   kΩ) and row 15 (3.9 kΩ); T52 D row 13 (510 Ω), row 14 (3 kΩ) and row
-//!   25 (390 Ω).
+//!   25 (390 Ω); T54 C row 20 (330 kΩ). T51 D row 7, FLUTE's high-pass
+//!   row, is written "51K" with no point, where its neighbours' points
+//!   are plain, and is taken as 51 kΩ; as 5.1 kΩ the filter would stand
+//!   on the fourth harmonic of every note.
 //! - **The diode's own drop** is made up by the column's supply: a row
 //!   with a diode alone is taken as the full ten volts. Service manual,
 //!   page 27, BA circuit diagram: each column is driven by a transistor
@@ -107,7 +110,7 @@ pub const PRESETS: [(&str, Tone); PRESET_COUNT] = [
     (
         "FLUTE",
         Tone::from_levers([
-            0, 0, 0, 0, 1, 0, 51, 85, 40, 102, 66, 9, 82, 106, 34, 127, 0, 87, 127, 66, 36, 127, 18, 127, 18, 127,
+            0, 0, 0, 0, 1, 0, 8, 85, 40, 102, 66, 9, 82, 106, 34, 127, 0, 87, 127, 66, 36, 127, 18, 127, 18, 127,
         ]),
     ),
     // T51, column E (page 31).
