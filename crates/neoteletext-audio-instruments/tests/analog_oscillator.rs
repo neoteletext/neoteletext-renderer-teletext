@@ -620,3 +620,29 @@ fn an_oscillator_set_back_makes_again_what_it_made() {
         }
     }
 }
+
+#[test]
+fn a_waveform_switched_off_and_on_again_starts_from_nothing() {
+    // A waveform that is switched off stops leaving its ring, and what
+    // was on its way out stayed there: switched on again, however much
+    // later, it began with those samples of the old moment.
+    let mut oscillator = Oscillator::new();
+    oscillator.set_step(frequency(100_000, 96_000));
+    for _ in 0..300 {
+        let _ = oscillator.tick(None);
+    }
+    oscillator.enable(waveform::ALL & !waveform::SAWTOOTH);
+    for _ in 0..200 {
+        assert_eq!(oscillator.tick(None).sawtooth, 0);
+    }
+    oscillator.enable(waveform::ALL);
+    // No edge falls in these samples: the sawtooth's own delay passes
+    // in silence, and then it is the sawtooth of the phase.
+    let after: Vec<i32> = (0..2 * Oscillator::DELAY).map(|_| oscillator.tick(None).sawtooth).collect();
+    assert!(after[..Oscillator::DELAY].iter().all(|&sample| sample == 0), "{after:?}");
+    let expected = (oscillator.phase() >> 7).cast_signed() - LEVEL;
+    let step = (oscillator.step() >> 7).cast_signed();
+    let last = after[2 * Oscillator::DELAY - 1];
+    let delay = i32::try_from(Oscillator::DELAY).unwrap();
+    assert!((last - (expected - step * delay)).abs() <= step, "{last} for {expected}");
+}

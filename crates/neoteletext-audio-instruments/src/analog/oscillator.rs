@@ -383,8 +383,24 @@ impl Oscillator {
     }
 
     /// Chooses the waveforms to make, as [`waveform`] bits; the others
-    /// cost nothing and read zero.
+    /// cost nothing and read zero. A waveform switched on begins with its
+    /// delay of [`Oscillator::DELAY`] samples of silence.
     pub const fn enable(&mut self, waveforms: u8) {
+        // A waveform that is switched off leaves nothing on its way out
+        // for the time it is switched on again.
+        let off = self.enabled & !waveforms;
+        if off & waveform::SAWTOOTH != 0 {
+            self.sawtooth = Ring::new();
+        }
+        if off & waveform::PULSE != 0 {
+            self.pulse = Ring::new();
+        }
+        if off & waveform::TRIANGLE != 0 {
+            self.triangle = Ring::new();
+        }
+        if off & waveform::SUB != 0 {
+            self.sub = Ring::new();
+        }
         self.enabled = waveforms;
     }
 
