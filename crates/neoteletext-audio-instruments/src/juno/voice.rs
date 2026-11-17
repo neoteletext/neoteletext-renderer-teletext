@@ -589,9 +589,15 @@ impl Voice {
     pub fn tick(&mut self, settings: &Settings, law: &Law, smoothing: i32) {
         let (cutoff_smoothing, level_smoothing) = match self.model {
             Model::Juno106 => (smoothing, smoothing),
-            // The Juno-60's controls are continuous; only the gate's
-            // edge is rounded, by as much (own choice: a bare edge on
-            // the amplifier is a click the instrument does not make).
+            // The Juno-60's cutoff is not smoothed, and the instrument's
+            // is not either: each voice's cutoff voltage is held on C14,
+            // 4,700 pF, straight from the switch IC47, with no resistor
+            // before it as the Juno-106 has (JUNO-60 service notes, page
+            // 15, "VCF Control Voltages", and CPU board schematic,
+            // printed page 9), so it steps at once when it is refreshed.
+            // Only the gate's edge is rounded, by as much as the
+            // Juno-106's (own choice: a bare edge on the amplifier is a
+            // click the instrument does not make).
             //
             // The VCA switch moved under a note takes the amplifier from
             // the gate's level to the envelope's, which may be far from

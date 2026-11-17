@@ -64,6 +64,17 @@
 //!   schematic's 10 kHz, where the instrument has fourth-order ones; the
 //!   chip's noise, which the instrument is known for, is left out.
 //! - **The Juno-60's low-frequency oscillator** is taken as a triangle.
+//! - **The Juno-60's sliders have the Juno-106's 128 places**, the
+//!   patch's. The instrument reads each to 8 bits and puts it out once
+//!   in its processor's loop of 7.2 ms (service notes, pages 16 and 17,
+//!   "ADC", "Pot data output" and figure 10), so a step of its cutoff
+//!   slider is 81 cents where a step here is 163, taken at the next tick,
+//!   a sixth of a millisecond. Under a resonant note a step is a step of
+//!   the ringing's pitch on the instrument as it is here: its cutoff
+//!   voltage is held on a capacitor with no resistor before it (CPU
+//!   board schematic, C14). No sample steps for it: the control sweep
+//!   (`tests/juno_control_sweep.rs`) has a step of the slider under a
+//!   resonant note at 0.88 of the note's own largest step.
 //! - **The bass lift** of the Juno-106's high-pass switch at 0 is one
 //!   pole's shelf from two resistors and a capacitor of a path whose
 //!   other parts were not read.
