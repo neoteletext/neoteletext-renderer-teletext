@@ -293,7 +293,18 @@ pub const REV3: Law = Law {
     // volt to the octave: 0.909 octave to the volt, 9.09 octaves over
     // ten volts, 0.04 Hz to 21.8 Hz. The square comes through 200 kΩ
     // from 13.5 V and the sawtooth through 160 kΩ from 10 V: 1.08 of
-    // it.
+    // it. The components bear the manual's range out no nearer than a
+    // quarter either way: by the CEM3340 data sheet's formulas (page 3),
+    // with the sheet's 0.1 µF (C382), 2.21 MΩ of reference (R3138),
+    // 5.62 kΩ, 1.82 kΩ and an untrimmed 30.1 kΩ about the multiplier
+    // (R3108, R3137, R3107) and 487 kΩ from 15 V to set the knob's 0
+    // (R3135, whose first figure is faint in the scan), the oscillator
+    // runs from 0.049 Hz, 0.94 octave to the volt, to 33 Hz; the
+    // oscillators of the voices trim that resistor between 28.7 and
+    // 33.7 kΩ, so one chip and the next differ that much. The manual's
+    // words are kept. Sequential's patch sheet 1-1 has "approximately 5
+    // cycles per second" with the knob drawn at 6.6, but of revisions 1
+    // and 2 ([`REV2`]); here that knob gives 2.5 Hz.
     lfo: (40, octaves(909, 12_000), (ONE_Q30_LEVEL as i64 * 108 / 100) as i32),
     // Source: own choice: the glide's amplifier is linear only over a
     // small difference (TM3 sheet SD334: a CA3280 with 4.7 kΩ at its
@@ -307,8 +318,10 @@ pub const REV3: Law = Law {
     // compensation"; own choice of 10 cents.
     tolerance: (octaves(15, 12_000), cents(10)),
     // Source: TM3 SD431 (page 50): the filter's output passes C4164,
-    // 2.2 µF, into R4499, 100 kΩ: 1 / (2 π R C) is 0.72 Hz.
-    blocking: (false, 723),
+    // 2.2 µF, to the output buffer's non-inverting input, which R4460,
+    // 68 kΩ, ties to ground: 1 / (2 π R C) is 1.06 Hz. (R4499, 100 kΩ,
+    // is at the buffer's other input, with R4500 the buffer's gain.)
+    blocking: (false, 1_064),
     // Source: measured on this filter at the feedback of the knob's top
     // (`tests/prophet5_filter.rs`); adjustment 4-20 tunes the filters
     // while they oscillate.

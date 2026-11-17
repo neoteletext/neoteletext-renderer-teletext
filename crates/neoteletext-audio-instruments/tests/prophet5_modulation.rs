@@ -105,7 +105,21 @@ fn wheel_mod_bends_pitch_through_182_kilohms_and_the_shapes_stand_as_the_chip_ma
             (Switch::LfoSawtooth, 0.0, unit),
             (Switch::LfoSquare, 0.0, square * unit),
         ] {
-            let (found_low, found_high, _) = swing(&wobble(model, &vibrato(model, shape, 96), 1.5));
+            let track = wobble(model, &vibrato(model, shape, 96), 1.5);
+            let (mut found_low, mut found_high, _) = swing(&track);
+            if shape == Switch::LfoSquare {
+                // Two levels: each is the middle one of its side. The
+                // cycles a jump spoils, which are as many as the
+                // thirtieth that the swing leaves out, do not move it.
+                let middle = f64::midpoint(found_low, found_high);
+                let side = |above: bool| {
+                    let mut values: Vec<f64> =
+                        track.iter().map(|&(_, value)| value).filter(|&value| (value > middle) == above).collect();
+                    values.sort_by(f64::total_cmp);
+                    values[values.len() / 2]
+                };
+                (found_low, found_high) = (side(false), side(true));
+            }
             println!("{model:?} {shape:?}: {found_low:.1} to {found_high:.1} cents (expected {low:.1} to {high:.1})");
             assert!((found_low - low).abs() < 35.0 && (found_high - high).abs() < 35.0, "{model:?} {shape:?}");
         }
