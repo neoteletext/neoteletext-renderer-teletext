@@ -275,15 +275,18 @@ pub const PITCH_LFO: i32 = OCTAVE;
 /// sustain at 10, VCO-1 at 16' with "VCO MOD ENV to 10" is trimmed to
 /// the pitch it had at 2' with none: three octaves.
 pub const PITCH_ENVELOPE: i32 = 3 * OCTAVE;
-/// The octaves VCO-2's waveform at its peak moves VCO-1's pitch with
-/// CROSS MOD at 10.
+/// The octaves that ten volts of VCO-2's waveform move VCO-1's pitch
+/// upwards with CROSS MOD at 10.
 ///
 /// Source: service notes, adjustment 10, VCO CROSS MOD DEPTH: "sets
 /// modulating voltage to the value by which VCO-1 frequency is shifted by
 /// 3 octaves when CROSS MOD is set at 5", with VCO-2 a square wave in its
-/// low range. Own reading: the slider is a straight line, and the three
-/// octaves are the square's upper half against none, the waveform
-/// swinging as far below.
+/// low range. The module board's schematic draws that wave from 0 V to
+/// 10 V, so the three octaves are its ten volts against none, and VCO-1
+/// goes nowhere below its own pitch under it; what each of VCO-2's
+/// waveforms does with its own voltage is in the voice (the sawtooth as
+/// the pulse, the sine half the depth either way, the noise a quarter).
+/// Own reading: the slider is a straight line.
 pub const CROSS_MODULATION: i32 = 6 * OCTAVE;
 /// VCO-2's fine tune at either end, in octaves.
 ///
@@ -350,9 +353,12 @@ pub const TIME_BASE: u32 = 1_000;
 ///
 /// Source: service notes, adjustment 20, ENVELOPE TOTAL TIME: the
 /// trimmer is set "for 6-sec attack period" with the slider at its top
-/// (the specifications say 5 s); then with "ATTACK (around 4-5)" the
-/// envelope's falling edge is centred on a screen of 20 ms a division,
-/// 100 ms. Own choice: the lines between; the sliders' taper resistors
+/// (the specifications say 5 s); then, at 20 ms a division, "adjust both
+/// ENV-1 ATTACK (around 4-5) and timebase VARI or vernier so that
+/// envelope's falling edge is centered on the screen", for the other
+/// voices to be trimmed to: 100 ms, as nearly as a slider "around 4-5"
+/// and a vernier off its calibrated stop say it. Own choice: the middle
+/// point at 4.5 and 100 ms, and the lines between; the sliders' taper resistors
 /// (panel board D: 4.7 kΩ on each) and the chip's law are not known well
 /// enough to do better.
 pub const ATTACK_LAW: [TimePoint; 3] = [(0, 0), (115, octaves(6_644, 1_000)), (255, octaves(12_551, 1_000))];

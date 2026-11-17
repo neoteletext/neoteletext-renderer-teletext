@@ -11,9 +11,10 @@
 //!   comparator make, from which the other waveforms are shaped: VCO-1
 //!   gives a triangle, a sawtooth, a pulse or a square, VCO-2 a sine, a
 //!   sawtooth, a pulse or noise. VCO-2 can be started again by each of
-//!   VCO-1's cycles (sync), can move VCO-1's frequency by up to six
-//!   octaves either way at audio rate (cross modulation), and can leave
-//!   the keyboard for a low range. Under cross modulation the
+//!   VCO-1's cycles (sync), can move VCO-1's frequency at audio rate
+//!   (cross modulation: its sawtooth and its pulse by up to six octaves
+//!   upwards, its sine by up to three either way, its noise by one and a
+//!   half), and can leave the keyboard for a low range. Under cross modulation the
 //!   oscillators run at four times the output rate, and VCO-1's
 //!   frequency is set for every sample of 5.2 µs and held to 48 kHz;
 //!   otherwise they run at twice the output rate.
@@ -73,9 +74,11 @@
 //! - **Cross modulation** is bounded at 48 kHz. With the sync on, what
 //!   it aliases below 20 kHz is 86 dB below the strongest harmonic or
 //!   better with the slider at 5 or less and keys to the A of 880 Hz,
-//!   79 dB on the A of 1,760 Hz, and with the slider at 10 as little as
-//!   46 dB (`tests/jupiter8_oscillator.rs`); without the sync it could
-//!   not be measured. The oscillators' waveforms are the building
+//!   80 dB on the A of 1,760 Hz, with VCO-2's sine or sawtooth; with
+//!   its pulse VCO-1 is a plain sawtooth three octaves up at the slider's
+//!   5, of which the filter folds back 77 dB and 68 dB on those two keys,
+//!   and at 10 one of 28 kHz, 39 dB (`tests/jupiter8_oscillator.rs`);
+//!   without the sync it could not be measured. The oscillators' waveforms are the building
 //!   block's ideal ones, without the glitch the instrument's triangle
 //!   and sine carry where the sawtooth starts again.
 //! - **The resonance at its top** is a feedback of 3.95, where the

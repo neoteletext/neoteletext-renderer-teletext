@@ -347,7 +347,7 @@ pub struct Settings {
     /// Whether each oscillator is heard, or is needed by the other.
     first_runs: bool,
     second_runs: bool,
-    /// Octaves VCO-2 at its peak moves VCO-1.
+    /// Octaves that ten volts of VCO-2's waveform move VCO-1.
     cross: i32,
     mix1: i32,
     mix2: i32,
