@@ -457,7 +457,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | `neoteletext-image` | L5 | Helpers `no_std`; writers `std` |
 | `neoteletext-audio` | Audio (area AUD, section 3, "Audio"): carriage, records, store, control, PCM16, IMA ADPCM and Opus | `no_std`, no allocation; the `encode` feature allocates |
 | `neoteletext-audio-mix` | Audio: the software mixer for ports with an operating system's audio output | `no_std` with `alloc` |
-| `neoteletext-audio-instruments` | Audio: the profile's instruments (REQ-6412), the SID chip and the Yamaha DX7, each rendered from its own input to samples; `neoteletext-audio` plays them behind its `sid` and `dx7` features | `no_std`, no allocation, integer only |
+| `neoteletext-audio-instruments` | Audio: the profile's instruments (REQ-6412), the SID chip, the Yamaha DX7 and five analogue synthesizers (the Juno, the Minimoog, the Prophet-5, the Jupiter-8 and the CS-80), each rendered from its own input to samples; `neoteletext-audio` plays them behind its `sid` and `dx7` features and the feature of each synthesizer | `no_std`, no allocation, integer only |
 | `neoteletext-opus` | Audio: the Opus decoder of the audio profile (decision E.123) | `no_std`, no allocation, integer only |
 | `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages | `std`, sans-IO |
 | `neoteletext-picture-cli` | L9: the program `neottx-picture` | `std` |
@@ -531,6 +531,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `ogg` (features `encode` and `opus`): an encoder's Ogg Opus file read into the profile's packets for `neottx sound`, every page bounded and checked (DEC-2448).
 - `mixer/` (`neoteletext-audio-mix`): live sounds in the mixer.
 - `receiver/instruments` (features `sid` and `dx7`): the instruments that follow instrument sounds in order, as the Opus decoders follow Opus sounds, a budget of blocks a call (REQ-6411).
+- `receiver/instruments/analogue` (features `juno`, `minimoog`, `prophet5`, `jupiter8` and `cs80`): the analogue synthesizers, played as the DX7 is, from its block of slots under a codec each and a patch bank of the instrument's family (DEC-6429).
 
 **`neoteletext-audio-instruments`**
 - `sid/`: the SID chip, MOS 6581 and 8580, written from the chip's public documentation (DEC-6418): oscillators and envelopes each chip cycle, the filter and output stage every fourth, and a decimating filter to 48,000 Hz.

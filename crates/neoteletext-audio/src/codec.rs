@@ -24,6 +24,22 @@ pub enum Codec {
     /// the instrument's packed format. It is stored as a sound and never
     /// played.
     Dx7Bank,
+    /// Roland's Juno-106 or Juno-60 (DEC-6429 foundations item 4): a block
+    /// is the DX7's block, 1 to 16 slots of a timed MIDI message each.
+    Juno,
+    /// Moog's Minimoog Model D: a block is the DX7's block.
+    Minimoog,
+    /// Sequential Circuits' Prophet-5: a block is the DX7's block.
+    Prophet5,
+    /// Roland's Jupiter-8: a block is the DX7's block.
+    Jupiter8,
+    /// Yamaha's CS-80: a block is the DX7's block.
+    Cs80,
+    /// A bank of patches for one family of the analogue synthesizers, which
+    /// its OBJECT names ([`crate::record::TAG_BANK_FAMILY`]): each block is
+    /// one patch in that instrument's own byte layout. It is stored as a
+    /// sound and never played, as a DX7 bank is.
+    PatchBank,
 }
 
 impl Codec {
@@ -52,6 +68,15 @@ impl Codec {
             3 if cfg!(feature = "sid") => Some(Self::Sid),
             4 if cfg!(feature = "dx7") => Some(Self::Dx7),
             5 if cfg!(feature = "dx7") => Some(Self::Dx7Bank),
+            6 if cfg!(feature = "juno") => Some(Self::Juno),
+            7 if cfg!(feature = "minimoog") => Some(Self::Minimoog),
+            8 if cfg!(feature = "prophet5") => Some(Self::Prophet5),
+            9 if cfg!(feature = "jupiter8") => Some(Self::Jupiter8),
+            10 if cfg!(feature = "cs80") => Some(Self::Cs80),
+            // A bank is read by a build with any of its families; one for a
+            // family the build leaves out is ignored when its OBJECT is
+            // read (`record::parse`).
+            11 if cfg!(feature = "analog") => Some(Self::PatchBank),
             _ => None,
         }
     }
@@ -66,7 +91,71 @@ impl Codec {
             Self::Sid => 3,
             Self::Dx7 => 4,
             Self::Dx7Bank => 5,
+            Self::Juno => 6,
+            Self::Minimoog => 7,
+            Self::Prophet5 => 8,
+            Self::Jupiter8 => 9,
+            Self::Cs80 => 10,
+            Self::PatchBank => 11,
         }
+    }
+
+    /// Whether `code` names a family of the analogue synthesizers, built
+    /// into this receiver or not: the codes a patch bank may be for.
+    #[must_use]
+    pub const fn is_family_code(code: u8) -> bool {
+        code >= Self::Juno.code() && code <= Self::Cs80.code()
+    }
+
+    /// The bytes of one patch of a family of the analogue synthesizers, in
+    /// the instrument's own layout; `None` for every other codec.
+    #[must_use]
+    pub const fn patch_bytes(self) -> Option<u16> {
+        match self {
+            Self::Juno => Some(JUNO_PATCH_BYTES),
+            Self::Minimoog => Some(MINIMOOG_PATCH_BYTES),
+            Self::Prophet5 => Some(PROPHET5_PATCH_BYTES),
+            Self::Jupiter8 => Some(JUPITER8_PATCH_BYTES),
+            Self::Cs80 => Some(CS80_PATCH_BYTES),
+            _ => None,
+        }
+    }
+
+    /// How many models of its instrument a codec plays, which
+    /// [`crate::record::TAG_MODEL`] chooses among, counted from 0: two for
+    /// the Juno (the Juno-106, then the Juno-60) and for the Prophet-5
+    /// (revision 3, then revisions 1 and 2), one for every other.
+    #[must_use]
+    pub const fn models(self) -> u8 {
+        match self {
+            Self::Juno | Self::Prophet5 => 2,
+            _ => 1,
+        }
+    }
+
+    /// The codec of the bank a sound of this codec plays the patches of,
+    /// or `None` for a codec that plays no patches.
+    #[must_use]
+    pub const fn bank_codec(self) -> Option<Self> {
+        match self {
+            Self::Dx7 => Some(Self::Dx7Bank),
+            Self::Juno | Self::Minimoog | Self::Prophet5 | Self::Jupiter8 | Self::Cs80 => Some(Self::PatchBank),
+            _ => None,
+        }
+    }
+
+    /// Whether the codec is a bank: patches, stored as a sound and never
+    /// played.
+    #[must_use]
+    pub const fn is_bank(self) -> bool {
+        matches!(self, Self::Dx7Bank | Self::PatchBank)
+    }
+
+    /// Whether a block of the codec is slots of timed MIDI messages, the
+    /// DX7's block (REQ-6411 item 3).
+    #[must_use]
+    pub const fn is_slots(self) -> bool {
+        matches!(self, Self::Dx7 | Self::Juno | Self::Minimoog | Self::Prophet5 | Self::Jupiter8 | Self::Cs80)
     }
 
     /// Whether the codec carries sound at `hz`: Opus only at 48 kHz, the
@@ -75,9 +164,10 @@ impl Codec {
     pub const fn allows_rate(self, hz: u32) -> bool {
         match self {
             Self::Opus => hz == OPUS_RATE,
-            // An instrument is rendered at one rate (REQ-6411 item 1).
-            Self::Sid | Self::Dx7 | Self::Dx7Bank => hz == INSTRUMENT_RATE,
             Self::Pcm16 | Self::ImaAdpcm => true,
+            // An instrument is rendered at one rate (REQ-6411 item 1), and
+            // a bank is carried as its instrument's sounds are.
+            _ => hz == INSTRUMENT_RATE,
         }
     }
 
@@ -92,12 +182,21 @@ impl Codec {
             // One, two or four register images (REQ-6411 item 2).
             Self::Sid => bytes == SID_IMAGE_BYTES || bytes == SID_IMAGE_BYTES * 2 || bytes == SID_IMAGE_BYTES * 4,
             // 1 to 16 slots (REQ-6411 item 3).
-            Self::Dx7 => {
+            Self::Dx7 | Self::Juno | Self::Minimoog | Self::Prophet5 | Self::Jupiter8 | Self::Cs80 => {
                 bytes >= DX7_SLOT_BYTES
                     && bytes <= DX7_SLOT_BYTES * DX7_MAX_SLOTS
                     && bytes.is_multiple_of(DX7_SLOT_BYTES)
             }
             Self::Dx7Bank => bytes == DX7_PATCH_BYTES,
+            // A patch of some family; the OBJECT's reader then holds it to
+            // the family the bank names (`record::parse`).
+            Self::PatchBank => {
+                bytes == JUNO_PATCH_BYTES
+                    || bytes == MINIMOOG_PATCH_BYTES
+                    || bytes == PROPHET5_PATCH_BYTES
+                    || bytes == JUPITER8_PATCH_BYTES
+                    || bytes == CS80_PATCH_BYTES
+            }
         }
     }
 
@@ -110,10 +209,11 @@ impl Codec {
             Self::ImaAdpcm => (bytes as u32).saturating_sub(IMA_HEADER as u32).saturating_mul(2).saturating_add(1),
             Self::Pcm16 => bytes as u32 / 2,
             Self::Opus => OPUS_FRAME_SAMPLES,
-            Self::Sid | Self::Dx7 => INSTRUMENT_BLOCK_SAMPLES,
             // A bank counts one sample a patch, so that it is a stored
             // sound of the profile (REQ-6411 item 4).
-            Self::Dx7Bank => 1,
+            Self::Dx7Bank | Self::PatchBank => 1,
+            // An instrument's block is 20 ms (REQ-6411 item 1).
+            _ => INSTRUMENT_BLOCK_SAMPLES,
         }
     }
 
@@ -128,15 +228,16 @@ impl Codec {
             Self::Pcm16 => samples.saturating_mul(2),
             // A block of an instrument is whole however few of its samples
             // the sound keeps, as an Opus packet is.
-            Self::Opus | Self::Sid | Self::Dx7 | Self::Dx7Bank => block_bytes as u32,
+            _ => block_bytes as u32,
         }
     }
 
     /// Whether the codec is an instrument's input, rendered by the
-    /// instrument and not decoded (REQ-6411): the SID's or the DX7's.
+    /// instrument and not decoded (REQ-6411): the SID's, the DX7's or an
+    /// analogue synthesizer's.
     #[must_use]
     pub const fn is_instrument(self) -> bool {
-        matches!(self, Self::Sid | Self::Dx7)
+        matches!(self, Self::Sid) || self.is_slots()
     }
 }
 
@@ -180,8 +281,39 @@ pub const DX7_BANK_PATCHES: u32 = 32;
 /// The latest time a DX7 slot may name within its block, in tenths of a
 /// millisecond: the block is 20 ms (REQ-6411 item 3).
 pub const DX7_SLOT_LAST_TIME: u8 = 199;
+/// The bytes of one Juno patch: its sixteen sliders and two bytes of
+/// switches, the layout of `neoteletext_audio_instruments::juno::Patch`.
+pub const JUNO_PATCH_BYTES: u16 = 18;
+/// The bytes of one Minimoog patch, the layout of
+/// `neoteletext_audio_instruments::minimoog::Patch`.
+pub const MINIMOOG_PATCH_BYTES: u16 = 36;
+/// The bytes of one Prophet-5 patch, the layout of
+/// `neoteletext_audio_instruments::prophet5::Patch`.
+pub const PROPHET5_PATCH_BYTES: u16 = 24;
+/// The bytes of one Jupiter-8 patch, the layout of
+/// `neoteletext_audio_instruments::jupiter8::Patch`.
+pub const JUPITER8_PATCH_BYTES: u16 = 43;
+/// The bytes of one CS-80 patch: two tones and the panel's other controls,
+/// the layout of `neoteletext_audio_instruments::cs80::Patch`.
+pub const CS80_PATCH_BYTES: u16 = 85;
+/// The most patches in a patch bank: as many as a DX7 bank holds, so that
+/// a program change means the same in every instrument's block.
+pub const PATCH_BANK_PATCHES: u32 = DX7_BANK_PATCHES;
+// A bank's patch is as long as its instrument reads. The figures are written
+// here so that a build without an instrument still knows a bank's block
+// sizes, and so that a publisher needs none of the instruments.
+#[cfg(feature = "juno")]
+const _: () = assert!(JUNO_PATCH_BYTES as usize == neoteletext_audio_instruments::juno::patch::PATCH_BYTES);
+#[cfg(feature = "minimoog")]
+const _: () = assert!(MINIMOOG_PATCH_BYTES as usize == neoteletext_audio_instruments::minimoog::PATCH_BYTES);
+#[cfg(feature = "prophet5")]
+const _: () = assert!(PROPHET5_PATCH_BYTES as usize == neoteletext_audio_instruments::prophet5::patch::PATCH_BYTES);
+#[cfg(feature = "jupiter8")]
+const _: () = assert!(JUPITER8_PATCH_BYTES as usize == neoteletext_audio_instruments::jupiter8::PATCH_BYTES);
+#[cfg(feature = "cs80")]
+const _: () = assert!(CS80_PATCH_BYTES as usize == neoteletext_audio_instruments::cs80::PATCH_BYTES);
 // The instruments render what the profile says a block is.
-#[cfg(any(feature = "sid", feature = "dx7"))]
+#[cfg(any(feature = "sid", feature = "dx7", feature = "analog"))]
 const _: () = {
     assert!(INSTRUMENT_RATE == neoteletext_audio_instruments::SAMPLE_RATE);
     assert!(INSTRUMENT_BLOCK_SAMPLES as usize == neoteletext_audio_instruments::BLOCK_SAMPLES);

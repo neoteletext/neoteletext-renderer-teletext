@@ -58,8 +58,8 @@ fn a_wrong_block_count_is_refused() {
 #[test]
 fn a_reserved_codec_is_read_and_left_for_the_receiver_to_ignore() {
     let mut body = object_body();
-    // Codes 0 to 5 are taken: the first reserved one (REQ-6411).
-    body[7] = 6;
+    // Codes 0 to 11 are taken: the first reserved one (REQ-6411, DEC-6429).
+    body[7] = 12;
     let bytes = frame(TYPE_OBJECT, &body);
     let Record::Object(object) = parse(&bytes).unwrap() else { panic!("not an object") };
     assert_eq!(object.codec, None);
@@ -81,6 +81,57 @@ fn codecs_left_out_of_the_build_are_read_as_unsupported() {
     let pcm = frame(TYPE_OBJECT, &pcm);
     let Record::Object(object) = parse(&pcm).unwrap() else { panic!("not an object") };
     assert_eq!(object.codec.is_some(), cfg!(feature = "pcm16"));
+}
+
+/// An OBJECT of a sound of slots: handle 3, generation 1, id 9, codec
+/// `codec`, 48 kHz, one block of one slot, and the bank at handle 9.
+fn slots_body(codec: u8) -> Vec<u8> {
+    let mut body = std::vec![3, 0, 1, 0, 0, 0, 9, codec, 7, 0, 4];
+    body.extend_from_slice(&crate::INSTRUMENT_BLOCK_SAMPLES.to_be_bytes());
+    body.extend_from_slice(&1_u16.to_be_bytes());
+    body.extend_from_slice(&[TAG_DX7_BANK, 1, 9]);
+    body
+}
+
+/// A patch bank's OBJECT: handle 9, generation 1, id 9, 48 kHz, one patch
+/// of `patch` bytes, for the family `family`.
+fn bank_body(patch: u16, family: u8) -> Vec<u8> {
+    let mut body = std::vec![9, 0, 1, 0, 0, 0, 9, Codec::PatchBank.code(), 7];
+    body.extend_from_slice(&patch.to_be_bytes());
+    body.extend_from_slice(&1_u32.to_be_bytes());
+    body.extend_from_slice(&1_u16.to_be_bytes());
+    body.extend_from_slice(&[TAG_BANK_FAMILY, 1, family]);
+    body
+}
+
+/// DEC-6429 foundations item 4: each analogue synthesizer is a codec behind
+/// its feature. A build without it reads the instrument's sounds, and a
+/// patch bank for it, as of no codec it decodes, so the receiver ignores
+/// them as unsupported; a build with it reads both.
+#[test]
+fn synthesizers_left_out_of_the_build_are_read_as_unsupported() {
+    for (codec, built) in [
+        (Codec::Juno, cfg!(feature = "juno")),
+        (Codec::Minimoog, cfg!(feature = "minimoog")),
+        (Codec::Prophet5, cfg!(feature = "prophet5")),
+        (Codec::Jupiter8, cfg!(feature = "jupiter8")),
+        (Codec::Cs80, cfg!(feature = "cs80")),
+    ] {
+        let sound = frame(TYPE_OBJECT, &slots_body(codec.code()));
+        let Record::Object(object) = parse(&sound).unwrap() else { panic!("not an object") };
+        assert_eq!(object.codec, built.then_some(codec), "a sound of {codec:?}");
+        let bank = frame(TYPE_OBJECT, &bank_body(codec.patch_bytes().unwrap(), codec.code()));
+        let Record::Object(object) = parse(&bank).unwrap() else { panic!("not an object") };
+        assert_eq!(object.codec, built.then_some(Codec::PatchBank), "a bank for {codec:?}");
+    }
+    // A bank whose patches are not its family's is refused where the family
+    // is built in, and ignored with the family where it is not.
+    let wrong = frame(TYPE_OBJECT, &bank_body(Codec::Cs80.patch_bytes().unwrap(), Codec::Juno.code()));
+    if cfg!(feature = "juno") {
+        assert_eq!(parse(&wrong), Err(RecordError::BadValue("block size")));
+    } else {
+        assert!(matches!(parse(&wrong), Ok(Record::Object(Object { codec: None, .. }))));
+    }
 }
 
 /// An Opus object: handle 3, generation 1, id 9, codec 2, rate code `rate`,

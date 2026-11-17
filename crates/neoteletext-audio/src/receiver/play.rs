@@ -16,9 +16,9 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             .entry(play.sound.handle)
             .copied()
             .filter(|entry| entry.sound == play.sound && !entry.conflict)
-            // A DX7 sound plays the patches of its bank, so it waits for
-            // them (REQ-6411 item 5).
-            .filter(|entry| entry.codec != Codec::Dx7 || self.bank_ready(entry.param))
+            // A sound that plays patches plays those of its bank, so it
+            // waits for them (REQ-6411 item 5).
+            .filter(|entry| self.bank_ready(entry))
             .filter(|entry| {
                 if entry.live {
                     // A live sound plays while its blocks keep coming.
@@ -29,7 +29,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                     || (play.progressive && self.buffered_ms(entry) >= PROGRESSIVE_BUFFER_MS.min(duration_ms(entry)))
             });
         // A bank is patches and is never played (REQ-6411 item 4).
-        if self.store.entry(play.sound.handle).is_some_and(|entry| entry.codec == Codec::Dx7Bank) {
+        if self.store.entry(play.sound.handle).is_some_and(|entry| entry.codec.is_bank()) {
             return;
         }
         let Some(channel) = self.channels.get_mut(usize::from(index)) else { return };
@@ -89,10 +89,17 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         }
     }
 
-    /// Whether the bank at `handle` is held whole: every patch of it has
-    /// arrived and none arrived twice with different bytes.
-    fn bank_ready(&self, handle: u8) -> bool {
-        self.store.entry(handle).is_some_and(|bank| bank.codec == Codec::Dx7Bank && bank.complete() && !bank.conflict)
+    /// Whether the bank `entry`'s sound names is held whole: it is a bank
+    /// for the sound's instrument, every patch of it has arrived and none
+    /// arrived twice with different bytes. A sound that plays no patches
+    /// waits for none.
+    fn bank_ready(&self, entry: &Entry) -> bool {
+        let Some(codec) = entry.codec.bank_codec() else { return true };
+        self.store.entry(entry.param).is_some_and(|bank| {
+            // A patch bank is for one family (`Entry::setup`).
+            let fits = codec != Codec::PatchBank || bank.setup.first() == Some(&entry.codec.code());
+            bank.codec == codec && fits && bank.complete() && !bank.conflict
+        })
     }
 
     /// Milliseconds of sound received contiguously from the start.

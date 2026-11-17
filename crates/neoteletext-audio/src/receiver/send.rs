@@ -24,7 +24,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         #[cfg(feature = "opus")]
         self.opus.release(entry.sound);
         // And an instrument's sound is rendered again from its first.
-        #[cfg(any(feature = "sid", feature = "dx7"))]
+        #[cfg(any(feature = "sid", feature = "dx7", feature = "analog"))]
         self.instruments.release(entry.sound);
         self.send_blocks(entry, 0, entry.blocks, sink);
     }
@@ -36,7 +36,14 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         expect(unused_variables, reason = "only PCM16 and IMA ADPCM send the blocks that arrived")
     )]
     #[cfg_attr(
-        not(any(feature = "pcm16", feature = "ima", feature = "opus", feature = "sid", feature = "dx7")),
+        not(any(
+            feature = "pcm16",
+            feature = "ima",
+            feature = "opus",
+            feature = "sid",
+            feature = "dx7",
+            feature = "analog"
+        )),
         expect(clippy::unused_self, reason = "a build with no decoder holds no sound to send")
     )]
     pub(super) fn send_blocks(&mut self, entry: &Entry, first: u16, count: u16, sink: &mut dyn VoiceSink) {
@@ -54,13 +61,14 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Opus => {}
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
-            #[cfg(any(feature = "sid", feature = "dx7"))]
-            Codec::Sid | Codec::Dx7 => self.instruments.send_stored(&self.store, entry, &mut self.statistics, sink),
-            // A codec the build leaves out: none is stored. A bank is
-            // patches, never samples (REQ-6411 item 4).
-            #[cfg(not(any(feature = "sid", feature = "dx7")))]
-            Codec::Sid | Codec::Dx7 => {}
-            Codec::Dx7Bank => {}
+            // A bank is patches, never samples (REQ-6411 item 4).
+            Codec::Dx7Bank | Codec::PatchBank => {}
+            // An instrument's. A codec the build leaves out renders
+            // silence, and none of one is stored.
+            #[cfg(any(feature = "sid", feature = "dx7", feature = "analog"))]
+            _ => self.instruments.send_stored(&self.store, entry, &mut self.statistics, sink),
+            #[cfg(not(any(feature = "sid", feature = "dx7", feature = "analog")))]
+            _ => {}
         }
     }
 
@@ -69,7 +77,14 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// sent as silence, or concealed by an Opus decoder, so a lost block
     /// never stops the sound.
     #[cfg_attr(
-        not(any(feature = "pcm16", feature = "ima", feature = "opus", feature = "sid", feature = "dx7")),
+        not(any(
+            feature = "pcm16",
+            feature = "ima",
+            feature = "opus",
+            feature = "sid",
+            feature = "dx7",
+            feature = "analog"
+        )),
         expect(unused_variables, reason = "a build with no decoder holds no sound to send")
     )]
     pub(super) fn send_live(&mut self, sound: SoundId, sink: &mut dyn VoiceSink) {
@@ -87,14 +102,14 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Opus => {}
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
-            #[cfg(any(feature = "sid", feature = "dx7"))]
-            Codec::Sid | Codec::Dx7 => {
+            Codec::Dx7Bank | Codec::PatchBank => {}
+            #[cfg(any(feature = "sid", feature = "dx7", feature = "analog"))]
+            _ => {
                 let next = self.instruments.send_live(&self.store, &entry, &mut self.statistics, sink);
                 self.store.set_live_cursor(sound, next, entry.arrived_ms);
             }
-            #[cfg(not(any(feature = "sid", feature = "dx7")))]
-            Codec::Sid | Codec::Dx7 => {}
-            Codec::Dx7Bank => {}
+            #[cfg(not(any(feature = "sid", feature = "dx7", feature = "analog")))]
+            _ => {}
         }
     }
 }
@@ -302,6 +317,6 @@ fn decode(codec: Codec, block: &[u8], pcm: &mut [i16; MAX_BLOCK_SAMPLES]) -> Opt
         // Neither decodes alone: an Opus packet and an instrument's block
         // are taken in order, by `receiver::opus` and
         // `receiver::instruments`; a bank is patches, never samples.
-        Codec::Opus | Codec::Sid | Codec::Dx7 | Codec::Dx7Bank => None,
+        _ => None,
     }
 }
