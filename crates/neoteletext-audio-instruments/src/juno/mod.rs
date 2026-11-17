@@ -604,11 +604,17 @@ impl Juno {
             self.sweep_by(wanted);
             self.fill = 0;
             self.wet = if wanted == ChorusMode::Off { 0 } else { CHORUS_FADE_SAMPLES };
-        } else if let (Some((_, now)), Some((_, then))) = (Self::sweep_of(self.sweep), Self::sweep_of(wanted))
+        } else if self.sweep != wanted
+            && let (Some((_, now)), Some((_, then))) = (Self::sweep_of(self.sweep), Self::sweep_of(wanted))
             && now == then
         {
             // I to II or back: the same sweep at another rate, which the
-            // lines' delays follow without a step.
+            // lines' delays follow without a step. A patch that leaves
+            // the sweep as it is leaves the chorus alone: set again, the
+            // lines' filters would be put to their clocks at another
+            // sample than they otherwise are, and a chorus switched off
+            // and on again before its lines had gone would not come back
+            // to the sample.
             self.sweep_by(wanted);
         }
         // Any other change is made in `render`, while the lines are not

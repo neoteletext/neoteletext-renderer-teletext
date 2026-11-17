@@ -512,3 +512,99 @@ fn the_high_pass_switch_moved_at_random_however_fast_does_not_click() {
         }
     }
 }
+
+#[test]
+fn the_chorus_comes_back_whole_and_keeps_nothing_of_how_it_was_switched() {
+    for model in MODELS {
+        let cutoff = match model {
+            Model::Juno106 => 62,
+            Model::Juno60 => 44,
+        };
+        let sine = flat(model, whistle(cutoff));
+        let with = |mode: ChorusMode| {
+            let mut patch = sine;
+            patch.chorus = mode;
+            patch
+        };
+        // Switched away and back before the lines have gone: the sweep
+        // was never touched, and once the lines are whole again the
+        // output is that of a chorus never switched, to the sample.
+        for (home, away) in [
+            (ChorusMode::One, ChorusMode::Off),
+            (ChorusMode::Two, ChorusMode::Off),
+            (ChorusMode::One, ChorusMode::Both),
+            (ChorusMode::Both, ChorusMode::Off),
+            (ChorusMode::Both, ChorusMode::One),
+        ] {
+            // On the Juno-106 both buttons are II, and I to II is no fade.
+            if model == Model::Juno106 && (home == ChorusMode::Both || away == ChorusMode::Both) {
+                continue;
+            }
+            for gone in [1usize, 100, 479] {
+                for cut in [usize::MAX, 7] {
+                    let mut juno = instrument(model, &with(home));
+                    let mut never = instrument(model, &with(home));
+                    for juno in [&mut juno, &mut never] {
+                        juno.event(NOTE_ON, 60, 100);
+                        render(juno, 0.5);
+                    }
+                    juno.set_patch(&with(away));
+                    let (mut out, mut same) = (vec![0i16; gone], vec![0i16; gone + 4_800]);
+                    juno.render(&mut out);
+                    juno.set_patch(&with(home));
+                    out.resize(gone + 4_800, 0);
+                    for part in out[gone..].chunks_mut(cut.min(4_800)) {
+                        juno.render(part);
+                    }
+                    never.render(&mut same);
+                    assert_ne!(out[..gone + 480], same[..gone + 480], "{model:?}: {home:?} never left");
+                    // Back in as many samples as it was gone.
+                    assert_eq!(
+                        out[2 * gone..],
+                        same[2 * gone..],
+                        "{model:?}: {home:?} to {away:?} for {gone} samples and back, calls of {cut}"
+                    );
+                }
+            }
+        }
+        // Switched on out of off, a chorus starts empty and from the
+        // start of its sweep: whatever was switched before, and however
+        // fast, it is the chorus of an instrument that only waited.
+        let modes = [ChorusMode::Off, ChorusMode::One, ChorusMode::Two, ChorusMode::Both];
+        for (last, cut) in [(ChorusMode::One, 480usize), (ChorusMode::Two, 7), (ChorusMode::Both, 1)] {
+            let mut juno = instrument(model, &with(ChorusMode::Off));
+            let mut waited = instrument(model, &with(ChorusMode::Off));
+            for juno in [&mut juno, &mut waited] {
+                juno.event(NOTE_ON, 60, 100);
+                render(juno, 0.5);
+            }
+            let mut random = 99u32;
+            for every in [1usize, 3, 50, 200, 288, 479, 480, 481, 700, 768, 1_300, 40, 290, 5] {
+                random = random.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                juno.set_patch(&with(modes[(random >> 24) as usize % modes.len()]));
+                let mut out = vec![0i16; every];
+                for part in out.chunks_mut(cut) {
+                    juno.render(part);
+                }
+                waited.render(&mut out);
+            }
+            // Off, for longer than the fade; then on.
+            juno.set_patch(&with(ChorusMode::Off));
+            let (mut out, mut same) = (vec![0i16; 600], vec![0i16; 600]);
+            for _ in 0..2 {
+                juno.render(&mut out);
+                waited.render(&mut same);
+            }
+            assert_eq!(out, same, "{model:?}: off is not the dry signal");
+            juno.set_patch(&with(last));
+            waited.set_patch(&with(last));
+            let (mut out, mut same) = (vec![0i16; 9_600], vec![0i16; 9_600]);
+            for part in out.chunks_mut(cut) {
+                juno.render(part);
+            }
+            waited.render(&mut same);
+            assert_eq!(out, same, "{model:?}: {last:?} keeps something of the switching before it");
+            assert_ne!(out[4_800..], same[..4_800], "{model:?}: {last:?} has no chorus");
+        }
+    }
+}
