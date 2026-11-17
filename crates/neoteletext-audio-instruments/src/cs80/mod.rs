@@ -149,10 +149,10 @@
 //!   both oscillators run under either tab. What no page prints is how
 //!   large the sound is where it enters the board, so how large the
 //!   delayed sound is against the dry is a reading of the adjustment
-//!   procedure's trimming figures ([`EFFECT_WET`]); and how many octaves
+//!   procedure's trimming figures (`EFFECT_WET`); and how many octaves
 //!   a volt is at the oscillators' chip is taken from the pulse width's
 //!   oscillator, which is the same chip behind another pair of resistors
-//!   ([`EFFECT_OCTAVES_A_VOLT`]). The drawings also carry later changes
+//!   (`EFFECT_OCTAVES_A_VOLT`). The drawings also carry later changes
 //!   by hand (the delayed sound's coupling capacitors of 1 µF made 0.01
 //!   µF, among others) that the boards as printed do not have; the
 //!   boards as printed are what is built.
