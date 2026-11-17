@@ -25,7 +25,7 @@ const CONTROLLER_FULL: i64 = 0x7f;
 const CONTROLLER_FULL_SQUARED: i64 = CONTROLLER_FULL * CONTROLLER_FULL;
 
 /// The gain a volume controller asks for, in Q28: the square of its
-/// share of [`CONTROLLER_FULL`], so half the controller is a quarter of
+/// share of its largest value, 127, so half the controller is a quarter of
 /// the level. A value above the controller's largest, which no message
 /// carries, asks for as much more.
 ///

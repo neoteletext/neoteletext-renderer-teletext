@@ -12,6 +12,11 @@ const CORE_SRC: &str = "crates/neoteletext-core/src";
 /// teletext constants. A path ending in `/` is a directory and covers
 /// every file under it.
 const DATA_FILES: &[&str] = &["consts.rs", "consts/", "limits.rs", "charset/", "glyphs/noto.rs"];
+/// Crates that hold no teletext, whose literals are another standard's
+/// values: the instruments' crate reads synthesizer patches and MIDI, where
+/// a byte such as 0x55 is a manufacturer's data byte (Roland's Juno-106
+/// owner's manual, MIDI Implementation 3.1), not the clock run-in.
+const NOT_TELETEXT: &[&str] = &["crates/neoteletext-audio-instruments/"];
 /// Teletext values that must only appear in the constants module
 /// (REQ-GEN-014), and the numbers of area NUM, which only `limits` writes
 /// (REQ-NUM-031): the null sub-code, the last sub-page's and the last
@@ -35,6 +40,11 @@ pub fn constants(root: &Path) -> Result<(), String> {
         let display = file.to_string_lossy().to_string();
         let under_core = file.strip_prefix(&core_src).ok().map(|path| path.to_string_lossy().replace('\\', "/"));
         if under_core.is_some_and(|path| is_data_file(&path)) {
+            continue;
+        }
+        let relative =
+            file.strip_prefix(root).map(|path| path.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+        if NOT_TELETEXT.iter().any(|crate_path| relative.starts_with(crate_path)) {
             continue;
         }
         for (number, literal) in watched_literals(&production_source(&file)) {

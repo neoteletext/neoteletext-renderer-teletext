@@ -14,14 +14,14 @@
 //!
 //! Behind the feature `analog`, which is not on by default, are the
 //! building blocks the analogue synthesizers of DEC-6429 are to be made
-//! from ([`analog`]): oscillators, filters, envelopes, a chorus and a
+//! from (module `analog`): oscillators, filters, envelopes, a chorus and a
 //! voice allocator. They are no codec yet. Behind the feature `juno`, also
 //! not on by default, is the first instrument made from them: Roland's
-//! Juno-106 and Juno-60 ([`juno`]). Behind the feature `minimoog`, not on
-//! by default either, is Moog's Minimoog Model D ([`minimoog`]).
-//! Behind the feature `prophet5`, also not on by default, is Sequential Circuits' Prophet-5 ([`prophet5`]).
-//! Behind the feature `jupiter8`, not on by default either, is Roland's Jupiter-8 ([`jupiter8`]).
-//! Behind the feature `cs80`, not on by default either, is Yamaha's CS-80 ([`cs80`]).
+//! Juno-106 and Juno-60 (module `juno`). Behind the feature `minimoog`, not on
+//! by default either, is Moog's Minimoog Model D (module `minimoog`).
+//! Behind the feature `prophet5`, also not on by default, is Sequential Circuits' Prophet-5 (module `prophet5`).
+//! Behind the feature `jupiter8`, not on by default either, is Roland's Jupiter-8 (module `jupiter8`).
+//! Behind the feature `cs80`, not on by default either, is Yamaha's CS-80 (module `cs80`).
 //!
 //! # Whose code this is
 //!
