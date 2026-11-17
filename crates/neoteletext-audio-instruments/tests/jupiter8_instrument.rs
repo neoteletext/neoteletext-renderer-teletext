@@ -542,7 +542,7 @@ fn the_hold_holds_and_the_controllers_do_what_midi_says() {
     render(&mut jupiter, 0.1);
     assert_eq!(jupiter.sounding_voices(), 0);
     // A note on with no velocity is a note off; all notes off releases
-    // keys under fingers; all sound off silences at once.
+    // keys under fingers; all sound off silences within 6 ms.
     jupiter.event(NOTE_ON, A2, 100);
     jupiter.event(NOTE_ON, A2, 0);
     render(&mut jupiter, 0.1);
@@ -555,7 +555,9 @@ fn the_hold_holds_and_the_controllers_do_what_midi_says() {
     jupiter.event(NOTE_ON, A2, 100);
     render(&mut jupiter, 0.1);
     jupiter.event(CONTROL, 120, 0);
-    assert_eq!((jupiter.sounding_voices(), rms(&render(&mut jupiter, 0.1)[samples(0.02)..]) < 1.0e-4), (0, true));
+    // The sound is out, and the voices cut, within 20 ms.
+    let after = render(&mut jupiter, 0.1);
+    assert_eq!((jupiter.sounding_voices(), rms(&after[samples(0.02)..]) < 1.0e-4), (0, true));
     // The volume is the square of the controller's share.
     let level = |jupiter: &mut Jupiter8| {
         jupiter.event(NOTE_ON, A2, 100);

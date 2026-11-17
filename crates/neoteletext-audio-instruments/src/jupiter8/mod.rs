@@ -287,6 +287,33 @@ const SEED: u32 = 0x4a75_7038;
 /// (service notes, interface board schematic, "S/H PORTAMENTO"), so it
 /// covers the same share of any interval in the same time.
 const PORTAMENTO_LONGEST: u32 = 1_000_000;
+/// The most of its whole way that a half's share of the output moves in
+/// a sample when the balance is moved: all of it in 256 samples, 5.3 ms,
+/// the time a volume controller's gain takes
+/// ([`VOLUME_SLEW`](crate::analog::volume::VOLUME_SLEW)).
+///
+/// Source: own choice. The balance is a potentiometer between the two
+/// halves' outputs; its shares were worked out once for each call to
+/// render, so a balance message moved them between one sample and the
+/// next.
+const BALANCE_SLEW: i32 = ENVELOPE_ONE >> 8;
+/// The most of its travel the bender moves in a tick: from its centre
+/// to an end in 128 ticks, 21 ms.
+///
+/// Source: own choice. The bender is a lever under a hand, which passes
+/// every place between two; a pitch bend message puts it at its new
+/// place in no time, and where the bender panel sends it to the cutoff
+/// too, the filter moved two octaves between one tick and the next: a
+/// step 1.9 times the note's own largest
+/// (`tests/jupiter8_control_sweep.rs`). The time is long against a
+/// tick and short against a hand.
+const BEND_SLEW: i32 = PITCH_BEND_CENTRE >> 7;
+/// Messages kept while all sound off takes the sound out, to be taken
+/// when it has gone: more than come in the 5.3 ms that lasts but from
+/// a stream that means to flood, whose next message ends the wait.
+///
+/// Source: own choice.
+const DEFERRED: usize = 16;
 /// The share of the mixed output that is a sample, in Q28: 659 / 1000.
 /// One voice's sawtooth through an open filter at the amplifier's full
 /// level then peaks 18.2 dB below full scale, and eight struck together
@@ -313,6 +340,19 @@ pub struct Jupiter8 {
     balance: u8,
     performance: Performance,
     patches: [Patch; HALVES],
+    /// Each patch's sliders as they stand, on their way to where the
+    /// patch has them, with the patch's switches: what the voices are
+    /// given ([`Jupiter8::slide`]).
+    panels: [Patch; HALVES],
+    /// The upper and the lower half's share of the output as it stands,
+    /// in Q30, on its way to what the balance asks.
+    shares: [i32; HALVES],
+    /// All sound off has come and the sound is on its way out: the gain
+    /// that takes it there, which the voices are cut at the end of; and
+    /// the messages that came meanwhile, in order, and how many.
+    cut: Option<crate::analog::volume::VolumeGain>,
+    deferred: [(u8, u8, u8); DEFERRED],
+    deferred_count: usize,
     settings: [Settings; HALVES],
     assigners: [Assigner; HALVES],
     lfos: [Lfo; HALVES],
@@ -322,8 +362,10 @@ pub struct Jupiter8 {
     seen: [(u32, u8); VOICES],
     /// Whether the hold pedal is down.
     pedal: bool,
-    /// The pitch bend, less its centre.
+    /// The pitch bend, less its centre: where the last message put the
+    /// bender, and where it stands on its way there.
     bend: i32,
+    bend_now: i32,
     wheel: u8,
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
@@ -360,6 +402,11 @@ impl Jupiter8 {
             balance: BALANCE_CENTRE,
             performance: Performance::DEFAULT,
             patches: [Patch::DEFAULT; HALVES],
+            panels: [Patch::DEFAULT; HALVES],
+            shares: Self::shares(BALANCE_CENTRE),
+            cut: None,
+            deferred: [(0, 0, 0); DEFERRED],
+            deferred_count: 0,
             settings: [settings; HALVES],
             assigners: [Assigner::new(AssignMode::Poly1, VOICES), Assigner::new(AssignMode::Poly1, 0)],
             lfos: [Lfo::new(0), Lfo::new(1)],
@@ -368,6 +415,7 @@ impl Jupiter8 {
             seen: [(0, 0); VOICES],
             pedal: false,
             bend: 0,
+            bend_now: 0,
             wheel: 0,
             volume: DATA_MAX,
             volume_gain: crate::analog::volume::VolumeGain::full(),
@@ -390,24 +438,79 @@ impl Jupiter8 {
         fresh.balance = self.balance;
         fresh.performance = self.performance;
         fresh.patches = self.patches;
+        fresh.panels = self.patches;
+        fresh.shares = Self::shares(self.balance);
         fresh.apply();
         *self = fresh;
     }
 
     /// Gives the instrument its upper patch, which [`KeyMode::Whole`]
-    /// plays on every voice. It takes effect at once, on the voices that
-    /// are sounding too, as moving the panel's controls does; a change
-    /// of the assign mode releases the voices it assigns, those the hold
-    /// kept too, and a pedal that is down holds what is played after.
+    /// plays on every voice. It takes effect on the voices that are
+    /// sounding too, as moving the panel's controls does: the switches
+    /// and selectors at once, and each slider a step of its 256 at every
+    /// tick, its whole travel in 43 thousandths of a second, as a hand
+    /// moves it through every place between. With no voice sounding,
+    /// all of it is there at once. A change of the assign mode releases
+    /// the voices it assigns, those the hold kept too, and a pedal that
+    /// is down holds what is played after.
     pub fn set_patch(&mut self, patch: &Patch) {
-        self.patches[UPPER] = *patch;
-        self.apply();
+        self.take_patch(UPPER, patch);
     }
 
     /// Gives the instrument its lower patch, which dual and split play.
     pub fn set_lower_patch(&mut self, patch: &Patch) {
-        self.patches[LOWER] = *patch;
+        self.take_patch(LOWER, patch);
+    }
+
+    /// Whether a control is a slider, which passes every place between
+    /// two, and not a switch or a selector, which has none between: the
+    /// controls that hold every value of a byte.
+    fn slides(place: usize) -> bool {
+        patch::MAXIMA.get(place).is_some_and(|&most| most == u8::MAX)
+    }
+
+    fn take_patch(&mut self, half: usize, patch: &Patch) {
+        let sounding = self.sounding_voices() > 0;
+        if let (Some(kept), Some(panel)) = (self.patches.get_mut(half), self.panels.get_mut(half)) {
+            *kept = *patch;
+            let mut bytes = patch.to_bytes();
+            if sounding {
+                for ((byte, held), place) in bytes.iter_mut().zip(panel.to_bytes()).zip(0usize..) {
+                    if Self::slides(place) {
+                        *byte = held;
+                    }
+                }
+            }
+            *panel = Patch::from_bytes(&bytes).unwrap_or(*patch);
+        }
         self.apply();
+    }
+
+    /// A tick of the sliders: each goes one step towards where its patch
+    /// has it.
+    ///
+    /// Source: own choice of the rate. The instrument's processor reads
+    /// its sliders and sends each voltage to the voices through a
+    /// converter and a sample-and-hold; the service notes' drawings of
+    /// them were not read for the time a voltage takes, so the time is
+    /// not the circuit's. A step of a 256th at each tick of a sixth of a
+    /// millisecond is less than a sample-and-hold's own step would be.
+    fn slide(&mut self) {
+        if self.panels == self.patches {
+            return;
+        }
+        for (panel, patch) in self.panels.iter_mut().zip(&self.patches) {
+            let mut bytes = panel.to_bytes();
+            for (held, wanted) in bytes.iter_mut().zip(patch.to_bytes()) {
+                *held = match (*held).cmp(&wanted) {
+                    core::cmp::Ordering::Less => held.saturating_add(1),
+                    core::cmp::Ordering::Equal => *held,
+                    core::cmp::Ordering::Greater => held.saturating_sub(1),
+                };
+            }
+            *panel = Patch::from_bytes(&bytes).unwrap_or(*patch);
+        }
+        self.settle();
     }
 
     /// The upper patch.
@@ -502,12 +605,20 @@ impl Jupiter8 {
             KeyMode::Whole => [VOICES, 0],
             KeyMode::Dual | KeyMode::Split => [HALF_VOICES; HALVES],
         };
-        for (((assigner, patch), settings), (lfo, count)) in
-            self.assigners.iter_mut().zip(&self.patches).zip(&mut self.settings).zip(self.lfos.iter_mut().zip(counts))
-        {
-            *settings = Settings::new(patch);
+        for ((assigner, patch), count) in self.assigners.iter_mut().zip(&self.patches).zip(counts) {
             assigner.configure(patch.assign_mode(), count);
-            lfo.configure(patch);
+        }
+        self.settle();
+        // A change of mode let every hold go: the pedal still stands.
+        self.hold();
+    }
+
+    /// The voices and the low-frequency oscillators take the panels as
+    /// they stand.
+    fn settle(&mut self) {
+        for ((panel, settings), lfo) in self.panels.iter().zip(&mut self.settings).zip(&mut self.lfos) {
+            *settings = Settings::new(panel);
+            lfo.configure(panel);
         }
         for index in 0..VOICES {
             let (half, _) = self.place(index);
@@ -515,8 +626,28 @@ impl Jupiter8 {
                 voice.configure(settings);
             }
         }
-        // A change of mode let every hold go: the pedal still stands.
-        self.hold();
+    }
+
+    /// The upper and the lower half's share of the output for a
+    /// balance, in Q30: each is in full from the centre to its own end,
+    /// and falls in a straight line to nothing at the other (own
+    /// choice).
+    fn shares(balance: u8) -> [i32; HALVES] {
+        let share = |towards: u8, centre: u8| {
+            let level =
+                i64::from(towards.min(centre)).saturating_mul(i64::from(ENVELOPE_ONE)).checked_div(i64::from(centre));
+            i32::try_from(level.unwrap_or(0)).unwrap_or(ENVELOPE_ONE)
+        };
+        let upper = share(balance, BALANCE_CENTRE);
+        let lower = share(DATA_MAX.saturating_sub(balance), DATA_MAX.saturating_sub(BALANCE_CENTRE));
+        let mut shares = [0; HALVES];
+        if let Some(kept) = shares.get_mut(UPPER) {
+            *kept = upper;
+        }
+        if let Some(kept) = shares.get_mut(LOWER) {
+            *kept = lower;
+        }
+        shares
     }
 
     /// Gives each half the hold the pedal asks of it.
@@ -556,15 +687,31 @@ impl Jupiter8 {
     ///   portamento time (5), volume (7), balance (8), the sustain pedal
     ///   (64: the hold, on from 64; of the lower half alone in
     ///   [`KeyMode::Split`]), portamento (65: on from 64 for both
-    ///   halves, off below), all sound off (120), reset all controllers
-    ///   (121, which leaves the volume, the balance and the portamento)
-    ///   and all notes off (123).
-    /// - Pitch bend (0xEn), 14 bits, `data1` the low seven: the bender.
+    ///   halves, off below), all sound off (120, which takes the sound
+    ///   out over five thousandths of a second, then silences every
+    ///   voice, and leaves the hold as the pedal has it; a message that
+    ///   comes before then is taken when the sound has gone), reset all
+    ///   controllers (121, which leaves the volume, the balance and the
+    ///   portamento) and all notes off (123). The balance moves to its
+    ///   new place over five thousandths of a second.
+    /// - Pitch bend (0xEn), 14 bits, `data1` the low seven: the bender,
+    ///   which goes to its new place at an end's travel in 21
+    ///   thousandths of a second.
     ///
     /// Anything else is ignored and counted
     /// ([`Jupiter8::ignored_events`]): any other status or controller, a
     /// data byte above 127. Nothing is an error.
     pub fn event(&mut self, status: u8, data1: u8, data2: u8) {
+        // While all sound off takes the sound out, a message waits for
+        // it to have gone; with no room to wait, the sound is cut now.
+        if self.cut.is_some() {
+            if let Some(slot) = self.deferred.get_mut(self.deferred_count) {
+                *slot = (status, data1, data2);
+                self.deferred_count = self.deferred_count.saturating_add(1);
+                return;
+            }
+            self.cut();
+        }
         if data1 > DATA_MAX || data2 > DATA_MAX {
             self.ignore();
             return;
@@ -625,13 +772,15 @@ impl Jupiter8 {
             CONTROL_PORTAMENTO => {
                 self.performance.portamento = if value >= SWITCH_ON { Portamento::On } else { Portamento::Off };
             }
+            // The sound goes out over the 5.3 ms a volume's gain takes,
+            // and the voices are cut and the keys let go when it has
+            // gone: cut where they stood, the signal would fall to
+            // nothing in one sample.
             CONTROL_ALL_SOUND_OFF => {
-                self.release_all();
-                for index in 0..VOICES {
-                    let (half, _) = self.place(index);
-                    if let (Some(voice), Some(settings)) = (self.voices.get_mut(index), self.settings.get(half)) {
-                        voice.cut(settings);
-                    }
+                if self.sounding_voices() == 0 {
+                    self.cut();
+                } else if self.cut.is_none() {
+                    self.cut = Some(crate::analog::volume::VolumeGain::full());
                 }
             }
             CONTROL_RESET_CONTROLLERS => {
@@ -650,6 +799,30 @@ impl Jupiter8 {
         }
     }
 
+    /// Silences every voice at once and lets every key go: what all
+    /// sound off comes to. The pedal has not moved, and its hold is
+    /// given back; the messages that waited are then taken, in order.
+    fn cut(&mut self) {
+        self.cut = None;
+        for assigner in &mut self.assigners {
+            assigner.release_all();
+        }
+        self.hold();
+        for index in 0..VOICES {
+            let (half, _) = self.place(index);
+            if let (Some(voice), Some(settings)) = (self.voices.get_mut(index), self.settings.get(half)) {
+                voice.cut(settings);
+            }
+        }
+        self.panels = self.patches;
+        self.settle();
+        let (deferred, count) = (self.deferred, self.deferred_count);
+        self.deferred_count = 0;
+        for &(status, data1, data2) in deferred.iter().take(count) {
+            self.event(status, data1, data2);
+        }
+    }
+
     /// Releases every voice, held by a key or by the hold, and lets the
     /// hold go: for when the input stops and no note off will come.
     pub fn release_all(&mut self) {
@@ -661,10 +834,13 @@ impl Jupiter8 {
 
     /// A tick: the voices take what the keys and the controls ask.
     fn control(&mut self) {
+        self.slide();
         let cents = |cents: u16| law::octaves(i32::from(cents), CENTS);
         let performance = self.performance;
-        let bend = law::share_of(cents(performance.bend_vco), self.bend, PITCH_BEND_CENTRE);
-        let bend_cutoff = law::share_of(cents(performance.bend_vcf), self.bend, PITCH_BEND_CENTRE);
+        let step = self.bend.saturating_sub(self.bend_now).clamp(-BEND_SLEW, BEND_SLEW);
+        self.bend_now = self.bend_now.saturating_add(step);
+        let bend = law::share_of(cents(performance.bend_vco), self.bend_now, PITCH_BEND_CENTRE);
+        let bend_cutoff = law::share_of(cents(performance.bend_vcf), self.bend_now, PITCH_BEND_CENTRE);
         let wheel = |cents_at_top: u16| law::share_of(cents(cents_at_top), i32::from(self.wheel), i32::from(DATA_MAX));
         let (wheel_pitch, wheel_cutoff) = (wheel(performance.lfo_vco), wheel(performance.lfo_vcf));
         let time = law::share_of(
@@ -751,21 +927,32 @@ impl Jupiter8 {
     /// second. The work of a sample is at most that of eight voices,
     /// whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        let volume = crate::analog::volume::wanted(self.volume);
-        // Each half is in full from the centre to its own end, and falls
-        // in a straight line to nothing at the other (own choice).
-        let share = |towards: u8, centre: u8| {
-            let level =
-                i64::from(towards.min(centre)).saturating_mul(i64::from(ENVELOPE_ONE)).checked_div(i64::from(centre));
-            i32::try_from(level.unwrap_or(0)).unwrap_or(ENVELOPE_ONE)
-        };
-        let upper = share(self.balance, BALANCE_CENTRE);
-        let lower = share(DATA_MAX.saturating_sub(self.balance), DATA_MAX.saturating_sub(BALANCE_CENTRE));
-        let mixed =
-            |[first, second]: [i32; HALVES]| (mul_high(first, upper) << 2).wrapping_add(mul_high(second, lower) << 2);
+        let mut volume = crate::analog::volume::wanted(self.volume);
+        let mut wanted = Self::shares(self.balance);
         for sample in out {
-            let earlier = mixed(self.voices_sample());
-            let later = mixed(self.voices_sample());
+            for (share, &wanted) in self.shares.iter_mut().zip(&wanted) {
+                let step = wanted.saturating_sub(*share).clamp(-BALANCE_SLEW, BALANCE_SLEW);
+                *share = share.saturating_add(step);
+            }
+            let [upper, lower] = self.shares;
+            let mixed = |[first, second]: [i32; HALVES]| {
+                (mul_high(first, upper) << 2).wrapping_add(mul_high(second, lower) << 2)
+            };
+            let mut earlier = mixed(self.voices_sample());
+            let mut later = mixed(self.voices_sample());
+            // Faded before the decimator, which then ends on silence:
+            // what it still holds when the voices are cut is nothing.
+            if let Some(cut) = &mut self.cut {
+                let gain = cut.towards(0);
+                (earlier, later) = (amplify(earlier, gain), amplify(later, gain));
+                if gain == 0 {
+                    // The messages that waited are taken now, the
+                    // volume's and the balance's among them.
+                    self.cut();
+                    volume = crate::analog::volume::wanted(self.volume);
+                    wanted = Self::shares(self.balance);
+                }
+            }
             let signal = self.decimator.process(earlier, later);
             *sample = to_sample(amplify(amplify(signal, self.volume_gain.towards(volume)), OUTPUT_GAIN));
         }

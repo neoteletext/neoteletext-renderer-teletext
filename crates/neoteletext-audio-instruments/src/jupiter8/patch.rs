@@ -186,7 +186,7 @@ const PWM_SOURCE_MAX: u8 = 2;
 pub const VCO2_RANGE_MAX: u8 = 36;
 
 /// The largest value of each byte, in the bytes' order.
-const MAXIMA: [u8; PATCH_BYTES] = {
+pub(super) const MAXIMA: [u8; PATCH_BYTES] = {
     let mut maxima = [u8::MAX; PATCH_BYTES];
     let limited = [
         (Param::LfoWave, SELECTOR_MAX),
