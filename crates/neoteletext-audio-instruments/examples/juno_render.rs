@@ -120,7 +120,8 @@ fn main() {
             _ => {}
         }
     }
-    samples.truncate((((length + tail) * f64::from(SAMPLE_RATE)).round() as usize).max(done));
+    // The track and its tail, however long the tail was asked to be.
+    samples.resize((((length + tail) * f64::from(SAMPLE_RATE)).round() as usize).max(done), 0);
     juno.render(&mut samples[done..]);
 
     let bytes = u32::try_from(samples.len() * 2).expect("a short file");
