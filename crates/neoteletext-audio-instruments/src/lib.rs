@@ -17,7 +17,8 @@
 //! from ([`analog`]): oscillators, filters, envelopes, a chorus and a
 //! voice allocator. They are no codec yet. Behind the feature `juno`, also
 //! not on by default, is the first instrument made from them: Roland's
-//! Juno-106 and Juno-60 ([`juno`]).
+//! Juno-106 and Juno-60 ([`juno`]). Behind the feature `cs80`, not on by
+//! default either, is Yamaha's CS-80 ([`cs80`]).
 //!
 //! # Whose code this is
 //!
@@ -73,6 +74,8 @@ extern crate std;
 
 #[cfg(feature = "analog")]
 pub mod analog;
+#[cfg(feature = "cs80")]
+pub mod cs80;
 #[cfg(feature = "dx7")]
 pub mod dx7;
 #[cfg(feature = "juno")]
