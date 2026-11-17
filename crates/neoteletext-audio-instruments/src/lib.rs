@@ -91,6 +91,7 @@ pub mod juno;
 pub mod jupiter8;
 #[cfg(feature = "minimoog")]
 pub mod minimoog;
+pub mod output;
 #[cfg(feature = "prophet5")]
 pub mod prophet5;
 #[cfg(feature = "sid")]

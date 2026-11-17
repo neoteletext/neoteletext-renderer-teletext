@@ -9,8 +9,9 @@
 //! velocity sensitivity at the hardest velocity can raise that to about
 //! ±15,000. The notes are added and the sum is shifted right by
 //! [`MIX_SHIFT`]: a full-level note is 24 decibels below full scale, and
-//! sixteen of them exactly in phase just reach it. Whatever is beyond full
-//! scale is saturated, never wrapped.
+//! sixteen of them exactly in phase just reach it. The sum goes through the
+//! output's limiter ([`crate::output::limit`]), which bends what is near
+//! full scale under it and never wraps.
 //!
 //! # Time
 //!
@@ -479,7 +480,7 @@ impl Rack {
                 }
             }
             for (sample, &sum) in now.iter_mut().zip(&mix) {
-                *sample = i16::try_from(sum >> MIX_SHIFT).unwrap_or(if sum < 0 { i16::MIN } else { i16::MAX });
+                *sample = crate::output::limit(sum >> MIX_SHIFT);
             }
             self.block_remaining = self.block_remaining.saturating_sub(count);
             rest = later;

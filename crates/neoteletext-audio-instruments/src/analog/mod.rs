@@ -168,18 +168,12 @@ pub const LIMIT: i32 = 1 << 29;
 const SAMPLE_SHIFT: u32 = 9;
 const _: () = assert!(LEVEL >> SAMPLE_SHIFT == 1 << 15);
 
-/// The 16-bit sample of a signal, rounded, and saturated beyond
-/// [`LEVEL`].
+/// The 16-bit sample of a signal, rounded, through the output's limiter
+/// ([`crate::output::limit`]): the signal's own value up to the
+/// limiter's knee, and bent under [`LEVEL`] above it.
 #[must_use]
 pub const fn to_sample(signal: i32) -> i16 {
-    let rounded = signal.saturating_add(1 << (SAMPLE_SHIFT - 1)) >> SAMPLE_SHIFT;
-    if rounded > i16::MAX as i32 {
-        i16::MAX
-    } else if rounded < i16::MIN as i32 {
-        i16::MIN
-    } else {
-        rounded as i16
-    }
+    crate::output::limit(signal.saturating_add(1 << (SAMPLE_SHIFT - 1)) >> SAMPLE_SHIFT)
 }
 
 /// How many times the output rate a voice runs at.

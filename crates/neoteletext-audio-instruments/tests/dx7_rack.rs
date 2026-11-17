@@ -405,17 +405,19 @@ fn reset_all_controllers_leaves_the_volume() {
     assert_eq!(rack.sounding_notes(), 0, "the pedal is up");
 }
 
-/// Sixteen notes at the patch's full level, exactly in phase, just fit: no
-/// sample is saturated.
+/// Sixteen notes at the patch's full level, exactly in phase, reach the
+/// output's limiter, which bends them under its ceiling; sixteen keys
+/// that are not in phase stay clear of the ceiling.
 #[test]
-fn sixteen_full_level_notes_do_not_clip() {
+fn sixteen_full_level_notes_meet_the_limiter_and_not_the_rail() {
     let mut rack = Rack::new();
     for part in 0..16 {
         rack.event(0x90 | part, 69, 127);
     }
     let unison = render(&mut rack, 9600);
     let top = peak(&unison);
-    assert!((32_000..32_767).contains(&top), "sixteen in unison peak at {top}");
+    assert!((KNEE + 1..=CEILING).contains(&top), "sixteen in unison peak at {top}");
+    assert!(unwrapped(&unison));
 
     // Sixteen different keys: far from full scale most of the time.
     let mut rack = Rack::new();
@@ -423,26 +425,35 @@ fn sixteen_full_level_notes_do_not_clip() {
         rack.event(0x90, 48 + 3 * key, 127);
     }
     let chord = render(&mut rack, 48_000);
-    let saturated = chord.iter().filter(|&&sample| sample == i16::MAX || sample == i16::MIN).count();
-    assert_eq!(saturated, 0);
+    assert!(peak(&chord) < CEILING, "{}", peak(&chord));
     let mean_square = chord.iter().map(|&sample| f64::from(sample).powi(2)).sum::<f64>() / chord.len() as f64;
     println!("sixteen keys: peak {}, RMS {:.0}", peak(&chord), mean_square.sqrt());
     assert!(mean_square.sqrt() < 8000.0);
 }
 
-/// What does saturate is clamped, not wrapped: sixteen notes in unison of
-/// a voice whose velocity sensitivity raises it above full level.
+/// What is far beyond full scale rests at the limiter's ceiling and is
+/// not wrapped: sixteen notes in unison of a voice whose velocity
+/// sensitivity raises it above full level.
 #[test]
-fn what_is_beyond_full_scale_saturates() {
+fn what_is_beyond_full_scale_rests_at_the_ceiling() {
     let mut rack = rack_with(&[patch(|voice| voice.operators[0].key_velocity_sensitivity = 7)]);
     for part in 0..16 {
         rack.event(0xc0 | part, 0, 0);
         rack.event(0x90 | part, 69, 127);
     }
     let samples = render(&mut rack, 9600);
-    assert_eq!(peak(&samples), 32_768);
-    // A wrapped sample would jump from one rail to the other.
-    assert!(samples.windows(2).all(|pair| (i32::from(pair[0]) - i32::from(pair[1])).abs() < 8000));
+    assert!((CEILING - 40..=CEILING).contains(&peak(&samples)), "{}", peak(&samples));
+    assert!(unwrapped(&samples));
+}
+
+/// The output limiter's knee and ceiling.
+const KNEE: i32 = neoteletext_audio_instruments::output::LIMIT_KNEE as i32;
+const CEILING: i32 = neoteletext_audio_instruments::output::LIMIT_CEILING as i32;
+
+/// Whether no sample jumps from one rail towards the other, as a wrapped
+/// one would: a 440 Hz sine of full scale moves 1,900 a sample.
+fn unwrapped(samples: &[i16]) -> bool {
+    samples.windows(2).all(|pair| (i32::from(pair[0]) - i32::from(pair[1])).abs() < 8000)
 }
 
 /// A small generator of random numbers: xorshift.

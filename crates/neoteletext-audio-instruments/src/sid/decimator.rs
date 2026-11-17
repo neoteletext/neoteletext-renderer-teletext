@@ -187,6 +187,9 @@ impl Resampler {
         let difference = (sums.1 >> BLEND_PRE_SHIFTS.0).wrapping_sub(base) >> BLEND_PRE_SHIFTS.1;
         let blended = base.wrapping_add(difference.wrapping_mul(weight) >> BLEND_POST_SHIFT);
         let rounded = blended.wrapping_add(SUM_HALF) >> SUM_FRACTION_BITS;
+        // The chip's output came through the limiter (`analogue`), so
+        // only this filter's overshoot of a signal already at the
+        // limiter's ceiling can be beyond a sample, and is held to it.
         rounded.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
     }
 }

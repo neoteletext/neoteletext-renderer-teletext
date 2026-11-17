@@ -591,7 +591,11 @@ impl Analogue {
         let raised = self.output.wrapping_mul(1 << COUPLING_FRACTION_BITS);
         self.coupling = self.coupling.wrapping_add(raised.wrapping_sub(self.coupling) >> COUPLING_SHIFT);
         let coupled = self.output.wrapping_sub(self.coupling >> COUPLING_FRACTION_BITS);
-        coupled.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
+        // The output's limiter stands here, where the chip's output
+        // stage is, and not after the decimator: what it bends is then
+        // bent at the chip's rate, where the harmonics that makes do not
+        // fold back.
+        crate::output::limit(coupled)
     }
 
     /// The filter's two states, for the tests that bound them.
