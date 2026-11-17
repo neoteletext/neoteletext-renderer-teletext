@@ -19,44 +19,14 @@
 use crate::analog::STEP_LIMIT;
 use crate::analog::envelope::ENVELOPE_ONE;
 use crate::analog::fixed::mul_high_unsigned;
+pub use crate::analog::octave::{OCTAVE, OCTAVE_BITS, cents, keys, octaves};
+use crate::analog::octave::{ONE_Q30, square_root};
 
-/// Fraction bits of an interval in octaves.
-pub const OCTAVE_BITS: u32 = 24;
-/// One octave.
-pub const OCTAVE: i32 = 1 << OCTAVE_BITS;
-/// Semitones in an octave.
-const SEMITONES: i32 = 12;
-/// Cents in an octave.
-const CENTS: i32 = 1_200;
 /// The largest value of a slider's byte.
 pub const SLIDER_MAX: u8 = 255;
 /// The largest magnitude of a signed slider.
 pub const SIGNED_MAX: i32 = 127;
 
-/// An interval of so many cents, in octaves.
-#[must_use]
-pub const fn cents(cents: i32) -> i32 {
-    octaves(cents, CENTS)
-}
-
-/// `numerator / denominator` octaves, for a fraction below 128 in
-/// magnitude; a denominator of zero gives none.
-#[must_use]
-pub const fn octaves(numerator: i32, denominator: i32) -> i32 {
-    match ((numerator as i64) << OCTAVE_BITS).checked_div(denominator as i64) {
-        Some(octaves) => octaves as i32,
-        None => 0,
-    }
-}
-
-/// The interval from one key to another, in octaves.
-#[must_use]
-pub const fn keys(from: u8, to: u8) -> i32 {
-    octaves((to as i32).wrapping_sub(from as i32), SEMITONES)
-}
-
-/// One in Q30, the fixed point of a ratio between one and two.
-const ONE_Q30: u64 = 1 << 30;
 /// Sixty-fourths of an octave: the table's steps.
 const TABLE_BITS: u32 = 6;
 /// Entries of the table: one for each step and one for the octave itself.
@@ -71,23 +41,6 @@ const REST_MASK: u32 = (1 << REST_BITS) - 1;
 const DIFFERENCE_SHIFT: u32 = 4;
 /// See [`DIFFERENCE_SHIFT`].
 const REST_SHIFT: u32 = 32 - REST_BITS - DIFFERENCE_SHIFT;
-
-/// The whole square root of a number, by Newton's iteration.
-const fn square_root(value: u128) -> u128 {
-    if value < 2 {
-        return value;
-    }
-    let mut estimate = value;
-    let mut next = value.div_ceil(2);
-    while next < estimate {
-        estimate = next;
-        next = match value.checked_div(estimate) {
-            Some(quotient) => estimate.wrapping_add(quotient) / 2,
-            None => estimate,
-        };
-    }
-    estimate
-}
 
 /// 2^(k/64) in Q30 for k from 0 to 64: each is a product of the square
 /// root of two taken one to six times.
@@ -166,6 +119,11 @@ pub fn raise_step(step: u32, octaves: i32) -> u32 {
 
 /// `value * 2^octaves`, held to a word, within 0.03 cent: for hertz and
 /// seconds, where a control changes.
+///
+/// It is this instrument's own and not [`crate::analog::octave::raise`]
+/// so that a control and the loop that renders samples take the same
+/// power, [`power_of_fraction`], and a frequency set by one agrees to the
+/// last place with a step made by the other.
 #[must_use]
 pub fn raise(value: u32, octaves: i32) -> u32 {
     let whole = octaves >> OCTAVE_BITS;

@@ -15,6 +15,8 @@ use crate::analog::Oversampling;
 use crate::analog::envelope::ENVELOPE_ONE;
 use crate::analog::filter::ONE_Q28;
 use crate::analog::fixed::mul_high_unsigned;
+pub use crate::analog::octave::{CENTS, OCTAVE, OCTAVE_BITS, SEMITONES, cents, keys, octaves};
+use crate::analog::octave::{ONE_Q30, square_root};
 
 /// How many times the output rate the voice runs at: the ladder distorts,
 /// and the oscillators want it for their aliasing to be 80 dB down.
@@ -25,37 +27,6 @@ pub const OVERSAMPLING: Oversampling = Oversampling::Twice;
 /// The voice's rate in hertz.
 pub const RATE: u32 = OVERSAMPLING.rate();
 
-/// Fraction bits of an interval in octaves.
-pub const OCTAVE_BITS: u32 = 24;
-/// One octave.
-pub const OCTAVE: i32 = 1 << OCTAVE_BITS;
-/// Semitones in an octave.
-pub const SEMITONES: i32 = 12;
-/// Cents in an octave.
-pub const CENTS: i32 = 1_200;
-
-/// `numerator / denominator` octaves, for a fraction below 128 in
-/// magnitude; a denominator of zero gives none.
-#[must_use]
-pub const fn octaves(numerator: i32, denominator: i32) -> i32 {
-    match ((numerator as i64) << OCTAVE_BITS).checked_div(denominator as i64) {
-        Some(octaves) => octaves as i32,
-        None => 0,
-    }
-}
-
-/// An interval of so many cents, in octaves.
-#[must_use]
-pub const fn cents(cents: i32) -> i32 {
-    octaves(cents, CENTS)
-}
-
-/// The interval from one key to another, in octaves.
-#[must_use]
-pub const fn keys(from: u8, to: u8) -> i32 {
-    octaves((to as i32).wrapping_sub(from as i32), SEMITONES)
-}
-
 /// `amount * part / whole`, rounded towards zero; nothing for a whole of
 /// zero. It divides, and belongs where a control changes.
 #[must_use]
@@ -64,8 +35,6 @@ pub fn share_of(amount: i32, part: i32, whole: i32) -> i32 {
     i32::try_from(product.checked_div(i64::from(whole)).unwrap_or(0)).unwrap_or(0)
 }
 
-/// One in Q30, the fixed point of a ratio between one and two.
-const ONE_Q30: u64 = 1 << 30;
 /// Sixty-fourths of an octave: the table's steps.
 const TABLE_BITS: u32 = 6;
 /// Bits of an interval below a step of the table.
@@ -77,23 +46,6 @@ const LN2_Q14: u32 = 11_357;
 /// The right shift that makes the rest of an interval, times
 /// [`LN2_Q14`], its natural logarithm in Q32.
 const LOG_SHIFT: u32 = OCTAVE_BITS + 14 - 32;
-
-/// The whole square root of a number, by Newton's iteration.
-const fn square_root(value: u128) -> u128 {
-    if value < 2 {
-        return value;
-    }
-    let mut estimate = value;
-    let mut next = value.div_ceil(2);
-    while next < estimate {
-        estimate = next;
-        next = match value.checked_div(estimate) {
-            Some(quotient) => estimate.wrapping_add(quotient) / 2,
-            None => estimate,
-        };
-    }
-    estimate
-}
 
 /// 2^(k/64) in Q30 for k from 0 to 63: each is a product of the square
 /// root of two taken one to six times.
@@ -137,7 +89,9 @@ const SIXTY_FOURTHS: [u32; 1 << TABLE_BITS] = {
 /// fraction, held to a word: the exponential converter of an oscillator
 /// and of the filter. It is within a hundredth of a cent of the
 /// exponential for a step of 16 bits or more, takes no division and no
-/// 64-bit product, and runs for every sample.
+/// 64-bit product, and runs for every sample: which is why it is not
+/// [`crate::analog::octave::raise`], whose 64-bit and 128-bit products
+/// belong where a control changes.
 #[inline]
 #[must_use]
 pub fn raise(step: u32, octaves: i32) -> u32 {

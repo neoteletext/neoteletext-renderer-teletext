@@ -18,7 +18,8 @@
 //!   cents.
 //! - [`allocator`]: which voice plays which key.
 //! - [`decimator`]: from twice or four times the output rate down to it.
-//! - [`fixed`] and [`tables`]: the arithmetic and the tables under them.
+//! - [`fixed`], [`octave`] and [`tables`]: the arithmetic, the intervals and
+//!   their exponential, and the tables under them.
 //!
 //! # Signals, rates and frequencies
 //!
@@ -144,6 +145,7 @@ pub mod envelope;
 pub mod filter;
 pub mod fixed;
 pub mod lfo;
+pub mod octave;
 pub mod oscillator;
 pub mod tables;
 

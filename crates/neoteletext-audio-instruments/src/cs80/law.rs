@@ -12,6 +12,8 @@
 //! lever is taken to travel its ten volts in a straight line.
 
 use crate::analog::envelope::ENVELOPE_ONE;
+use crate::analog::octave::ONE_Q30;
+pub use crate::analog::octave::{OCTAVE, OCTAVE_BITS, SEMITONES, cents, keys, octaves};
 
 /// The largest position of a lever in a patch.
 ///
@@ -21,39 +23,6 @@ pub const LEVER_MAX: u8 = 127;
 /// The middle of a lever that rests at its centre.
 pub const LEVER_CENTRE: u8 = 64;
 
-/// Fraction bits of an interval in octaves.
-pub const OCTAVE_BITS: u32 = 24;
-/// One octave.
-pub const OCTAVE: i32 = 1 << OCTAVE_BITS;
-/// Semitones in an octave.
-pub const SEMITONES: i32 = 12;
-/// Cents in an octave.
-const CENTS: i32 = 1_200;
-
-/// `numerator / denominator` octaves, for a fraction below 128 in
-/// magnitude; a denominator of zero gives none.
-#[must_use]
-pub const fn octaves(numerator: i32, denominator: i32) -> i32 {
-    match ((numerator as i64) << OCTAVE_BITS).checked_div(denominator as i64) {
-        Some(octaves) => octaves as i32,
-        None => 0,
-    }
-}
-
-/// An interval of so many cents, in octaves.
-#[must_use]
-pub const fn cents(cents: i32) -> i32 {
-    octaves(cents, CENTS)
-}
-
-/// The interval from one key to another, in octaves.
-#[must_use]
-pub const fn keys(from: u8, to: u8) -> i32 {
-    octaves((to as i32).wrapping_sub(from as i32), SEMITONES)
-}
-
-/// One in Q30, the fixed point of a ratio between one and two.
-const ONE_Q30: u64 = 1 << 30;
 /// Bits of the table's index: thirty-seconds of an octave.
 const TABLE_BITS: u32 = 5;
 /// Bits of an interval below a step of the table.
@@ -92,6 +61,12 @@ const POWERS: [u64; 1 << TABLE_BITS] = {
 /// fraction, held to a word: within a hundredth of a cent of it.
 ///
 /// It takes 64-bit products, and belongs where a control changes.
+///
+/// It is kept beside [`crate::analog::octave::raise`], which computes the
+/// same power from a table of sixteenths: the two round differently in
+/// the last places of a word (one result in six, by up to three parts in
+/// ten million), and every figure this instrument was measured with came
+/// through this one.
 #[must_use]
 pub fn raise(value: u32, octaves: i32) -> u32 {
     let whole = octaves >> OCTAVE_BITS;
