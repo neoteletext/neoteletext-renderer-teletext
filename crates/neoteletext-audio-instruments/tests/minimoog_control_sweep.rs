@@ -16,7 +16,7 @@
 mod control_sweep_support;
 
 use control_sweep_support::{
-    AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
+    AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Clock, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
     PROGRAM, Sound, all_sound_off_silences, check, continuous, on_off, run, sweep, switch, to_crest,
 };
 use neoteletext_audio_instruments::minimoog::{ContourPatch, Minimoog, OscillatorPatch, Patch, Range, Waveform};
@@ -113,9 +113,9 @@ fn sounds() -> Vec<Sound<Minimoog>> {
     let held = |name, patch: fn() -> Patch, key: u8, wheel: u8| Sound {
         name,
         make: Box::new(move || instrument(&patch(), wheel)),
-        play: Box::new(move |minimoog: &mut Minimoog| {
+        play: Box::new(move |minimoog: &mut Minimoog, clock: &mut Clock| {
             minimoog.event(NOTE_ON, key, 100);
-            to_crest(minimoog, 4 * AFTER)
+            to_crest(minimoog, 4 * AFTER, clock)
         }),
     };
     vec![
@@ -126,17 +126,17 @@ fn sounds() -> Vec<Sound<Minimoog>> {
         Sound {
             name: "release",
             make: Box::new(|| instrument(&everything(), WHEEL)),
-            play: Box::new(|minimoog: &mut Minimoog| {
+            play: Box::new(|minimoog: &mut Minimoog, clock: &mut Clock| {
                 minimoog.event(NOTE_ON, 60, 100);
-                to_crest(minimoog, 4 * AFTER);
+                to_crest(minimoog, 4 * AFTER, clock);
                 minimoog.event(NOTE_OFF, 60, 0);
-                to_crest(minimoog, AFTER / 2)
+                to_crest(minimoog, AFTER / 2, clock)
             }),
         },
         Sound {
             name: "silence",
             make: Box::new(|| instrument(&bright(), 0)),
-            play: Box::new(|minimoog: &mut Minimoog| {
+            play: Box::new(|minimoog: &mut Minimoog, _clock: &mut Clock| {
                 minimoog.event(NOTE_ON, 60, 100);
                 run(minimoog, 2 * AFTER);
                 minimoog.event(NOTE_OFF, 60, 0);

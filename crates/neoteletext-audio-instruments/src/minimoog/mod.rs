@@ -221,11 +221,6 @@ const NOISE_SLEW: i32 = law::NOISE_LEVEL >> POT_SLEW_SHIFT;
 const EXTERNAL_SLEW: i32 = law::EXTERNAL_GAIN >> POT_SLEW_SHIFT;
 /// Likewise the EMPHASIS, whose top is [`law::EMPHASIS_TOP`].
 const EMPHASIS_SLEW: i32 = law::EMPHASIS_TOP >> FILTER_SLEW_SHIFT;
-/// Likewise the modulation wheel, which is the amount of what moves the
-/// cutoff and goes as slowly as the filter's knobs: two thirds of its travel in
-/// 5.3 ms under a note with the EMPHASIS up is a step 1.78 times the
-/// note's own.
-const WHEEL_SLEW: i32 = i32::MAX >> FILTER_SLEW_SHIFT;
 /// Likewise a contour's SUSTAIN LEVEL, whose top is one in Q30.
 const SUSTAIN_SLEW: i32 = ENVELOPE_ONE >> POT_SLEW_SHIFT;
 /// Likewise the AMOUNT OF CONTOUR, whose top is [`law::CONTOUR`].
@@ -476,11 +471,9 @@ pub struct Minimoog {
     pitch: i32,
     pitch_fraction: u32,
     /// The pitch wheel, in octaves, and the modulation wheel's share in
-    /// Q31: where the controller has it, and where it stands on its way
-    /// there, a potentiometer as the knobs are.
+    /// Q31.
     bend: i32,
     wheel: i32,
-    wheel_now: i32,
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
@@ -544,7 +537,6 @@ impl Minimoog {
             pitch_fraction: 0,
             bend: 0,
             wheel: 0,
-            wheel_now: 0,
             volume: DATA_MAX,
             volume_gain: VolumeGain::full(),
             cut: None,
@@ -797,7 +789,6 @@ impl Minimoog {
         let settings = self.settings;
         self.pots.approach(&settings.pots);
         let pots = self.pots;
-        self.wheel_now = approach(self.wheel_now, self.wheel, WHEEL_SLEW);
 
         // The glide: the pitch moves a share of the way to the key's.
         if settings.glide == IMMEDIATE {
@@ -812,7 +803,7 @@ impl Minimoog {
         // wheel. A full swing is one in Q24.
         let (periodic, random) = self.modulation;
         let mixed = periodic.wrapping_add(scale(random.wrapping_sub(periodic), pots.mix));
-        let modulation = scale(mixed, self.wheel_now);
+        let modulation = scale(mixed, self.wheel);
         let pitch_modulation = amplify(modulation, settings.oscillator_modulation);
         let cutoff_modulation = amplify(modulation, settings.filter_modulation);
 
@@ -839,7 +830,7 @@ impl Minimoog {
         // The noise: white or pink to the mixer; to the modulation, pink
         // with the switch at white and red with it at pink (service
         // manual, figure 9-8: "PINK OR RED NOISE" to the modulation mix).
-        let needs_colour = settings.pink || (pots.mix > 0 && self.wheel_now > 0);
+        let needs_colour = settings.pink || (pots.mix > 0 && self.wheel > 0);
         self.noise_due = !self.noise_due;
         if self.noise_due {
             let (pink, red) = if needs_colour { self.pink.tick() } else { (0, 0) };

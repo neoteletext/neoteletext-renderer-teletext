@@ -47,10 +47,11 @@ use neoteletext_audio_instruments::SAMPLE_RATE;
 
 /// Samples in the 50 ms after a change in which its step is looked for.
 pub const AFTER: usize = SAMPLE_RATE as usize / 20;
-/// Samples over which a sound's own largest step is taken: three times
-/// as long, so that it is the largest of more of the sound's cycles
-/// than the change is measured across and is not a lucky small one.
-pub const ALONE: usize = 3 * AFTER;
+/// Samples over which a sound's own largest step is taken: eight times
+/// as long, so that it is the largest of many more of the sound's
+/// cycles than the change is measured across, and of a whole cycle of a
+/// slow modulation, and is not a lucky small one.
+pub const ALONE: usize = 8 * AFTER;
 /// The step, in units of a 16-bit sample, that stands in for a sound's
 /// own where the sound is silent or nearly: 72 dB below a full-scale
 /// sample, and a twelfth of the smallest own step of any sound here.
@@ -87,6 +88,9 @@ pub trait Instrument: Clone + Send {
 /// Something done to an instrument.
 pub type Act<I> = Box<dyn Fn(&mut I) + Send + Sync>;
 
+/// How a sound is played to the instant of the change.
+pub type Play<I> = Box<dyn Fn(&mut I, &mut Clock) -> i16 + Send + Sync>;
+
 /// One sound: an instrument as it is made, and how it is played up to
 /// the instant of the change.
 pub struct Sound<I> {
@@ -94,8 +98,9 @@ pub struct Sound<I> {
     pub name: &'static str,
     /// The instrument with the sound's patch, before any key.
     pub make: Box<dyn Fn() -> I + Send + Sync>,
-    /// Plays it to the instant of the change; gives the last sample.
-    pub play: Box<dyn Fn(&mut I) -> i16 + Send + Sync>,
+    /// Plays it to the instant of the change, by the clock it is given;
+    /// gives the last sample.
+    pub play: Play<I>,
 }
 
 /// One change of one control.
@@ -247,20 +252,44 @@ pub fn run<I: Instrument>(instrument: &mut I, samples: usize) -> Vec<i16> {
     out
 }
 
+/// How long each wait for a crest was, so that a second instrument is
+/// played for exactly as long as the first was, wherever its own crests
+/// are: the two are then at the same instant of the same notes.
+#[derive(Default)]
+pub struct Clock {
+    /// Samples each wait took, in order.
+    waits: Vec<usize>,
+    /// The wait that comes next, when the clock is being followed.
+    next: Option<usize>,
+}
+
+impl Clock {
+    /// A clock that follows this one's waits.
+    fn again(&self) -> Self {
+        Self { waits: self.waits.clone(), next: Some(0) }
+    }
+}
+
 /// Renders `lead` samples and then on to a crest of the wave: a sample
 /// within a tenth of the largest of the lead's last 50 ms, or 100 ms
-/// more if none comes. Gives the last sample.
-pub fn to_crest<I: Instrument>(instrument: &mut I, lead: usize) -> i16 {
+/// more if none comes; or, by a clock that follows another, for as long
+/// as that one waited. Gives the last sample.
+pub fn to_crest<I: Instrument>(instrument: &mut I, lead: usize, clock: &mut Clock) -> i16 {
     let signal = run(instrument, lead);
+    let mut last = signal.last().copied().unwrap_or(0);
+    if let Some(next) = clock.next {
+        let wait = clock.waits.get(next).copied().unwrap_or(0);
+        clock.next = Some(next + 1);
+        return run(instrument, wait).last().copied().unwrap_or(last);
+    }
     let recent = &signal[signal.len().saturating_sub(AFTER)..];
     let peak = recent.iter().map(|&sample| i32::from(sample).abs()).max().unwrap_or(0);
-    let mut last = signal.last().copied().unwrap_or(0);
-    for _ in 0..2 * AFTER {
-        if i32::from(last).abs() * 10 >= peak * 9 {
-            break;
-        }
+    let mut wait = 0;
+    while wait < 2 * AFTER && i32::from(last).abs() * 10 < peak * 9 {
         last = run(instrument, 1)[0];
+        wait += 1;
     }
+    clock.waits.push(wait);
     last
 }
 
@@ -269,7 +298,8 @@ pub fn to_crest<I: Instrument>(instrument: &mut I, lead: usize) -> i16 {
 pub fn measure<I: Instrument>(sound: &Sound<I>, change: &Change<I>) -> Row {
     let mut changed = (sound.make)();
     (change.before)(&mut changed);
-    let last = (sound.play)(&mut changed);
+    let mut clock = Clock::default();
+    let last = (sound.play)(&mut changed, &mut clock);
     let mut alone = changed.clone();
     let own = largest_step(last, &run(&mut alone, ALONE));
     (change.apply)(&mut changed);
@@ -277,7 +307,7 @@ pub fn measure<I: Instrument>(sound: &Sound<I>, change: &Change<I>) -> Row {
     let mut twin = (sound.make)();
     (change.before)(&mut twin);
     (change.apply)(&mut twin);
-    let last = (sound.play)(&mut twin);
+    let last = (sound.play)(&mut twin, &mut clock.again());
     let mut there = largest_step(last, &run(&mut twin, ALONE));
     if let Some(onset) = &change.onset {
         let mut fresh = (sound.make)();
@@ -310,7 +340,7 @@ pub fn sweep<I: Instrument>(sounds: &[Sound<I>], changes: &(dyn Fn(&I) -> Vec<Ch
 pub fn all_sound_off_silences<I: Instrument>(sounds: &[Sound<I>], off: &(dyn Fn(&mut I) + Sync), within: usize) {
     for sound in sounds {
         let mut instrument = (sound.make)();
-        (sound.play)(&mut instrument);
+        (sound.play)(&mut instrument, &mut Clock::default());
         off(&mut instrument);
         run(&mut instrument, within);
         let after = run(&mut instrument, 2 * AFTER);
