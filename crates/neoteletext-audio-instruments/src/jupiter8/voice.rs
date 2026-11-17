@@ -122,11 +122,15 @@
 //!
 //! Eight voices render 14 times faster than real time with one
 //! oscillator each, 12.5 times with a factory patch of two oscillators
-//! and a moving pulse, and 7.7 times under cross modulation with sync
+//! and a moving pulse, and 7.8 times under cross modulation with sync
 //! (8.8 with one frequency for each sample and nothing rounded), on one
 //! core of a 3.7 GHz Intel Core i9-10900KF
 //! (`tests/jupiter8_instrument.rs`, `rendering_speed`, 17 November
-//! 2026).
+//! 2026). The most work found is 6.0 times: the slider at 10 under
+//! VCO-2's sine with both oscillators at 2' on the top octaves, where
+//! VCO-1 is at its bound for much of every cycle of VCO-2 and starts a
+//! cycle of its own in every fourth sample. A sample is made in six
+//! stretches at most, whatever the patch.
 
 use crate::analog::decimator::Decimator;
 use crate::analog::envelope::{ENVELOPE_ONE, IMMEDIATE, REST_LEVEL, RcEnvelope, Stage, apply, time_constant};

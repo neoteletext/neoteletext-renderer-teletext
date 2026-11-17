@@ -88,8 +88,9 @@
 //! - **The resonance at its top** is a feedback of 3.95, where the
 //!   service notes' drawing of the ringing would have a little more than
 //!   the filter can take without oscillating by itself.
-//! - **Eight voices cost** 8 to 14 times less than real time on one core
-//!   of a 3.7 GHz Intel Core i9-10900KF.
+//! - **Eight voices cost** 6 to 14 times less than real time on one core
+//!   of a 3.7 GHz Intel Core i9-10900KF, the 6 under the deepest cross
+//!   modulation on the highest keys.
 //! - **No arpeggiator**, no tape memory, no external control voltages;
 //!   the hold is the pedal alone, without the panel's two selectors: it
 //!   holds both halves in whole and dual and the lower half in split, as

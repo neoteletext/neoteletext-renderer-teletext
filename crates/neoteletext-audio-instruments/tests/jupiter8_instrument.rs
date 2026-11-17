@@ -573,14 +573,30 @@ fn rendering_speed() {
         .with(Param::Sync, 1)
         .with(Param::MixVco2, 255)
         .with(Param::VcfResonance, 128);
-    for (name, patch) in [
-        ("a sawtooth each", Patch::DEFAULT),
-        ("LO STRINGS", factory::lo_strings()),
-        ("cross modulation and sync", cross),
+    // The most work found: the slider at 10 under VCO-2's sine, both
+    // oscillators at 2' on the keyboard's top octaves, where VCO-1 is at
+    // its bound of 48 kHz for much of every cycle of VCO-2 and starts a
+    // cycle in every fourth sample; the pulse's width swept as well.
+    let hardest = Patch::DEFAULT
+        .with(Param::CrossMod, 255)
+        .with(Param::Vco2Wave, 0)
+        .with(Param::Vco1Range, 3)
+        .with(Param::Vco2Range, 36)
+        .with(Param::MixVco2, 255)
+        .with(Param::PwmSource, 0)
+        .with(Param::PwmDepth, 255)
+        .with(Param::LfoRate, 255)
+        .with(Param::HpfCutoff, 100)
+        .with(Param::VcfResonance, 128);
+    for (name, patch, higher) in [
+        ("a sawtooth each", Patch::DEFAULT, 0),
+        ("LO STRINGS", factory::lo_strings(), 0),
+        ("cross modulation and sync", cross, 0),
+        ("cross modulation at 10 with both oscillators at 2', four octaves up", hardest, 48),
     ] {
         let mut jupiter = instrument(&patch);
         for &key in &KEYS[..8] {
-            jupiter.event(NOTE_ON, key, 100);
+            jupiter.event(NOTE_ON, key + higher, 100);
         }
         let start = Instant::now();
         jupiter.render(&mut out);
