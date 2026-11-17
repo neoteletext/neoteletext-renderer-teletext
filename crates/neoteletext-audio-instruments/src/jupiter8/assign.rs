@@ -251,6 +251,9 @@ impl Assigner {
     /// notes played to carry on indefinitely at their programmed Sustain
     /// levels".
     pub fn hold(&mut self, on: bool) {
+        if on == self.hold {
+            return;
+        }
         self.hold = on;
         if !on {
             for slot in self.active_mut().iter_mut().filter(|slot| slot.kept) {
