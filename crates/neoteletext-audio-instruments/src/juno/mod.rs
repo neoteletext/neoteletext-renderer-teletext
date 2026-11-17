@@ -87,7 +87,7 @@ use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::{amplify, mul_high, scale};
 use crate::analog::lfo::{LFO_ONE, Lfo, Shape};
 use crate::analog::oscillator::Noise;
-use crate::analog::{frequency, to_sample};
+use crate::analog::{LEVEL, frequency, to_sample};
 
 use law::{Law, OCTAVE};
 pub use patch::{ChorusMode, Patch, PatchError, PwmSource, Range, Slider};
@@ -239,6 +239,14 @@ const _: () = assert!(
     CHORUS_FILL_SAMPLES as u64 * 1_000_000 > (CHORUS_DELAY.0 + CHORUS_DELAY.1) as u64 * SAMPLE_RATE as u64
         && CHORUS_FADE_SAMPLES > 0
 );
+/// What the signal into the chorus stays under while nothing in it could
+/// be heard to step: half a unit of a 16-bit sample before the output's
+/// gain. Once it has stayed under for [`CHORUS_FILL_SAMPLES`], longer
+/// than the longest delay, the lines hold nothing either, and the
+/// chorus's switches may move at once.
+///
+/// Source: own choice: under the sample's last bit.
+const QUIET_LEVEL: i32 = LEVEL >> 16;
 
 /// The corner below which the voices' sum does not pass, in thousandths
 /// of a hertz: what takes away the steady part of a pulse that is not a
@@ -277,6 +285,16 @@ const VCA_LEVEL_RANGE: i32 = OCTAVE;
 /// Source: own choice with [`VCA_LEVEL_RANGE`]: 64 of 0 to 127, the
 /// slider's 0 between -5 and +5, where [`Patch::DEFAULT`] has it.
 const VCA_LEVEL_CENTRE: i32 = 64;
+/// The right shift of the share of the way the amplifier's level moves
+/// in a sample towards a level a patch has newly set: a time constant of
+/// 64 samples, 1.3 ms. A level set in one sample under a note is a step
+/// as large as the note's signal at that instant times the change.
+///
+/// Source: own choice: the nearest power of two to the 1 ms that follows
+/// each of the Juno-106's held control voltages (service notes, module
+/// board schematic, page 13: 10 kΩ onto 0.1 µF); the level's own path
+/// was not read.
+const VCA_LEVEL_SLEW_SHIFT: u32 = 6;
 /// The share of the mixed output that is a sample, in Q28: 494 / 1000.
 /// One voice's sawtooth through an open filter then peaks 16.8 dB below
 /// full scale, and six struck together 3.4 dB below.
@@ -336,7 +354,10 @@ pub struct Juno {
     coupling: OnePole,
     high_pass: OnePole,
     bass: OnePole,
+    /// The amplifier's level in Q28, and the level the patch asks, which
+    /// it follows.
     level: i32,
+    level_wanted: i32,
     chorus: Chorus,
     /// The setting the lines are swept by now, which follows the patch's
     /// at once or by way of a fade; off, the lines are not run.
@@ -346,6 +367,9 @@ pub struct Juno {
     /// before it rises.
     wet: u32,
     fill: u32,
+    /// Samples for which the signal into the chorus has stayed under
+    /// [`QUIET_LEVEL`], counted no further than [`CHORUS_FILL_SAMPLES`].
+    quiet: u32,
     ignored: u64,
 }
 
@@ -391,10 +415,12 @@ impl Juno {
             high_pass: OnePole::new(),
             bass: OnePole::new(),
             level: ONE_Q28,
+            level_wanted: ONE_Q28,
             chorus: Self::empty_chorus(),
             sweep: ChorusMode::Off,
             wet: 0,
             fill: 0,
+            quiet: CHORUS_FILL_SAMPLES,
             ignored: 0,
         };
         juno.coupling.set_cutoff(frequency(COUPLING_CORNER, SAMPLE_RATE));
@@ -428,10 +454,12 @@ impl Juno {
 
     /// Gives the instrument a patch, which it copies. It takes effect at
     /// once, on the voices that are sounding too, as moving the panel's
-    /// controls does; but the chorus, switched while a voice sounds,
-    /// goes and comes over a hundredth of a second, so that its lines
-    /// are not cut into the output or out of it in one step. A setting
-    /// the model has not is taken as the nearest it has
+    /// controls does; but the chorus, switched while anything passes
+    /// into it, goes and comes over a hundredth of a second, so that its
+    /// lines are not cut into the output or out of it in one step, and
+    /// the amplifier's level then moves to its new place over a
+    /// thousandth of a second or so. A setting the model has not is
+    /// taken as the nearest it has
     /// ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
@@ -473,11 +501,20 @@ impl Juno {
         }
         let slider = i32::from(patch.get(Slider::VcaLevel)).saturating_sub(VCA_LEVEL_CENTRE);
         let octaves = slider.saturating_mul(VCA_LEVEL_RANGE) / VCA_LEVEL_CENTRE;
-        self.level = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
+        self.level_wanted = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
+        if self.quiet >= CHORUS_FILL_SAMPLES {
+            // Nothing passes through the amplifier: at once.
+            self.level = self.level_wanted;
+        }
 
         let wanted = self.chorus_mode();
-        if self.allocator.sounding() == 0 {
-            // Nothing sounds, so nothing can click: at once.
+        if self.quiet >= CHORUS_FILL_SAMPLES {
+            // Nothing is in the lines or on its way into them, so nothing
+            // can click: at once. That no voice sounds is not enough: for
+            // seconds after a wide pulse's note the coupling capacitor
+            // gives up the charge the pulse's steady part left on it, and
+            // a line cut out of that, or let into it, is a step as large
+            // as what is left.
             self.sweep_by(wanted);
             self.fill = 0;
             self.wet = if wanted == ChorusMode::Off { 0 } else { CHORUS_FADE_SAMPLES };
@@ -727,7 +764,17 @@ impl Juno {
             if boost {
                 signal = signal.saturating_add(amplify(self.bass.low_pass(signal), BASS_BOOST_GAIN));
             }
+            if self.level != self.level_wanted {
+                let step = self.level_wanted.saturating_sub(self.level) >> VCA_LEVEL_SLEW_SHIFT;
+                // A share cut to nothing would never arrive.
+                self.level = if step == 0 { self.level_wanted } else { self.level.saturating_add(step) };
+            }
             signal = amplify(amplify(signal, self.level), volume);
+            self.quiet = if signal.saturating_abs() < QUIET_LEVEL {
+                self.quiet.saturating_add(1).min(CHORUS_FILL_SAMPLES)
+            } else {
+                0
+            };
             let fade = self.chorus_fade(chorus);
             if self.sweep != ChorusMode::Off {
                 let [first, second] = self.chorus.process(signal);
