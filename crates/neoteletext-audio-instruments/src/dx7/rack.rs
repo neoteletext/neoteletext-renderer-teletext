@@ -25,7 +25,7 @@
 //! milliseconds later, and at once when each call renders a multiple of 32
 //! samples, as the 960 of an instrument block are.
 
-use super::kernel::BLOCK_SAMPLES;
+use super::kernel::{ATTENUATION_ONE, ATTENUATION_SILENT, BLOCK_SAMPLES};
 use super::msfa::Q24_ONE;
 use super::msfa::lfo::{Lfo, Waveform};
 use super::note::{Controls, Note};
@@ -100,6 +100,21 @@ const STATUS_PITCH_BEND: u8 = 0xe0;
 const CONTROL_MODULATION_WHEEL: u8 = 1;
 /// Controller: volume.
 const CONTROL_VOLUME: u8 = 7;
+/// The most a part's volume moves in a block, as attenuation: a quarter
+/// of a doubling, 1.5 dB.
+///
+/// Source: own choice, measured (`tests/dx7_rack.rs`,
+/// `tests/dx7_control_sweep.rs`). The kernel glides an operator's
+/// attenuation from one block's to the next in a straight line, which
+/// is a level that falls or rises by the same share at every sample;
+/// a volume that went all its way in one block, 16 doublings in 32
+/// samples, took 29% of the level at each sample, and from 127 to 0
+/// stepped a note by 4.8 times its own largest step. At a quarter of a
+/// doubling a block it is 0.5% a sample: 127 to 64, a quarter of the
+/// level, takes eight blocks, 5.3 ms, which is the whole way of the
+/// other instruments' volume, and 127 to 0 takes 56 blocks, 37 ms, of
+/// which the last half is below a 250th of the level.
+const VOLUME_STEP: u32 = ATTENUATION_ONE / 4;
 /// Controller: sustain pedal.
 const CONTROL_SUSTAIN: u8 = 64;
 /// Controller: all sound off.
@@ -160,6 +175,9 @@ struct Part {
     bend: i32,
     wheel: u8,
     volume: u8,
+    /// The volume's attenuation as it stands, in the kernel's units, on
+    /// its way to what the controller asks ([`VOLUME_STEP`]).
+    attenuation: u32,
     sustain: bool,
     lfo: Lfo,
 }
@@ -167,7 +185,35 @@ struct Part {
 impl Part {
     fn new(index: usize) -> Self {
         let seed = SEED.wrapping_add(SEED_STEP.wrapping_mul(index.to_le_bytes()[0]));
-        Self { program: 0, bend: 0, wheel: 0, volume: VOLUME_DEFAULT, sustain: false, lfo: Lfo::new(seed) }
+        Self {
+            program: 0,
+            bend: 0,
+            wheel: 0,
+            volume: VOLUME_DEFAULT,
+            attenuation: Self::wanted(VOLUME_DEFAULT),
+            sustain: false,
+            lfo: Lfo::new(seed),
+        }
+    }
+
+    /// The attenuation a volume asks for, in the kernel's units. It is
+    /// held to the attenuation at which an operator is silent, beyond
+    /// which more changes no sample and would only be more way to go.
+    fn wanted(volume: u8) -> u32 {
+        let attenuation = u32::from(VOLUME_ATTENUATION.get(usize::from(volume)).copied().unwrap_or(0)) << VOLUME_SHIFT;
+        attenuation.min(ATTENUATION_SILENT)
+    }
+
+    /// The volume's attenuation for the next block: [`VOLUME_STEP`]
+    /// nearer to what the controller asks, or there.
+    fn volume(&mut self) -> u32 {
+        let wanted = Self::wanted(self.volume);
+        self.attenuation = if self.attenuation < wanted {
+            self.attenuation.saturating_add(VOLUME_STEP).min(wanted)
+        } else {
+            self.attenuation.saturating_sub(VOLUME_STEP).max(wanted)
+        };
+        self.attenuation
     }
 
     /// Sets the oscillator from the part's patch.
@@ -265,7 +311,9 @@ impl Rack {
     ///
     /// - Note off (0x8n), and note on (0x9n) with a velocity of 0.
     /// - Note on (0x9n).
-    /// - Control change (0xBn) of the modulation wheel (1), volume (7), the
+    /// - Control change (0xBn) of the modulation wheel (1), volume (7,
+    ///   which moves to its new place by 1.5 dB at the most in each
+    ///   block of 32 samples), the
     ///   sustain pedal (64, down from 64), all sound off (120), reset all
     ///   controllers (121, which leaves the volume) and all notes off (123).
     /// - Program change (0xCn) to a program of 0 to 31, which chooses the
@@ -453,8 +501,7 @@ impl Rack {
                 lfo_delay: part.lfo.getdelay(),
                 bend: part.bend.saturating_mul(PITCH_BEND_SCALE) >> PITCH_BEND_SHIFT,
                 wheel: part.wheel,
-                volume: u32::from(VOLUME_ATTENUATION.get(usize::from(part.volume)).copied().unwrap_or(0))
-                    << VOLUME_SHIFT,
+                volume: part.volume(),
             };
         }
         for slot in &mut self.slots {
