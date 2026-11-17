@@ -19,6 +19,7 @@
 //! not on by default, is the first instrument made from them: Roland's
 //! Juno-106 and Juno-60 ([`juno`]). Behind the feature `minimoog`, not on
 //! by default either, is Moog's Minimoog Model D ([`minimoog`]).
+//! Behind the feature `prophet5`, also not on by default, is Sequential Circuits' Prophet-5 ([`prophet5`]).
 //!
 //! # Whose code this is
 //!
@@ -80,6 +81,8 @@ pub mod dx7;
 pub mod juno;
 #[cfg(feature = "minimoog")]
 pub mod minimoog;
+#[cfg(feature = "prophet5")]
+pub mod prophet5;
 #[cfg(feature = "sid")]
 pub mod sid;
 

@@ -96,6 +96,8 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio-instruments", features: "juno" },
     // Moog's Minimoog Model D (TODO-6432), which no codec uses yet.
     Build { package: "neoteletext-audio-instruments", features: "minimoog" },
+    // Sequential Circuits' Prophet-5 (TODO-6433), which no codec uses yet.
+    Build { package: "neoteletext-audio-instruments", features: "prophet5" },
     Build { package: "neoteletext-opus", features: "" },
     Build { package: "neoteletext-opus", features: "error-trait" },
     Build { package: "neoteletext-audio-mix", features: "" },
