@@ -94,6 +94,8 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio-instruments", features: "analog" },
     // Roland's Juno-106 and Juno-60 (TODO-6431), which no codec uses yet.
     Build { package: "neoteletext-audio-instruments", features: "juno" },
+    // Moog's Minimoog Model D (TODO-6432), which no codec uses yet.
+    Build { package: "neoteletext-audio-instruments", features: "minimoog" },
     Build { package: "neoteletext-opus", features: "" },
     Build { package: "neoteletext-opus", features: "error-trait" },
     Build { package: "neoteletext-audio-mix", features: "" },

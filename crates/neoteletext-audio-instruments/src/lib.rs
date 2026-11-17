@@ -17,7 +17,8 @@
 //! from ([`analog`]): oscillators, filters, envelopes, a chorus and a
 //! voice allocator. They are no codec yet. Behind the feature `juno`, also
 //! not on by default, is the first instrument made from them: Roland's
-//! Juno-106 and Juno-60 ([`juno`]).
+//! Juno-106 and Juno-60 ([`juno`]). Behind the feature `minimoog`, not on
+//! by default either, is Moog's Minimoog Model D ([`minimoog`]).
 //!
 //! # Whose code this is
 //!
@@ -77,6 +78,8 @@ pub mod analog;
 pub mod dx7;
 #[cfg(feature = "juno")]
 pub mod juno;
+#[cfg(feature = "minimoog")]
+pub mod minimoog;
 #[cfg(feature = "sid")]
 pub mod sid;
 
