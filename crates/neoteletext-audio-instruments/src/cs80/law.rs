@@ -161,6 +161,10 @@ pub const VOLT: i32 = OCTAVE;
 /// its control currents meet ([`LPF_LEVER`]). The chip's own figure
 /// agrees within 5%: page 42, pin 4, "When the VK is 0.25V and Vf is 5V,
 /// the cut off frequency is set to just 1KHz"; this law gives 1,046 Hz.
+/// Yamaha's CS-series servicing guide (the page "Operational principle of
+/// LSI (IG00156)") states the law itself: "fc = 125 Kv · 2^Vfc", in
+/// proportion to the key voltage and an octave to the volt, 31.25 Hz
+/// here for this constant's 32.70 Hz.
 pub const CUTOFF_AT_NOTHING: u32 = 32_703;
 /// The key whose voltage is the 0.25 V of [`CUTOFF_AT_NOTHING`].
 ///

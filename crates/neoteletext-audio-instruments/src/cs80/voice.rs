@@ -112,8 +112,9 @@ const DRIVE_SHIFT: u32 = 2;
 ///
 /// Source: adjustment procedure, page 15, VCA, steps 1 and 2: the sine at
 /// 10 alone is trimmed to "1.00 ± .02 Vp-p" at the amplifier, and the
-/// square wave through open filters with VCF LEVEL at 10 to "800 ± 20
-/// mVp-p".
+/// square wave through open filters to "800 ± 20 mVp-p" (the page has
+/// "VCA LEVEL ... 10" there, read as the VCF LEVEL lever, which step 1
+/// has at 0).
 const VCF_GAIN: i32 = (ONE_Q28 as i64 * (1 << DRIVE_SHIFT) * 8 / 10) as i32;
 
 /// The amplifier's gain with every level at nominal, in Q30: an eighth,

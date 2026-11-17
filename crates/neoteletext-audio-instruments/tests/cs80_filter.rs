@@ -240,3 +240,70 @@ fn the_flutes_high_pass_filter_stands_below_its_note() {
     let fourth = component(steady, 4.0 * note);
     assert!(decibels(fundamental / fourth) > 6.0, "{:.1} dB", decibels(fundamental / fourth));
 }
+
+/// The cutoff, in octaves above the note, of the low-pass filter of a Q
+/// of `q` that a sawtooth's harmonics went through: the one whose gains
+/// are nearest theirs, in decibels, over the first sixteen.
+fn fitted_cutoff(signal: &[f64], note: f64, q: f64) -> f64 {
+    let found: Vec<f64> = (1..=16).map(|harmonic| decibels(component(signal, note * f64::from(harmonic)))).collect();
+    let error = |octaves: f64| {
+        let model: Vec<f64> = (1..=16)
+            .map(|harmonic| {
+                let x = f64::from(harmonic) / octaves.exp2();
+                -decibels(f64::from(harmonic) * (1.0 - x * x).hypot(x / q))
+            })
+            .collect();
+        let offset = found.iter().zip(&model).map(|(found, model)| found - model).sum::<f64>() / 16.0;
+        found.iter().zip(&model).map(|(found, model)| (found - model - offset).powi(2)).sum::<f64>()
+    };
+    let mut best = (f64::INFINITY, 0.0);
+    for step in 0..=600 {
+        let octaves = f64::from(step) / 100.0;
+        let error = error(octaves);
+        if error < best.0 {
+            best = (error, octaves);
+        }
+    }
+    best.1
+}
+
+#[test]
+#[ignore = "an open conflict between the documents as read and twelve recordings of a real instrument: run by hand it \
+            fails, BRASS 1 resting 2.92 octaves above its note for the recordings' 1.39 to 2.00"]
+fn brass_1_rests_where_a_real_instruments_does() {
+    // Twelve keys of one real CS-80's BRASS 1, each held 12 s
+    // (`~/devel/teletext-reference/synthesizers/cs-80/recordings/`,
+    // measured by `validation/table.py`). The low-pass filter's cutoff
+    // from 9.5 s on, in octaves above the note, on the keys 39, 42, 57,
+    // 60, 63, 65, 69, 70, 76, 79, 80 and 88:
+    //   +2.00 +1.99 +1.96 +1.65 +1.62 +1.61 +1.95 +1.61 +1.87 +1.50 +1.58 +1.39
+    // a mean of +1.73, in two groups 0.35 octave apart (the instrument's
+    // voices, each with its own trimmers). This reading of the documents
+    // rests at +2.92 on every key at the softest stroke, and higher at a
+    // harder one: 0.92 to 1.53 octaves above the recordings, 1.19 in the
+    // mean. The peak above the rest agrees where the recording's
+    // bandwidth lets it be measured (2.2 to 3.0 octaves for our 2.2, and
+    // the stroke adds to the real one).
+    //
+    // The same recordings against this reading otherwise: the filter's
+    // peak comes 116 to 260 ms after the key for our 390 ms; the fall
+    // from it is one exponential of 2.8 to 3.6 s, 6.5 to 8.3 s to a
+    // tenth, for our 3.3 s to a tenth; the level falls 5.5 to 9 dB in
+    // 10 s for our 4.4 dB, and is still falling at 6 s where ours has
+    // stopped at 3 s.
+    //
+    // What the documents were asked and did not answer is in the
+    // module's notes ([`neoteletext_audio_instruments::cs80`], "What is
+    // not here"): no one documented quantity moved within its tolerance
+    // or its doubt closes this on the twelve keys.
+    let patch = Patch::with_tones(PRESETS[2].1, PRESETS[2].1);
+    assert_eq!(PRESETS[2].0, "BRASS 1");
+    for key in [39u8, 60, 88] {
+        let note = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
+        let signal = play(&patch, key, 1, 11.5, 0.0);
+        // The Q is the preset's own: 0.5 + 4.5 × 61 / 127.
+        let rest = fitted_cutoff(&signal[samples(9.5)..], note, 2.66);
+        println!("BRASS 1, key {key}: at rest {rest:+.2} octaves above the note");
+        assert!((1.39..=2.00).contains(&rest), "key {key}: {rest:+.2} octaves for the recordings' +1.39 to +2.00");
+    }
+}
