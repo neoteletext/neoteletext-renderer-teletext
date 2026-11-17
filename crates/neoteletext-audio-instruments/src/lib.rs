@@ -21,6 +21,7 @@
 //! by default either, is Moog's Minimoog Model D ([`minimoog`]).
 //! Behind the feature `prophet5`, also not on by default, is Sequential Circuits' Prophet-5 ([`prophet5`]).
 //! Behind the feature `jupiter8`, not on by default either, is Roland's Jupiter-8 ([`jupiter8`]).
+//! Behind the feature `cs80`, not on by default either, is Yamaha's CS-80 ([`cs80`]).
 //!
 //! # Whose code this is
 //!
@@ -76,6 +77,8 @@ extern crate std;
 
 #[cfg(feature = "analog")]
 pub mod analog;
+#[cfg(feature = "cs80")]
+pub mod cs80;
 #[cfg(feature = "dx7")]
 pub mod dx7;
 #[cfg(feature = "juno")]

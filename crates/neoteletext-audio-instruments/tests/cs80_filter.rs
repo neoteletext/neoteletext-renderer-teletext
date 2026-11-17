@@ -1,0 +1,220 @@
+//! The CS-80's two filters: their cutoffs against Yamaha's one stated
+//! point and the alignment procedure's, an octave to the volt, the keys,
+//! the resonance from a Q of 0.5 to 5 and Haible's bound of 12.5, at
+//! which the filters do not oscillate (TODO-6434).
+
+// Without the feature there is nothing here to test.
+#![cfg(feature = "cs80")]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "a test, in f64 and on indices it derives itself"
+)]
+
+mod cs80_support;
+
+use std::f64::consts::PI;
+
+use cs80_support::{component, decibels, panel, pitch, play};
+use neoteletext_audio_instruments::cs80::{Control, Global, Patch, RATE};
+
+/// A filter of the documents: its cutoff in hertz and its Q.
+#[derive(Clone, Copy, Debug)]
+struct Filter {
+    cutoff: f64,
+    q: f64,
+}
+
+/// Which of the two filters.
+#[derive(Clone, Copy, PartialEq)]
+enum Which {
+    High,
+    Low,
+}
+
+/// The octaves to the volt of a filter's own lever: one for the
+/// high-pass filter, 3.3 / 2.7 for the low-pass (service manual, page 41:
+/// R6 and R7).
+fn lever_octaves(which: Which) -> f64 {
+    if which == Which::High { 1.0 } else { 3.3 / 2.7 }
+}
+
+/// The cutoff the documents give a filter's lever at a key: 32.70 Hz at
+/// 0.25 V of key voltage (key 48) with nothing at the control input, in
+/// proportion to the key voltage; `more` octaves are added. Haible's
+/// floor of 21.3 Hz, and this crate's ceiling of 20 kHz.
+fn cutoff(which: Which, key: u8, lever: u8, more: f64) -> f64 {
+    let volts = 10.0 * f64::from(lever) / 127.0;
+    let octaves = (f64::from(key) - 48.0) / 12.0 + volts * lever_octaves(which) + more;
+    (32.703 * octaves.exp2()).clamp(21.277, 20_000.0)
+}
+
+/// The Q of a resonance lever with the overall lever: 0.5 to 5 by the one
+/// lever, tenfold again by the other, and never above 12.5.
+fn q(lever: u8, overall: u8) -> f64 {
+    (0.5 * 10.0f64.powf(f64::from(lever) / 127.0 + f64::from(overall) / 127.0)).min(12.5)
+}
+
+/// The gain of the high-pass then the low-pass at a frequency, each a
+/// state-variable filter made at the voices' rate with its cutoff where
+/// it is asked.
+fn gain(high: Filter, low: Filter, hertz: f64) -> f64 {
+    let warped = |frequency: f64| (PI * frequency / f64::from(RATE)).tan();
+    let denominator = |filter: Filter| {
+        let x = warped(hertz) / warped(filter.cutoff);
+        ((1.0 - x * x).powi(2) + (x / filter.q).powi(2)).sqrt()
+    };
+    let x = warped(hertz) / warped(high.cutoff);
+    x * x / denominator(high) / denominator(low)
+}
+
+/// Plays a sawtooth through the filters and compares each harmonic below
+/// 12 kHz with the documents' filters; gives the worst difference in dB.
+fn compare(patch: &Patch, key: u8, high: Filter, low: Filter) -> f64 {
+    let signal = play(patch, key, 100, 1.5, 0.0);
+    let steady = &signal[24_000..];
+    // The oscillator's own pitch, from its sine.
+    let hertz = pitch(&play(&panel(&cs80_support::SINE), key, 100, 1.5, 0.0)[24_000..]);
+    assert!(hertz > 20.0);
+    let mut worst = 0.0f64;
+    let mut harmonic = 1.0;
+    while hertz * harmonic < 12_000.0 {
+        // A sawtooth's harmonic n is 2 / (π n) of its peak; the filters'
+        // output at full VCF LEVEL is 0.8 of the sine's level, which is
+        // an eighth of full scale.
+        let expected = 0.8 / 8.0 * 2.0 / (PI * harmonic) * gain(high, low, hertz * harmonic);
+        if expected > 1.0e-4 {
+            let found = component(steady, hertz * harmonic);
+            worst = worst.max(decibels(found / expected).abs());
+        }
+        harmonic += 1.0;
+    }
+    worst
+}
+
+/// A patch of the panel's sawtooth with the four filter levers set.
+fn filters(hpf: u8, hpf_resonance: u8, lpf: u8, lpf_resonance: u8) -> Patch {
+    panel(&[
+        (Control::Hpf, hpf),
+        (Control::HpfResonance, hpf_resonance),
+        (Control::Lpf, lpf),
+        (Control::LpfResonance, lpf_resonance),
+    ])
+}
+
+#[test]
+fn the_cutoffs_are_the_alignments_two_points_and_follow_the_keys() {
+    // Adjustment procedure, page 11: at the lowest key, 4.0 V at the
+    // high-pass lever and 3.3 V at the low-pass lever put each filter on
+    // the 2' note, 261.6 Hz. The levers' 51 and 42 of 127 are 4.02 V and
+    // 3.31 V.
+    let (high, low) = (cutoff(Which::High, 36, 51, 0.0), cutoff(Which::Low, 36, 42, 0.0));
+    println!("the alignment's 4.0 V and 3.3 V at the lowest key: {high:.1} Hz and {low:.1} Hz for 261.6 Hz");
+    // A lever's step of 127 is 0.08 V, 7% of a frequency.
+    assert!((high / 261.6 - 1.0).abs() < 0.04 && (low / 261.6 - 1.0).abs() < 0.04);
+    // Service manual, page 42, VCF IC, pin 4: 0.25 V of key voltage and 5
+    // V are "just 1KHz".
+    let chip = cutoff(Which::High, 48, 0, 5.0);
+    assert!((chip / 1000.0 - 1.0).abs() < 0.05);
+    for (key, hpf, lpf) in
+        [(48u8, 0u8, 64u8), (36, 0, 64), (60, 0, 64), (48, 0, 38), (48, 0, 90), (72, 40, 80), (48, 64, 127)]
+    {
+        let high = Filter { cutoff: cutoff(Which::High, key, hpf, 0.0), q: 0.5 };
+        let low = Filter { cutoff: cutoff(Which::Low, key, lpf, 0.0), q: 0.5 };
+        let worst = compare(&filters(hpf, 0, lpf, 0), key, high, low);
+        println!("key {key}: high-pass {:.0} Hz, low-pass {:.0} Hz: within {worst:.2} dB", high.cutoff, low.cutoff);
+        assert!(worst < 0.3, "key {key}, levers {hpf} and {lpf}: {worst} dB");
+    }
+}
+
+#[test]
+fn the_resonance_is_a_q_of_a_half_to_five_and_twelve_and_a_half_at_most() {
+    for (hpf_resonance, lpf_resonance, overall) in
+        [(0u8, 127u8, 0u8), (127, 0, 0), (64, 64, 0), (127, 127, 0), (0, 0, 127), (127, 127, 127), (40, 90, 60)]
+    {
+        let mut patch = filters(52, hpf_resonance, 70, lpf_resonance);
+        patch.set(Global::Resonance, overall);
+        let high = Filter { cutoff: cutoff(Which::High, 48, 52, 0.0), q: q(hpf_resonance, overall) };
+        let low = Filter { cutoff: cutoff(Which::Low, 48, 70, 0.0), q: q(lpf_resonance, overall) };
+        let worst = compare(&patch, 48, high, low);
+        println!("Q {:.2} and {:.2}: within {worst:.2} dB", high.q, low.q);
+        assert!(worst < 0.5, "levers {hpf_resonance}, {lpf_resonance}, {overall}: {worst} dB");
+    }
+}
+
+#[test]
+fn at_the_most_resonance_the_filters_ring_and_do_not_oscillate() {
+    // A short note into filters at the highest Q, the amplifier held open
+    // long after it: what is left is the filters' own ringing.
+    let mut patch = panel(&[
+        (Control::Hpf, 60),
+        (Control::HpfResonance, 127),
+        (Control::Lpf, 64),
+        (Control::LpfResonance, 127),
+        (Control::Sawtooth, 0),
+        (Control::Noise, 127),
+    ]);
+    patch.set(Global::Resonance, 127);
+    let signal = play(&patch, 48, 100, 2.0, 0.0);
+    let level = |from: usize| cs80_support::rms(&signal[from..from + 24_000]);
+    let (early, late) = (level(24_000), level(72_000));
+    println!("noise through both filters at a Q of 12.5: {early:.4} then {late:.4} of full scale");
+    // Steady, and far from what an oscillation would settle at.
+    assert!((late / early - 1.0).abs() < 0.25 && late < 0.3);
+    // With nothing going in, nothing comes out.
+    patch.tones[0].set(Control::Noise, 0);
+    let silent = play(&patch, 48, 100, 1.0, 0.0);
+    assert!(silent.iter().all(|&sample| sample.abs() < 1.0e-4));
+}
+
+#[test]
+fn the_overall_brilliance_moves_the_low_pass_filter_more_than_the_high_pass() {
+    // Service manual, page 39: the brilliance reaches the high-pass
+    // filter through 680 kΩ and the low-pass filter through 220 kΩ, where
+    // the levers come through 39 kΩ. The lever's ends are taken as 15 V.
+    for (lever, volts) in [(0u8, -15.0), (32, -7.5), (127, 15.0)] {
+        let mut patch = filters(60, 0, 64, 90);
+        patch.set(Global::Brilliance, lever);
+        let (up, down) = (volts * 39.0 / 680.0, volts * 39.0 / 220.0 * 3.3 / 2.7);
+        let high = Filter { cutoff: cutoff(Which::High, 48, 60, up), q: 0.5 };
+        let low = Filter { cutoff: cutoff(Which::Low, 48, 64, down), q: q(90, 0) };
+        let worst = compare(&patch, 48, high, low);
+        println!("BRILLIANCE at {lever}: {up:.2} and {down:.2} octaves: within {worst:.2} dB");
+        assert!(worst < 0.5, "{lever}: {worst} dB");
+    }
+}
+
+#[test]
+fn the_square_is_eight_tenths_of_the_sine_and_the_levels_are_straight() {
+    // Adjustment procedure, page 15, steps 1 and 2: 1.00 V of sine, 0.8 V
+    // of square, peak to peak. A square's fundamental is 4 / π of its
+    // peak.
+    let square = panel(&[(Control::Sawtooth, 0), (Control::Square, 1)]);
+    let signal = play(&square, 57, 100, 1.5, 0.0);
+    let hertz = pitch(&signal[24_000..]);
+    let found = component(&signal[24_000..], hertz);
+    // The filters at rest take a little of the fundamental.
+    let filters = gain(
+        Filter { cutoff: cutoff(Which::High, 57, 0, 0.0), q: 0.5 },
+        Filter { cutoff: cutoff(Which::Low, 57, 127, 0.0), q: 0.5 },
+        hertz,
+    );
+    let ratio = found / (0.125 * 4.0 / PI * filters);
+    println!("the square against the sine: {ratio:.3}");
+    assert!((ratio - 0.8).abs() < 0.01);
+    for (control, value) in [(Control::VcfLevel, 64u8), (Control::Level, 64)] {
+        let mut half = square;
+        half.tones[0].set(control, value);
+        let quieter = component(&play(&half, 57, 100, 1.5, 0.0)[24_000..], hertz) / found;
+        assert!((quieter - 64.0 / 127.0).abs() < 0.01, "{control:?}: {quieter}");
+    }
+    // The mix is a balance between the channels.
+    let mut mixed = square;
+    mixed.set(Global::Mix, 32);
+    mixed.tones[1].set(Control::Level, 0);
+    let share = component(&play(&mixed, 57, 100, 1.5, 0.0)[24_000..], hertz) / found;
+    assert!((share - 95.0 / 127.0).abs() < 0.01, "{share}");
+}
