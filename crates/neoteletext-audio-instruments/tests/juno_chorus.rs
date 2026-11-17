@@ -202,6 +202,10 @@ fn both_buttons_of_the_juno_60_sweep_both_lines_alike_a_little_and_fast() {
     assert!(longest > 5.0, "{longest}");
 }
 
+/// What counts as silence, as a share of full scale: three units of a
+/// 16-bit sample.
+const SILENCE: f64 = 1.0e-4;
+
 #[test]
 fn a_chorus_switched_on_again_brings_back_nothing_of_what_it_last_held() {
     // A note through the chorus; the chorus switched off and the note
@@ -219,10 +223,11 @@ fn a_chorus_switched_on_again_brings_back_nothing_of_what_it_last_held() {
         assert!(loud > 0.1, "{model:?}: {loud}");
         juno.set_patch(&off);
         juno.event(CONTROL, 120, 0);
-        assert!(render(&mut juno, 1.0)[samples(0.5)..].iter().all(|&sample| sample == 0.0), "{model:?}: not silent");
+        // Silence, once the coupling capacitor's last charge has run out.
+        assert!(peak(&render(&mut juno, 3.0)[samples(2.5)..]) < SILENCE, "{model:?}: not silent");
         juno.set_patch(&on);
         let back = peak(&render(&mut juno, 0.1));
         println!("{model:?}: the chorus switched on in silence gives a peak of {back:.5}, after a note of {loud:.3}");
-        assert!(back == 0.0, "{model:?}: {back}");
+        assert!(back < SILENCE, "{model:?}: {back}");
     }
 }

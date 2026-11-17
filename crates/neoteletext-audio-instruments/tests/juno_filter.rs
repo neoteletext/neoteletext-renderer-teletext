@@ -222,9 +222,12 @@ fn the_bass_lift_switched_in_again_brings_back_nothing_of_what_it_last_held() {
     render(&mut juno, 0.503);
     juno.set_patch(&flat(model, square()));
     juno.event(CONTROL, 120, 0);
-    assert!(render(&mut juno, 1.0)[samples(0.5)..].iter().all(|&sample| sample == 0.0), "not silent");
+    // Silence, once the coupling capacitor's last charge has run out:
+    // within three units of a 16-bit sample.
+    let peak = |signal: &[f64]| signal.iter().fold(0.0f64, |peak, &value| peak.max(value.abs()));
+    assert!(peak(&render(&mut juno, 3.0)[samples(2.5)..]) < 1.0e-4, "not silent");
     juno.set_patch(&lifted);
-    let back = render(&mut juno, 0.1).iter().fold(0.0f64, |peak, &value| peak.max(value.abs()));
+    let back = peak(&render(&mut juno, 0.1));
     println!("Juno106: the bass lift switched in in silence gives a peak of {back:.5}");
-    assert!(back == 0.0, "{back}");
+    assert!(back < 1.0e-4, "{back}");
 }

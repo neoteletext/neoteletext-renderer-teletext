@@ -23,7 +23,8 @@
 //! - **Envelope.** The Juno-106's is computed by its processor every
 //!   4.2 ms and smoothed by 1 ms of resistor and capacitor; the Juno-60's
 //!   is a chip charging a capacitor.
-//! - **After the voices**, at the output rate: the high-pass filter (a
+//! - **After the voices**, at the output rate: the capacitor the sum
+//!   passes into the jack board through, the high-pass filter (a
 //!   switch of four positions), the amplifier's level, and the chorus:
 //!   two delay lines swept oppositely by one slow triangle, mixed with
 //!   the dry signal as the instrument's mono output mixes them
@@ -207,6 +208,18 @@ const CHORUS_FILTER: u32 = 10_000_000;
 /// the dry signal is whole and each line half that.
 const CHORUS_LINE_GAIN: i32 = ((47i64 << 31) / 78) as i32;
 
+/// The corner below which the voices' sum does not pass, in thousandths
+/// of a hertz: what takes away the steady part of a pulse that is not a
+/// square, which would otherwise stand in the output for as long as the
+/// note.
+///
+/// Source: JUNO-106 service notes, jack board schematic (page 15): the
+/// voices' sum enters the board through C14, 10 µF, across R39, 33 kΩ,
+/// before the high-pass switch IC3: 1 / (2 π R C) is 0.48 Hz. Own
+/// choice for the Juno-60, whose schematic was not read for it: the
+/// same.
+const COUPLING_CORNER: u32 = 482;
+
 /// The corner of the bass lift, in thousandths of a hertz.
 ///
 /// Source: JUNO-106 service notes, jack board schematic (page 15): in
@@ -285,6 +298,7 @@ pub struct Juno {
     /// The share of the way a held control voltage moves in a tick.
     smoothing: i32,
     decimator: Decimator,
+    coupling: OnePole,
     high_pass: OnePole,
     bass: OnePole,
     level: i32,
@@ -328,12 +342,14 @@ impl Juno {
             frame_wait: 0,
             smoothing: voice::hold_smoothing(),
             decimator: Decimator::sharp(),
+            coupling: OnePole::new(),
             high_pass: OnePole::new(),
             bass: OnePole::new(),
             level: ONE_Q28,
             chorus: Self::empty_chorus(),
             ignored: 0,
         };
+        juno.coupling.set_cutoff(frequency(COUPLING_CORNER, SAMPLE_RATE));
         juno.bass.set_cutoff(frequency(BASS_BOOST_CORNER, SAMPLE_RATE));
         juno.apply_patch();
         juno
@@ -598,6 +614,7 @@ impl Juno {
             let earlier = self.voices_sample();
             let later = self.voices_sample();
             let mut signal = self.decimator.process(earlier, later);
+            signal = self.coupling.high_pass(signal);
             signal = self.high_pass.high_pass(signal);
             if boost {
                 signal = signal.saturating_add(amplify(self.bass.low_pass(signal), BASS_BOOST_GAIN));

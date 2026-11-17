@@ -82,3 +82,27 @@ fn the_oscillator_sweeps_the_pulse_between_a_square_and_the_sliders_width() {
         assert!((narrowest - 0.5).abs() < 0.03 && (widest - 0.95).abs() < 0.03, "{model:?}: {narrowest} to {widest}");
     }
 }
+
+#[test]
+fn a_wide_pulses_steady_part_does_not_stand_in_the_output() {
+    // JUNO-106 service notes, jack board schematic: the voices' sum
+    // passes 10 µF across 33 kΩ, a time constant of 0.33 s. A pulse of
+    // 95% has a mean of nine tenths of its height; it is let through at
+    // first, 37% of it is left after one time constant, and none in the
+    // end. Without the capacitor it stood at 0.111 of full scale for as
+    // long as the note (TODO-6438).
+    for model in MODELS {
+        let signal = play(model, &flat(model, square().with(Slider::DcoPwm, 127)), 60, 3.0, 0.0);
+        let mean = |from: f64, to: f64| {
+            let part = &signal[samples(from)..samples(to)];
+            part.iter().sum::<f64>() / part.len() as f64
+        };
+        let (first, later, last) = (mean(0.01, 0.03), mean(0.31, 0.35), mean(2.5, 3.0));
+        println!(
+            "{model:?}: a 95% pulse's mean is {first:.4} at first, {later:.4} after 0.33 s and {last:.5} in the end"
+        );
+        assert!(first > 0.09, "{model:?}: {first}");
+        assert!((later / first - (-1.0f64).exp() / (-0.06f64).exp()).abs() < 0.04, "{model:?}: {later} after {first}");
+        assert!(last.abs() < 5.0e-4, "{model:?}: {last}");
+    }
+}
