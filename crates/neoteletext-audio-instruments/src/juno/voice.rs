@@ -552,6 +552,9 @@ impl Voice {
 }
 
 /// Fraction bits of a divisor before it is rounded.
+///
+/// Source: own choice: with the 16 bits of a timer's divisor they fill
+/// a word.
 const DIVISOR_BITS: u32 = 16;
 /// The A's frequency in hertz.
 const A4_HERTZ: u64 = A4.0 as u64 / MILLIHERTZ;
@@ -587,7 +590,10 @@ fn nearest(dividend: u64, divisor: u64) -> u64 {
     dividend.saturating_add(divisor / 2).checked_div(divisor).unwrap_or(DIVISOR_MAX).clamp(1, DIVISOR_MAX)
 }
 
-/// The key the cutoff's key follow turns about.
+/// The key the cutoff's key follow turns about: middle C.
+///
+/// Source: MIDI 1.0: middle C is key 60. That the key follow turns about
+/// it is the service notes', cited where it is used ([`Voice::frame`]).
 const MIDDLE_C: u8 = 60;
 
 /// The analogue attack's length in time constants, in thousandths.

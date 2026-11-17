@@ -272,7 +272,10 @@ const BASS_BOOST_GAIN: i32 = ((100i64 << 28) / 47) as i32;
 /// Source: own choice: the slider is marked -5 to +5 and no document
 /// gives its range.
 const VCA_LEVEL_RANGE: i32 = OCTAVE;
-/// The slider's middle.
+/// The slider's middle, where the level is one.
+///
+/// Source: own choice with [`VCA_LEVEL_RANGE`]: 64 of 0 to 127, the
+/// slider's 0 between -5 and +5, where [`Patch::DEFAULT`] has it.
 const VCA_LEVEL_CENTRE: i32 = 64;
 /// The share of the mixed output that is a sample, in Q28: 494 / 1000.
 /// One voice's sawtooth through an open filter then peaks 16.8 dB below
@@ -426,9 +429,10 @@ impl Juno {
     /// Gives the instrument a patch, which it copies. It takes effect at
     /// once, on the voices that are sounding too, as moving the panel's
     /// controls does; but the chorus, switched while a voice sounds,
-    /// goes and comes over a hundredth of a second
-    /// ([`CHORUS_FADE_SAMPLES`]). A setting the model has not is taken as
-    /// the nearest it has ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
+    /// goes and comes over a hundredth of a second, so that its lines
+    /// are not cut into the output or out of it in one step. A setting
+    /// the model has not is taken as the nearest it has
+    /// ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
         self.apply_patch();
