@@ -671,6 +671,49 @@ fn the_effect_switched_on_in_silence_lets_nothing_out() {
     assert!(peak < 1.0e-4, "{peak}");
 }
 
+#[test]
+fn the_effects_switch_does_not_click_on_a_note() {
+    // Service manual, page 55: the switches that put the delayed sound in
+    // the sound's place have their gates through 10 kΩ into 2.2 µF, so
+    // one pair closes over 22 ms as the other opens. Switched at once,
+    // the output stepped by up to nine tenths of the note's peak: 14 to
+    // 40 times the largest step between two samples of the note itself.
+    let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    let off = panel(&SINE);
+    let mut on = off;
+    on.set(Global::Effect, 1);
+    for key in [45u8, 60] {
+        let mut cs80 = instrument(&off);
+        cs80.event(NOTE_ON, key, 100);
+        let _ = render(&mut cs80, 0.25);
+        let plain = step(&render(&mut cs80, 0.25));
+        let mut combed = 0.0f64;
+        // Seven switches each way, at different places in the cycle.
+        for turn in 0..14 {
+            let before = render(&mut cs80, 0.2 + 0.0137 * f64::from(turn));
+            let patch = if turn % 2 == 0 { on } else { off };
+            cs80.set_patch(&patch);
+            let mut after = vec![before[before.len() - 1]];
+            after.extend(render(&mut cs80, 0.1));
+            if turn % 2 == 0 {
+                combed = step(&after[2_400..]);
+            }
+            let (worst, bound) = (step(&after), 1.1 * plain.max(combed));
+            assert!(worst < bound, "key {key}, turn {turn}: a step of {worst} for the note's own {bound}");
+        }
+        // And the switch does go over: on is the comb, off is the note.
+        cs80.set_patch(&on);
+        let _ = render(&mut cs80, 0.1);
+        let hertz = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
+        let with = component(&render(&mut cs80, 0.5), hertz);
+        cs80.set_patch(&off);
+        let _ = render(&mut cs80, 0.1);
+        let without = component(&render(&mut cs80, 0.5), hertz);
+        let found = with / without;
+        assert!((decibels(found / comb(hertz, 2.6e-3))).abs() < 0.3, "key {key}: {found}");
+    }
+}
+
 /// The level in decibels of each octave band of a signal, from the band
 /// centred on 125 Hz to the one on 8 kHz, and of the whole: the mean
 /// square of the samples, by a discrete Fourier transform of 32,768 of

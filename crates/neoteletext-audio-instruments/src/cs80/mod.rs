@@ -39,7 +39,8 @@
 //! - **After the voices**, at the output rate: the ring modulator, whose
 //!   own oscillator an attack and decay envelope speeds up; the
 //!   tremolo/chorus, which adds the sound delayed by 2.56 ms, inverted
-//!   and dulled, to the sound itself; the volume.
+//!   and dulled, to the sound itself, and is switched in and out over 22
+//!   ms; the volume.
 //!
 //! # What MIDI's controls are on this instrument
 //!
@@ -426,6 +427,16 @@ const EFFECT_DRY: i32 = (ENVELOPE_ONE as i64 * 68 / 168) as i32;
 /// √(1 + (987.8 / 499.1)²), 2.2176, which low frequencies are spared:
 /// 1.0086 × 2.2176 = 2.2365 (`tests/cs80_modulation.rs` works it out).
 const EFFECT_WET: i32 = 357_360_555;
+/// What the effect's switches move by in a sample, in Q30: from off to on
+/// or back in 22 ms, in a straight line.
+///
+/// Source: service manual, page 55, OE1 circuit diagram: the two pairs
+/// of switches (FET2 and FET3 for the sound itself, FET1 and FET4 for the
+/// delayed sound) have their gates from the lines G1 and G2 through 10 kΩ
+/// into 2.2 µF, 22 ms, so that one pair closes as the other opens and the
+/// ON-OFF switch does not click. Own choice: the straight line, in place
+/// of what a FET makes of its gate's voltage.
+const EFFECT_SWITCH_STEP: i32 = (ENVELOPE_ONE as i64 * 1_000_000 / (22_000 * SAMPLE_RATE as i64)) as i32;
 /// How far the effect at full depth under the CHORUS tab moves the
 /// delayed sound's level in the mono output either way for each of its
 /// two oscillators, in Q30: 7 / 246.
@@ -561,6 +572,9 @@ pub struct Cs80 {
     /// sound's level, in Q30.
     effect: [Wave; 2],
     effect_depth: i32,
+    /// How far the effect's switches have gone over, in Q30: nothing with
+    /// the effect off, one with it on ([`EFFECT_SWITCH_STEP`]).
+    effect_on: i32,
     line: Chorus,
     /// The low-pass filter of the modulation amplifiers' outputs.
     wet_filter: OnePole,
@@ -612,6 +626,7 @@ impl Cs80 {
             ring_modulation: 0,
             effect: [Wave::default(); 2],
             effect_depth: 0,
+            effect_on: 0,
             line: effect_line(),
             wet_filter: OnePole::new(),
             bend: 0,
@@ -639,12 +654,18 @@ impl Cs80 {
     /// once, on the voices that are sounding too, as moving the panel's
     /// levers does.
     pub fn set_patch(&mut self, patch: &Patch) {
-        // The effect's lines are fed only while it is on, so what they
-        // held when it was switched off is not let out when it is
-        // switched on again.
-        if !self.patch.on(Global::Effect) && patch.on(Global::Effect) {
+        // The effect's lines are fed only while its switches are over at
+        // all, so what they held when the switches came to rest at off is
+        // not let out when it is switched on again. Switched on again
+        // before that, they have been fed all along.
+        if self.effect_on == 0 && patch.on(Global::Effect) {
             self.line = effect_line();
             self.wet_filter.reset();
+        }
+        // With nothing sounding there is nothing for the switches to
+        // click on: they are where the patch has them at once.
+        if self.allocator.sounding() == 0 {
+            self.effect_on = if patch.on(Global::Effect) { ENVELOPE_ONE } else { 0 };
         }
         self.patch = *patch;
         self.apply_patch();
@@ -956,14 +977,25 @@ impl Cs80 {
                 let gain = ENVELOPE_ONE.saturating_sub(ring).saturating_add(apply(carrier, ring));
                 signal = apply(signal, gain);
             }
-            if effect {
+            if effect || self.effect_on != 0 {
                 // The dry sound's share, less the delayed sound, whose
                 // level the two oscillators move against each other.
                 let [first, second] = &mut self.effect;
                 let moved = apply(sine_level(first.tick()).saturating_sub(sine_level(second.tick())), depth);
                 let [line, _] = self.line.process(signal);
                 let delayed = amplify(self.wet_filter.low_pass(line), EFFECT_WET);
-                signal = apply(signal, EFFECT_DRY).saturating_sub(apply(delayed, ENVELOPE_ONE.saturating_add(moved)));
+                let delayed = apply(delayed, ENVELOPE_ONE.saturating_add(moved));
+                let step = if effect { EFFECT_SWITCH_STEP } else { EFFECT_SWITCH_STEP.saturating_neg() };
+                self.effect_on = self.effect_on.saturating_add(step).clamp(0, ENVELOPE_ONE);
+                signal = if self.effect_on == ENVELOPE_ONE {
+                    apply(signal, EFFECT_DRY).saturating_sub(delayed)
+                } else {
+                    // On the way over, the second path has the sound
+                    // itself by what one pair of switches still passes
+                    // and the delayed sound by what the other does.
+                    let through = apply(ENVELOPE_ONE.saturating_sub(EFFECT_DRY), self.effect_on);
+                    apply(signal, ENVELOPE_ONE.saturating_sub(through)).saturating_sub(apply(delayed, self.effect_on))
+                };
             }
             *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
         }
