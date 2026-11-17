@@ -23,7 +23,10 @@
 //!   ([`Oscillator::run`]).
 //! - **Oscillator A's pulse width** slides through a stretch and jumps
 //!   between two, and the pulse turns where it jumps
-//!   ([`Oscillator::jump_width`]).
+//!   ([`Oscillator::jump_width`]). A stretch ends too where the width
+//!   meets an end of its range, none or the whole of a cycle, and stays:
+//!   the width turns a corner there, and where the pulse next turns can
+//!   hang on where that corner was.
 //! - **The cutoff**, which the filter takes once a sample, is its mean
 //!   over the sample.
 //!
@@ -44,10 +47,13 @@
 //! about the voices' rate; rounding the corner the jump makes in the
 //! filter's output was tried and gained 3 dB.
 //!
-//! Five voices with everything on render 13.8 times faster than real
-//! time, 16.4 before the stretches (`tests/prophet5_instrument.rs`,
-//! `rendering_speed`, 17 November 2026, one core of a 3.7 GHz Intel Core
-//! i9-10900KF).
+//! Five voices with everything on render 12.8 times faster than real
+//! time (16.4 before the stretches), and 8.4 to 10.2 times with
+//! oscillator B at the top of its knob under the keyboard's top octave,
+//! where every other sample is made in two stretches or three: the most
+//! a sample costs (`tests/prophet5_instrument.rs`, `rendering_speed`,
+//! 17 November 2026, one core of a 3.7 GHz Intel Core i9-10900KF, with
+//! other work on the machine).
 
 use crate::analog::envelope::{ENVELOPE_ONE, REST_LEVEL, RcEnvelope, Stage, apply, time_constant};
 use crate::analog::filter::{ONE_Q28, OnePole, OtaCascade};
@@ -77,7 +83,14 @@ const TICK_BITS: u32 = 4;
 /// gain, which runs in a straight line through each tick, stays within
 /// 2% of the peak of the curve the envelope's capacitor draws; the
 /// cutoff, which is set once a tick, takes that envelope in four steps
-/// of 41%, 28%, 19% and 12% of its swing.
+/// of 41%, 28%, 19% and 12% of its swing. Measured on 17 November 2026
+/// against a build with a tick of one sample, over the first 6 ms of a
+/// sawtooth with both attacks at 0: where the note has anything of its
+/// own (from the C of 262 Hz up) each band's energy is within 0.4 dB;
+/// under the lowest C with the envelope amount at its top, the steps
+/// add 7 to 10 dB to what is there from 6 kHz to 20 kHz, which is then
+/// 53 dB below the attack's energy under 2 kHz. No click and no zipper
+/// was found, and the cutoff is left as it is.
 pub const TICK_SAMPLES: u32 = 1 << TICK_BITS;
 /// Ticks a second.
 pub const TICK_RATE: u32 = RATE / TICK_SAMPLES;
@@ -126,8 +139,10 @@ const WHEEL_CUTOFF: i32 = ((1_000i64 << 28) / 133) as i32;
 const POLY_MOD_PITCH: i32 = ((100i64 << 28) / 301) as i32;
 /// The octaves of cutoff for each volt of Poly-Mod: 100 / 54.9, in Q28.
 ///
-/// Source: TM3 SD431: R4181, 54.9 kΩ; TM2 SD411: R4105, 54.9 kΩ (the
-/// reading of which of two resistors it is was not certain).
+/// Source: TM3 SD431: R4181, 54.9 kΩ; TM2 SD411 (page 85): R4105,
+/// 54.9 kΩ, from the switch that Poly-Mod's filter switch closes into
+/// the cutoff's summer (the 100 kΩ beside it, R4109, is the filter
+/// envelope amount's).
 const POLY_MOD_CUTOFF: i32 = ((1_000i64 << 28) / 549) as i32;
 
 /// The volts of Poly-Mod that oscillator B's sawtooth makes, peak to
@@ -311,7 +326,7 @@ impl Settings {
         let whole = |on: bool| if on { ENVELOPE_ONE } else { 0 };
         let (shares_a, shares_b) = match law.mixing {
             Mixing::Currents => ([whole(a_saw), whole(a_pulse), 0], [whole(b_saw), whole(b_pulse), whole(b_triangle)]),
-            Mixing::Node => (law::node(a_saw, a_pulse, false), law::node(b_saw, b_pulse, b_triangle)),
+            Mixing::Node => (law::node(a_saw, a_pulse), law::followed_node(b_saw, b_pulse, b_triangle)),
         };
         let levels = [ENVELOPE_ONE, pulse_level, triangle_level];
         let weigh = |shares: [i32; 3], level: i32| {
@@ -326,7 +341,9 @@ impl Settings {
         // the other (R4366; R4250 and R4285), so those two are upside
         // down against the sawtooth in the mix. Poly-Mod's own node
         // (R4243, R4251, R4260) takes all three one way round. Revision
-        // 2's waveforms meet at one node before the mixer (TM2 SD411).
+        // 2's waveforms all reach the one input marked "+" of their
+        // mixer amplifier, the other grounded (TM2 SD411, pages 85 and
+        // 86: half of U473, an SSM2020, for each oscillator).
         let turned = |[saw, pulse, triangle]: [i32; 3]| match law.mixing {
             Mixing::Currents => [saw, pulse.saturating_neg(), triangle.saturating_neg()],
             Mixing::Node => [saw, pulse, triangle],
@@ -382,7 +399,7 @@ impl Settings {
             source_b,
             poly_pitch: through(to_pitch, POLY_MOD_PITCH),
             poly_cutoff: through(to_cutoff, POLY_MOD_CUTOFF),
-            poly_width: through(to_width, law.pulse_width_modulation.1 << (28 - law::OCTAVE_BITS)),
+            poly_width: through(to_width, law.pulse_width_modulation.2 << (28 - law::OCTAVE_BITS)),
             poly_envelope: law::gain(POLY_MOD_ENVELOPE_VOLTS, amount(Knob::PolyModFilterEnvelope)),
             poly_to_pitch: to_pitch,
             poly_to_width: to_width,
@@ -619,15 +636,15 @@ impl Voice {
             .saturating_add(through(settings.wheel_pitch_b, scale(wheel, WHEEL_PITCH)));
         self.oscillator_b.set_step(law::raise(STEP_OF_C0, pitch_b.clamp(PITCH_BOUNDS.0, PITCH_BOUNDS.1)));
 
-        let (wheel_width, poly_width) = law.pulse_width_modulation;
+        let (wheel_width_a, wheel_width_b, poly_width) = law.pulse_width_modulation;
         let moved =
             |amount: i32, by: i32| i32::try_from((i64::from(amount).saturating_mul(i64::from(by))) >> law::OCTAVE_BITS);
         self.width_a = settings
             .width_a
-            .saturating_add(through(settings.wheel_width_a, moved(wheel, wheel_width).unwrap_or(0)))
+            .saturating_add(through(settings.wheel_width_a, moved(wheel, wheel_width_a).unwrap_or(0)))
             .saturating_add(through(settings.poly_to_width, moved(poly_envelope, poly_width).unwrap_or(0)));
         let width_b =
-            settings.width_b.saturating_add(through(settings.wheel_width_b, moved(wheel, wheel_width).unwrap_or(0)));
+            settings.width_b.saturating_add(through(settings.wheel_width_b, moved(wheel, wheel_width_b).unwrap_or(0)));
         self.width_b = width(width_b);
         self.oscillator_b.set_width(self.width_b);
         self.carried = None;
@@ -700,7 +717,9 @@ impl Voice {
     /// voltage there, and its width slides to what that voltage makes
     /// it; where the voltage jumps, the width jumps
     /// ([`Oscillator::jump_width`]), and where B's cycle starts, A's
-    /// does if it is synchronised. The cutoff, which the filter takes
+    /// does if it is synchronised. A stretch in which the width would
+    /// meet an end of its range ends there, so that the width stays at
+    /// the end from that instant and not from the stretch's end. The cutoff, which the filter takes
     /// once a sample, is its mean over the sample: each stretch's for
     /// that stretch's share.
     #[inline]
@@ -711,17 +730,36 @@ impl Voice {
         let mut cutoff = 0u32;
         let stretches = settings.poly_pitch != 0 || settings.poly_width != 0;
         let mut now = u32::MAX;
+        // What B has still to run in the sample, to the unit.
+        let mut left = step;
+        let mut ends = WIDTH_ENDS;
         for _ in 0..STRETCHES {
-            // What B runs in what is left of the sample.
-            let left = if now == u32::MAX { step } else { mul_high_unsigned(step, now) };
-            let mark = self.to_the_mark(settings, phase).filter(|&distance| distance <= left);
-            let run = mark.unwrap_or(left);
-            let until = if run >= left { 0 } else { ratio(left.wrapping_sub(run), step) };
-            let end = phase.wrapping_add(run);
+            let mut mark = self.to_the_mark(settings, phase).filter(|&distance| distance <= left);
+            let mut run = mark.unwrap_or(left);
+            let mut end = phase.wrapping_add(run);
             // Before a jump the voltage is as it was a unit of phase
             // short of it.
-            let (to, pitch_to, cutoff_to) =
+            let (mut to, mut pitch_to, mut cutoff_to) =
                 self.under(settings, if mark.is_some() { end.wrapping_sub(1) } else { end });
+            let mut jumps = mark.is_some();
+            // The width is held to its range: where it meets an end the
+            // stretch ends, with no jump.
+            if settings.poly_width != 0
+                && ends > 0
+                && let Some(share) = self.meets_an_end(settings, from, to)
+            {
+                let shorter = mul_high_unsigned(run, share);
+                if shorter > 0 && shorter < run {
+                    ends = ends.saturating_sub(1);
+                    run = shorter;
+                    mark = Some(run);
+                    jumps = false;
+                    end = phase.wrapping_add(run);
+                    (to, pitch_to, cutoff_to) = self.under(settings, end);
+                }
+            }
+            left = left.saturating_sub(run);
+            let until = if left == 0 { 0 } else { ratio(left, step) };
             if stretches {
                 if settings.poly_width != 0 {
                     self.oscillator_a.set_width(self.width_under(settings, to));
@@ -730,11 +768,11 @@ impl Voice {
             }
             // The whole sample is one stretch more often than not.
             let middle = (cutoff_from >> 1).wrapping_add(cutoff_to >> 1);
-            let span = now.wrapping_sub(until);
+            let span = now.saturating_sub(until);
             cutoff = if span == u32::MAX { middle } else { cutoff.saturating_add(mul_high_unsigned(middle, span)) };
             phase = end;
             (from, pitch_from, cutoff_from) = (to, pitch_to, cutoff_to);
-            if mark.is_some() {
+            if jumps {
                 if stretches && settings.sync && phase == 0 {
                     self.oscillator_a.synchronise();
                 }
@@ -744,7 +782,7 @@ impl Voice {
                 }
             }
             now = until;
-            if now == 0 {
+            if left == 0 {
                 break;
             }
         }
@@ -755,6 +793,25 @@ impl Voice {
             self.oscillator_a.tick(if settings.sync { self.oscillator_b.started() } else { None })
         };
         (waves, cutoff)
+    }
+
+    /// Where in a stretch oscillator A's width, on its way from what
+    /// one voltage of Poly-Mod makes it to what another does, first
+    /// meets an end of its range, as the share of the stretch run by
+    /// then in Q32; nothing if it meets neither.
+    #[inline]
+    fn meets_an_end(&self, settings: &Settings, from: i32, to: i32) -> Option<u32> {
+        let first = self.width_a.saturating_add(amplify(from, settings.poly_width));
+        let last = self.width_a.saturating_add(amplify(to, settings.poly_width));
+        let whole = first.abs_diff(last);
+        let mut nearest = None;
+        for bound in [0, WIDTH_FULL] {
+            if (first < bound && bound < last) || (first > bound && bound > last) {
+                let share = ratio(first.abs_diff(bound), whole);
+                nearest = Some(nearest.map_or(share, |other: u32| other.min(share)));
+            }
+        }
+        nearest
     }
 
     /// What Poly-Mod has of oscillator B at a phase, and oscillator A's
@@ -822,8 +879,12 @@ const HALF_CYCLE: u32 = 1 << 31;
 const SAWTOOTH_SHIFT: u32 = 32 - LEVEL.trailing_zeros() - 1;
 /// Stretches a sample of oscillator A is made in under Poly-Mod, at
 /// most: oscillator B's pulse falls, its triangle turns, its cycle
-/// starts, and the sample ends; one to spare.
-const STRETCHES: u32 = 5;
+/// starts, and the sample ends; one to spare; and one for each of
+/// [`WIDTH_ENDS`].
+const STRETCHES: u32 = 5 + WIDTH_ENDS;
+/// Times in a sample that a stretch is ended where oscillator A's pulse
+/// width meets an end of its range, at most: once for each end.
+const WIDTH_ENDS: u32 = 2;
 
 /// An oscillator's width for a share of a cycle in Q24, held between
 /// none and the whole.
@@ -848,7 +909,71 @@ const _: () = assert!(SEMITONES == 12 && ONE_Q28 == 1 << 28 && UNIT == LEVEL);
 #[cfg(test)]
 #[allow(clippy::cast_precision_loss, clippy::arithmetic_side_effects, reason = "a test, in f64")]
 mod tests {
-    use super::{RATE, STEP_OF_C0};
+    use super::{Controls, RATE, STEP_OF_C0, Settings, UNIT, Voice, WIDTH_SHIFT};
+    use crate::prophet5::Model;
+    use crate::prophet5::patch::{Knob, Patch, Switch};
+
+    #[test]
+    fn a_cycle_of_oscillator_b_that_starts_as_a_sample_ends_synchronises_oscillator_a() {
+        // Oscillator B's pulse falls a quarter of the way through a
+        // sample and its cycle starts exactly where the sample ends.
+        // What was left of the sample after the fall was worked out
+        // again from a rounded share of it, came out a unit short of
+        // the start, and the start was then seen by no sample: oscillator
+        // A ran on unsynchronised for a cycle of B.
+        let (step, fall) = (0x0400_0000u32, 0x0100_0000u32);
+        let patch = Patch::DEFAULT
+            .with_switch(Switch::Sync, true)
+            .with_switch(Switch::OscAPulse, true)
+            .with_switch(Switch::OscBPulse, true)
+            .with_switch(Switch::PolyModPulseWidthA, true)
+            .with(Knob::PolyModOscB, 120);
+        for model in [Model::Rev3, Model::Rev2] {
+            let settings = Settings::new(&patch, model);
+            let mut voice = Voice::new(model, [0; 3]);
+            voice.configure(&settings);
+            voice.start(24);
+            voice.tick(&settings, Controls { wheel: 0, pitch: 0, unison: None, pedal: false });
+            for _ in 0..7 {
+                let _ = voice.sample(&settings, 0);
+            }
+            assert_ne!(voice.oscillator_a.phase(), 0, "{model:?}: oscillator A is under way");
+            // Oscillator B a sample short of its cycle's start.
+            voice.oscillator_b.set_step(step);
+            voice.oscillator_b.restart();
+            voice.oscillator_b.rewind(step);
+            voice.width_b = step.wrapping_neg() + fall;
+            voice.oscillator_b.set_width(voice.width_b);
+            voice.carried = None;
+            let _ = voice.sample(&settings, 0);
+            assert_eq!(voice.oscillator_b.phase(), 0, "{model:?}: oscillator B's cycle starts with the sample");
+            assert_eq!(
+                (voice.oscillator_a.phase(), voice.oscillator_a.started()),
+                (0, Some(0)),
+                "{model:?}: oscillator A starts its cycle there too"
+            );
+        }
+    }
+
+    #[test]
+    fn wheel_mod_narrows_revision_2s_two_pulses_through_their_own_resistors() {
+        // TM2 SD411: 13.3 kΩ against 100 kΩ for oscillator A (R492,
+        // R493); SD312: 15 kΩ against 100 kΩ for oscillator B (R392,
+        // R395). A tenth of a volt of Wheel-Mod narrows A's pulse by
+        // 7.52% of a cycle and B's by 6.67%.
+        let patch = Patch::DEFAULT
+            .with_switch(Switch::WheelPulseWidthA, true)
+            .with_switch(Switch::WheelPulseWidthB, true)
+            .with(Knob::OscAPulseWidth, 60)
+            .with(Knob::OscBPulseWidth, 60);
+        let settings = Settings::new(&patch, Model::Rev2);
+        let mut voice = Voice::new(Model::Rev2, [0; 3]);
+        voice.start(24);
+        voice.tick(&settings, Controls { wheel: UNIT / 10, pitch: 0, unison: None, pedal: false });
+        let share = |width: f64| width / f64::from(UNIT);
+        let (a, b) = (share(f64::from(voice.width_a)), share(f64::from(voice.width_b >> WIDTH_SHIFT)));
+        assert!((a - (0.5 - 0.01 / 0.133)).abs() < 0.001 && (b - (0.5 - 0.01 / 0.15)).abs() < 0.001, "{a} and {b}");
+    }
 
     #[test]
     fn the_step_of_c0_is_the_number_its_source_gives() {

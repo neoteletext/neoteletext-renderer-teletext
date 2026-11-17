@@ -103,12 +103,20 @@ fn wheel_mod_bends_pitch_through_182_kilohms_and_the_shapes_stand_as_the_chip_ma
     // sawtooth, the triangle a half either way: its 5 V are doubled about
     // their reference before the 160 kΩ the sawtooth's 10 V pass (TM3
     // SD334: U380 with R3147 and R3148, 100 kΩ each, and R3131).
+    //
+    // Revision 2 (TM2 SD312): the sawtooth and the pulse through 10 kΩ
+    // each (R385, R386) to a node with 200 kΩ to ground (R384), 0.952 of
+    // each alone; and the triangle, 10 V from peak to peak as the
+    // sawtooth is, through 10 kΩ (R373) against the 10 kΩ (R387) of the
+    // follower that reads that node: half of it, a quarter of the
+    // sawtooth's swing either way.
     for model in MODELS {
         let unit = 1200.0 * 100.0 / 182.0;
-        let square = if model == Model::Rev3 { 1.08 } else { 0.75 };
+        let (triangle, sawtooth, square) =
+            if model == Model::Rev3 { (0.5, 1.0, 1.08) } else { (0.25, 100.0 / 105.0, 0.75 * 100.0 / 105.0) };
         for (shape, low, high) in [
-            (Switch::LfoTriangle, -0.5 * unit, 0.5 * unit),
-            (Switch::LfoSawtooth, 0.0, unit),
+            (Switch::LfoTriangle, -triangle * unit, triangle * unit),
+            (Switch::LfoSawtooth, 0.0, sawtooth * unit),
             (Switch::LfoSquare, 0.0, square * unit),
         ] {
             let track = wobble(model, &vibrato(model, shape, 96), 1.5);
@@ -169,7 +177,8 @@ fn poly_mod_from_oscillator_b_sweeps_oscillator_a_and_the_filter() {
     for model in MODELS {
         // Oscillator B slow and off the keyboard, its sawtooth to
         // oscillator A's frequency: from nothing up to 3.5 V through
-        // 301 kΩ (revision 2: 300 kΩ, and the node's 0.952 of it).
+        // 301 kΩ (revision 2: 300 kΩ, and the 0.952 of it that each of
+        // its two nodes leaves).
         let slow = plain(model)
             .with_switch(Switch::OscBSawtooth, true)
             .with_switch(Switch::OscBLowFrequency, true)
@@ -183,7 +192,7 @@ fn poly_mod_from_oscillator_b_sweeps_oscillator_a_and_the_filter() {
                 .map(|(time, hertz)| (time, cents(base, hertz)))
                 .collect();
         let (low, high, rate) = swing(&track[track.len() / 4..]);
-        let share = if model == Model::Rev3 { 1.0 } else { 100.0 / 105.0 };
+        let share = if model == Model::Rev3 { 1.0 } else { (100.0f64 / 105.0).powi(2) };
         let expected = 1200.0 * 3.5 / 3.01 * share;
         println!(
             "{model:?}: oscillator B's sawtooth sweeps A from {low:.0} to {high:.0} cents at {rate:.2} Hz (0 to {expected:.0})"
@@ -241,6 +250,34 @@ fn oscillator_bs_triangle_is_as_large_as_its_sawtooth_on_revision_3() {
         "revision 3: fundamental of the sawtooth {sawtooth:.4}, of the triangle {triangle:.4}: {ratio:.3} (4 / π: 1.273)"
     );
     assert!((ratio - 4.0 / std::f64::consts::PI).abs() < 0.04, "{ratio}");
+}
+
+#[test]
+fn on_revision_2_oscillator_bs_triangle_alone_is_three_quarters_of_itself() {
+    // TM2 SD411: the sawtooth through 10 kΩ (R436) to a node with 200 kΩ
+    // to ground (R434), a follower, and 10 kΩ (R438) to the node that
+    // 200 kΩ load (R459): 0.952 twice. The triangle through 3.3 kΩ
+    // (R433) to that second node, where the follower's 10 kΩ and the
+    // 200 kΩ stand whether or not the follower carries anything: 0.743.
+    // Both are 10 V from peak to peak, so the fundamentals are 4 / π
+    // apart but for those shares.
+    let alone = |shape: Switch| {
+        let patch = plain(Model::Rev2)
+            .with(Knob::MixerOscA, 0)
+            .with(Knob::MixerOscB, 120)
+            .with_switch(Switch::OscASawtooth, false)
+            .with_switch(shape, true);
+        let signal = play(Model::Rev2, &patch, 60, 1.0, 0.0);
+        let steady = &signal[samples(0.2)..];
+        amplitude(steady, pitch(steady))
+    };
+    let (sawtooth, triangle) = (alone(Switch::OscBSawtooth), alone(Switch::OscBTriangle));
+    let ratio = triangle / sawtooth;
+    let expected = 4.0 / std::f64::consts::PI * (303.0 / 408.0) / (100.0f64 / 105.0).powi(2);
+    println!(
+        "revision 2: fundamental of the sawtooth {sawtooth:.4}, of the triangle {triangle:.4}: {ratio:.3} ({expected:.3})"
+    );
+    assert!((ratio - expected).abs() < 0.04, "{ratio}");
 }
 
 #[test]

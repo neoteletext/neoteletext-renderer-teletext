@@ -229,6 +229,55 @@ fn random_patches_and_random_messages_neither_panic_nor_leave_the_bounds() {
 }
 
 #[test]
+fn a_volume_message_between_two_renders_does_not_step_the_signal() {
+    // A low, nearly pure tone moves little from one sample to the next.
+    // The volume falling from full to a quarter between two calls moved
+    // the gain all at once: a step of most of the signal's height.
+    for model in MODELS {
+        let mut prophet = instrument(model, &pure(model));
+        prophet.event(NOTE_ON, 45, 100);
+        render(&mut prophet, 0.5);
+        let largest = |signal: &[f64]| signal.windows(2).fold(0.0f64, |most, pair| most.max((pair[1] - pair[0]).abs()));
+        let steady = render(&mut prophet, 0.2513);
+        let (peak, step) = (steady.iter().fold(0.0f64, |peak, &value| peak.max(value.abs())), largest(&steady));
+        let mut worst = 0.0f64;
+        // Twenty changes, each where the last call happened to end.
+        for turn in 0..20 {
+            let before = *render(&mut prophet, 0.0137).last().unwrap_or(&0.0);
+            prophet.event(CONTROL, 7, if turn % 2 == 0 { 64 } else { 127 });
+            let after = render(&mut prophet, 0.05);
+            worst = worst.max((after[0] - before).abs()).max(largest(&after));
+        }
+        println!("{model:?}: peak {peak:.4}, largest step steady {step:.5}, across volume changes {worst:.5}");
+        assert!(worst < 1.5 * step, "{model:?}: {worst} against {step}");
+    }
+}
+
+#[test]
+fn the_pedal_still_holds_after_all_sound_off() {
+    // All sound off silences the voices; it is no message about the
+    // pedal, which is still down: a key struck and let go after it is
+    // held, and the pedal going up lets it go.
+    for model in MODELS {
+        let mut prophet = instrument(model, &pure(model));
+        prophet.event(CONTROL, 64, 127);
+        prophet.event(NOTE_ON, 60, 100);
+        render(&mut prophet, 0.1);
+        prophet.event(CONTROL, 120, 0);
+        render(&mut prophet, 0.1);
+        assert_eq!(prophet.sounding_voices(), 0, "{model:?}: silenced");
+        prophet.event(NOTE_ON, 64, 100);
+        render(&mut prophet, 0.1);
+        prophet.event(NOTE_OFF, 64, 0);
+        render(&mut prophet, 0.5);
+        assert_eq!(prophet.sounding_voices(), 1, "{model:?}: the pedal holds the key let go");
+        prophet.event(CONTROL, 64, 0);
+        render(&mut prophet, 0.5);
+        assert_eq!(prophet.sounding_voices(), 0, "{model:?}: the pedal up lets it go");
+    }
+}
+
+#[test]
 fn the_pedal_still_holds_after_a_patch_turns_unison_on_or_off() {
     // Changing between polyphonic and unison lets go of every key, but a
     // pedal that is down is down still: a key struck and let go after
@@ -369,9 +418,19 @@ fn rendering_speed() {
         // open, no glide.
         bytes[7] = 0x7f;
         let patch = Patch::from_bytes(&bytes).with(Knob::Resonance, 60).with(Knob::AmplifierRelease, 127);
-        for (name, patch) in [("everything on", patch), ("the plain patch", plain(model))] {
+        // Oscillator B out of its low-frequency mode and at the top of
+        // its knob, under the keyboard's top octave: its voltage jumps
+        // or turns in every other sample, and each of those samples is
+        // made in two stretches or three.
+        let fast = patch.with_switch(Switch::OscBLowFrequency, false).with(Knob::OscBPulseWidth, 40);
+        let (middle, top) = ([48u8, 55, 60, 64, 67], [96u8, 100, 103, 106, 108]);
+        for (name, patch, keys) in [
+            ("everything on", patch, middle),
+            ("everything on, oscillator B at its fastest", fast, top),
+            ("the plain patch", plain(model), middle),
+        ] {
             let mut prophet = instrument(model, &patch);
-            for key in [48u8, 55, 60, 64, 67] {
+            for key in keys {
                 prophet.event(NOTE_ON, key, 100);
             }
             let mut out = vec![0i16; 48_000];
