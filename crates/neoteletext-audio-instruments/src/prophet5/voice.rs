@@ -328,6 +328,10 @@ impl Settings {
             Mixing::Currents => ([whole(a_saw), whole(a_pulse), 0], [whole(b_saw), whole(b_pulse), whole(b_triangle)]),
             Mixing::Node => (law::node(a_saw, a_pulse), law::followed_node(b_saw, b_pulse, b_triangle)),
         };
+        // The oscillator block's triangle is lowest where its sawtooth
+        // falls; a revision whose triangle is at its top there has it
+        // turned over, in the mixer and in Poly-Mod alike.
+        let triangle_level = if law.triangle_from_top { triangle_level.saturating_neg() } else { triangle_level };
         let levels = [ENVELOPE_ONE, pulse_level, triangle_level];
         let weigh = |shares: [i32; 3], level: i32| {
             let [saw, pulse, triangle] = shares;
@@ -340,7 +344,7 @@ impl Settings {
         // marked "+" (R4364; R4241) and the pulse and the triangle at
         // the other (R4366; R4250 and R4285), so those two are upside
         // down against the sawtooth in the mix. Poly-Mod's own node
-        // (R4243, R4251, R4260) takes all three one way round. Revision
+        // (R4243, R4251, R4280) takes all three one way round. Revision
         // 2's waveforms all reach the one input marked "+" of their
         // mixer amplifier, the other grounded (TM2 SD411, pages 85 and
         // 86: half of U473, an SSM2020, for each oscillator).
@@ -690,7 +694,7 @@ impl Voice {
 
     /// What oscillator B runs from a phase of its cycle to where what
     /// Poly-Mod has of it next jumps or turns: the start of its cycle,
-    /// where its pulse falls, and where its triangle turns down.
+    /// where its pulse falls, and where its triangle turns.
     #[inline]
     fn to_the_mark(&self, settings: &Settings, phase: u32) -> Option<u32> {
         let [_, pulse, triangle] = settings.source_b;
@@ -912,6 +916,32 @@ mod tests {
     use super::{Controls, RATE, STEP_OF_C0, Settings, UNIT, Voice, WIDTH_SHIFT};
     use crate::prophet5::Model;
     use crate::prophet5::patch::{Knob, Patch, Switch};
+
+    #[test]
+    fn oscillator_bs_triangle_is_at_its_foot_where_the_cycle_starts_on_revision_3_and_at_its_top_on_revision_2() {
+        // CEM3340 data sheet, figure 1, for revision 3; TM2 section 2-23
+        // and sheet SD411 for revision 2, whose converter gives 5 V where
+        // the sawtooth is at 0 V and at 10 V and -5 V at its middle.
+        let patch = Patch::DEFAULT
+            .with_switch(Switch::OscBSawtooth, false)
+            .with_switch(Switch::OscBPulse, false)
+            .with_switch(Switch::OscBTriangle, true)
+            .with_switch(Switch::PolyModFrequencyA, true)
+            .with(Knob::PolyModOscB, 120)
+            .with(Knob::MixerOscB, 120);
+        for (model, from_top) in [(Model::Rev3, false), (Model::Rev2, true)] {
+            let settings = Settings::new(&patch, model);
+            let voice = Voice::new(model, [0; 3]);
+            let (start, middle) = (voice.source(&settings, 0), voice.source(&settings, super::HALF_CYCLE));
+            assert_ne!(start, 0, "{model:?}");
+            assert!((start + middle).abs() <= 8, "{model:?}: as far above as below, {start} and {middle}");
+            assert_eq!(start > 0, from_top, "{model:?}: Poly-Mod has {start} at the start and {middle} at the middle");
+            // The mixer has the same triangle, turned over once more on
+            // revision 3, where it enters the other input.
+            let [_, _, mixed] = settings.mix_b;
+            assert!(mixed < 0, "{model:?}: {mixed}");
+        }
+    }
 
     #[test]
     fn a_cycle_of_oscillator_b_that_starts_as_a_sample_ends_synchronises_oscillator_a() {

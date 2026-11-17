@@ -273,9 +273,12 @@ fn a_shorter_delay_set_while_waiting_shortens_the_wait() {
 #[test]
 fn the_oscillator_moves_the_amplifier_by_its_switch() {
     // Owner's manual, printed page 20: none at 0, "three progressively
-    // deeper Levels" at 1, 2 and 3. Own choice of the depths: a third,
-    // two thirds and all of the level, either way. A square at 1.9 Hz
-    // holds each level for a quarter of a second.
+    // deeper Levels" at 1, 2 and 3. Service notes, module controller
+    // schematic, VCA MOD: the switch leaves open a path of 47 kΩ and
+    // 470 kΩ, one of 47 kΩ and 180 kΩ, or those two and a second of
+    // 517 kΩ together. Own choice of the depth at 3: all of the level,
+    // either way. A square at 1.9 Hz holds each level for a quarter of a
+    // second.
     let swing = |position: u8| {
         let patch = square()
             .with(Param::LfoWave, 2)
@@ -288,7 +291,9 @@ fn the_oscillator_moves_the_amplifier_by_its_switch() {
     };
     let swings = [0u8, 1, 2, 3].map(swing);
     println!("the amplifier's swing as a share of its level, positions 0 to 3: {swings:.3?}");
-    for (found, wanted) in swings.iter().zip([0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]) {
-        assert!((found - wanted).abs() < 0.03);
+    let (least, middle) = (1.0 / 517.0, 1.0 / 227.0);
+    let all = 2.0 * least + middle;
+    for (found, wanted) in swings.iter().zip([0.0, least / all, middle / all, 1.0]) {
+        assert!((found - wanted).abs() < 0.015, "{found} for {wanted}");
     }
 }

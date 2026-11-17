@@ -67,21 +67,26 @@ fn each_waveform_has_its_harmonics() {
 }
 
 #[test]
-fn the_pulse_narrows_to_thirty_microseconds_at_middle_c() {
+fn the_pulse_narrows_to_thirty_microseconds_on_the_key_c2_at_two_feet() {
     // Service notes, adjustment 11: "Press C2 key ... for 30µs space
-    // width". Measured as the pulse's mean: a pulse low for a share s of
-    // its cycle between -1 and 1 has a mean of 1 - 2s. The amplifier
-    // passes the mean, the high-pass filter being off.
-    let pulse = |width: u8| Patch::DEFAULT.with(Param::Vco1Wave, 2).with(Param::PwmDepth, width);
+    // width", with VCO-1's range knob drawn at 2', where that key is two
+    // octaves above middle C. Measured as the pulse's mean: a pulse low
+    // for a share s of its cycle between -1 and 1 has a mean of 1 - 2s.
+    // The amplifier passes the mean, the high-pass filter being off.
+    /// The key C2 at 2', in hertz.
+    const HERTZ: f64 = 4.0 * 261.626;
+    let pulse =
+        |width: u8| Patch::DEFAULT.with(Param::Vco1Wave, 2).with(Param::Vco1Range, 3).with(Param::PwmDepth, width);
     let mean = |signal: &[f64]| signal.iter().sum::<f64>() / signal.len() as f64;
     let square = tone(&pulse(0), C2);
     let narrow = tone(&pulse(255), C2);
+    assert!((pitch(&square) / HERTZ - 1.0).abs() < 0.002, "{} Hz", pitch(&square));
     // The pulse's 1 is the square's, whose fundamental is 4 / π of it.
     let unit = component(&square[..samples(1.0)], pitch(&square)) * std::f64::consts::FRAC_PI_4;
     let low = (1.0 - (mean(&narrow) - mean(&square)) / unit) / 2.0;
-    let microseconds = low * 1.0e6 / 261.626;
+    let microseconds = low * 1.0e6 / HERTZ;
     println!("low for {:.3}% of the cycle: {microseconds:.1} µs", low * 100.0);
-    assert!((microseconds - 30.0).abs() < 4.0);
+    assert!((microseconds - 30.0).abs() < 3.0);
 }
 
 #[test]

@@ -154,6 +154,30 @@ fn wheel_mod_bends_pitch_through_182_kilohms_and_the_shapes_stand_as_the_chip_ma
 }
 
 #[test]
+fn the_triangle_starts_at_its_foot_on_revision_3_and_at_its_top_on_revision_2() {
+    // CEM3340 data sheet, figure 1: the sawtooth falls where the
+    // triangle is lowest. TM2 section 2-23 and sheet SD411: revision 2's
+    // converter takes twice the sawtooth from four times a follower that
+    // 15 kΩ and 7.5 kΩ hold at 5 V, which is 5 V where the sawtooth
+    // falls and -5 V at its middle. A new instrument's low-frequency
+    // oscillator starts where its sawtooth has just fallen: at 0.17 Hz
+    // and 0.21 Hz the first 0.3 s is a sixteenth of a cycle or less.
+    for (model, knob, sharp) in [(Model::Rev3, 27u8, false), (Model::Rev2, 38, true)] {
+        let patch = vibrato(model, Switch::LfoTriangle, knob);
+        let mut prophet = instrument(model, &patch);
+        prophet.event(CONTROL, 1, 127);
+        prophet.event(NOTE_ON, KEY, 100);
+        let early = pitch(&render(&mut prophet, 0.3));
+        let mut plain = instrument(model, &patch);
+        plain.event(NOTE_ON, KEY, 100);
+        let base = pitch(&render(&mut plain, 0.3));
+        let above = cents(base, early);
+        println!("{model:?}: the triangle's first 0.3 s is {above:.0} cents from the pitch");
+        assert!(if sharp { above > 100.0 } else { above < -100.0 }, "{model:?}: {above}");
+    }
+}
+
+#[test]
 fn poly_mod_from_the_filter_envelope_raises_oscillator_a_through_301_kilohms() {
     // Five volts of envelope (own choice) through 301 kΩ: 1.661 octaves
     // at the top of the amount; half the amount at full sustain is half.
@@ -344,22 +368,38 @@ fn unison_plays_five_voices_on_the_lowest_key_without_a_new_attack() {
 }
 
 #[test]
-fn the_glide_slews_an_octave_a_second_at_its_slowest_and_only_in_unison() {
-    // TM3 test table: glide 10, "MINIMUM: 5 SECS TO SLEW 5 OCTAVES"; 0,
-    // "NO GLIDE"; unison off, "NO DETUNING".
+fn the_glide_slews_as_its_capacitor_is_charged_and_only_in_unison() {
+    // TM3 sheet SD334 and TM2 sheet SD312, GLIDE: 0.1 µF charged by a
+    // current that 17.9 mV at a pair's base halve, the knob's volt being
+    // 26.29 mV there (100 kΩ over 2.7 kΩ), from the 0.48 mA of 30 kΩ on
+    // revision 3 and the 0.96 mA of 15 kΩ on revision 2. TM3 test table:
+    // glide 10, "MINIMUM: 5 SECS TO SLEW 5 OCTAVES"; 0, "NO GLIDE";
+    // unison off, "NO DETUNING".
     for model in MODELS {
-        let top = if model == Model::Rev3 { 120 } else { 127 };
+        let (top, milliamperes) = if model == Model::Rev3 { (120u8, 14.4 / 30.0) } else { (127, 14.4 / 15.0) };
         let patch = pure(model).with(Knob::Glide, top).with_switch(Switch::Unison, true);
-        let mut prophet = instrument(model, &patch);
-        prophet.event(NOTE_ON, 48, 100);
-        render(&mut prophet, 6.0);
-        prophet.event(NOTE_OFF, 48, 0);
-        prophet.event(NOTE_ON, 84, 100);
-        // Three octaves to go: after one second, one octave is done.
-        render(&mut prophet, 0.95);
-        let after = cents(130.81, pitch(&render(&mut prophet, 0.1)));
-        println!("{model:?}: a second into a glide of three octaves: {after:.0} cents up (1200)");
-        assert!((after - 1200.0).abs() < 40.0, "{after}");
+        // Octaves a second for a knob's number: microamperes over the
+        // capacitor's tenth of a microfarad.
+        let rate = |steps: u8| {
+            let octaves_down = f64::from(steps) / 12.0 * (2.7 / 102.7) / 0.0179;
+            milliamperes * 1.0e3 / octaves_down.exp2() / 0.1
+        };
+        for (steps, seconds) in [(top, 3.0), (96, 1.0)] {
+            let mut prophet = instrument(model, &patch.with(Knob::Glide, steps));
+            prophet.event(NOTE_ON, 48, 100);
+            render(&mut prophet, 6.0);
+            prophet.event(NOTE_OFF, 48, 0);
+            prophet.event(NOTE_ON, 84, 100);
+            // Three octaves to go, of which the time's share is done.
+            render(&mut prophet, seconds - 0.05);
+            let after = cents(130.81, pitch(&render(&mut prophet, 0.1)));
+            let wanted = 1200.0 * rate(steps) * seconds;
+            println!("{model:?}, glide {steps}: {seconds} s into three octaves: {after:.0} cents up ({wanted:.0})");
+            assert!((after / wanted - 1.0).abs() < 0.04, "{after} for {wanted}");
+        }
+        // Five octaves at the knob's 10 take the table's five seconds
+        // and more.
+        assert!(5.0 / rate(120) > 5.0);
 
         for patch in [patch.with(Knob::Glide, 0), patch.with_switch(Switch::Unison, false)] {
             let mut prophet = instrument(model, &patch);

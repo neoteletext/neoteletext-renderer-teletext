@@ -127,4 +127,23 @@ fn the_factory_patches_are_patches_and_sound() {
     // VCO-2's in semitones.
     let gong = factory::gong();
     assert_eq!(i32::from(gong.get(Param::Vco2Range)) - 12 * i32::from(gong.get(Param::Vco1Range)), 7);
+    // LO STRINGS' envelopes, measured on the scan of its sheet at 300
+    // dots an inch: each knob's middle between the end marks of its
+    // scale, to a quarter of a division. In tenths of the scale.
+    let strings = factory::lo_strings();
+    let drawn = [
+        (Param::Env1Attack, 50),
+        (Param::Env1Decay, 67),
+        (Param::Env1Sustain, 67),
+        (Param::Env1Release, 46),
+        (Param::Env2Attack, 54),
+        (Param::Env2Decay, 62),
+        (Param::Env2Sustain, 61),
+        (Param::Env2Release, 51),
+    ];
+    for (param, tenths) in drawn {
+        let (low, high) =
+            (Patch::DEFAULT.at(param, tenths - 3).get(param), Patch::DEFAULT.at(param, tenths + 3).get(param));
+        assert!((low..=high).contains(&strings.get(param)), "{param:?}: {} for {tenths} tenths", strings.get(param));
+    }
 }

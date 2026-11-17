@@ -228,10 +228,19 @@ pub const CUTOFF_ENVELOPE: i32 = 6 * OCTAVE;
 /// The octaves the low-frequency oscillator at its peak moves the cutoff
 /// either way with LFO MOD at 10.
 ///
-/// Source: own choice. Service notes, adjustment 23, VCF LFO MOD LEVEL,
-/// trims it "for 50 percentage modulation" of a figure whose two heights
-/// are marked 1 and 2, with no frequency given; it is taken here as half
-/// the envelope's six octaves.
+/// Source: service notes, adjustment 23, VCF LFO MOD LEVEL: "Press C2
+/// key (S/N **0600— C4 key), adjust CON VR7 for 50 percentage
+/// modulation", with a figure of a square wave whose height at its
+/// least is marked 1 against 2 at its most. The adjustment's drawing of
+/// the panel, read at the scan's 400 dots an inch, has VCO-1 alone, its
+/// square at 2', the cutoff at 10, the resonance, ENV MOD and KEY FOLLOW
+/// at 0, the slope at -12 dB and LFO MOD at 10. A square wave through
+/// two equal poles is half its height from peak to peak with the cutoff
+/// at 0.762 of its frequency (worked out from its harmonics); the later
+/// instruments' key C4 at 2' is 4,186 Hz, so the cutoff falls to
+/// 3,189 Hz from adjustment 14's 25 kHz: 2.97 octaves. Own reading: the
+/// later serial numbers' figures, as [`CUTOFF_SPAN`]'s, and the three
+/// octaves either way of the slider's 10.
 pub const CUTOFF_LFO: i32 = 3 * OCTAVE;
 /// The cutoff's key follow, as points of the slider's 127 steps and the
 /// share of the key's interval from middle C that the cutoff follows
@@ -333,9 +342,15 @@ pub const LFO_DELAY: u32 = 4_000_000;
 /// Source: own choice. Owner's manual, printed page 18: "The Source
 /// Mixer output is unchanged with the HPF Cutoff Frequency set at 'Low',
 /// becoming progressively less full in body ... The cutoff slope of the
-/// HPF is -6dB/octave"; no document read gives its frequencies, and the
-/// schematic's values in that corner were not legible. 20 Hz to 5 kHz
-/// spans what "less full in body" can mean.
+/// HPF is -6dB/octave"; no document gives its frequencies. The module
+/// board's schematic (page 15 of the file, HPF), read at the scan's 400
+/// dots an inch, has the mixer's output pass C45A, 680 pF, to a node
+/// that an amplifier of variable transconductance (IC26A, 470 Ω at each
+/// input, R141A of 150 kΩ back from the follower TR19A) holds to
+/// ground, so the cutoff is in proportion to that amplifier's control
+/// current, which the transistor TR18A sets from the slider's voltage
+/// by its own base voltage: no figure of the drawing fixes it. 20 Hz to
+/// 5 kHz spans what "less full in body" can mean.
 pub const HPF_TOP: (u32, i32) = (5_000_000, octaves(7_966, 1_000));
 
 /// A point of an envelope time's law: a slider position of 255 and the
@@ -393,7 +408,9 @@ pub const KEY_FOLLOW_ONE: u32 = 1 << 12;
 /// `AMSynths`, "Roland IR3R01 Design & Replica":
 ///
 /// - A 555 (IC50) resets a capacitor, C70 3,300 pF, that charges through
-///   R199, 8.2 kΩ; the schematic draws the result as a rounded sawtooth
+///   R199, 8.2 kΩ, from the emitter of TR32, whose base stands between
+///   R201 and R202, 15 kΩ each, from the supply to ground; the schematic
+///   draws the result as a rounded sawtooth
 ///   from 0 V to 7.5 V with a period of 35 µs (`AMSynths`: "a 28 kHz saw
 ///   wave"). The switch IC40 passes it to an envelope's circuit when that
 ///   envelope's key follow is on, and grounds the line when it is off.
@@ -413,6 +430,12 @@ pub const KEY_FOLLOW_ONE: u32 = 1 << 12;
 ///   comparator's other input, and its times are longer by 1 / d.
 /// - The sawtooth is taken as the capacitor's charge, 1 - e^(-t / RC)
 ///   with RC = 27.06 µs, reaching the drawn 7.5 V at the drawn 35 µs.
+///   That asks for a charge towards 10.3 V, where TR32's divider offers
+///   half the supply less a junction; had the drawn 7.5 V been what the
+///   capacitor charges towards, it would stand near 5 V after 35 µs and
+///   the comparator's other input, as taken below, would be above it on
+///   every key but the lowest. The drawn figures are kept, and this
+///   inference is the weakest of the three.
 /// - The key voltage is taken as 1 V an octave from 0 V at the lowest
 ///   key, as the interface board's converter is trimmed (adjustment 4:
 ///   C0 0.000 V, C5 5.000 V), and the supply as 15 V: the comparator's

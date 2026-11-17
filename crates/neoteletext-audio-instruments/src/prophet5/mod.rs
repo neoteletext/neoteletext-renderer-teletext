@@ -70,9 +70,9 @@
 //!   the sawtooth's restart, which the manual's circuit is said to give.
 //! - **The firmware's timing** (a loop of 6 to 11 ms) is left out: a
 //!   key sounds and a knob moves at once.
-//! - **The glide's rates** between none and its slowest, the pitch of a
-//!   knob's steps between its ends, and where a released voice stands
-//!   when keys are assigned are own choices, each said where it is made.
+//! - **The pitch of a knob's steps** between its ends, and where a
+//!   released voice stands when keys are assigned, are own choices, each
+//!   said where it is made.
 //! - **No scale mode, no sequencer or cassette interface, no A-440
 //!   tone**, and no automatic tuning: each oscillator is off by a fixed
 //!   small amount instead.
@@ -90,7 +90,7 @@ use crate::analog::fixed::amplify;
 use crate::analog::oscillator::Noise;
 use crate::analog::{frequency, to_sample};
 
-use law::{Law, Mixing, OCTAVE, SEMITONES, UNIT};
+use law::{Law, Mixing, OCTAVE, UNIT};
 pub use patch::{Knob, Patch, Switch};
 use voice::{Controls, Settings, TICK_RATE, TICK_SAMPLES, Voice};
 
@@ -192,20 +192,6 @@ const PINK_GAIN: i32 = 3 * ONE_Q28;
 /// section 2-21 (page 43) calls the result pink noise.
 const PINK_CORNER: u32 = 159_155;
 
-/// The glide's slowest rate, in octaves a second in Q24.
-///
-/// Source: TM3 test table (page 61): with the glide at 10, "MINIMUM: 5
-/// SECS TO SLEW 5 OCTAVES".
-const GLIDE_SLOWEST: u32 = OCTAVE.cast_unsigned();
-/// The octaves of rate that each step of the glide knob below its top
-/// adds: the rate doubles for each twelve steps, a thousand octaves a
-/// second with the knob at 0.
-///
-/// Source: own choice. The manuals give the slowest rate and "NO GLIDE"
-/// at 0; between, the circuit's control current falls as the knob rises
-/// (TM3 section 2-12, page 22: "as GLIDE CV increases, Iabc decreases").
-const GLIDE_STEP: i32 = OCTAVE / SEMITONES;
-
 /// The pitch bend value that bends nothing.
 ///
 /// Source: MIDI 1.0: a pitch bend is 14 bits and its centre is 0x2000.
@@ -285,7 +271,8 @@ impl Modulator {
     /// only the triangle is shifted to stand about zero (sheet SD334).
     /// The triangle is lowest where the sawtooth falls, and the square
     /// is high about that fall, as the CEM3340 makes its pulse of the
-    /// triangle (data sheet, page 4, figure 1).
+    /// triangle (data sheet, page 4, figure 1); on revisions 1 and 2 the
+    /// triangle is highest there ([`Law::triangle_from_top`]).
     fn tick(&mut self, patch: &Patch, law: &Law) -> i32 {
         let phase = self.phase;
         self.phase = phase.wrapping_add(self.step);
@@ -295,6 +282,7 @@ impl Modulator {
         // From -1/2 at the cycle's start to 1/2 at its middle.
         let folded = if phase < Self::HALF { rise } else { UNIT.saturating_sub(rise) };
         let turning = (folded << 2).saturating_sub(UNIT) >> LFO_TRIANGLE_SHIFT;
+        let turning = if law.triangle_from_top { turning.saturating_neg() } else { turning };
         let high = phase.wrapping_add(Self::HALF >> 1) < Self::HALF;
         let level = if high { law::gain(UNIT, law.lfo.2) } else { 0 };
         match law.mixing {
@@ -610,8 +598,10 @@ impl Prophet5 {
             return target;
         }
         // Octaves a tick at full rate.
-        let faster = i32::from(law.knob_top).saturating_sub(steps).saturating_mul(GLIDE_STEP);
-        let rate = law::raise(GLIDE_SLOWEST / TICK_RATE, faster).min(i32::MAX.cast_unsigned()).cast_signed();
+        let (slowest, step, most) = law.glide;
+        let faster = i32::from(law.knob_top).saturating_sub(steps).saturating_mul(step);
+        let most = most.saturating_mul(OCTAVE.cast_unsigned() / TICK_RATE);
+        let rate = law::raise(slowest / TICK_RATE, faster).min(most).min(i32::MAX.cast_unsigned()).cast_signed();
         let distance = target.saturating_sub(self.glide);
         let within = distance.clamp(law.glide_zone.saturating_neg(), law.glide_zone);
         let step = law::share(rate, within, law.glide_zone);
