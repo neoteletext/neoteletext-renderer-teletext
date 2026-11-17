@@ -344,7 +344,7 @@ impl Settings {
         // marked "+" (R4364; R4241) and the pulse and the triangle at
         // the other (R4366; R4250 and R4285), so those two are upside
         // down against the sawtooth in the mix. Poly-Mod's own node
-        // (R4243, R4251, R4260) takes all three one way round. Revision
+        // (R4243, R4251, R4280) takes all three one way round. Revision
         // 2's waveforms all reach the one input marked "+" of their
         // mixer amplifier, the other grounded (TM2 SD411, pages 85 and
         // 86: half of U473, an SSM2020, for each oscillator).

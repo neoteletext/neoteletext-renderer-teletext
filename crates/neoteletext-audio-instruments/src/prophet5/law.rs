@@ -263,7 +263,8 @@ pub const REV3: Law = Law {
     // "shifts down the dc-level of the triangle to be symmetrical about
     // ground"). Currents of 67, 67.5 and 67 µA peak to peak: the pulse
     // and the triangle are each as large as the sawtooth, in the mixer
-    // and, through the same 150 kΩ (R4243, R4260), in Poly-Mod.
+    // (R4241, R4250, R4285) and, through the same 150 kΩ, 200 kΩ and
+    // 150 kΩ (R4243, R4251, R4280), in Poly-Mod.
     mixing: Mixing::Currents,
     // Source: CEM3340 data sheet, page 4, figure 1: the triangle is the
     // chip's own wave and the sawtooth is made of it, falling where the
