@@ -20,7 +20,9 @@ mod support;
 
 use analog::{amplitude, decibels};
 use neoteletext_audio_instruments::juno::{Model, Patch, Slider};
-use support::{MODELS, RATE, cents, flat, pitch, play, rms, samples, square, whistle};
+use support::{
+    CONTROL, MODELS, NOTE_ON, RATE, cents, flat, instrument, pitch, play, render, rms, samples, square, whistle,
+};
 
 /// Each voice's filter may be off by so many cents (JUNO-106 service
 /// notes, adjustments 7 and 8), and the oscillation's pitch is trimmed
@@ -201,4 +203,28 @@ fn the_high_pass_switch_cuts_or_lifts_the_bass() {
     let levels = [1u8, 2, 3].map(|position| decibels(fundamental(Model::Juno60, position) / flat));
     println!("Juno60: 55 Hz at positions 1, 2 and 3 against 0: {levels:.1?} dB");
     assert!(levels[0] < -10.0 && levels[1] < levels[0] - 3.0 && levels[2] < levels[1] - 3.0);
+}
+
+#[test]
+fn the_bass_lift_switched_in_again_brings_back_nothing_of_what_it_last_held() {
+    // A low note with the Juno-106's switch at 0; the switch moved to 1
+    // and the note silenced; then, out of silence, the switch back at 0.
+    // The lift's low-pass was not run while the switch was away
+    // (TODO-6438: it kept the note's last level and let it out, a thump
+    // of 0.09 of full scale).
+    let model = Model::Juno106;
+    let mut lifted = square();
+    lifted.hpf = 0;
+    let mut juno = instrument(model, &lifted);
+    juno.event(NOTE_ON, 33, 100);
+    // Stopped part of the way through a cycle, while the lift holds a
+    // level.
+    render(&mut juno, 0.503);
+    juno.set_patch(&flat(model, square()));
+    juno.event(CONTROL, 120, 0);
+    assert!(render(&mut juno, 1.0)[samples(0.5)..].iter().all(|&sample| sample == 0.0), "not silent");
+    juno.set_patch(&lifted);
+    let back = render(&mut juno, 0.1).iter().fold(0.0f64, |peak, &value| peak.max(value.abs()));
+    println!("Juno106: the bass lift switched in in silence gives a peak of {back:.5}");
+    assert!(back == 0.0, "{back}");
 }

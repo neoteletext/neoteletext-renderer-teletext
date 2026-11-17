@@ -405,6 +405,12 @@ impl Juno {
         if corner == 0 {
             self.high_pass.reset();
         }
+        // The bass lift's capacitor is followed only while the lift is
+        // heard; what it held when the switch left 0 is not brought back
+        // when the switch returns.
+        if !(law.bass_boost && patch.hpf == 0) {
+            self.bass.reset();
+        }
         let slider = i32::from(patch.get(Slider::VcaLevel)).saturating_sub(VCA_LEVEL_CENTRE);
         let octaves = slider.saturating_mul(VCA_LEVEL_RANGE) / VCA_LEVEL_CENTRE;
         self.level = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
