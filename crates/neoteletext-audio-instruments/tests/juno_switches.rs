@@ -674,7 +674,16 @@ fn the_chorus_comes_back_whole_and_keeps_nothing_of_how_it_was_switched() {
                         juno.render(part);
                     }
                     never.render(&mut same);
-                    assert_ne!(out[..gone + 480], same[..gone + 480], "{model:?}: {home:?} never left");
+                    // A single sample away can move the output by less
+                    // than one step of 16 bits, so that the switch leaves
+                    // no trace; longer gaps must show one.
+                    if gone > 1 {
+                        assert_ne!(
+                            out[..gone + 480],
+                            same[..gone + 480],
+                            "{model:?}: {home:?} never left, gone {gone}"
+                        );
+                    }
                     // Back in as many samples as it was gone.
                     assert_eq!(
                         out[2 * gone..],
@@ -705,10 +714,10 @@ fn the_chorus_comes_back_whole_and_keeps_nothing_of_how_it_was_switched() {
                 }
                 waited.render(&mut out);
             }
-            // Off, for longer than the fade; then on.
+            // Off, for longer than the fade (20 ms, 960 samples); then on.
             juno.set_patch(&with(ChorusMode::Off));
             let (mut out, mut same) = (vec![0i16; 600], vec![0i16; 600]);
-            for _ in 0..2 {
+            for _ in 0..3 {
                 juno.render(&mut out);
                 waited.render(&mut same);
             }

@@ -193,27 +193,30 @@ const SEED: u32 = 0x4a75_6e6f;
 /// The chorus's sweep rates in thousandths of a hertz: I, II, and both
 /// buttons of the Juno-60.
 ///
-/// Source: Florian Anwander's schematic of the Juno-60's chorus
-/// oscillator, the notes written beside its outputs: I, 20 V peak to
-/// peak, one cycle in 2 s; II, 20 V, 1.2 s; I+II, 1.6 V. His page
-/// "Roland choruses and ensemble effects" gives 0.5 Hz, 0.8 Hz and, for
-/// I+II, "8% amount, 1Hz, sine like"; and of the Juno-106: "no
-/// frequencies defined ... I assume they are similar to the Juno-60".
-/// Own derivation for I+II: the oscillator is an integrator between two
-/// thresholds, so with its swing cut to 8% a cycle takes at most 8% of
-/// the slower setting's 2 s, 0.16 s; the schematic's note is read as
-/// 0.1 s, which one reference program's 9.7 Hz agrees with, and the
-/// page's 1 Hz cannot be.
-const CHORUS_RATES: [u32; 3] = [500, 833, 10_000];
+/// Source: Roland's Juno-60 chorus LFO schematic (as scanned by Florian
+/// Anwander), simulated in ngspice on 18 November 2026: a Schmitt trigger
+/// (R7 33k, R12 47k, R14 3.3k, R102 270k) around an integrator (R8 100k,
+/// C3 0.1 uF) fed through R11 270k and a 4066 shunt of R9 3.9k (I) or
+/// R10 6.8k (II), none for I+II, where R6 150k and C2 1 uF also follow
+/// it. I 0.506 Hz and II 0.854 Hz agree with the schematic's own notes
+/// (one cycle in 2 s and 1.2 s). I+II is 9.64 Hz: only that rate leaves
+/// the 1.6 V the schematic notes after R6 and C2.
+const CHORUS_RATES: [u32; 3] = [506, 854, 9_640];
 /// The chorus's middle delay and its sweep either way with one button
 /// down, in millionths of a second.
 ///
-/// Source: own choice: no document read gives either (Anwander: "At the
-/// moment I can provide only the modulation rates"). They lie inside the
-/// MN3009's 0.64 to 12.8 ms (the chorus block's figures, from its data
-/// sheet), and near one reference program's measured
-/// 1.6 to 5.2 ms.
-const CHORUS_DELAY: (u32, u32) = (3_500, 1_850);
+/// Source: Roland's Juno-60 chorus board schematic (as scanned by
+/// Florian Anwander), simulated in ngspice on 18 November 2026. The
+/// MN3009's clock comes from a transistor oscillator (TR1 to TR5, C3
+/// 150 pF, R5 6.8k, R7 8.2k, R11 1.8k, R12 10k) driving the MN3101's
+/// OX1; the MN3101 halves it (its datasheet: "Clock signal frequency is
+/// 1/2 of oscillation frequency") and the MN3009's 256 stages delay by
+/// 256 / (2 x clock) (its datasheet), so the delay is 256 over the
+/// oscillator's frequency. Over the chorus LFO's 18.9 V swing it runs
+/// from 1.44 to 5.24 ms, linearly in the LFO's voltage. The longest
+/// delay is the least certain: a slower switching MN3101 than modelled
+/// would shorten it, to 3.5 ms at worst.
+const CHORUS_DELAY: (u32, u32) = (3_340, 1_900);
 /// The sweep with both buttons down, as a share of the sweep with one,
 /// in hundredths.
 ///
@@ -238,23 +241,26 @@ const CHORUS_FILTER: u32 = 10_000_000;
 const CHORUS_LINE_GAIN: i32 = ((47i64 << 31) / 78) as i32;
 
 /// Samples over which the lines' share of the output falls to nothing or
-/// rises from it when the chorus's switches move while a note sounds: 10
+/// rises from it when the chorus's switches move while a note sounds: 20
 /// ms. A line cut off or let in at once is a step as large as the line's
 /// signal at that instant, a click; so is a sweep that changes its depth
 /// or its direction at once, which moves the lines' delays in one step,
 /// and that change is made while the lines are not heard.
 ///
-/// Source: own choice of the time and of the straight line. JUNO-60
+/// Source: own choice of the time and of the straight line; 20 ms, as the
+/// Juno's all sound off fades, because at 10 ms a switch from I+II to I
+/// under a held pulse stepped 1.5 times the instrument's own largest step
+/// once the sweep took the rates derived from the schematic. JUNO-60
 /// service notes, chorus board schematic (page 11), "MUTE": each line
 /// reaches its output amplifier through a FET (TR8, TR16) whose gate the
 /// CHORUS OFF line moves through resistors and a capacitor, so the
 /// instrument's chorus comes and goes softly too; that circuit's time
 /// was not worked out.
-const CHORUS_FADE_SAMPLES: u32 = SAMPLE_RATE / 100;
+const CHORUS_FADE_SAMPLES: u32 = SAMPLE_RATE / 50;
 /// Samples the lines are given to fill, and their filters to settle,
 /// after the sweep is set and before the lines are let in: 6 ms.
 ///
-/// Source: own choice: just over the longest delay of the sweep, 5.35 ms
+/// Source: own choice: just over the longest delay of the sweep, 5.24 ms
 /// ([`CHORUS_DELAY`]).
 const CHORUS_FILL_SAMPLES: u32 = SAMPLE_RATE * 6 / 1000;
 /// What one step of the fade is of the lines' whole share, in Q31.

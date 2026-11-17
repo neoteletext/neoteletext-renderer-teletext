@@ -102,8 +102,8 @@ fn delays(signal: &[f64], from: f64, to: f64) -> Vec<f64> {
 const FILTERS: f64 = 0.075;
 /// The middle delay and the sweep either way, in milliseconds: an own
 /// choice of the instrument's.
-const MIDDLE: f64 = 3.5 + FILTERS;
-const SWEEP: f64 = 1.85;
+const MIDDLE: f64 = 3.34 + FILTERS;
+const SWEEP: f64 = 1.90;
 
 /// The rate in hertz at which a sequence of readings, [`HOP`] apart,
 /// rises through its middle.
@@ -120,8 +120,39 @@ fn rate(readings: &[f64]) -> f64 {
             rises.push(index as f64 + (middle - pair[0]) / (pair[1] - pair[0]));
         }
     }
-    assert!(rises.len() >= 2, "{} rises", rises.len());
+    // A folded sweep rises through its middle twice a cycle, unevenly
+    // spaced, so only whole pairs of rises are counted: an even number of
+    // intervals, which is as right for a sweep that is not folded.
+    if rises.len() % 2 == 0 {
+        rises.pop();
+    }
+    assert!(rises.len() >= 3, "{} rises", rises.len());
     (rises.len() - 1) as f64 / ((rises[rises.len() - 1] - rises[0]) * HOP)
+}
+
+/// The rate in hertz at which a sequence of readings, [`HOP`] apart,
+/// repeats: the lag of its first strong likeness to itself past its
+/// first fall below zero. It reads every reading, so a folded sweep, which
+/// crosses its middle unevenly, is measured as well as a plain one.
+fn repeat_rate(readings: &[f64]) -> f64 {
+    let mean = readings.iter().sum::<f64>() / readings.len() as f64;
+    let centred: Vec<f64> = readings.iter().map(|r| r - mean).collect();
+    let likeness = |lag: usize| -> f64 {
+        let pairs = centred.len() - lag;
+        centred.iter().zip(&centred[lag..]).map(|(a, b)| a * b).sum::<f64>() / pairs as f64
+    };
+    let last = centred.len() / 2;
+    let first_negative = (1..last).find(|&lag| likeness(lag) < 0.0).expect("the readings change");
+    // The first peak that rises back past half its likeness at no lag:
+    // later peaks are its multiples.
+    let strong = 0.5 * likeness(0);
+    let best = (first_negative + 1..last - 1)
+        .find(|&lag| likeness(lag) > strong && likeness(lag) >= likeness(lag - 1) && likeness(lag) >= likeness(lag + 1))
+        .expect("the readings repeat");
+    // The peak's top, between its neighbours, as a parabola.
+    let (before, at, after) = (likeness(best - 1), likeness(best), likeness(best + 1));
+    let shift = 0.5 * (before - after) / (before - 2.0 * at + after);
+    1.0 / ((best as f64 + shift) * HOP)
 }
 
 #[test]
@@ -136,11 +167,11 @@ fn chorus_off_is_the_dry_signal_alone() {
 #[test]
 fn chorus_one_and_two_sweep_two_lines_oppositely_at_their_rates() {
     // The Juno-60's chorus oscillator: I, one cycle in 2 s; II, in 1.2 s
-    // (Anwander's schematic and page: 0.5 Hz and 0.8 Hz). The delays
-    // are an own choice: 3.5 ms, swept 1.85 ms either way.
+    // (Roland's Juno-60 chorus LFO schematic, simulated: 0.506 Hz and 0.854 Hz). The delays
+    // come from the chorus board schematic, simulated: 3.34 ms, swept 1.90 ms either way.
     for model in MODELS {
-        for (mode, hertz) in [(ChorusMode::One, 0.5), (ChorusMode::Two, 1.0 / 1.2)] {
-            let wet = clicks(model, mode, 6.5);
+        for (mode, hertz) in [(ChorusMode::One, 0.506), (ChorusMode::Two, 0.854)] {
+            let wet = clicks(model, mode, 10.5);
             // One line is above the middle delay while the other is
             // below: each of the two is the sweep folded over, and rises
             // through its middle twice in a cycle.
@@ -150,7 +181,7 @@ fn chorus_one_and_two_sweep_two_lines_oppositely_at_their_rates() {
             let shorter = delays(&wet, 2.0 * SHORTEST, (MIDDLE - 0.1) / 1000.0);
             let longest = longer.iter().fold(0.0f64, |a, &b| a.max(b));
             let shortest = shorter.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-            let found = rate(&shorter) / 2.0;
+            let found = repeat_rate(&shorter) / 2.0;
             println!("{model:?} {mode:?}: delays from {shortest:.2} ms to {longest:.2} ms, swept at {found:.3} Hz");
             assert!((found / hertz - 1.0).abs() < 0.03, "{model:?} {mode:?}: {found} Hz");
             let ends = ((shortest - (MIDDLE - SWEEP)).abs(), (longest - (MIDDLE + SWEEP)).abs());
@@ -183,19 +214,19 @@ fn each_line_is_47_parts_to_the_dry_signals_78_in_the_mono_output() {
 #[test]
 fn both_buttons_of_the_juno_60_sweep_both_lines_alike_a_little_and_fast() {
     // Anwander's schematic of the Juno-60's chorus oscillator: 1.6 V
-    // against 20 V, 8% of the sweep; its cycle is read as 0.1 s; and
+    // against 20 V, 8% of the sweep; its rate, simulated from the schematic, 9.64 Hz; and
     // "the second BBD is controlled in a non inverted way".
     let wet = clicks(Model::Juno60, ChorusMode::Both, 3.5);
     let both = delays(&wet, 2.0 * SHORTEST, LONGEST);
     let (low, high) = both.iter().fold((f64::INFINITY, 0.0f64), |(low, high), &d| (low.min(d), high.max(d)));
     let found = rate(&both);
     println!("Juno60 Both: one delay from {low:.2} ms to {high:.2} ms, swept at {found:.2} Hz");
-    // One echo, of both lines together: 3.5 ms, 0.148 ms either way.
+    // One echo, of both lines together: 3.34 ms, 0.152 ms either way.
     assert!(
         (low - (MIDDLE - 0.08 * SWEEP)).abs() < 0.04 && (high - (MIDDLE + 0.08 * SWEEP)).abs() < 0.04,
         "{low} to {high}"
     );
-    assert!((found / 10.0 - 1.0).abs() < 0.05, "{found} Hz");
+    assert!((found / 9.64 - 1.0).abs() < 0.05, "{found} Hz");
     // The Juno-106 has no such setting, and takes it as II: two echoes.
     let wet = clicks(Model::Juno106, ChorusMode::Both, 2.0);
     let longest = delays(&wet, (2.0 * SWEEP + 0.1) / 1000.0, LONGEST).iter().fold(0.0f64, |a, &delay| a.max(delay));
