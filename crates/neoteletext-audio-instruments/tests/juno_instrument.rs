@@ -187,6 +187,33 @@ fn the_pedal_holds_and_the_controllers_do_what_midi_says() {
 }
 
 #[test]
+fn the_pedal_is_down_at_any_value_but_0_on_the_juno_106_and_from_64_on_the_juno_60() {
+    // JUNO-106 owner's manual, MIDI Implementation 2.1: "hold OFF" is a
+    // third byte of 0 and "hold ON" is "vvvvvvv = 1 - 127". The Juno-60
+    // has no MIDI of its own and keeps MIDI 1.0's rule, on from 64.
+    for (model, down_from) in [(Model::Juno106, 1u8), (Model::Juno60, 64)] {
+        for value in [0u8, 1, 2, 63, 64, 127] {
+            let mut juno = instrument(model, &flat(model, square()));
+            juno.event(CONTROL, 64, value);
+            juno.event(NOTE_ON, 60, 100);
+            render(&mut juno, 0.05);
+            juno.event(NOTE_OFF, 60, 0);
+            render(&mut juno, 0.1);
+            let held = usize::from(value >= down_from);
+            assert_eq!(juno.sounding_voices(), held, "{model:?}: the pedal at {value}");
+            // A pedal that was down stays down at any value that is down,
+            // and 0 lets go on both.
+            juno.event(CONTROL, 64, down_from);
+            render(&mut juno, 0.1);
+            assert_eq!(juno.sounding_voices(), held, "{model:?}: the pedal from {value} to {down_from}");
+            juno.event(CONTROL, 64, 0);
+            render(&mut juno, 0.1);
+            assert_eq!(juno.sounding_voices(), 0, "{model:?}: the pedal from {value} to 0");
+        }
+    }
+}
+
+#[test]
 fn the_mode_messages_are_all_notes_off_as_the_owners_manual_says() {
     for model in MODELS {
         for controller in 123..=127u8 {

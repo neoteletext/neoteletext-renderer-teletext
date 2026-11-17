@@ -129,10 +129,22 @@ const PITCH_BEND_CENTRE: i32 = 0x2000;
 const PITCH_BEND_KEYS: u8 = PITCH_BEND_SEMITONES as u8;
 /// The largest value of a MIDI data byte.
 const DATA_MAX: u8 = 0x7f;
-/// The sustain pedal is down at this value and above.
+/// The Juno-106's sustain pedal is down at this value and above: at any
+/// value but 0.
 ///
-/// Source: MIDI 1.0: a switch controller is on from 64.
-const PEDAL_DOWN: u8 = 64;
+/// Source: JUNO-106 owner's manual, MIDI Implementation 2.1: controller
+/// 64 with a third byte of 0 is "hold OFF", and "hold ON" is "vvvvvvv = 1
+/// - 127".
+const PEDAL_DOWN_106: u8 = 1;
+/// The Juno-60's sustain pedal is down at this value and above.
+///
+/// Source: MIDI 1.0: a switch controller is on from 64. The Juno-60 has
+/// no MIDI, so no document of Roland's says how it would read the
+/// controller; its pedal is a switch at a jack (Roland's specifications
+/// of the JUNO-60: "PEDAL HOLD Jack (DP-2)", "Pedal Switch: DP-2"), and
+/// the rule of the Juno-106's own MIDI is not carried over to an
+/// instrument that never had it.
+const PEDAL_DOWN_60: u8 = 64;
 /// MIDI status: note off.
 const STATUS_NOTE_OFF: u8 = 0x80;
 /// MIDI status: note on.
@@ -614,7 +626,10 @@ impl Juno {
     /// - Note off (0x8n), and note on (0x9n) with a velocity of 0.
     /// - Note on (0x9n); the velocity is not used.
     /// - Control change (0xBn) of the modulation wheel (1), volume (7),
-    ///   the sustain pedal (64, down from 64), all sound off (120), reset
+    ///   the sustain pedal (64: down at any value but 0 on the Juno-106,
+    ///   as its owner's manual has it, MIDI Implementation 2.1, and from
+    ///   64 on the Juno-60, which has no MIDI of its own and is given MIDI
+    ///   1.0's rule), all sound off (120), reset
     ///   all controllers (121, which leaves the volume), all notes off
     ///   (123) and the four mode messages (124 to 127), which are an all
     ///   notes off and nothing more: the instrument stays one part that
@@ -657,7 +672,13 @@ impl Juno {
         match controller {
             CONTROL_MODULATION_WHEEL => self.wheel = value,
             CONTROL_VOLUME => self.volume = value,
-            CONTROL_SUSTAIN => self.allocator.sustain(value >= PEDAL_DOWN),
+            CONTROL_SUSTAIN => {
+                let down = match self.model {
+                    Model::Juno106 => PEDAL_DOWN_106,
+                    Model::Juno60 => PEDAL_DOWN_60,
+                };
+                self.allocator.sustain(value >= down);
+            }
             CONTROL_ALL_SOUND_OFF => {
                 self.allocator.all_keys_up();
                 for (index, voice) in self.voices.iter_mut().enumerate() {
