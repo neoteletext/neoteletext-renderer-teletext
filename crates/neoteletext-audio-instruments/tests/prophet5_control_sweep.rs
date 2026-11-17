@@ -16,7 +16,8 @@ mod control_sweep_support;
 
 use control_sweep_support::{
     AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Clock, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
-    PROGRAM, Sound, all_sound_off_silences, check, continuous, on_off, run, sweep, switch, to_crest,
+    PROGRAM, Sound, all_sound_off_leaves_the_pedal, all_sound_off_silences, check, continuous, on_off, run, sweep,
+    switch, to_crest,
 };
 use neoteletext_audio_instruments::prophet5::patch::{Knob, Switch};
 use neoteletext_audio_instruments::prophet5::{Model, Patch, Prophet5};
@@ -254,6 +255,10 @@ fn changes(prophet: &Prophet5) -> Vec<Change<Prophet5>> {
         Change::new(name, "sent", move |prophet: &mut Prophet5| prophet.event(status, data1, data2))
     };
     all.push(message("all sound off (120)", CONTROL, 120, 0));
+    all.push(Change::starting("all sound off (120), then a key", "sent", |prophet: &mut Prophet5| {
+        prophet.event(CONTROL, 120, 0);
+        prophet.event(NOTE_ON, 64, 100);
+    }));
     all.push(message("reset all controllers (121)", CONTROL, 121, 0));
     all.push(message("all notes off (123)", CONTROL, 123, 0));
     all.push(message("note off", NOTE_OFF, 60, 0));
@@ -309,10 +314,6 @@ fn no_control_of_revision_3_steps_the_signal_but_the_switches_that_do() {
             Allowed { controls: &["FilterKeyboard switch", "OscBTriangle switch"], why: SWITCH },
             Allowed { controls: &["Resonance"], why: STAIR },
             Allowed { controls: &["note off", "all notes off (123)", "release_all", "Unison switch"], why: RELEASE },
-            Allowed {
-                controls: &["all sound off (120)"],
-                why: "OUR FAULT, not the instrument's: the voices are emptied in one sample (TODO-6438)",
-            },
             Allowed { controls: &["reset"], why: RESET },
         ],
     );
@@ -326,10 +327,6 @@ fn no_control_of_revision_2_steps_the_signal_but_the_switches_that_do() {
             Allowed { controls: &["FilterKeyboard switch", "OscBTriangle switch"], why: SWITCH },
             Allowed { controls: &["Resonance"], why: STAIR },
             Allowed { controls: &["all notes off (123)", "release_all", "Unison switch"], why: RELEASE },
-            Allowed {
-                controls: &["all sound off (120)"],
-                why: "OUR FAULT, not the instrument's: the voices are emptied in one sample (TODO-6438)",
-            },
             Allowed { controls: &["reset"], why: RESET },
         ],
     );
@@ -339,5 +336,12 @@ fn no_control_of_revision_2_steps_the_signal_but_the_switches_that_do() {
 fn all_sound_off_takes_the_sound_out_and_leaves_silence() {
     for model in [Model::Rev3, Model::Rev2] {
         all_sound_off_silences(&sounds(model), &|prophet: &mut Prophet5| prophet.event(CONTROL, 120, 0), 256 + 64);
+    }
+}
+
+#[test]
+fn all_sound_off_leaves_the_pedal_where_it_is() {
+    for model in [Model::Rev3, Model::Rev2] {
+        all_sound_off_leaves_the_pedal(&|| instrument(model, &bright(model), 0), &Prophet5::event);
     }
 }

@@ -221,6 +221,13 @@ const PINK_CORNER: u32 = 159_155;
 const LOOP_TICKS: u32 = TICK_RATE * 6 / 1_000;
 const _: () = assert!(LOOP_TICKS == 36);
 
+/// Messages kept while all sound off takes the sound out, to be taken
+/// when it has gone: more than come in the 5.3 ms that lasts but from
+/// a stream that means to flood, whose next message ends the wait.
+///
+/// Source: own choice.
+const DEFERRED: usize = 16;
+
 /// The pitch bend value that bends nothing.
 ///
 /// Source: MIDI 1.0: a pitch bend is 14 bits and its centre is 0x2000.
@@ -370,6 +377,12 @@ pub struct Prophet5 {
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
     volume_gain: VolumeGain,
+    /// All sound off has come and the sound is on its way out: the gain
+    /// that takes it there, which the voices are cut at the end of.
+    cut: Option<VolumeGain>,
+    /// The messages that came meanwhile, in order, and how many.
+    deferred: [(u8, u8, u8); DEFERRED],
+    deferred_count: usize,
     pedal: bool,
     /// The master tune, in octaves.
     tune: i32,
@@ -412,6 +425,9 @@ impl Prophet5 {
             wheel: 0,
             volume: DATA_MAX,
             volume_gain: VolumeGain::full(),
+            cut: None,
+            deferred: [(0, 0, 0); DEFERRED],
+            deferred_count: 0,
             pedal: false,
             tune: 0,
             glide: 0,
@@ -560,8 +576,10 @@ impl Prophet5 {
     /// - Control change (0xBn) of the modulation wheel (1), volume (7),
     ///   the pedal (64, down from 64), all sound off (120), reset all
     ///   controllers (121, which leaves the volume) and all notes off
-    ///   (123). All sound off silences every voice at once and leaves
-    ///   the pedal where it is. The pedal holds the notes whose keys go up while it is
+    ///   (123). All sound off takes the sound out over five thousandths
+    ///   of a second, then silences every voice, and leaves the pedal
+    ///   where it is; a message that comes before then is taken when
+    ///   the sound has gone. The pedal holds the notes whose keys go up while it is
     ///   down, as a MIDI instrument's does, and is besides the
     ///   instrument's release footswitch: while it is down the
     ///   envelopes' releases are as the knobs say though the release
@@ -572,6 +590,16 @@ impl Prophet5 {
     /// ([`Prophet5::ignored_events`]): any other status or controller, a
     /// data byte above 127. Nothing is an error.
     pub fn event(&mut self, status: u8, data1: u8, data2: u8) {
+        // While all sound off takes the sound out, a message waits for
+        // it to have gone; with no room to wait, the sound is cut now.
+        if self.cut.is_some() {
+            if let Some(slot) = self.deferred.get_mut(self.deferred_count) {
+                *slot = (status, data1, data2);
+                self.deferred_count = self.deferred_count.saturating_add(1);
+                return;
+            }
+            self.cut();
+        }
         if data1 > DATA_MAX || data2 > DATA_MAX {
             self.ignore();
             return;
@@ -600,16 +628,17 @@ impl Prophet5 {
                 self.pedal = value >= PEDAL_DOWN;
                 self.allocator.sustain(self.pedal);
             }
+            // The sound goes out over the 5.3 ms a volume's gain takes,
+            // and the voices are cut when it has gone: cut where they
+            // stood, the signal would fall to nothing in one sample.
+            // The keys are let go then and not before: a release at its
+            // shortest is quicker than the fade.
             CONTROL_ALL_SOUND_OFF => {
-                self.allocator.all_keys_up();
-                for (index, voice) in self.voices.iter_mut().enumerate() {
-                    voice.cut();
-                    voice.configure(&self.settings);
-                    self.allocator.finished(index);
+                if self.sounding_voices() == 0 {
+                    self.cut();
+                } else if self.cut.is_none() {
+                    self.cut = Some(VolumeGain::full());
                 }
-                // The allocator lets go of the pedal with the keys; the
-                // pedal has not moved, and is given back.
-                self.allocator.sustain(self.pedal);
             }
             CONTROL_RESET_CONTROLLERS => {
                 self.wheel = 0;
@@ -632,6 +661,30 @@ impl Prophet5 {
                 }
             }
             _ => self.ignore(),
+        }
+    }
+
+    /// Silences every voice at once: what all sound off comes to.
+    fn cut(&mut self) {
+        self.cut = None;
+        self.allocator.all_keys_up();
+        // The allocator lets go of the pedal with the keys; the pedal
+        // has not moved, and is given back.
+        self.allocator.sustain(self.pedal);
+        for (index, voice) in self.voices.iter_mut().enumerate() {
+            voice.cut();
+            voice.configure(&self.settings);
+            self.allocator.finished(index);
+        }
+        self.take_deferred();
+    }
+
+    /// Takes the messages that waited for the sound to go, in order.
+    fn take_deferred(&mut self) {
+        let (deferred, count) = (self.deferred, self.deferred_count);
+        self.deferred_count = 0;
+        for &(status, data1, data2) in deferred.iter().take(count) {
+            self.event(status, data1, data2);
         }
     }
 
@@ -741,8 +794,17 @@ impl Prophet5 {
     pub fn render(&mut self, out: &mut [i16]) {
         let volume = volume::wanted(self.volume);
         for sample in out {
-            let earlier = self.voices_sample();
-            let later = self.voices_sample();
+            let mut earlier = self.voices_sample();
+            let mut later = self.voices_sample();
+            // Faded before the decimator, which then ends on silence:
+            // what it still holds when the voices are cut is nothing.
+            if let Some(cut) = &mut self.cut {
+                let gain = cut.towards(0);
+                (earlier, later) = (amplify(earlier, gain), amplify(later, gain));
+                if gain == 0 {
+                    self.cut();
+                }
+            }
             let signal = amplify(self.decimator.process(earlier, later), self.volume_gain.towards(volume));
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));
         }
