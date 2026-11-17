@@ -239,8 +239,9 @@ fn the_envelope_holds_each_sustain_level() {
         sid.write(third + 4, SAWTOOTH | 0x01);
         let level = amplitude(&settled(&mut sid), 440.0);
         // A sawtooth of 4,095 * 255 units is 2/π of half that at its
-        // fundamental, and 1,024 units are one of a sample at full volume.
-        let full = 4095.0 * 255.0 / std::f64::consts::PI * 15.0 / 1024.0;
+        // fundamental, and 65,536 / 31 units, the 8580's output gain, are
+        // one of a sample at each of the volume's fifteen steps.
+        let full = 4095.0 * 255.0 / std::f64::consts::PI * 15.0 * 31.0 / 65536.0;
         let expected = full * f64::from(nibble) / 15.0;
         assert!((level - expected).abs() < full * 0.01, "sustain {nibble}: {level} for {expected}");
     }
@@ -315,13 +316,16 @@ fn noise_is_broadband_and_unpitched() {
 }
 
 /// Pulse combined with triangle or sawtooth sounds at about the level of
-/// the triangle alone, as the reference emulator reSIDfp gives it (+1.3 dB
-/// for triangle and pulse, +1.0 dB for sawtooth and pulse, on the 8580 at
-/// width $200), measured against it on 17 November 2026 (TODO-6427 fault
-/// 1). The pulse comparison was the wrong way round: the chip's waveform
-/// output is inverted, so the bits set by the pulse are the share of the
-/// period above the width, and combined with another waveform the wrong
-/// share all but silenced the voice (−15.6 and −21.6 dB).
+/// the triangle alone on an 8580 at width $200: two emulators run as
+/// separate programs give +1.2 and +1.5 dB for triangle and pulse and
+/// +1.0 and +1.2 dB for sawtooth and pulse (sidplayfp 2.16.0, both its
+/// engines, measured 17 November 2026; TODO-6427 fault 1). The pulse
+/// comparison was the wrong way round: the chip's waveform output is
+/// inverted, so the bits set by the pulse are the share of the period
+/// above the width, and combined with another waveform the wrong share
+/// all but silenced the voice (-15.6 and -21.6 dB). Real 6581s settle
+/// which share it is: the test
+/// `the_6581s_combined_waveforms_are_as_quiet_as_two_real_chips`.
 #[test]
 fn pulse_combined_with_another_waveform_keeps_its_level() {
     const WIDTH: u16 = 0x200;
@@ -340,4 +344,101 @@ fn pulse_combined_with_another_waveform_keeps_its_level() {
         let relative = decibels(level(control) / triangle);
         assert!(relative > LEAST_DB, "{name}: {relative:.1} dB against the triangle alone");
     }
+}
+
+/// The level of a waveform selection on voice 1 against the triangle's,
+/// in decibels, at a pulse width.
+fn level_against_the_triangle(model: ChipModel, control: u8, width: u16) -> f64 {
+    let level = |control: u8| {
+        let mut sid = Sid::new(model, ChipClock::Pal);
+        sid.write(VOLUME_REGISTER, FULL_VOLUME);
+        sid.write(2, (width & 0xFF) as u8);
+        sid.write(3, (width >> 8) as u8);
+        start(&mut sid, 0, frequency_register(240.0, ChipClock::Pal), control);
+        let _ = render(&mut sid, 0.2);
+        let samples = render(&mut sid, 0.7);
+        let mean = samples.iter().map(|&sample| f64::from(sample)).sum::<f64>() / samples.len() as f64;
+        (samples.iter().map(|&sample| (f64::from(sample) - mean).powi(2)).sum::<f64>() / samples.len() as f64).sqrt()
+    };
+    decibels(level(control).max(1e-3) / level(TRIANGLE))
+}
+
+/// The level of a waveform selection over one sweep of Plogue's one-page
+/// BASIC SID benchmark (ploguechipsounds.blogspot.com, May 2010) as its
+/// listing plays it on voice 1: attack 0 and decay 8, sustain 12 and
+/// release 6, the gate set, then the frequency's upper byte from 0 to 254
+/// in steps of 2. A step of the BASIC loop takes 8.6 ms on the machine
+/// (128 steps in 1.1 s of the recordings); the level is the root mean
+/// square from 35 to 95 % of the sweep, with what lies below 15 Hz taken
+/// off, as the recordings were measured.
+fn benchmark_level(model: ChipModel, control: u8, width_high: u8) -> f64 {
+    const STEP_SECONDS: f64 = 0.0086;
+    const HIGH_PASS_HZ: f64 = 15.0;
+    let mut sid = Sid::new(model, ChipClock::Pal);
+    sid.write(VOLUME_REGISTER, FULL_VOLUME);
+    sid.write(3, width_high);
+    sid.write(5, 0x08);
+    sid.write(6, 0xC6);
+    sid.write(4, control | 0x01);
+    let mut samples = Vec::new();
+    for high in (0..=254u8).step_by(2) {
+        sid.write(1, high);
+        samples.extend(render(&mut sid, STEP_SECONDS));
+    }
+    // One pole: the level a capacitor has taken up is taken off.
+    let share = 2.0 * std::f64::consts::PI * HIGH_PASS_HZ / f64::from(SAMPLE_RATE);
+    let mut held = 0.0;
+    let passed: Vec<f64> = samples
+        .iter()
+        .map(|&sample| {
+            held += share * (f64::from(sample) - held);
+            f64::from(sample) - held
+        })
+        .collect();
+    let part = &passed[samples.len() * 35 / 100..samples.len() * 95 / 100];
+    (part.iter().map(|value| value * value).sum::<f64>() / part.len() as f64).sqrt()
+}
+
+/// The 6581's combined waveforms are as quiet as two real chips play
+/// them: Stone Oakvalley's recordings of his 6581 R2 and R4 playing the
+/// benchmark (6581-8580.com, 1 September 2015), measured 17 November 2026
+/// as each selection's level over its sweep against the same voice's
+/// triangle, on the three voices of each chip. The pulse's width is 0
+/// when the benchmark combines it. Each range is the two chips' with 2 dB
+/// either side. TODO-6427 fault 3: the reach of the pull before, fitted
+/// to one emulator's output, gave -24.4 dB for sawtooth with triangle,
+/// -33.8 dB for pulse with sawtooth and -24.4 dB for all three by this
+/// measure.
+#[test]
+fn the_6581s_combined_waveforms_are_as_quiet_as_two_real_chips() {
+    const MARGIN_DB: f64 = 2.0;
+    let triangle = benchmark_level(ChipModel::Mos6581, TRIANGLE, 0x08);
+    for (control, width_high, quietest, loudest) in [
+        (SAWTOOTH | TRIANGLE, 0x08, -31.3, -27.9),
+        (PULSE | TRIANGLE, 0x00, -4.1, -3.2),
+        (PULSE | SAWTOOTH, 0x00, -17.0, -9.9),
+        (PULSE | SAWTOOTH | TRIANGLE, 0x00, -35.8, -33.5),
+    ] {
+        let found = decibels(benchmark_level(ChipModel::Mos6581, control, width_high) / triangle);
+        assert!(
+            (quietest - MARGIN_DB..=loudest + MARGIN_DB).contains(&found),
+            "{control:#04x}: {found:.1} dB for {quietest} to {loudest}"
+        );
+    }
+    // At a width of 0 the pulse masks nothing, and the real chips play it
+    // with a triangle: the other share of the period would be silence.
+    assert!(decibels(benchmark_level(ChipModel::Mos6581, PULSE | TRIANGLE, 0x00) / triangle) > -6.0);
+    // No real chip was measured at other widths. Two emulators run as
+    // separate programs (sidplayfp 2.16.0, both engines) give pulse with
+    // triangle against a steady triangle -3.3 and -5.7 dB at width $800,
+    // -0.7 and -2.9 at $200, -20.0 and -21.4 at $C00: here within 3 dB of
+    // that range.
+    for (width, quietest, loudest) in [(0x800, -5.7, -3.3), (0x200, -2.9, -0.7), (0xC00, -21.4, -20.0)] {
+        let found = level_against_the_triangle(ChipModel::Mos6581, PULSE | TRIANGLE, width);
+        assert!((quietest - 3.0..=loudest + 3.0).contains(&found), "pulse and triangle at {width:#05x}: {found:.1} dB");
+    }
+    // The 8580's stay the AND: sawtooth with triangle at -2.1 and -2.5 dB
+    // in the two emulators.
+    let found = level_against_the_triangle(ChipModel::Mos8580, SAWTOOTH | TRIANGLE, 0x800);
+    assert!((found + 2.5).abs() < 1.0, "8580: {found:.1} dB");
 }

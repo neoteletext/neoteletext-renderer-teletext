@@ -7,6 +7,7 @@
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::indexing_slicing,
+    clippy::cast_sign_loss,
     clippy::arithmetic_side_effects,
     clippy::unwrap_used,
     clippy::print_stdout,
@@ -18,7 +19,12 @@ mod support;
 
 use neoteletext_audio_instruments::sid::{ChipClock, ChipModel, REGISTERS, Sid};
 use neoteletext_audio_instruments::{BLOCK_SAMPLES, SAMPLE_RATE};
-use support::{CLOCKS, MODELS, Random, render, rms};
+use support::{CLOCKS, MODELS, Random, decibels, frequency_register, render, rms, start};
+
+const TRIANGLE: u8 = 0x10;
+const PULSE: u8 = 0x40;
+const MODE_VOLUME: u8 = 24;
+const FULL_VOLUME: u8 = 0x0F;
 
 /// A busy register image: three voices, each with another waveform, the
 /// filter in use.
@@ -124,6 +130,47 @@ fn every_byte_at_every_address_is_valid() {
         let cycles = sid.cycles();
         sid.render(&mut []);
         assert_eq!(sid.cycles(), cycles);
+    }
+}
+
+#[test]
+fn the_output_level_leaves_headroom_for_three_voices() {
+    // TODO-6427 fault 5: at first the output clipped three of nine tunes.
+    // The scale is an own choice; no real chip was measured for it. One
+    // triangle at full envelope and full volume spans the middle of what
+    // it spans in two emulators run as separate programs (sidplayfp
+    // 2.16.0, both engines, measured from their output on 17 November
+    // 2026): 9,271 and 9,530 output units on a 6581, 7,017 and 7,437 on
+    // an 8580. Before, the 8580's span was 7,534, above both.
+    const NEAR_DB: f64 = 0.25;
+    for (model, spans) in [(ChipModel::Mos6581, (9_271.0, 9_530.0)), (ChipModel::Mos8580, (7_017.0, 7_437.0))] {
+        let clock = ChipClock::Pal;
+        let register = frequency_register(440.0, clock);
+        let extremes = |sid: &mut Sid| {
+            let _ = render(sid, 0.5);
+            let samples = render(sid, 0.5);
+            let lowest = i32::from(*samples.iter().min().unwrap());
+            let highest = i32::from(*samples.iter().max().unwrap());
+            (lowest, highest)
+        };
+        let mut sid = Sid::new(model, clock);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        start(&mut sid, 0, register, TRIANGLE);
+        let (lowest, highest) = extremes(&mut sid);
+        let middle = f64::midpoint(spans.0, spans.1);
+        let found = decibels(f64::from(highest - lowest) / middle);
+        assert!(found.abs() < NEAR_DB, "{model:?}: a triangle spans {} units, {found} dB", highest - lowest);
+        // Three pulses in step, the loudest the three voices can be with
+        // no filter, stay under half of a sample's range.
+        let mut sid = Sid::new(model, clock);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        for voice in 0..3 {
+            sid.write(support::voice(voice) + 3, 0x08);
+            start(&mut sid, voice, register, PULSE);
+        }
+        let (lowest, highest) = extremes(&mut sid);
+        let half = i32::from(i16::MAX) / 2;
+        assert!(lowest > -half && highest < half, "{model:?}: three pulses reach {lowest} and {highest}");
     }
 }
 

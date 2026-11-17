@@ -49,10 +49,10 @@ fn through(model: ChipModel, hz: f64, cutoff: u16, resonance: u8, mode: u8) -> f
     amplitude(&render(&mut sid, 0.5), pitch(register, clock))
 }
 
-/// The 8580's cutoff register for a cutoff in hertz: 30 Hz and 12,500 Hz
-/// over 2,048 steps.
+/// The 8580's cutoff register for a cutoff in hertz: 30 Hz and 7.25 Hz a
+/// step.
 fn register_8580(hz: f64) -> u16 {
-    ((hz - 30.0) * 2048.0 / 12_500.0).round() as u16
+    ((hz - 30.0) / 7.25).round() as u16
 }
 
 #[test]
@@ -108,55 +108,110 @@ fn the_cutoff_register_opens_the_low_pass_step_by_step() {
             last = level;
             levels.push(level);
         }
+        // Open, the filter passes the tone as it came. For the 6581 that
+        // is what two real chips do: noise through the low-pass with no
+        // resonance lay 0 to 1 dB above the same noise sent past the
+        // filter on Stone Oakvalley's R2 and 1 dB below it on his R4
+        // (his recordings of Plogue's benchmark, measured 17 November
+        // 2026). TODO-6427: the filter's input was multiplied by 0.67
+        // before, 3.5 dB down, as one emulator has it.
         let direct = through(model, 2000.0, 0, 0, 0);
-        assert!(decibels(levels[0] / direct) < -30.0, "{model:?} closed: {}", decibels(levels[0] / direct));
-        assert!(decibels(last / direct) > -1.0, "{model:?} open: {}", decibels(last / direct));
+        // Closed, the tone is five times the 6581's floor of 400 Hz, two
+        // poles down.
+        assert!(decibels(levels[0] / direct) < -25.0, "{model:?} closed: {}", decibels(levels[0] / direct));
+        assert!(decibels(last / direct).abs() < 1.0, "{model:?} open: {}", decibels(last / direct));
     }
+}
+
+/// The first cutoff register, in steps of eight, at which a tone of `hz`
+/// through the low-pass is less than 3 dB below the same tone with the
+/// filter wide open: the register whose cutoff is `hz`.
+fn register_reaching(model: ChipModel, hz: f64) -> u16 {
+    let open = through(model, hz, 2047, 0, LOW_PASS);
+    (0..=2047u16).step_by(8).find(|&cutoff| decibels(through(model, hz, cutoff, 0, LOW_PASS) / open) > -3.0).unwrap()
 }
 
 #[test]
 fn the_8580_cutoff_is_a_straight_line_and_the_6581_is_not() {
-    // The register at which a 2 kHz tone through the low-pass is 3 dB down
-    // is the register whose cutoff is 2 kHz.
-    let crossing = |model: ChipModel| {
-        let direct = through(model, 2000.0, 0, 0, 0);
-        (0..=2047u16)
-            .step_by(8)
-            .find(|&cutoff| decibels(through(model, 2000.0, cutoff, 0, LOW_PASS) / direct) > -3.0)
-            .unwrap()
-    };
-    let straight = crossing(ChipModel::Mos8580);
+    let straight = register_reaching(ChipModel::Mos8580, 2000.0);
     assert!(straight.abs_diff(register_8580(2000.0)) <= 16, "8580: {straight}");
-    // The 6581 here reaches 2 kHz far later: its curve lies flat first.
-    let bent = crossing(ChipModel::Mos6581);
-    assert!(bent > 2 * straight && bent < 1024, "6581: {bent}");
+    // The 6581 lies at its floor first, and reaches 500 Hz far later than
+    // the 8580 does: at register 391 by its curve, against 65.
+    let (bent, line) = (register_reaching(ChipModel::Mos6581, 500.0), register_reaching(ChipModel::Mos8580, 500.0));
+    assert!(bent > 2 * line && bent.abs_diff(391) <= 16, "6581: {bent} against {line}");
+}
+
+#[test]
+fn the_6581_cutoff_is_the_middle_chips() {
+    // The 6581's cutoff follows the middle one of seven real chips, Stone
+    // Oakvalley's 6581 R2, whose low-pass for noise had its corner at
+    // 1,348 Hz for register $220 and 2,723 Hz for $2A0 (measured 17
+    // November 2026 from his recording of Plogue's benchmark; the table
+    // at the curve). TODO-6427 fault 2: the curve fitted to one
+    // emulator's output had its cutoff at 2,826 and 4,554 Hz there, and
+    // the one before it at 526 and 1,376 Hz.
+    let open = |tone: f64| through(ChipModel::Mos6581, tone, 2047, 0, LOW_PASS);
+    let at = |register: u16, tone: f64| decibels(through(ChipModel::Mos6581, tone, register, 0, LOW_PASS) / open(tone));
+    // The low-pass's corner, 3 dB down, is within an octave of each:
+    // above half of it, and below 1.7 times it or the highest tone a
+    // voice can play, 3.8 kHz.
+    for (register, hz) in [(0x220, 1348.0), (0x2A0, 2723.0)] {
+        let (below, above) = (at(register, hz / 2.0), at(register, (hz * 1.7_f64).min(3800.0)));
+        assert!(below > -3.0 && above < -3.0, "${register:03X}: {below} dB and {above} dB about {hz} Hz");
+    }
+}
+
+/// How far a tone at the cutoff is raised by the low-pass at a resonance
+/// setting, against the tone sent past the filter.
+fn peak(model: ChipModel, resonance: u8, cutoff: u16, hz: f64) -> f64 {
+    through(model, hz, cutoff, resonance, LOW_PASS) / through(model, hz, cutoff, resonance, 0)
 }
 
 #[test]
 fn resonance_raises_the_cutoff_and_the_8580_has_more_of_it() {
-    let peak = |model: ChipModel, resonance: u8| {
-        // The 6581's cutoff register for 1 kHz, by the test above's
-        // method, is found here by its level instead: use the band-pass,
-        // which peaks at the cutoff whatever it is, and search near it.
+    // The cutoff register for 1 kHz: on the 6581, by its curve, 495.
+    let at_1_khz = |model: ChipModel, resonance: u8| {
         let cutoff = match model {
-            ChipModel::Mos6581 => 624,
+            ChipModel::Mos6581 => 495,
             ChipModel::Mos8580 => register_8580(1000.0),
         };
-        through(model, 1000.0, cutoff, resonance, LOW_PASS) / through(model, 1000.0, cutoff, resonance, 0)
+        peak(model, resonance, cutoff, 1000.0)
     };
     for model in MODELS {
         let mut last = 0.0;
         for resonance in 0..16 {
-            let level = peak(model, resonance);
+            let level = at_1_khz(model, resonance);
             assert!(level > last, "{model:?} resonance {resonance}: {level} after {last}");
             last = level;
         }
     }
-    // No resonance is -3 dB at the cutoff; the highest is +6 dB on a 6581
-    // and +12 dB on an 8580.
-    assert!((decibels(peak(ChipModel::Mos8580, 0)) + 3.0).abs() < 0.5);
-    assert!((decibels(peak(ChipModel::Mos8580, 15)) - 12.0).abs() < 1.0, "{}", decibels(peak(ChipModel::Mos8580, 15)));
-    assert!((decibels(peak(ChipModel::Mos6581, 15)) - 6.0).abs() < 1.5, "{}", decibels(peak(ChipModel::Mos6581, 15)));
+    // No resonance is -3 dB at the cutoff on both chips; the highest is
+    // +8 dB on an 8580 (TODO-6427 fault 6: +12 dB at first).
+    assert!((decibels(at_1_khz(ChipModel::Mos8580, 0)) + 3.0).abs() < 0.5);
+    let found = decibels(at_1_khz(ChipModel::Mos8580, 15));
+    assert!((found - 8.0).abs() < 1.0, "{found}");
+    assert!((decibels(at_1_khz(ChipModel::Mos6581, 0)) + 3.0).abs() < 1.0);
+}
+
+#[test]
+fn the_6581s_resonance_is_weak_at_a_low_cutoff_and_grows_with_it() {
+    // At its floor of 400 Hz the 6581's highest resonance is a Q of 1.2,
+    // +1.6 dB: three real chips playing "$11 Heaven", which holds the
+    // highest resonance with the cutoff register between 160 and 256, are
+    // followed better the weaker it is (Stone Oakvalley's recordings of
+    // his 6581 R2, R3 and R4, measured 17 November 2026; the figures are
+    // at the constant). TODO-6427: a Q of 2.4 at every cutoff before,
+    // +7.6 dB.
+    let floor = decibels(peak(ChipModel::Mos6581, 15, 200, 400.0));
+    assert!((floor - 1.6).abs() < 1.0, "at the floor: {floor} dB");
+    // It grows with the cutoff, as two emulators have it and no real chip
+    // was measured: a Q of 1.37 at register 495, where the cutoff is
+    // 1 kHz, and 1.57 at 717, where it is 3.5 kHz, near the highest tone
+    // a voice plays.
+    let middle = decibels(peak(ChipModel::Mos6581, 15, 495, 1000.0));
+    let upper = decibels(peak(ChipModel::Mos6581, 15, 717, 3500.0));
+    assert!((middle - 2.7).abs() < 1.0 && (upper - 3.9).abs() < 1.0, "{middle} dB and {upper} dB");
+    assert!(floor < middle && middle < upper);
 }
 
 #[test]
@@ -183,7 +238,7 @@ fn a_voice_reaches_the_output_by_one_path_only() {
 }
 
 #[test]
-fn the_volume_register_plays_samples_on_a_6581_and_barely_on_an_8580() {
+fn the_volume_register_plays_samples_on_a_6581_and_quietly_on_an_8580() {
     let played = |model: ChipModel| {
         let mut sid = Sid::new(model, ChipClock::Pal);
         let mut samples = Vec::new();
@@ -197,13 +252,60 @@ fn the_volume_register_plays_samples_on_a_6581_and_barely_on_an_8580() {
         amplitude(&samples[4800..], 1000.0)
     };
     let (old, new) = (played(ChipModel::Mos6581), played(ChipModel::Mos8580));
-    // "The C64 Digi": the 6581's output rises 0.72 V from volume 0 to 15,
-    // against 1.05 V for a voice's full swing: here 0.72 / 1.05 of 4,095 *
-    // 255 * 15 / 1,024 samples, and a square wave of that has 2/π of it at
-    // its fundamental. The offsets used are 3 * 0.26 - 0.04 = 0.74 V.
-    let expected = 0.74 / 1.05 * 4095.0 * 255.0 * 15.0 / 1024.0 * 2.0 / std::f64::consts::PI;
+    // The 6581's three silent voices and its mixer add (3 * 0.26 + 0.08)
+    // / 1.05 of a voice's full swing, 4,095 * 255 units, which the
+    // volume's fifteen steps and the 6581's output gain, 40 / 65,536,
+    // bring to samples; a square wave of that has 2/π of it at its
+    // fundamental.
+    let expected = (3.0 * 0.26 + 0.08) / 1.05 * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((old / expected - 1.0).abs() < 0.05, "6581: {old} for {expected}");
-    assert!(new < old / 10.0 && new > old / 100.0, "8580: {new} against {old}");
+    // The 8580's add 3 * 0.05 of it, at an output gain of 31 / 65,536.
+    let expected = 0.15 * 4095.0 * 255.0 * 15.0 * 31.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    assert!((new / expected - 1.0).abs() < 0.05, "8580: {new} for {expected}");
+}
+
+/// The largest change over eight samples of what `sid` plays next: the
+/// height of a step.
+fn step(sid: &mut Sid) -> f64 {
+    let samples = render(sid, 0.01);
+    samples.windows(9).map(|window| f64::from(i32::from(window[8]) - i32::from(window[0])).abs()).fold(0.0, f64::max)
+}
+
+#[test]
+fn the_volume_registers_step_is_as_loud_as_real_chips_play_samples() {
+    // The step heard when only the volume changes, as a share of the span
+    // of one triangle at full volume. Four real 6581s have 0.57, 0.69,
+    // 0.98 and 1.53 (the chip of "The C64 Digi", and Stone Oakvalley's
+    // R4, R2 and R3 from his recordings of "Arkanoid"), and the middle is
+    // 0.82; his 8580 R5 has 0.15 (measured 17 November 2026; the figures
+    // are at the constants). With the voices out of the mixer, what is
+    // left is the mixer's own: 0.08 of the span on the 6581, nothing on
+    // the 8580. TODO-6427 fault 4: 0.73 and 0.05 at first, then 1.57 and
+    // 0.29 when fitted to one emulator.
+    const NEAR: f64 = 0.1;
+    for (model, silent, mixer) in [(ChipModel::Mos6581, 0.82, 0.076), (ChipModel::Mos8580, 0.15, 0.0)] {
+        let clock = ChipClock::Pal;
+        let mut sid = Sid::new(model, clock);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        start(&mut sid, 0, frequency_register(440.0, clock), TRIANGLE);
+        let _ = render(&mut sid, 0.5);
+        let triangle = render(&mut sid, 0.5);
+        let span = f64::from(i32::from(*triangle.iter().max().unwrap()) - i32::from(*triangle.iter().min().unwrap()));
+
+        let mut sid = Sid::new(model, clock);
+        let _ = render(&mut sid, 0.5);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        let found = step(&mut sid) / span;
+        assert!((found - silent).abs() < NEAR * silent, "{model:?}: a step of {found} for {silent}");
+
+        // The three voices sent to the filter, and no output of it heard.
+        let mut sid = Sid::new(model, clock);
+        sid.write(RESONANCE_ROUTING, 0x07);
+        let _ = render(&mut sid, 0.5);
+        sid.write(MODE_VOLUME, FULL_VOLUME);
+        let found = step(&mut sid) / span;
+        assert!((found - mixer).abs() < NEAR * silent, "{model:?}: the mixer's step of {found} for {mixer}");
+    }
 }
 
 #[test]
