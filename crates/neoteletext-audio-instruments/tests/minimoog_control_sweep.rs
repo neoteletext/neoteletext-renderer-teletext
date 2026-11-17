@@ -17,7 +17,8 @@ mod control_sweep_support;
 
 use control_sweep_support::{
     AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Clock, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
-    PROGRAM, Sound, all_sound_off_silences, check, continuous, on_off, run, sweep, switch, to_crest,
+    PROGRAM, Sound, all_sound_off_leaves_the_pedal, all_sound_off_silences, check, continuous, on_off, run, sweep,
+    switch, to_crest,
 };
 use neoteletext_audio_instruments::minimoog::{ContourPatch, Minimoog, OscillatorPatch, Patch, Range, Waveform};
 
@@ -255,6 +256,10 @@ fn changes(minimoog: &Minimoog) -> Vec<Change<Minimoog>> {
         Change::new(name, "sent", move |minimoog: &mut Minimoog| minimoog.event(status, data1, data2))
     };
     all.push(message("all sound off (120)", CONTROL, 120, 0));
+    all.push(Change::starting("all sound off (120), then a key", "sent", |minimoog: &mut Minimoog| {
+        minimoog.event(CONTROL, 120, 0);
+        minimoog.event(NOTE_ON, 64, 100);
+    }));
     all.push(message("reset all controllers (121)", CONTROL, 121, 0));
     all.push(message("all notes off (123)", CONTROL, 123, 0));
     all.push(message("note off", NOTE_OFF, 60, 0));
@@ -309,4 +314,9 @@ fn no_control_steps_the_signal_but_the_switches_that_do() {
 fn all_sound_off_takes_the_sound_out_and_leaves_silence() {
     // The 256 samples the sound takes to go, and the decimators' tail.
     all_sound_off_silences(&sounds(), &|minimoog: &mut Minimoog| minimoog.event(CONTROL, 120, 0), 256 + 64);
+}
+
+#[test]
+fn all_sound_off_leaves_the_pedal_where_it_is() {
+    all_sound_off_leaves_the_pedal(&|| instrument(&bright(), 0), &Minimoog::event);
 }

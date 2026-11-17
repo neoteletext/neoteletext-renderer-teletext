@@ -113,6 +113,13 @@ pub use patch::{ContourPatch, OscillatorPatch, PATCH_BYTES, Patch, PatchError, R
 /// of pitched tones".
 pub const OSCILLATORS: usize = 3;
 
+/// Messages kept while all sound off takes the sound out, to be taken
+/// when it has gone: more than come in the 5.3 ms that lasts but from
+/// a stream that means to flood, whose next message ends the wait.
+///
+/// Source: own choice.
+const DEFERRED: usize = 16;
+
 /// The pitch bend value that bends nothing.
 ///
 /// Source: MIDI 1.0: a pitch bend is 14 bits and its centre is 0x2000.
@@ -475,12 +482,17 @@ pub struct Minimoog {
     bend: i32,
     wheel: i32,
     volume: u8,
+    /// Whether the sustain pedal is down.
+    pedal: bool,
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
     volume_gain: VolumeGain,
     /// All sound off has come and the sound is on its way out: the gain
     /// that takes it there, which the note is cut at the end of.
     cut: Option<VolumeGain>,
+    /// The messages that came meanwhile, in order, and how many.
+    deferred: [(u8, u8, u8); DEFERRED],
+    deferred_count: usize,
     /// From the voice's rate to twice the output rate, and from there to
     /// the output rate.
     wide: Decimator,
@@ -538,8 +550,11 @@ impl Minimoog {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            pedal: false,
             volume_gain: VolumeGain::full(),
             cut: None,
+            deferred: [(0, 0, 0); DEFERRED],
+            deferred_count: 0,
             wide: Decimator::wide(),
             decimator: Decimator::sharp(),
             ignored: 0,
@@ -648,8 +663,9 @@ impl Minimoog {
     ///   second at the most),
     ///   the sustain pedal (64, down from 64, which holds the note as a
     ///   key does), all sound off (120, which takes the sound out over
-    ///   five thousandths of a second and then empties the voice; a key
-    ///   struck before then empties it at once), reset all controllers
+    ///   five thousandths of a second, then empties the voice, and
+    ///   leaves the pedal where it is; a message that comes before then
+    ///   is taken when the sound has gone), reset all controllers
     ///   (121, which leaves the volume) and all notes off (123).
     /// - Pitch bend (0xEn), 14 bits, `data1` the low seven: the pitch
     ///   wheel, [`law::BEND`] either way.
@@ -658,6 +674,16 @@ impl Minimoog {
     /// ([`Minimoog::ignored_events`]): any other status or controller, a
     /// data byte above 127. Nothing is an error.
     pub fn event(&mut self, status: u8, data1: u8, data2: u8) {
+        // While all sound off takes the sound out, a message waits for
+        // it to have gone; with no room to wait, the sound is cut now.
+        if self.cut.is_some() {
+            if let Some(slot) = self.deferred.get_mut(self.deferred_count) {
+                *slot = (status, data1, data2);
+                self.deferred_count = self.deferred_count.saturating_add(1);
+                return;
+            }
+            self.cut();
+        }
         if data1 > DATA_MAX || data2 > DATA_MAX {
             self.ignore();
             return;
@@ -665,15 +691,7 @@ impl Minimoog {
         match status & 0xf0 {
             STATUS_NOTE_OFF => self.allocator.key_up(data1),
             STATUS_NOTE_ON if data2 == 0 => self.allocator.key_up(data1),
-            STATUS_NOTE_ON => {
-                // A key struck while all sound off is taking the last
-                // note out starts from an empty voice, as it would have
-                // a moment later.
-                if self.cut.is_some() {
-                    self.cut();
-                }
-                self.allocator.key_down(data1, data2);
-            }
+            STATUS_NOTE_ON => self.allocator.key_down(data1, data2),
             STATUS_CONTROL_CHANGE => self.control_change(data1, data2),
             STATUS_PITCH_BEND => {
                 let bend = (i32::from(data2) << 7 | i32::from(data1)).saturating_sub(PITCH_BEND_CENTRE);
@@ -698,19 +716,26 @@ impl Minimoog {
                 self.wheel = law::share_of(i32::MAX, travel.saturating_mul(travel), full.saturating_mul(full));
             }
             CONTROL_VOLUME => self.volume = value,
-            CONTROL_SUSTAIN => self.allocator.sustain(value >= PEDAL_DOWN),
+            CONTROL_SUSTAIN => {
+                self.pedal = value >= PEDAL_DOWN;
+                self.allocator.sustain(self.pedal);
+            }
             // The sound goes out over the 5.3 ms a volume's gain takes,
             // and the note is cut when it has gone: cut where it stood,
             // the signal would fall to nothing in one sample.
+            // The key is let go then and not before: the DECAY switch
+            // off ends a note more quickly than the fade.
             CONTROL_ALL_SOUND_OFF => {
-                self.allocator.all_keys_up();
-                if self.sounding() && self.cut.is_none() {
+                if self.sounding() {
                     self.cut = Some(VolumeGain::full());
+                } else {
+                    self.cut();
                 }
             }
             CONTROL_RESET_CONTROLLERS => {
                 self.wheel = 0;
                 self.bend = 0;
+                self.pedal = false;
                 self.allocator.sustain(false);
             }
             CONTROL_ALL_NOTES_OFF => {
@@ -730,6 +755,7 @@ impl Minimoog {
     /// Empties the voice at once: what all sound off comes to.
     fn cut(&mut self) {
         self.cut = None;
+        self.allocator.all_keys_up();
         self.allocator.finished(0);
         self.contours = [RcEnvelope::new(), RcEnvelope::new()];
         self.apply_patch();
@@ -738,11 +764,25 @@ impl Minimoog {
         self.coupling.reset();
         self.return_coupling.reset();
         self.returned = 0;
+        // The allocator lets go of the pedal with the keys; the pedal
+        // has not moved, and is given back.
+        self.allocator.sustain(self.pedal);
+        self.take_deferred();
+    }
+
+    /// Takes the messages that waited for the sound to go, in order.
+    fn take_deferred(&mut self) {
+        let (deferred, count) = (self.deferred, self.deferred_count);
+        self.deferred_count = 0;
+        for &(status, data1, data2) in deferred.iter().take(count) {
+            self.event(status, data1, data2);
+        }
     }
 
     /// Releases the note, held by a key or by the pedal, and lifts the
     /// pedal: for when the input stops and no note off will come.
     pub fn release_all(&mut self) {
+        self.pedal = false;
         self.allocator.all_keys_up();
         self.keys();
     }

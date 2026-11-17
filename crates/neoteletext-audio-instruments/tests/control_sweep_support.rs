@@ -348,6 +348,27 @@ pub fn all_sound_off_silences<I: Instrument>(sounds: &[Sound<I>], off: &(dyn Fn(
     }
 }
 
+/// All sound off leaves the pedal where it is: with the pedal down, a
+/// key struck after the message and let go still sounds half a second
+/// on, and stops when the pedal goes up. `make` gives an instrument
+/// whose patch sustains and whose release is short.
+pub fn all_sound_off_leaves_the_pedal<I: Instrument>(make: &dyn Fn() -> I, event: &dyn Fn(&mut I, u8, u8, u8)) {
+    let mut instrument = make();
+    event(&mut instrument, CONTROL, 64, 127);
+    event(&mut instrument, NOTE_ON, 60, 100);
+    run(&mut instrument, 2 * AFTER);
+    event(&mut instrument, CONTROL, 120, 0);
+    run(&mut instrument, AFTER);
+    event(&mut instrument, NOTE_ON, 64, 100);
+    run(&mut instrument, 2 * AFTER);
+    event(&mut instrument, NOTE_OFF, 64, 0);
+    let held = run(&mut instrument, 10 * AFTER);
+    assert!(held[9 * AFTER..].iter().any(|&sample| sample.unsigned_abs() > 64), "the pedal no longer holds");
+    event(&mut instrument, CONTROL, 64, 0);
+    let after = run(&mut instrument, 20 * AFTER);
+    assert!(after[19 * AFTER..].iter().all(|&sample| sample.unsigned_abs() < 8), "the note outlives the pedal");
+}
+
 /// Controls whose change steps the signal on the instrument itself.
 pub struct Allowed {
     /// The controls, as the rows name them.
