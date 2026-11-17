@@ -139,3 +139,33 @@ fn a_key_brings_the_delay_and_then_the_fade() {
     let risen: Vec<i32> = (0..12).map(|_| lfo.tick().abs()).collect();
     assert!(risen[0] == 0 && risen[5] > LFO_ONE / 3 && risen[11] == LFO_ONE, "{risen:?}");
 }
+
+#[test]
+fn a_shorter_delay_set_while_waiting_shortens_the_wait() {
+    // A key with two seconds of delay; a tenth of a second on, the delay
+    // is set to nothing, as a patch change does under a held note. The
+    // modulation is there at once, not two seconds later.
+    let mut lfo = Lfo::new(1);
+    lfo.set_shape(Shape::Square);
+    lfo.set_step(frequency(50_000, RATE));
+    lfo.set_delay(2 * RATE, 0);
+    lfo.key();
+    for _ in 0..RATE / 10 {
+        assert_eq!(lfo.tick(), 0);
+    }
+    lfo.set_delay(0, 0);
+    assert_eq!(lfo.tick().abs(), LFO_ONE);
+    // Shortened to a wait that has not yet passed, it ends when that
+    // has passed since the change at the latest; and with a fade, the
+    // fade follows it.
+    lfo.set_delay(2 * RATE, 0);
+    lfo.key();
+    let _ = lfo.tick();
+    lfo.set_delay(RATE / 10, RATE / 10);
+    let depth: Vec<i32> = (0..RATE / 4).map(|_| lfo.tick().abs()).collect();
+    assert!(depth[(RATE / 10) as usize - 1] == 0 && depth[(RATE / 4) as usize - 1] == LFO_ONE, "{depth:?}");
+    // A longer delay set while waiting leaves the wait as it was, and a
+    // delay set with no key waiting changes nothing until a key.
+    lfo.set_delay(RATE, 0);
+    assert_eq!(lfo.tick().abs(), LFO_ONE);
+}

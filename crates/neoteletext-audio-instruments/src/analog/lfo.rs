@@ -91,6 +91,11 @@ impl Lfo {
     /// to full depth along a straight line over `fade` samples. Zero for
     /// both is full depth at once.
     ///
+    /// A wait that is running is held to the new delay, so that a delay
+    /// shortened under a held note shortens what is left of the silence;
+    /// and with nothing for both, whatever silence or fade is running
+    /// ends at once.
+    ///
     /// It divides, so it belongs where a control changes.
     pub const fn set_delay(&mut self, delay: u32, fade: u32) {
         self.delay = delay;
@@ -98,6 +103,12 @@ impl Lfo {
             Some(step) if step > 0 => step,
             _ => FADE_FULL,
         };
+        if self.waiting > delay {
+            self.waiting = delay;
+        }
+        if delay == 0 && self.fade_step == FADE_FULL {
+            self.fade = FADE_FULL;
+        }
     }
 
     /// A key: the delay and the fade start again. The cycle goes on
