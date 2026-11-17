@@ -153,6 +153,44 @@ fn the_cross_modulation_at_five_moves_vco_1_three_octaves() {
     assert!(error.abs() < 10.0);
 }
 
+#[test]
+fn each_waveform_of_vco_2_moves_vco_1_by_its_own_voltage() {
+    // Service notes, module board schematic: VCO-2's waveform reaches
+    // the cross modulation's amplifier with no capacitor between, the
+    // sine from -5 V to +5 V and the sawtooth and the pulse from 0 V to
+    // 10 V; adjustment 10 makes ten volts three octaves at 5. So at 5
+    // the pulse and the sawtooth take VCO-1 from its own pitch to three
+    // octaves above and nowhere below, and the sine an octave and a
+    // half either way. VCO-2 in its low range at 16', 1 Hz; VCO-1 at
+    // 16' on the key A0, 55 Hz.
+    let moved = |wave: u8| {
+        let patch = Patch::DEFAULT
+            .with(Param::Vco1Range, 0)
+            .with(Param::CrossMod, 128)
+            .with(Param::Vco2Wave, wave)
+            .with(Param::LowFrequency, 1)
+            .with(Param::Vco2Range, 0);
+        let signal = play(&patch, C0 + 9, 3.3, 0.0);
+        let pitches: Vec<f64> = signal[samples(0.3)..].chunks_exact(samples(0.1)).map(pitch).collect();
+        (pitches.iter().copied().fold(f64::MAX, f64::min), pitches.iter().copied().fold(0.0f64, f64::max))
+    };
+    // The slider's 128 of 255 is a little above its 5.
+    let depth = 6.0f64 * 128.0 / 255.0;
+    let (lowest, highest) = moved(2);
+    println!("the pulse: from {lowest:.2} Hz to {highest:.2} Hz");
+    assert!(cents(55.0, lowest).abs() < 10.0 && cents(55.0 * depth.exp2(), highest).abs() < 10.0);
+    // A tenth of a second holds the sawtooth's first and last tenth and
+    // the sine's top and bottom only in the mean.
+    let (lowest, highest) = moved(1);
+    println!("the sawtooth: from {lowest:.2} Hz to {highest:.2} Hz");
+    assert!(lowest > 55.0 && lowest < 55.0 * (0.15 * depth).exp2(), "{lowest}");
+    assert!(highest < 55.0 * depth.exp2() && highest > 55.0 * (0.85 * depth).exp2(), "{highest}");
+    let (lowest, highest) = moved(0);
+    println!("the sine: from {lowest:.2} Hz to {highest:.2} Hz");
+    assert!(highest < 55.0 * (depth / 2.0).exp2() && highest > 55.0 * (0.9 * depth / 2.0).exp2(), "{highest}");
+    assert!(lowest > 55.0 * (-depth / 2.0).exp2() && lowest < 55.0 * (-0.9 * depth / 2.0).exp2(), "{lowest}");
+}
+
 /// What the cross modulation's aliasing is held below, in decibels, with
 /// the slider at 5 or less and keys to the A of 880 Hz, and at any
 /// setting: the worst measured (-77.2 dB and -38.8 dB), and 3 dB. Both
@@ -163,7 +201,7 @@ const MODERATE_ALIASING: f64 = -74.0;
 const DEEPEST_ALIASING: f64 = -35.0;
 /// The same with VCO-2's sine or sawtooth moving VCO-1, the slider at 5
 /// or less and keys to the A of 880 Hz, for VCO-1's sawtooth, triangle
-/// and square: the worst measured (-87.1 dB, -91.1 dB and -83.1 dB), and
+/// and square: the worst measured (-87.9 dB, -92.0 dB and -86.6 dB), and
 /// 3 dB or more. Before the edges of VCO-1 were placed by its moving
 /// frequency and its corners rounded, these were -70.5 dB, -64.5 dB and
 /// -69.7 dB.

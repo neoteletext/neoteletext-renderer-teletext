@@ -14,10 +14,14 @@
 //!
 //! # Cross modulation and sync
 //!
-//! VCO-2's waveform moves VCO-1's frequency exponentially, by up to six
-//! octaves either way ([`law::CROSS_MODULATION`]), and VCO-1's cycle
-//! starts VCO-2's again when the sync is on: with both, each oscillator
-//! steers the other. Here:
+//! VCO-2's waveform moves VCO-1's frequency exponentially, by its own
+//! voltage as it stands: ten volts are six octaves with the slider at 10
+//! ([`law::CROSS_MODULATION`]), so the sawtooth and the pulse, which
+//! run from nothing to ten volts, move VCO-1 from its own pitch to six
+//! octaves above, the sine three octaves either way and the noise one
+//! and a half ([`Voice::crossed_at`]). VCO-1's cycle starts VCO-2's
+//! again when the sync is on: with both, each oscillator steers the
+//! other. Here:
 //!
 //! - Each sample of VCO-1, 5.2 µs, is made in stretches
 //!   ([`Oscillator::run_to_start`]): a stretch ends where VCO-2's
@@ -54,24 +58,26 @@
 //!
 //! | CROSS MOD | on the A of 440 Hz | the A of 880 Hz | the A of 1,760 Hz |
 //! |---|---|---|---|
-//! | 1 (0.6 octave) | 98 dB down | 95 dB | 89 dB |
-//! | 2.5 (1.5 octaves) | 91 dB | 92 dB | 87 dB |
-//! | 5 (3 octaves) | 91 dB | 87 dB | 79 dB |
-//! | 10 (6 octaves) | 84 dB | 78 dB | 44 dB |
+//! | 1 (0.6 octave for ten volts) | 99 dB down | 95 dB | 89 dB |
+//! | 2.5 (1.5 octaves) | 92 dB | 92 dB | 86 dB |
+//! | 5 (3 octaves) | 93 dB | 87 dB | 80 dB |
+//! | 10 (6 octaves) | 90 dB | 84 dB | 77 dB |
 //!
-//! With one frequency for each sample and nothing rounded, the slider at
-//! 5 left 78 dB, 70 dB and 56 dB, and at 10 56 dB, 43 dB and 32 dB. With
-//! VCO-1's triangle the slider to 5 and keys to the A of 880 Hz leave
-//! 91 dB or better (64 dB), and with its square 83 dB (69 dB). At 10 on
-//! the highest A, VCO-1 is driven to its bound of 48 kHz for part of
-//! every cycle: the instrument's own oscillator has a bound there too,
-//! which no document read gives.
+//! With one frequency for each sample and nothing rounded, and every
+//! waveform swinging the whole depth either way as it was then taken
+//! to, the slider at 5 left 78 dB, 70 dB and 56 dB, and at 10 56 dB,
+//! 43 dB and 32 dB. With VCO-1's triangle the slider to 5 and keys to
+//! the A of 880 Hz leave 92 dB or better, and with its square 86 dB. At
+//! 10 on the highest A, VCO-2's sawtooth drives VCO-1 to its bound of
+//! 48 kHz for part of every cycle: the instrument's own oscillator has
+//! a bound there too, which no document read gives.
 //!
 //! These figures are of the whole voice, and the filter after the
 //! oscillators bends what it is given: measured before the filter, the
-//! two oscillators leave 89 dB or better with the slider to 5 on every
-//! one of these keys, for each of VCO-1's and VCO-2's waveforms, where
-//! that measurement reads no lower than 92 dB (the test in this file).
+//! two oscillators leave 86 dB or better at every position of the
+//! slider on every one of these keys, for each of VCO-1's and VCO-2's
+//! waveforms, and 92 dB, which is as low as that measurement reads, on
+//! all but the highest (the test in this file).
 //!
 //! With VCO-2's pulse and the sync, VCO-1 at the slider's 5 is a
 //! sawtooth three octaves above its key and nothing else, the pulse
@@ -684,32 +690,48 @@ impl Voice {
         }
     }
 
-    /// VCO-1's step under VCO-2's waveform at a level.
+    /// VCO-1's step under a voltage of VCO-2's waveform, as a share of
+    /// the ten volts that move it [`law::CROSS_MODULATION`] with the
+    /// slider at 10, [`LEVEL`] being the ten.
     #[inline]
-    fn crossed(&self, settings: &Settings, modulator: i32) -> u32 {
-        // Octaves in Q24 from a depth in Q24 and a signal whose peak is
+    fn crossed(&self, settings: &Settings, voltage: i32) -> u32 {
+        // Octaves in Q24 from a depth in Q24 and a share whose one is
         // 2²⁴.
-        let octaves = mul_high(settings.cross << 4, modulator.clamp(-LEVEL, LEVEL) << 4);
+        let octaves = mul_high(settings.cross << 4, voltage.clamp(-LEVEL, LEVEL) << 4);
         law::raise_step(self.step, octaves)
     }
 
     /// VCO-1's step with VCO-2 at a phase of its cycle, or under the
     /// noise, which has no phase.
+    ///
+    /// Source: service notes, module board schematic (page 15 of the
+    /// file): VCO-2's waveform selector IC14 feeds the X-MOD amplifier
+    /// IC18A through R102A, 100 kΩ, with no capacitor, so each waveform
+    /// moves VCO-1 by its voltage as it stands. The waveforms are drawn
+    /// there with their levels: the sine "+5v" to "-5v", the sawtooth
+    /// and the pulse "10v" to "0v"; adjustment 24 sets the noise to
+    /// "approx. 5V p-p". Adjustment 10 makes the pulse's ten volts three
+    /// octaves with CROSS MOD at 5. So the sine moves VCO-1 half the
+    /// depth either way, the sawtooth and the pulse from nothing to the
+    /// whole depth upwards, and the noise a quarter either way. Own
+    /// reading: the noise is taken as centred on zero.
     #[inline]
     fn crossed_at(&self, settings: &Settings, phase: u32, noise: i32) -> u32 {
-        let modulator = match settings.wave2 {
-            Vco2Wave::Sine => sine(triangle(phase)),
-            Vco2Wave::Sawtooth => (phase >> SAWTOOTH_SHIFT).cast_signed().wrapping_sub(LEVEL),
+        let voltage = match settings.wave2 {
+            Vco2Wave::Sine => sine(triangle(phase)) >> 1,
+            Vco2Wave::Sawtooth => (phase >> (SAWTOOTH_SHIFT + 1)).cast_signed(),
             Vco2Wave::Pulse => {
                 if phase < self.width {
                     LEVEL
                 } else {
-                    -LEVEL
+                    0
                 }
             }
-            Vco2Wave::Noise => noise,
+            // The noise comes at the level it has in the mixer, half an
+            // oscillator's swing of ten volts.
+            Vco2Wave::Noise => noise >> 1,
         };
-        self.crossed(settings, modulator)
+        self.crossed(settings, voltage)
     }
 
     /// What VCO-2 runs from a phase of its cycle to where its waveform
@@ -1069,20 +1091,28 @@ mod tests {
     #[test]
     fn the_oscillators_under_cross_modulation_are_clean_before_the_filter() {
         // The instrument's own figures are of the whole voice, whose
-        // filter bends what it is given. Before it, with the slider to 5
-        // and keys to the A of 1,760 Hz, nothing that is no harmonic is
-        // within 88 dB, for VCO-1's sawtooth, triangle and square under
-        // VCO-2's sine, sawtooth and pulse; the window reads no lower
-        // than 92 dB.
+        // filter bends what it is given. Before it, at every position of
+        // the slider and keys to the A of 1,760 Hz, nothing that is no
+        // harmonic is within 86 dB, for VCO-1's sawtooth, triangle and
+        // square under VCO-2's sine, sawtooth and pulse: 92 dB, which
+        // is as low as the window reads, but for the sine at 2.5 and 10
+        // on the highest key.
         let keys: &[u8] = if cfg!(debug_assertions) { &[81] } else { &[45, 69, 81, 93] };
         for first in [1u8, 0, 3] {
             let mut worst = f64::MIN;
             for &key in keys {
-                for depth in [26u8, 64, 128] {
+                for depth in [26u8, 64, 128, 255] {
                     for wave in [0u8, 1, 2] {
                         let found = before_the_filter(key, depth, wave, first);
-                        worst = worst.max(found);
-                        assert!(found < -88.0, "VCO-1 {first}, VCO-2 {wave}, key {key}, depth {depth}: {found}");
+                        if found.is_finite() {
+                            worst = worst.max(found);
+                        }
+                        // Where VCO-1 is driven out of hearing nothing is left
+                        // to measure against.
+                        assert!(
+                            !found.is_finite() || found < -86.0,
+                            "VCO-1 {first}, VCO-2 {wave}, key {key}, depth {depth}: {found}"
+                        );
                     }
                 }
             }
