@@ -28,15 +28,15 @@ pub struct Entry {
     pub samples: u32,
     /// Blocks in the whole sound.
     pub blocks: u16,
-    /// What its codec needs to know of it (REQ-6411): a SID sound's chip
+    /// What its codec needs to know of it (REQ-6411): a synth6581 sound's chip
     /// and clock byte, the bank handle of a sound that plays patches, and 0
     /// for every other.
     pub param: u8,
     /// What else an analogue synthesizer's codec needs to know (DEC-6429
     /// foundations item 4), and two zeros for every other. A sound's first
-    /// byte is its model ([`crate::record::TAG_MODEL`]), or for a Jupiter-8
+    /// byte is its model ([`crate::record::TAG_MODEL`]), or for a synth8
     /// sound, which has one model, its key mode, and then its second byte
-    /// is its split point ([`crate::record::TAG_JUPITER8_KEYS`]). A patch
+    /// is its split point ([`crate::record::TAG_SYNTH8_KEYS`]). A patch
     /// bank's first byte is the code of the family it is for
     /// ([`crate::record::TAG_BANK_FAMILY`]).
     pub setup: [u8; 2],

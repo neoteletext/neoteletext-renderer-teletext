@@ -302,7 +302,7 @@ impl Chorus {
 
     /// Chooses whether the second line is swept opposite to the first, as
     /// it is until this is called, or along with it: the Juno-6 and the
-    /// Juno-60 with both chorus buttons down sweep the two alike ("In the
+    /// synth60 with both chorus buttons down sweep the two alike ("In the
     /// 'fast mode' the second BBD is controlled in a non inverted way":
     /// Florian Anwander, "Roland choruses and ensemble effects").
     pub const fn set_opposite(&mut self, opposite: bool) {

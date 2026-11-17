@@ -1,8 +1,8 @@
-//! Instrument sounds end to end (REQ-6411, DEC-6410): a SID sound's register
-//! images and a DX7 sound's slots, written by the publishing encoder, read
+//! Instrument sounds end to end (REQ-6411, DEC-6410): a synth6581 sound's register
+//! images and a synth7 sound's slots, written by the publishing encoder, read
 //! back by the receiver, rendered by the instruments and given to a
 //! recording sink as samples.
-#![cfg(all(feature = "encode", feature = "sid", feature = "dx7"))]
+#![cfg(all(feature = "encode", feature = "synth6581", feature = "synth7"))]
 #![allow(
     clippy::indexing_slicing,
     clippy::unwrap_used,
@@ -13,9 +13,9 @@
 use neoteletext_audio::encode::{Command, Sound};
 use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
-use neoteletext_audio::record::{Record, SID_CHIP_8580, SID_CLOCK_NTSC, parse};
+use neoteletext_audio::record::{Record, SYNTH6581_CHIP_8580, SYNTH6581_CLOCK_NTSC, parse};
 use neoteletext_audio::{Codec, INSTRUMENT_BLOCK_SAMPLES, INSTRUMENT_RATE};
-use neoteletext_audio_instruments::dx7::Patch;
+use neoteletext_audio_instruments::synth7::Patch;
 
 /// The samples of a block, as a length.
 const BLOCK: usize = INSTRUMENT_BLOCK_SAMPLES as usize;
@@ -74,9 +74,9 @@ fn image() -> [u8; 25] {
     image
 }
 
-fn sid_sound(handle: u8, blocks: usize) -> Sound {
+fn synth6581_sound(handle: u8, blocks: usize) -> Sound {
     let data: Vec<u8> = (0..blocks).flat_map(|_| image()).collect();
-    Sound::instrument(handle, 1, Codec::Sid, 25, &data).unwrap()
+    Sound::instrument(handle, 1, Codec::Synth6581, 25, &data).unwrap()
 }
 
 /// A play of `sound` on `channel`, for the whole service.
@@ -109,11 +109,11 @@ fn loud(pcm: &[i16]) -> bool {
 
 // Verifies REQ-6411 items 1, 2 and 6.
 #[test]
-fn a_stored_sid_sound_is_rendered_block_by_block_and_started() {
+fn a_stored_synth6581_sound_is_rendered_block_by_block_and_started() {
     let mut arena = vec![0_u8; 64 * 1024];
     let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
     let mut sink = Recorder::default();
-    let sound = sid_sound(3, 3);
+    let sound = synth6581_sound(3, 3);
     push(&mut receiver, &sound, &mut sink);
     assert!(sink.defined.is_empty(), "receiving data never starts a sound");
     receiver.push_record(&play(0, 1, &sound), &mut sink);
@@ -134,7 +134,7 @@ fn a_long_sound_is_rendered_over_several_ticks_and_asks_for_them_at_once() {
     let mut arena = vec![0_u8; 64 * 1024];
     let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
     let mut sink = Recorder::default();
-    let sound = sid_sound(3, 120);
+    let sound = synth6581_sound(3, 120);
     push(&mut receiver, &sound, &mut sink);
     receiver.push_record(&play(0, 1, &sound), &mut sink);
     assert_eq!(sink.stored.len(), 50, "one budget's blocks");
@@ -148,19 +148,19 @@ fn a_long_sound_is_rendered_over_several_ticks_and_asks_for_them_at_once() {
     assert_eq!(receiver.next_tick_ms(), None);
 }
 
-/// A DX7 block of one slot: `status`, `data1` and `data2` at the block's
+/// A synth7 block of one slot: `status`, `data1` and `data2` at the block's
 /// start.
 fn slot(status: u8, data1: u8, data2: u8) -> [u8; 4] {
     [0, status, data1, data2]
 }
 
 fn bank_sound(handle: u8) -> Sound {
-    Sound::instrument(handle, 1, Codec::Dx7Bank, 128, &Patch::DEFAULT.to_packed()).unwrap()
+    Sound::instrument(handle, 1, Codec::Synth7Bank, 128, &Patch::DEFAULT.to_packed()).unwrap()
 }
 
 // Verifies REQ-6411 items 3, 4 and 5.
 #[test]
-fn a_dx7_sound_waits_for_its_bank_and_then_plays_its_notes() {
+fn a_synth7_sound_waits_for_its_bank_and_then_plays_its_notes() {
     let mut arena = vec![0_u8; 64 * 1024];
     let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
     let mut sink = Recorder::default();
@@ -168,7 +168,7 @@ fn a_dx7_sound_waits_for_its_bank_and_then_plays_its_notes() {
     let mut blocks: Vec<u8> = slot(0x90, 69, 100).to_vec();
     blocks.extend(std::iter::repeat_n([0_u8; 4], 20).flatten());
     blocks.extend(slot(0x80, 69, 0));
-    let mut sound = Sound::instrument(4, 1, Codec::Dx7, 4, &blocks).unwrap();
+    let mut sound = Sound::instrument(4, 1, Codec::Synth7, 4, &blocks).unwrap();
     sound.bank = Some(9);
     push(&mut receiver, &sound, &mut sink);
     receiver.push_record(&play(1, 1, &sound), &mut sink);
@@ -198,7 +198,7 @@ fn slots_the_codec_does_not_take_are_passed_over_and_counted() {
     let mut block: Vec<u8> = faulty.iter().flatten().copied().collect();
     block.extend(slot(0x90, 69, 100));
     block.extend([0_u8; 4]);
-    let mut sound = Sound::instrument(4, 1, Codec::Dx7, 32, &block).unwrap();
+    let mut sound = Sound::instrument(4, 1, Codec::Synth7, 32, &block).unwrap();
     sound.bank = Some(9);
     push(&mut receiver, &bank_sound(9), &mut sink);
     push(&mut receiver, &sound, &mut sink);
@@ -222,11 +222,11 @@ fn a_bank_is_never_played() {
 // Verifies REQ-6411 items 1 and 2 for a live sound, and what a lost block
 // costs.
 #[test]
-fn a_live_sid_sound_is_rendered_as_its_blocks_come_and_plays_through_a_lost_one() {
+fn a_live_synth6581_sound_is_rendered_as_its_blocks_come_and_plays_through_a_lost_one() {
     let mut arena = vec![0_u8; 64 * 1024];
     let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
     let mut sink = Recorder::default();
-    let sound = Sound::live(5, 1, Codec::Sid, INSTRUMENT_RATE, 25).unwrap();
+    let sound = Sound::live(5, 1, Codec::Synth6581, INSTRUMENT_RATE, 25).unwrap();
     receiver.push_record(&sound.object_record().unwrap(), &mut sink);
     for record in sound.packet_records(0, &image()).unwrap() {
         receiver.push_record(&record, &mut sink);
@@ -248,34 +248,34 @@ fn a_live_sid_sound_is_rendered_as_its_blocks_come_and_plays_through_a_lost_one(
 // Verifies REQ-6411 items 2 to 4: what an OBJECT of each codec must say.
 #[test]
 fn an_object_names_its_chip_or_its_bank_and_a_faulty_one_is_refused() {
-    let mut sid = sid_sound(3, 1);
-    sid.chip = Some(SID_CHIP_8580 | SID_CLOCK_NTSC);
-    let record = sid.object_record().unwrap();
+    let mut synth6581 = synth6581_sound(3, 1);
+    synth6581.chip = Some(SYNTH6581_CHIP_8580 | SYNTH6581_CLOCK_NTSC);
+    let record = synth6581.object_record().unwrap();
     let Ok(Record::Object(object)) = parse(&record) else { panic!("not an OBJECT") };
-    assert_eq!((object.codec, object.chip, object.bank), (Some(Codec::Sid), Some(3), None));
-    sid.chip = Some(4);
-    assert!(parse(&sid.object_record().unwrap()).is_err(), "a reserved bit of the chip byte");
+    assert_eq!((object.codec, object.chip, object.bank), (Some(Codec::Synth6581), Some(3), None));
+    synth6581.chip = Some(4);
+    assert!(parse(&synth6581.object_record().unwrap()).is_err(), "a reserved bit of the chip byte");
 
-    let mut dx7 = Sound::instrument(4, 1, Codec::Dx7, 8, &[0; 8]).unwrap();
-    assert!(parse(&dx7.object_record().unwrap()).is_err(), "a DX7 sound that names no bank");
-    dx7.bank = Some(200);
-    let record = dx7.object_record().unwrap();
+    let mut synth7 = Sound::instrument(4, 1, Codec::Synth7, 8, &[0; 8]).unwrap();
+    assert!(parse(&synth7.object_record().unwrap()).is_err(), "a synth7 sound that names no bank");
+    synth7.bank = Some(200);
+    let record = synth7.object_record().unwrap();
     let Ok(Record::Object(object)) = parse(&record) else { panic!("not an OBJECT") };
-    assert_eq!((object.codec, object.bank), (Some(Codec::Dx7), Some(200)));
+    assert_eq!((object.codec, object.bank), (Some(Codec::Synth7), Some(200)));
 
     for (codec, block, allowed) in [
-        (Codec::Sid, 25, true),
-        (Codec::Sid, 50, true),
-        (Codec::Sid, 100, true),
-        (Codec::Sid, 75, false),
-        (Codec::Dx7, 4, true),
-        (Codec::Dx7, 64, true),
-        (Codec::Dx7, 68, false),
-        (Codec::Dx7, 6, false),
-        (Codec::Dx7Bank, 128, true),
-        (Codec::Dx7Bank, 155, false),
+        (Codec::Synth6581, 25, true),
+        (Codec::Synth6581, 50, true),
+        (Codec::Synth6581, 100, true),
+        (Codec::Synth6581, 75, false),
+        (Codec::Synth7, 4, true),
+        (Codec::Synth7, 64, true),
+        (Codec::Synth7, 68, false),
+        (Codec::Synth7, 6, false),
+        (Codec::Synth7Bank, 128, true),
+        (Codec::Synth7Bank, 155, false),
     ] {
         assert_eq!(codec.allows_block(block), allowed, "{codec:?} with blocks of {block}");
     }
-    assert!(Sound::instrument(9, 1, Codec::Dx7Bank, 128, &[0; 128 * 33]).is_err(), "more than 32 patches");
+    assert!(Sound::instrument(9, 1, Codec::Synth7Bank, 128, &[0; 128 * 33]).is_err(), "more than 32 patches");
 }

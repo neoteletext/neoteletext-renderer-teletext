@@ -1,9 +1,9 @@
 //! The analogue synthesizers as instruments of a lane (DEC-6429 foundations
-//! item 4): the Juno, the Minimoog, the Prophet-5, the Jupiter-8 and the
-//! CS-80, each behind its feature. A sound of one is the DX7's block, slots
+//! item 4): synth106, synthD, synth53, synth8 and the
+//! synth80, each behind its feature. A sound of one is synth7's block, slots
 //! of timed MIDI messages, under the instrument's own codec, and its
 //! patches come from a patch bank of the instrument's family, read when the
-//! sound starts, as a DX7 sound's are.
+//! sound starts, as a synth7 sound's are.
 //!
 //! None of these instruments knows of a bank, so a program change is taken
 //! here: it gives the instrument the patch of that number from the copy of
@@ -11,7 +11,7 @@
 //! A lane holds one synthesizer at a time, so it is as large as the largest
 //! built in and no larger.
 #![cfg_attr(
-    not(any(feature = "juno", feature = "minimoog", feature = "prophet5", feature = "jupiter8", feature = "cs80")),
+    not(any(feature = "synth106", feature = "synthd", feature = "synth53", feature = "synth8", feature = "synth80")),
     allow(
         dead_code,
         unused_imports,
@@ -20,16 +20,16 @@
     )
 )]
 
-#[cfg(feature = "cs80")]
-use neoteletext_audio_instruments::cs80;
-#[cfg(feature = "juno")]
-use neoteletext_audio_instruments::juno;
-#[cfg(feature = "jupiter8")]
-use neoteletext_audio_instruments::jupiter8;
-#[cfg(feature = "minimoog")]
-use neoteletext_audio_instruments::minimoog;
-#[cfg(feature = "prophet5")]
-use neoteletext_audio_instruments::prophet5;
+#[cfg(feature = "synth8")]
+use neoteletext_audio_instruments::synth8;
+#[cfg(feature = "synth53")]
+use neoteletext_audio_instruments::synth53;
+#[cfg(feature = "synth80")]
+use neoteletext_audio_instruments::synth80;
+#[cfg(feature = "synth106")]
+use neoteletext_audio_instruments::synth106;
+#[cfg(feature = "synthd")]
+use neoteletext_audio_instruments::synthd;
 
 use super::{BLOCK, MIDI_KIND, Player, Statistics, common, kind, render_slots};
 use crate::Codec;
@@ -131,7 +131,7 @@ impl<S: Synth> Player for Played<S> {
 /// that is for the synthesizer's family, each checked by the instrument's
 /// own reader. A patch that has not arrived, or that has a field out of its
 /// range, leaves the instrument's default patch in its place, so a faulty
-/// bank costs a sound its timbre and nothing else, as a faulty DX7 bank
+/// bank costs a sound its timbre and nothing else, as a faulty synth7 bank
 /// does (REQ-6411 item 4, DEC-6421 item 4).
 fn bank<S: Synth, const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8, plain: S::Patch) -> [S::Patch; BANK] {
     let mut patches = [plain; BANK];
@@ -147,33 +147,33 @@ fn bank<S: Synth, const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8, 
     patches
 }
 
-/// The controllers a Juno block may carry beyond [`super::CONTROLLERS`],
+/// The controllers a synth106 block may carry beyond [`super::CONTROLLERS`],
 /// which its instrument takes: the four mode messages, omni off, omni on,
-/// mono on and poly on, each of which is to a Juno-106 an all notes off
+/// mono on and poly on, each of which is to a synth106 an all notes off
 /// and nothing more (its owner's manual, MIDI Implementation 2.1: "Mode
 /// messages (123 - 127) are also recognized as ALL NOTES OFF").
-#[cfg(feature = "juno")]
-const JUNO_CONTROLLERS: [u8; 4] = [124, 125, 126, 127];
+#[cfg(feature = "synth106")]
+const SYNTH106_CONTROLLERS: [u8; 4] = [124, 125, 126, 127];
 
-#[cfg(feature = "juno")]
-impl Synth for juno::Juno {
-    type Patch = juno::Patch;
-    const PLAIN: Self::Patch = juno::Patch::DEFAULT;
+#[cfg(feature = "synth106")]
+impl Synth for synth106::Synth106 {
+    type Patch = synth106::Patch;
+    const PLAIN: Self::Patch = synth106::Patch::DEFAULT;
 
-    // The Juno-60's high-pass switch is flat at another position than
-    // the Juno-106's: each model has its own plain patch.
+    // synth60's high-pass switch is flat at another position than
+    // synth106's: each model has its own plain patch.
     fn plain(&self) -> Self::Patch {
-        juno::Patch::default_for(self.model())
+        synth106::Patch::default_for(self.model())
     }
-    const FAMILY: Codec = Codec::Juno;
+    const FAMILY: Codec = Codec::Synth106;
 
     fn patch(block: &[u8]) -> Option<Self::Patch> {
-        juno::Patch::from_bytes(block.try_into().ok()?).ok()
+        synth106::Patch::from_bytes(block.try_into().ok()?).ok()
     }
 
     fn takes(status: u8, data1: u8, data2: u8) -> bool {
         match status & MIDI_KIND {
-            kind::CONTROL_CHANGE => common(status, data1, data2) || JUNO_CONTROLLERS.contains(&data1),
+            kind::CONTROL_CHANGE => common(status, data1, data2) || SYNTH106_CONTROLLERS.contains(&data1),
             _ => common(status, data1, data2),
         }
     }
@@ -183,26 +183,26 @@ impl Synth for juno::Juno {
     }
 
     fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        juno::Juno::event(self, status, data1, data2);
+        synth106::Synth106::event(self, status, data1, data2);
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        juno::Juno::render(self, out);
+        synth106::Synth106::render(self, out);
     }
 
     fn release_all(&mut self) {
-        juno::Juno::release_all(self);
+        synth106::Synth106::release_all(self);
     }
 }
 
-#[cfg(feature = "minimoog")]
-impl Synth for minimoog::Minimoog {
-    type Patch = minimoog::Patch;
-    const PLAIN: Self::Patch = minimoog::Patch::DEFAULT;
-    const FAMILY: Codec = Codec::Minimoog;
+#[cfg(feature = "synthd")]
+impl Synth for synthd::SynthD {
+    type Patch = synthd::Patch;
+    const PLAIN: Self::Patch = synthd::Patch::DEFAULT;
+    const FAMILY: Codec = Codec::SynthD;
 
     fn patch(block: &[u8]) -> Option<Self::Patch> {
-        minimoog::Patch::from_bytes(block.try_into().ok()?).ok()
+        synthd::Patch::from_bytes(block.try_into().ok()?).ok()
     }
 
     fn program(&mut self, _channel: u8, patch: &Self::Patch) {
@@ -210,28 +210,28 @@ impl Synth for minimoog::Minimoog {
     }
 
     fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        minimoog::Minimoog::event(self, status, data1, data2);
+        synthd::SynthD::event(self, status, data1, data2);
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        minimoog::Minimoog::render(self, out);
+        synthd::SynthD::render(self, out);
     }
 
     fn release_all(&mut self) {
-        minimoog::Minimoog::release_all(self);
+        synthd::SynthD::release_all(self);
     }
 }
 
-#[cfg(feature = "prophet5")]
-impl Synth for prophet5::Prophet5 {
-    type Patch = prophet5::Patch;
-    const PLAIN: Self::Patch = prophet5::Patch::DEFAULT;
-    const FAMILY: Codec = Codec::Prophet5;
+#[cfg(feature = "synth53")]
+impl Synth for synth53::Synth53 {
+    type Patch = synth53::Patch;
+    const PLAIN: Self::Patch = synth53::Patch::DEFAULT;
+    const FAMILY: Codec = Codec::Synth53;
 
     fn patch(block: &[u8]) -> Option<Self::Patch> {
         // The instrument's reader holds each byte to its range itself, so
         // only a block of another length is no patch.
-        Some(prophet5::Patch::from_bytes(block.try_into().ok()?))
+        Some(synth53::Patch::from_bytes(block.try_into().ok()?))
     }
 
     fn program(&mut self, _channel: u8, patch: &Self::Patch) {
@@ -239,43 +239,43 @@ impl Synth for prophet5::Prophet5 {
     }
 
     fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        prophet5::Prophet5::event(self, status, data1, data2);
+        synth53::Synth53::event(self, status, data1, data2);
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        prophet5::Prophet5::render(self, out);
+        synth53::Synth53::render(self, out);
     }
 
     fn release_all(&mut self) {
-        prophet5::Prophet5::release_all(self);
+        synth53::Synth53::release_all(self);
     }
 }
 
 /// The MIDI channel, counted from 0, whose program change chooses the
-/// Jupiter-8's upper patch: MIDI channel 1.
-#[cfg(feature = "jupiter8")]
-const JUPITER8_UPPER_CHANNEL: u8 = 0;
-/// The controllers a Jupiter-8 block may carry beyond [`super::CONTROLLERS`],
+/// synth8's upper patch: MIDI channel 1.
+#[cfg(feature = "synth8")]
+const SYNTH8_UPPER_CHANNEL: u8 = 0;
+/// The controllers a synth8 block may carry beyond [`super::CONTROLLERS`],
 /// which its instrument takes: portamento time, the balance of its two
 /// halves, and portamento on or off.
-#[cfg(feature = "jupiter8")]
-const JUPITER8_CONTROLLERS: [u8; 3] = [5, 8, 65];
+#[cfg(feature = "synth8")]
+const SYNTH8_CONTROLLERS: [u8; 3] = [5, 8, 65];
 
-#[cfg(feature = "jupiter8")]
-impl Synth for jupiter8::Jupiter8 {
-    type Patch = jupiter8::Patch;
-    const PLAIN: Self::Patch = jupiter8::Patch::DEFAULT;
-    const FAMILY: Codec = Codec::Jupiter8;
+#[cfg(feature = "synth8")]
+impl Synth for synth8::Synth8 {
+    type Patch = synth8::Patch;
+    const PLAIN: Self::Patch = synth8::Patch::DEFAULT;
+    const FAMILY: Codec = Codec::Synth8;
     /// MIDI channel 1 chooses the upper patch and channel 2 the lower.
     const PROGRAM_CHANNELS: u8 = 2;
 
     fn patch(block: &[u8]) -> Option<Self::Patch> {
-        jupiter8::Patch::from_bytes(block.try_into().ok()?).ok()
+        synth8::Patch::from_bytes(block.try_into().ok()?).ok()
     }
 
     fn takes(status: u8, data1: u8, data2: u8) -> bool {
         match status & MIDI_KIND {
-            kind::CONTROL_CHANGE => common(status, data1, data2) || JUPITER8_CONTROLLERS.contains(&data1),
+            kind::CONTROL_CHANGE => common(status, data1, data2) || SYNTH8_CONTROLLERS.contains(&data1),
             // The instrument has two patches, so only their two channels
             // choose one.
             kind::PROGRAM_CHANGE => common(status, data1, data2) && status & MIDI_CHANNEL < Self::PROGRAM_CHANNELS,
@@ -284,7 +284,7 @@ impl Synth for jupiter8::Jupiter8 {
     }
 
     fn program(&mut self, channel: u8, patch: &Self::Patch) {
-        if channel == JUPITER8_UPPER_CHANNEL {
+        if channel == SYNTH8_UPPER_CHANNEL {
             self.set_patch(patch);
         } else {
             self.set_lower_patch(patch);
@@ -292,26 +292,26 @@ impl Synth for jupiter8::Jupiter8 {
     }
 
     fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        jupiter8::Jupiter8::event(self, status, data1, data2);
+        synth8::Synth8::event(self, status, data1, data2);
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        jupiter8::Jupiter8::render(self, out);
+        synth8::Synth8::render(self, out);
     }
 
     fn release_all(&mut self) {
-        jupiter8::Jupiter8::release_all(self);
+        synth8::Synth8::release_all(self);
     }
 }
 
-#[cfg(feature = "cs80")]
-impl Synth for cs80::Cs80 {
-    type Patch = cs80::Patch;
-    const PLAIN: Self::Patch = cs80::Patch::DEFAULT;
-    const FAMILY: Codec = Codec::Cs80;
+#[cfg(feature = "synth80")]
+impl Synth for synth80::Synth80 {
+    type Patch = synth80::Patch;
+    const PLAIN: Self::Patch = synth80::Patch::DEFAULT;
+    const FAMILY: Codec = Codec::Synth80;
 
     fn patch(block: &[u8]) -> Option<Self::Patch> {
-        cs80::Patch::from_bytes(block.try_into().ok()?).ok()
+        synth80::Patch::from_bytes(block.try_into().ok()?).ok()
     }
 
     fn takes(status: u8, data1: u8, data2: u8) -> bool {
@@ -329,15 +329,15 @@ impl Synth for cs80::Cs80 {
     }
 
     fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        cs80::Cs80::event(self, status, data1, data2);
+        synth80::Synth80::event(self, status, data1, data2);
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        cs80::Cs80::render(self, out);
+        synth80::Synth80::render(self, out);
     }
 
     fn release_all(&mut self) {
-        cs80::Cs80::release_all(self);
+        synth80::Synth80::release_all(self);
     }
 }
 
@@ -350,21 +350,21 @@ impl Synth for cs80::Cs80 {
 pub(super) enum Analogue {
     /// None yet, or the sound's instrument is not built in.
     None,
-    /// A Juno-106 or Juno-60.
-    #[cfg(feature = "juno")]
-    Juno(Played<juno::Juno>),
-    /// A Minimoog.
-    #[cfg(feature = "minimoog")]
-    Minimoog(Played<minimoog::Minimoog>),
-    /// A Prophet-5.
-    #[cfg(feature = "prophet5")]
-    Prophet5(Played<prophet5::Prophet5>),
-    /// A Jupiter-8.
-    #[cfg(feature = "jupiter8")]
-    Jupiter8(Played<jupiter8::Jupiter8>),
-    /// A CS-80.
-    #[cfg(feature = "cs80")]
-    Cs80(Played<cs80::Cs80>),
+    /// A synth106 or synth60.
+    #[cfg(feature = "synth106")]
+    Synth106(Played<synth106::Synth106>),
+    /// A synthD.
+    #[cfg(feature = "synthd")]
+    SynthD(Played<synthd::SynthD>),
+    /// A synth53.
+    #[cfg(feature = "synth53")]
+    Synth53(Played<synth53::Synth53>),
+    /// A synth8.
+    #[cfg(feature = "synth8")]
+    Synth8(Played<synth8::Synth8>),
+    /// A synth80.
+    #[cfg(feature = "synth80")]
+    Synth80(Played<synth80::Synth80>),
 }
 
 /// Does `$then` with the synthesizer `$value` holds, whichever it is, bound
@@ -372,16 +372,16 @@ pub(super) enum Analogue {
 macro_rules! with_synth {
     ($value:expr, $played:ident => $then:expr, $otherwise:expr) => {
         match $value {
-            #[cfg(feature = "juno")]
-            Analogue::Juno($played) => $then,
-            #[cfg(feature = "minimoog")]
-            Analogue::Minimoog($played) => $then,
-            #[cfg(feature = "prophet5")]
-            Analogue::Prophet5($played) => $then,
-            #[cfg(feature = "jupiter8")]
-            Analogue::Jupiter8($played) => $then,
-            #[cfg(feature = "cs80")]
-            Analogue::Cs80($played) => $then,
+            #[cfg(feature = "synth106")]
+            Analogue::Synth106($played) => $then,
+            #[cfg(feature = "synthd")]
+            Analogue::SynthD($played) => $then,
+            #[cfg(feature = "synth53")]
+            Analogue::Synth53($played) => $then,
+            #[cfg(feature = "synth8")]
+            Analogue::Synth8($played) => $then,
+            #[cfg(feature = "synth80")]
+            Analogue::Synth80($played) => $then,
             Analogue::None => $otherwise,
         }
     };
@@ -393,37 +393,38 @@ impl Analogue {
     /// its bank.
     pub(super) fn of<const OBJECTS: usize>(store: &Store<'_, OBJECTS>, entry: &Entry) -> Self {
         match entry.codec {
-            #[cfg(feature = "juno")]
-            Codec::Juno => {
-                // `record::TAG_MODEL`: 0 the Juno-106, 1 the Juno-60.
+            #[cfg(feature = "synth106")]
+            Codec::Synth106 => {
+                // `record::TAG_MODEL`: 0 synth106, 1 synth60.
                 let [model, _] = entry.setup;
-                let model = if model == 0 { juno::Model::Juno106 } else { juno::Model::Juno60 };
-                Self::Juno(Played::new(juno::Juno::new(model), store, entry))
+                let model = if model == 0 { synth106::Model::Synth106 } else { synth106::Model::Synth60 };
+                Self::Synth106(Played::new(synth106::Synth106::new(model), store, entry))
             }
-            #[cfg(feature = "minimoog")]
-            Codec::Minimoog => Self::Minimoog(Played::new(minimoog::Minimoog::new(), store, entry)),
-            #[cfg(feature = "prophet5")]
-            Codec::Prophet5 => {
-                // `record::TAG_MODEL`: 0 revision 3, 1 revisions 1 and 2.
+            #[cfg(feature = "synthd")]
+            Codec::SynthD => Self::SynthD(Played::new(synthd::SynthD::new(), store, entry)),
+            #[cfg(feature = "synth53")]
+            Codec::Synth53 => {
+                // `record::TAG_MODEL`: 0 synth53, 1 synth52 and synth51, one model
+                // (DEC-6461 item 6).
                 let [model, _] = entry.setup;
-                let model = if model == 0 { prophet5::Model::Rev3 } else { prophet5::Model::Rev2 };
-                Self::Prophet5(Played::new(prophet5::Prophet5::new(model), store, entry))
+                let model = if model == 0 { synth53::Model::Synth53 } else { synth53::Model::Synth52 };
+                Self::Synth53(Played::new(synth53::Synth53::new(model), store, entry))
             }
-            #[cfg(feature = "jupiter8")]
-            Codec::Jupiter8 => {
-                let mut synth = jupiter8::Jupiter8::new();
-                // `record::TAG_JUPITER8_KEYS`, checked when it was read.
+            #[cfg(feature = "synth8")]
+            Codec::Synth8 => {
+                let mut synth = synth8::Synth8::new();
+                // `record::TAG_SYNTH8_KEYS`, checked when it was read.
                 let [mode, split] = entry.setup;
                 synth.set_key_mode(match mode {
-                    crate::record::JUPITER8_KEYS_DUAL => jupiter8::KeyMode::Dual,
-                    crate::record::JUPITER8_KEYS_SPLIT => jupiter8::KeyMode::Split,
-                    _ => jupiter8::KeyMode::Whole,
+                    crate::record::SYNTH8_KEYS_DUAL => synth8::KeyMode::Dual,
+                    crate::record::SYNTH8_KEYS_SPLIT => synth8::KeyMode::Split,
+                    _ => synth8::KeyMode::Whole,
                 });
                 synth.set_split(split);
-                Self::Jupiter8(Played::new(synth, store, entry))
+                Self::Synth8(Played::new(synth, store, entry))
             }
-            #[cfg(feature = "cs80")]
-            Codec::Cs80 => Self::Cs80(Played::new(cs80::Cs80::new(), store, entry)),
+            #[cfg(feature = "synth80")]
+            Codec::Synth80 => Self::Synth80(Played::new(synth80::Synth80::new(), store, entry)),
             _ => Self::None,
         }
     }

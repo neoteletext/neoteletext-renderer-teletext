@@ -73,7 +73,7 @@ and Fredrik Lundh, <https://python-pillow.org/>
 - *What it solved:* how a Yamaha DX7 turns a patch's settings into sound over time: the operator
   envelopes with their rates and attack law, the pitch envelope, the LFO, keyboard and velocity
   scaling, output levels and operator frequencies, all measured from the instrument. They are
-  translated to Rust as `crates/neoteletext-audio-instruments/src/dx7/msfa/` (DEC-6420). The sound
+  translated to Rust as `crates/neoteletext-audio-instruments/src/synth7/msfa/` (DEC-6420). The sound
   kernel, the rack and the patch reader beside them are neoteletext's own.
 - *Licence:* Apache-2.0. Its notice heads each translated file, which says what was changed, and
   its text is `crates/neoteletext-audio-instruments/LICENSE-APACHE-2.0`; both must ship with every
@@ -83,7 +83,7 @@ and Fredrik Lundh, <https://python-pillow.org/>
 
 **mos6581 0.3.0** — Enzo Lombardi, <https://github.com/aovestdipaperino/mos6581>
 - *What it gave:* its record of which public document supports which fact about the SID chip,
-  read as a reading list for the SID emulator in `crates/neoteletext-audio-instruments/src/sid/`,
+  read as a reading list for the SID emulator in `crates/neoteletext-audio-instruments/src/synth6581/`,
   which is written from those documents and keeps the same practice of naming a source at every
   constant (DEC-6418).
 - *Licence:* MIT or Apache-2.0. None of its code or constants is used.

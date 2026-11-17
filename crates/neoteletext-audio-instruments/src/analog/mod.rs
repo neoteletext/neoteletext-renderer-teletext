@@ -1,6 +1,6 @@
 //! The building blocks of the analogue synthesizers (DEC-6429): what the
-//! emulations of the Juno-60 and Juno-106, the Minimoog, the Prophet-5,
-//! the CS-80 and the Jupiter-8 are made from. They make no instrument by
+//! emulations of synth60 and synth106, synthD, synth53,
+//! synth80 and synth8 are made from. They make no instrument by
 //! themselves: `tests/analog_voice.rs` puts them together as an
 //! instrument would.
 //!
@@ -77,7 +77,7 @@
 //!   of a differential pair, which is each ladder stage's distortion.
 //! - Electric Druid, "Roland filter designs with the IR3109 or AS3109":
 //!   the amplifier cascade's four stages, its feedback through a
-//!   soft-clipping amplifier, and the Jupiter-8's two outputs.
+//!   soft-clipping amplifier, and synth8's two outputs.
 //! - Curtis Electromusic Specialties, CEM3310 Voltage Controlled
 //!   Envelope Generator data sheet (1979): the attack's asymptote and
 //!   peak.
@@ -119,7 +119,7 @@
 //!   2 kHz ([`filter::PASSES`]). Their cutoff is limited to 0.45 of the
 //!   rate.
 //! - **The state-variable filter does not distort**, and its cutoff is
-//!   limited to a quarter of the rate. The CS-80's own filter circuit
+//!   limited to a quarter of the rate. synth80's own filter circuit
 //!   has not been read.
 //! - **Oscillation above a resonance of four is flatter than the
 //!   cutoff**, as the equations are: 2 cents at 4.02, 19 at 4.2, 70 at

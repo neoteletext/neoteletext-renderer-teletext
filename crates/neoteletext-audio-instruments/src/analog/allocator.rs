@@ -11,7 +11,7 @@
 //!
 //! A key takes, in order: the voice already sounding that key; a voice
 //! at rest; the voice released longest ago; the voice held longest. That
-//! is the order of this crate's DX7 rack. Which voice at rest is taken
+//! is the order of this crate's synth7 rack. Which voice at rest is taken
 //! is the mode's ([`Assign`]): the next after the last one taken, round
 //! and round, so that a released note rings on while others play; or the
 //! first, so that the same keys land on the same voices.

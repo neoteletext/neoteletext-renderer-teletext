@@ -33,10 +33,10 @@ pub struct Sound {
     pub data: Vec<u8>,
     /// A label, at most [`crate::record::MAX_LABEL`] bytes.
     pub label: Option<Vec<u8>>,
-    /// A SID sound's chip and clock byte ([`crate::record::TAG_SID_CHIP`]).
+    /// A synth6581 sound's chip and clock byte ([`crate::record::TAG_SYNTH6581_CHIP`]).
     pub chip: Option<u8>,
     /// The handle of the bank of a sound that plays patches
-    /// ([`crate::record::TAG_DX7_BANK`]).
+    /// ([`crate::record::TAG_SYNTH7_BANK`]).
     pub bank: Option<u8>,
     /// The model of an analogue synthesizer's sound
     /// ([`crate::record::TAG_MODEL`]).
@@ -44,8 +44,8 @@ pub struct Sound {
     /// The family a patch bank is for
     /// ([`crate::record::TAG_BANK_FAMILY`]); [`Sound::patch_bank`] sets it.
     pub family: Option<Codec>,
-    /// A Jupiter-8 sound's key mode and split point
-    /// ([`crate::record::TAG_JUPITER8_KEYS`]).
+    /// A synth8 sound's key mode and split point
+    /// ([`crate::record::TAG_SYNTH8_KEYS`]).
     pub keys: Option<[u8; 2]>,
 }
 
@@ -205,10 +205,10 @@ impl Sound {
     }
 
     /// A stored sound of an instrument codec from its blocks, `block_bytes`
-    /// each, back to back in `blocks` (REQ-6411): a SID sound's register
-    /// images, the slots of a DX7 sound or of an analogue synthesizer's, or
-    /// a DX7 bank's patches. A SID sound's chip, the bank of a sound that
-    /// plays patches, an analogue synthesizer's model and a Jupiter-8's
+    /// each, back to back in `blocks` (REQ-6411): a synth6581 sound's register
+    /// images, the slots of a synth7 sound or of an analogue synthesizer's, or
+    /// a synth7 bank's patches. A synth6581 sound's chip, the bank of a sound that
+    /// plays patches, an analogue synthesizer's model and a synth8's
     /// keyboard are set afterwards, in the fields `chip`, `bank`, `model`
     /// and `keys`. A patch bank of the analogue synthesizers is
     /// [`Sound::patch_bank`]'s.
@@ -224,7 +224,7 @@ impl Sound {
         block_bytes: u16,
         blocks: &[u8],
     ) -> Result<Self, EncodeError> {
-        if !(codec.is_instrument() || codec == Codec::Dx7Bank) {
+        if !(codec.is_instrument() || codec == Codec::Synth7Bank) {
             return Err(EncodeError::Encoder);
         }
         Self::of_blocks(handle, generation, codec, block_bytes, blocks)
@@ -339,8 +339,8 @@ impl Sound {
             body.extend_from_slice(label);
         }
         for (tag, value) in [
-            (crate::record::TAG_SID_CHIP, self.chip),
-            (crate::record::TAG_DX7_BANK, self.bank),
+            (crate::record::TAG_SYNTH6581_CHIP, self.chip),
+            (crate::record::TAG_SYNTH7_BANK, self.bank),
             (crate::record::TAG_MODEL, self.model),
             (crate::record::TAG_BANK_FAMILY, self.family.map(Codec::code)),
         ] {
@@ -349,7 +349,7 @@ impl Sound {
             }
         }
         if let Some([mode, split]) = self.keys {
-            body.extend_from_slice(&[crate::record::TAG_JUPITER8_KEYS, 2, mode, split]);
+            body.extend_from_slice(&[crate::record::TAG_SYNTH8_KEYS, 2, mode, split]);
         }
         Ok(frame(TYPE_OBJECT, &body))
     }

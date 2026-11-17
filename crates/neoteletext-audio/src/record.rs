@@ -118,47 +118,47 @@ pub const MAX_LANGUAGE: usize = 16;
 pub const TAG_LABEL: u8 = 1;
 /// Extension tag of a language.
 pub const TAG_LANGUAGE: u8 = 2;
-/// Extension tag of a SID sound's chip and clock, one byte (REQ-6411 item
-/// 2): bit 0 is 0 for the 6581 and 1 for the 8580; bit 1 is 0 for the PAL
+/// Extension tag of a synth6581 sound's chip and clock, one byte (REQ-6411 item
+/// 2): bit 0 is 0 for synth6581 and 1 for synth8580; bit 1 is 0 for the PAL
 /// clock and 1 for the NTSC clock; the rest are 0.
-pub const TAG_SID_CHIP: u8 = 3;
+pub const TAG_SYNTH6581_CHIP: u8 = 3;
 /// Extension tag of the bank of a sound that plays patches, one byte: the
-/// handle of the sound that holds them (REQ-6411 item 3). A DX7 sound names
-/// a DX7 bank; a sound of an analogue synthesizer names a patch bank of its
+/// handle of the sound that holds them (REQ-6411 item 3). A synth7 sound names
+/// a synth7 bank; a sound of an analogue synthesizer names a patch bank of its
 /// own family.
-pub const TAG_DX7_BANK: u8 = 4;
+pub const TAG_SYNTH7_BANK: u8 = 4;
 /// Extension tag of the model a sound of an analogue synthesizer plays, one
-/// byte, counted from 0 and below [`Codec::models`]: for the Juno, 0 the
-/// Juno-106 and 1 the Juno-60; for the Prophet-5, 0 revision 3 and 1
-/// revisions 1 and 2; for the others 0 alone. Without the tag: model 0.
+/// byte, counted from 0 and below [`Codec::models`]: for synth106, 0
+/// synth106 and 1 synth60; for synth53, 0 synth53 and 1 synth52 and
+/// synth51; for the others 0 alone. Without the tag: model 0.
 pub const TAG_MODEL: u8 = 5;
 /// Extension tag of the family a patch bank is for, one byte: the code of
 /// that family's codec ([`Codec::is_family_code`]). A patch bank must
 /// carry it, and its blocks are that family's patches.
 pub const TAG_BANK_FAMILY: u8 = 6;
-/// Extension tag of a Jupiter-8 sound's keyboard, two bytes: the key mode
-/// ([`JUPITER8_KEYS_WHOLE`], [`JUPITER8_KEYS_DUAL`] or
-/// [`JUPITER8_KEYS_SPLIT`]) and the split point, a MIDI key of 0 to
+/// Extension tag of a synth8 sound's keyboard, two bytes: the key mode
+/// ([`SYNTH8_KEYS_WHOLE`], [`SYNTH8_KEYS_DUAL`] or
+/// [`SYNTH8_KEYS_SPLIT`]) and the split point, a MIDI key of 0 to
 /// [`MIDI_DATA_MAX`], from which up a split keyboard plays the upper patch.
 /// Without the tag: the whole keyboard plays the upper patch. It is a tag
 /// and not a controller so that a receiver that joins a live sound, or
 /// loses a block of one, has it from the OBJECT.
-pub const TAG_JUPITER8_KEYS: u8 = 7;
-/// [`TAG_JUPITER8_KEYS`]: eight voices of the upper patch.
-pub const JUPITER8_KEYS_WHOLE: u8 = 0;
-/// [`TAG_JUPITER8_KEYS`]: every key plays both patches, four voices each.
-pub const JUPITER8_KEYS_DUAL: u8 = 1;
-/// [`TAG_JUPITER8_KEYS`]: keys below the split point play the lower patch,
+pub const TAG_SYNTH8_KEYS: u8 = 7;
+/// [`TAG_SYNTH8_KEYS`]: eight voices of the upper patch.
+pub const SYNTH8_KEYS_WHOLE: u8 = 0;
+/// [`TAG_SYNTH8_KEYS`]: every key plays both patches, four voices each.
+pub const SYNTH8_KEYS_DUAL: u8 = 1;
+/// [`TAG_SYNTH8_KEYS`]: keys below the split point play the lower patch,
 /// the others the upper, four voices each.
-pub const JUPITER8_KEYS_SPLIT: u8 = 2;
+pub const SYNTH8_KEYS_SPLIT: u8 = 2;
 /// The largest value of a MIDI data byte (MIDI 1.0: seven bits).
 pub const MIDI_DATA_MAX: u8 = 0x7F;
-/// [`TAG_SID_CHIP`]'s bit for the 8580.
-pub const SID_CHIP_8580: u8 = 1;
-/// [`TAG_SID_CHIP`]'s bit for the NTSC clock.
-pub const SID_CLOCK_NTSC: u8 = 2;
-/// The bits of [`TAG_SID_CHIP`] that mean something.
-const SID_CHIP_BITS: u8 = SID_CHIP_8580 | SID_CLOCK_NTSC;
+/// [`TAG_SYNTH6581_CHIP`]'s bit for synth8580.
+pub const SYNTH6581_CHIP_8580: u8 = 1;
+/// [`TAG_SYNTH6581_CHIP`]'s bit for the NTSC clock.
+pub const SYNTH6581_CLOCK_NTSC: u8 = 2;
+/// The bits of [`TAG_SYNTH6581_CHIP`] that mean something.
+const SYNTH6581_CHIP_BITS: u8 = SYNTH6581_CHIP_8580 | SYNTH6581_CLOCK_NTSC;
 
 /// Command flag: start before the whole sound has arrived (REQ-AUD-013).
 pub const FLAG_PROGRESSIVE: u8 = 1;
@@ -196,11 +196,11 @@ pub struct Object<'a> {
     pub label: Option<&'a [u8]>,
     /// The BCP 47 language tag, as sent.
     pub language: Option<&'a [u8]>,
-    /// A SID sound's chip and clock ([`TAG_SID_CHIP`]); `None` is a 6581 on
+    /// A synth6581 sound's chip and clock ([`TAG_SYNTH6581_CHIP`]); `None` is a synth6581 on
     /// the PAL clock.
     pub chip: Option<u8>,
     /// The handle of the bank of a sound that plays patches
-    /// ([`TAG_DX7_BANK`]).
+    /// ([`TAG_SYNTH7_BANK`]).
     pub bank: Option<u8>,
     /// The model of an analogue synthesizer's sound ([`TAG_MODEL`]); `None`
     /// is model 0.
@@ -208,8 +208,8 @@ pub struct Object<'a> {
     /// The family a patch bank is for ([`TAG_BANK_FAMILY`]): the code of
     /// its codec.
     pub family: Option<u8>,
-    /// A Jupiter-8 sound's key mode and split point
-    /// ([`TAG_JUPITER8_KEYS`]); `None` is the whole keyboard.
+    /// A synth8 sound's key mode and split point
+    /// ([`TAG_SYNTH8_KEYS`]); `None` is the whole keyboard.
     pub keys: Option<[u8; 2]>,
 }
 
@@ -365,11 +365,11 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
             // The instruments' tags mean something only on their own codec
             // (REQ-6411 items 2 and 3); on another they are skipped, as any
             // unknown tag is.
-            TAG_SID_CHIP if codec == Some(Codec::Sid) => match value {
-                [chip] if chip & !SID_CHIP_BITS == 0 => object.chip = Some(*chip),
+            TAG_SYNTH6581_CHIP if codec == Some(Codec::Synth6581) => match value {
+                [chip] if chip & !SYNTH6581_CHIP_BITS == 0 => object.chip = Some(*chip),
                 _ => return Err(RecordError::BadValue("chip")),
             },
-            TAG_DX7_BANK if codec.is_some_and(|codec| codec.bank_codec().is_some()) => match value {
+            TAG_SYNTH7_BANK if codec.is_some_and(|codec| codec.bank_codec().is_some()) => match value {
                 [bank] => object.bank = Some(*bank),
                 _ => return Err(RecordError::BadValue("bank")),
             },
@@ -381,8 +381,8 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
                 [family] if Codec::is_family_code(*family) => object.family = Some(*family),
                 _ => return Err(RecordError::BadValue("family")),
             },
-            TAG_JUPITER8_KEYS if codec == Some(Codec::Jupiter8) => match value {
-                [mode, split] if *mode <= JUPITER8_KEYS_SPLIT && *split <= MIDI_DATA_MAX => {
+            TAG_SYNTH8_KEYS if codec == Some(Codec::Synth8) => match value {
+                [mode, split] if *mode <= SYNTH8_KEYS_SPLIT && *split <= MIDI_DATA_MAX => {
                     object.keys = Some([*mode, *split]);
                 }
                 _ => return Err(RecordError::BadValue("keys")),

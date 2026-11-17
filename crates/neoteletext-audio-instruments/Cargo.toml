@@ -1,11 +1,11 @@
 [package]
 name = "neoteletext-audio-instruments"
-description = "The audio profile's instruments (area AUD): the SID chip and the Yamaha DX7, rendered to samples in integers, no_std, no allocation"
+description = "The audio profile's instruments (area AUD): synth6581 and synth7, rendered to samples in integers, no_std, no allocation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 # The crate is MIT, as the workspace is, except the files under
-# `src/dx7/msfa/`, which are translated from Google's
+# `src/synth7/msfa/`, which are translated from Google's
 # music-synthesizer-for-android and stay under Apache-2.0 (DEC-6420).
 license = "MIT AND Apache-2.0"
 publish.workspace = true
@@ -16,88 +16,88 @@ publish.workspace = true
 
 [features]
 # Decision E.61: each optional area is a feature, all on by default.
-default = ["sid", "dx7"]
-# The SID chip, MOS 6581 and 8580 (codec 3, REQ-6412 item 4).
-sid = []
-# The Yamaha DX7 (codecs 4 and 5, REQ-6412 items 5 and 6).
-dx7 = []
+default = ["synth6581", "synth7"]
+# synth6581 and synth8580 (codec 3, REQ-6412 item 4).
+synth6581 = []
+# synth7 (codecs 4 and 5, REQ-6412 items 5 and 6).
+synth7 = []
 # The building blocks of the analogue synthesizers (DEC-6429): oscillators,
 # filters, envelopes, the chorus and the voice allocator. Not a codec by
 # itself, so it is not on by default.
 analog = []
-# Roland's Juno-106 and Juno-60, made from the analogue building blocks
+# synth106 and synth60, made from the analogue building blocks
 # (TODO-6431). No codec carries it yet, so it is not on by default.
-juno = ["analog"]
-# Moog's Minimoog Model D, made from the analogue building blocks
+synth106 = ["analog"]
+# synthD, made from the analogue building blocks
 # (TODO-6432). No codec carries it yet, so it is not on by default.
-minimoog = ["analog"]
-# Sequential Circuits' Prophet-5, revision 3 and revisions 1 and 2, made
+synthd = ["analog"]
+# synth53, synth52 and synth51, made
 # from the analogue building blocks (TODO-6433). No codec carries it yet,
 # so it is not on by default.
-prophet5 = ["analog"]
-# Roland's Jupiter-8, made from the analogue building blocks (TODO-6435).
+synth53 = ["analog"]
+# synth8, made from the analogue building blocks (TODO-6435).
 # No codec carries it yet, so it is not on by default.
-jupiter8 = ["analog"]
-# Yamaha's CS-80, made from the analogue building blocks (TODO-6434). No
+synth8 = ["analog"]
+# synth80, made from the analogue building blocks (TODO-6434). No
 # codec carries it yet, so it is not on by default.
-cs80 = ["analog"]
+synth80 = ["analog"]
 
 # Each example plays or builds one instrument, so it is built only with it.
 [[example]]
-name = "sid_demo"
-required-features = ["sid"]
+name = "synth6581_demo"
+required-features = ["synth6581"]
 
 [[example]]
-name = "sid_fir_table"
-required-features = ["sid"]
+name = "synth6581_fir_table"
+required-features = ["synth6581"]
 
 [[example]]
-name = "dx7_demo"
-required-features = ["dx7"]
+name = "synth7_demo"
+required-features = ["synth7"]
 
 [[example]]
 name = "analog_tables"
 required-features = ["analog"]
 
 [[example]]
-name = "juno_demo"
-required-features = ["juno"]
+name = "synth106_demo"
+required-features = ["synth106"]
 
 [[example]]
-name = "juno_render"
-required-features = ["juno"]
+name = "synth106_render"
+required-features = ["synth106"]
 
 [[example]]
-name = "minimoog_demo"
-required-features = ["minimoog"]
+name = "synthd_demo"
+required-features = ["synthd"]
 
 [[example]]
-name = "minimoog_render"
-required-features = ["minimoog"]
+name = "synthd_render"
+required-features = ["synthd"]
 
 [[example]]
-name = "prophet5_demo"
-required-features = ["prophet5"]
+name = "synth53_demo"
+required-features = ["synth53"]
 
 [[example]]
-name = "prophet5_render"
-required-features = ["prophet5"]
+name = "synth53_render"
+required-features = ["synth53"]
 
 [[example]]
-name = "jupiter8_demo"
-required-features = ["jupiter8"]
+name = "synth8_demo"
+required-features = ["synth8"]
 
 [[example]]
-name = "jupiter8_render"
-required-features = ["jupiter8"]
+name = "synth8_render"
+required-features = ["synth8"]
 
 [[example]]
-name = "cs80_demo"
-required-features = ["cs80"]
+name = "synth80_demo"
+required-features = ["synth80"]
 
 [[example]]
-name = "cs80_render"
-required-features = ["cs80"]
+name = "synth80_render"
+required-features = ["synth80"]
 
 [lints]
 workspace = true

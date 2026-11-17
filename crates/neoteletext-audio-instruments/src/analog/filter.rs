@@ -344,7 +344,7 @@ impl Loop {
 /// The transistor ladder: a four-pole low-pass of 24 dB an octave whose
 /// every stage saturates, with feedback from the last stage to the first
 /// that gives resonance and, from four up, oscillation at the cutoff
-/// (the Minimoog's filter).
+/// (synthD's filter).
 ///
 /// Small signals pass as through `1 / (k + (1 + s)⁴)` (Zavalishin,
 /// equation 5.1; Stilson and Smith 1996, section 2): the gain below the
@@ -426,7 +426,7 @@ pub struct Slopes {
 /// buffered output; the feedback passes through one more such amplifier,
 /// whose soft clipping "acts to limit the amount of feedback that's
 /// possible" (Electric Druid, "Roland filter designs with the IR3109 or
-/// AS3109", on the Juno-6's resonance amplifier). The Jupiter-8 takes
+/// AS3109", on the Juno-6's resonance amplifier). synth8 takes
 /// both the two-pole and the four-pole output (the same article).
 ///
 /// Small signals pass as through the ladder, `1 / (k + (1 + s)⁴)` at the
@@ -516,7 +516,7 @@ pub struct Bands {
 }
 
 /// The two-pole state-variable filter, with its low-pass, band-pass and
-/// high-pass outputs at once (the Yamaha CS-80 has one as its high-pass
+/// high-pass outputs at once (synth80 has one as its high-pass
 /// filter and one as its low-pass filter in each voice). It does not
 /// distort.
 ///

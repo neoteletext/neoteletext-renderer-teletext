@@ -89,7 +89,7 @@ fn slots_body(codec: u8) -> Vec<u8> {
     let mut body = std::vec![3, 0, 1, 0, 0, 0, 9, codec, 7, 0, 4];
     body.extend_from_slice(&crate::INSTRUMENT_BLOCK_SAMPLES.to_be_bytes());
     body.extend_from_slice(&1_u16.to_be_bytes());
-    body.extend_from_slice(&[TAG_DX7_BANK, 1, 9]);
+    body.extend_from_slice(&[TAG_SYNTH7_BANK, 1, 9]);
     body
 }
 
@@ -111,11 +111,11 @@ fn bank_body(patch: u16, family: u8) -> Vec<u8> {
 #[test]
 fn synthesizers_left_out_of_the_build_are_read_as_unsupported() {
     for (codec, built) in [
-        (Codec::Juno, cfg!(feature = "juno")),
-        (Codec::Minimoog, cfg!(feature = "minimoog")),
-        (Codec::Prophet5, cfg!(feature = "prophet5")),
-        (Codec::Jupiter8, cfg!(feature = "jupiter8")),
-        (Codec::Cs80, cfg!(feature = "cs80")),
+        (Codec::Synth106, cfg!(feature = "synth106")),
+        (Codec::SynthD, cfg!(feature = "synthd")),
+        (Codec::Synth53, cfg!(feature = "synth53")),
+        (Codec::Synth8, cfg!(feature = "synth8")),
+        (Codec::Synth80, cfg!(feature = "synth80")),
     ] {
         let sound = frame(TYPE_OBJECT, &slots_body(codec.code()));
         let Record::Object(object) = parse(&sound).unwrap() else { panic!("not an object") };
@@ -126,8 +126,8 @@ fn synthesizers_left_out_of_the_build_are_read_as_unsupported() {
     }
     // A bank whose patches are not its family's is refused where the family
     // is built in, and ignored with the family where it is not.
-    let wrong = frame(TYPE_OBJECT, &bank_body(Codec::Cs80.patch_bytes().unwrap(), Codec::Juno.code()));
-    if cfg!(feature = "juno") {
+    let wrong = frame(TYPE_OBJECT, &bank_body(Codec::Synth80.patch_bytes().unwrap(), Codec::Synth106.code()));
+    if cfg!(feature = "synth106") {
         assert_eq!(parse(&wrong), Err(RecordError::BadValue("block size")));
     } else {
         assert!(matches!(parse(&wrong), Ok(Record::Object(Object { codec: None, .. }))));

@@ -57,11 +57,11 @@ pub const OPUS_DECODERS: usize = 2;
 
 /// The instruments a receiver keeps (REQ-6411): one for each channel, since
 /// each channel may play an instrument's sound and a live one keeps its
-/// instrument for as long as it plays. Each holds a SID chip and a DX7 rack
+/// instrument for as long as it plays. Each holds a synth6581 and a synth7 rack
 /// where they are built in, 13,552 bytes together, and room for the largest
 /// analogue synthesizer built in with its bank: 20,456 bytes more with the
-/// CS-80, 13,744 with the Jupiter-8, 13,288 with the Juno, 6,008 with the
-/// Prophet-5 and 3,784 with the Minimoog (measured on x86-64, 17 November
+/// synth80, 13,744 with synth8, 13,288 with synth106, 6,008 with the
+/// synth53 and 3,784 with synthD (measured on x86-64, 17 November
 /// 2026). With every instrument the four are 136,032 bytes.
 pub const INSTRUMENT_LANES: usize = CHANNELS as usize;
 

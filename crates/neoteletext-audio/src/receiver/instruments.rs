@@ -9,7 +9,7 @@
 //! arrived.
 //!
 //! The analogue synthesizers (DEC-6429 foundations item 4) are played as
-//! the DX7 is: their blocks are its slots, and their patches come from a
+//! synth7 is: their blocks are its slots, and their patches come from a
 //! bank ([`analogue`]).
 //!
 //! Rendering is work the sound's sender chose, so a call renders at most
@@ -18,10 +18,10 @@
 //! ([`super::Receiver::next_tick_ms`]). A sound of any length therefore
 //! never holds the port for longer than the budget's blocks cost.
 
-#[cfg(feature = "dx7")]
-use neoteletext_audio_instruments::dx7::{Bank, Patch, Rack};
-#[cfg(feature = "sid")]
-use neoteletext_audio_instruments::sid::{ChipClock, ChipModel, Sid};
+#[cfg(feature = "synth7")]
+use neoteletext_audio_instruments::synth7::{Bank, Patch, Rack};
+#[cfg(feature = "synth6581")]
+use neoteletext_audio_instruments::synth6581::{ChipClock, Synth6581, Variant};
 
 #[cfg(feature = "analog")]
 mod analogue;
@@ -46,11 +46,11 @@ struct Lane {
     next: u16,
     /// The codec of the sound it follows: which of its instruments plays.
     codec: Codec,
-    /// The chip, for a SID sound.
-    #[cfg(feature = "sid")]
-    sid: Sid,
-    /// The rack, for a DX7 sound.
-    #[cfg(feature = "dx7")]
+    /// The chip, for a synth6581 sound.
+    #[cfg(feature = "synth6581")]
+    synth6581: Synth6581,
+    /// The rack, for a synth7 sound.
+    #[cfg(feature = "synth7")]
     rack: Rack,
     /// The synthesizer, for a sound of an analogue one.
     #[cfg(feature = "analog")]
@@ -68,10 +68,10 @@ impl Lanes {
             lanes: core::array::from_fn(|_| Lane {
                 sound: None,
                 next: 0,
-                codec: Codec::Sid,
-                #[cfg(feature = "sid")]
-                sid: Sid::new(ChipModel::Mos6581, ChipClock::Pal),
-                #[cfg(feature = "dx7")]
+                codec: Codec::Synth6581,
+                #[cfg(feature = "synth6581")]
+                synth6581: Synth6581::new(Variant::Synth6581, ChipClock::Pal),
+                #[cfg(feature = "synth7")]
                 rack: Rack::new(),
                 #[cfg(feature = "analog")]
                 analogue: analogue::Analogue::None,
@@ -216,24 +216,27 @@ impl Lane {
     /// the bank its sound names; or the synthesizer its sound names, new,
     /// with the patches of its bank.
     #[cfg_attr(
-        not(any(feature = "dx7", feature = "analog")),
+        not(any(feature = "synth7", feature = "analog")),
         expect(unused_variables, reason = "only a sound that plays patches reads its bank from the store")
     )]
     fn prepare<const OBJECTS: usize>(&mut self, store: &Store<'_, OBJECTS>, entry: &Entry) {
         match entry.codec {
-            #[cfg(feature = "sid")]
-            Codec::Sid => {
-                let model = if entry.param & crate::record::SID_CHIP_8580 == 0 {
-                    ChipModel::Mos6581
+            #[cfg(feature = "synth6581")]
+            Codec::Synth6581 => {
+                let model = if entry.param & crate::record::SYNTH6581_CHIP_8580 == 0 {
+                    Variant::Synth6581
                 } else {
-                    ChipModel::Mos8580
+                    Variant::Synth8580
                 };
-                let clock =
-                    if entry.param & crate::record::SID_CLOCK_NTSC == 0 { ChipClock::Pal } else { ChipClock::Ntsc };
-                self.sid = Sid::new(model, clock);
+                let clock = if entry.param & crate::record::SYNTH6581_CLOCK_NTSC == 0 {
+                    ChipClock::Pal
+                } else {
+                    ChipClock::Ntsc
+                };
+                self.synth6581 = Synth6581::new(model, clock);
             }
-            #[cfg(feature = "dx7")]
-            Codec::Dx7 => {
+            #[cfg(feature = "synth7")]
+            Codec::Synth7 => {
                 self.rack.reset();
                 self.rack.set_bank(&bank(store, entry.param));
             }
@@ -247,15 +250,15 @@ impl Lane {
 
     /// Plays one block into the lane's instrument and renders its 20 ms.
     #[cfg_attr(
-        not(any(feature = "dx7", feature = "analog")),
+        not(any(feature = "synth7", feature = "analog")),
         expect(unused_variables, reason = "only a block of slots counts what it passes over")
     )]
     fn render(&mut self, block: &[u8], pcm: &mut [i16; BLOCK], statistics: &mut Statistics) {
         match self.codec {
-            #[cfg(feature = "sid")]
-            Codec::Sid => render_sid(&mut self.sid, block, pcm),
-            #[cfg(feature = "dx7")]
-            Codec::Dx7 => render_slots(&mut self.rack, block, pcm, statistics),
+            #[cfg(feature = "synth6581")]
+            Codec::Synth6581 => render_synth6581(&mut self.synth6581, block, pcm),
+            #[cfg(feature = "synth7")]
+            Codec::Synth7 => render_slots(&mut self.rack, block, pcm, statistics),
             #[cfg(feature = "analog")]
             codec if codec.patch_bytes().is_some() => self.analogue.render(block, pcm, statistics),
             _ => pcm.fill(0),
@@ -267,10 +270,10 @@ impl Lane {
     /// first, since the lost block may have held a note off.
     fn conceal(&mut self, pcm: &mut [i16; BLOCK]) {
         match self.codec {
-            #[cfg(feature = "sid")]
-            Codec::Sid => self.sid.render(pcm),
-            #[cfg(feature = "dx7")]
-            Codec::Dx7 => {
+            #[cfg(feature = "synth6581")]
+            Codec::Synth6581 => self.synth6581.render(pcm),
+            #[cfg(feature = "synth7")]
+            Codec::Synth7 => {
                 self.rack.release_all();
                 self.rack.render(pcm);
             }
@@ -281,18 +284,18 @@ impl Lane {
     }
 }
 
-/// The bank a DX7 sound names: the patches of the stored bank at `handle`,
+/// The bank a synth7 sound names: the patches of the stored bank at `handle`,
 /// each checked whole. A patch that has not arrived, or that has a field
 /// out of its range, leaves the rack's own plain patch in its place, so a
 /// faulty bank costs a sound its timbre and nothing else (REQ-6411 item 4).
-#[cfg(feature = "dx7")]
+#[cfg(feature = "synth7")]
 fn bank<const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8) -> Bank {
     let mut bank = Bank::new();
-    let Some(entry) = store.entry(handle).filter(|entry| entry.codec == Codec::Dx7Bank) else { return bank };
+    let Some(entry) = store.entry(handle).filter(|entry| entry.codec == Codec::Synth7Bank) else { return bank };
     for index in 0..entry.blocks {
         let patch = store
             .block(entry.sound, index)
-            .and_then(|block| <&[u8; crate::DX7_PATCH_BYTES as usize]>::try_from(block).ok())
+            .and_then(|block| <&[u8; crate::SYNTH7_PATCH_BYTES as usize]>::try_from(block).ok())
             .and_then(|packed| Patch::from_packed(packed).ok());
         if let Some(patch) = patch {
             bank.set(usize::from(index), patch);
@@ -301,27 +304,27 @@ fn bank<const OBJECTS: usize>(store: &Store<'_, OBJECTS>, handle: u8) -> Bank {
     bank
 }
 
-/// A SID block: each of its register images written at its step of the
+/// A synth6581 block: each of its register images written at its step of the
 /// 20 ms, register 0 first (REQ-6411 item 2).
-#[cfg(feature = "sid")]
-fn render_sid(sid: &mut Sid, block: &[u8], pcm: &mut [i16; BLOCK]) {
-    let (images, _) = block.as_chunks::<{ crate::SID_IMAGE_BYTES as usize }>();
+#[cfg(feature = "synth6581")]
+fn render_synth6581(synth6581: &mut Synth6581, block: &[u8], pcm: &mut [i16; BLOCK]) {
+    let (images, _) = block.as_chunks::<{ crate::SYNTH6581_IMAGE_BYTES as usize }>();
     // 1, 2 or 4 images (`Codec::allows_block`), each of which divides the
     // block's samples exactly.
     let step = BLOCK.checked_div(images.len()).unwrap_or(BLOCK).max(1);
     let mut rest = pcm.as_mut_slice();
     for image in images {
-        sid.write_image(image);
+        synth6581.write_image(image);
         let (now, later) = rest.split_at_mut(step.min(rest.len()));
-        sid.render(now);
+        synth6581.render(now);
         rest = later;
     }
     // A block with no whole image, which no stored sound has, still sounds.
-    sid.render(rest);
+    synth6581.render(rest);
 }
 
 /// One slot of a block of slots that holds a message its codec takes.
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 #[derive(Clone, Copy)]
 struct Slot {
     /// When, in tenths of a millisecond from the block's start.
@@ -333,28 +336,28 @@ struct Slot {
 
 /// The top bit of a MIDI byte: set on a status byte, clear on a data byte
 /// (MIDI 1.0).
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 const MIDI_STATUS_BIT: u8 = 0x80;
 /// The bits of a MIDI status byte that say what the message is; the rest
 /// are its channel (MIDI 1.0, channel voice messages).
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 const MIDI_KIND: u8 = 0xF0;
 /// The MIDI 1.0 channel voice messages, by the kind bits of their status.
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 mod kind {
     /// Note off.
     pub(super) const NOTE_OFF: u8 = 0x80;
     /// Note on.
     pub(super) const NOTE_ON: u8 = 0x90;
     /// Polyphonic key pressure.
-    #[cfg(feature = "cs80")]
+    #[cfg(feature = "synth80")]
     pub(super) const KEY_PRESSURE: u8 = 0xA0;
     /// Control change.
     pub(super) const CONTROL_CHANGE: u8 = 0xB0;
     /// Program change.
     pub(super) const PROGRAM_CHANGE: u8 = 0xC0;
     /// Channel pressure.
-    #[cfg(feature = "cs80")]
+    #[cfg(feature = "synth80")]
     pub(super) const CHANNEL_PRESSURE: u8 = 0xD0;
     /// Pitch bend.
     pub(super) const PITCH_BEND: u8 = 0xE0;
@@ -362,19 +365,19 @@ mod kind {
 /// The controllers every block of slots may carry (REQ-6411 item 3): the
 /// modulation wheel, volume, the sustain pedal, all sound off, reset all
 /// controllers and all notes off.
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 const CONTROLLERS: [u8; 6] = [1, 7, 64, 120, 121, 123];
 /// The highest program a part may change to: the last patch of a bank.
-#[cfg(any(feature = "dx7", feature = "analog"))]
-const LAST_PROGRAM: u8 = (crate::DX7_BANK_PATCHES - 1) as u8;
+#[cfg(any(feature = "synth7", feature = "analog"))]
+const LAST_PROGRAM: u8 = (crate::SYNTH7_BANK_PATCHES - 1) as u8;
 // A program change names a patch of either kind of bank.
-#[cfg(any(feature = "dx7", feature = "analog"))]
-const _: () = assert!(crate::PATCH_BANK_PATCHES == crate::DX7_BANK_PATCHES);
+#[cfg(any(feature = "synth7", feature = "analog"))]
+const _: () = assert!(crate::PATCH_BANK_PATCHES == crate::SYNTH7_BANK_PATCHES);
 
 /// Whether a message is one every codec of slots takes (REQ-6411 item 3):
 /// a note off, a note on, a pitch bend, one of [`CONTROLLERS`], or a change
 /// to a program a bank holds.
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 fn common(status: u8, data1: u8, data2: u8) -> bool {
     match status & MIDI_KIND {
         kind::NOTE_OFF | kind::NOTE_ON | kind::PITCH_BEND => true,
@@ -385,9 +388,9 @@ fn common(status: u8, data1: u8, data2: u8) -> bool {
     }
 }
 
-/// What plays a block of slots: the DX7's rack, or an analogue synthesizer
+/// What plays a block of slots: synth7's rack, or an analogue synthesizer
 /// with its bank.
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 trait Player {
     /// Whether the instrument's codec takes a message whose data bytes are
     /// both data bytes.
@@ -398,7 +401,7 @@ trait Player {
     fn render(&mut self, out: &mut [i16]);
 }
 
-#[cfg(feature = "dx7")]
+#[cfg(feature = "synth7")]
 impl Player for Rack {
     fn takes(status: u8, data1: u8, data2: u8) -> bool {
         common(status, data1, data2)
@@ -416,14 +419,14 @@ impl Player for Rack {
 /// The slot `bytes` hold, if it is a message the player's codec takes
 /// (REQ-6411 item 3); `None` for an empty slot or one to pass over, the
 /// second counted.
-#[cfg(any(feature = "dx7", feature = "analog"))]
-fn slot<P: Player>(bytes: [u8; crate::DX7_SLOT_BYTES as usize], statistics: &mut Statistics) -> Option<Slot> {
+#[cfg(any(feature = "synth7", feature = "analog"))]
+fn slot<P: Player>(bytes: [u8; crate::SYNTH7_SLOT_BYTES as usize], statistics: &mut Statistics) -> Option<Slot> {
     let [time, status, data1, data2] = bytes;
-    if bytes == [0; crate::DX7_SLOT_BYTES as usize] {
+    if bytes == [0; crate::SYNTH7_SLOT_BYTES as usize] {
         return None;
     }
     let data = data1 & MIDI_STATUS_BIT == 0 && data2 & MIDI_STATUS_BIT == 0;
-    if time > crate::DX7_SLOT_LAST_TIME || !data || !P::takes(status, data1, data2) {
+    if time > crate::SYNTH7_SLOT_LAST_TIME || !data || !P::takes(status, data1, data2) {
         statistics.slots_passed_over = statistics.slots_passed_over.saturating_add(1);
         return None;
     }
@@ -433,10 +436,10 @@ fn slot<P: Player>(bytes: [u8; crate::DX7_SLOT_BYTES as usize], statistics: &mut
 /// A block of slots: its messages given to the player in order of their
 /// time, and in slot order where times are equal, each at its sample of the
 /// 20 ms (REQ-6411 item 3).
-#[cfg(any(feature = "dx7", feature = "analog"))]
+#[cfg(any(feature = "synth7", feature = "analog"))]
 fn render_slots<P: Player>(player: &mut P, block: &[u8], pcm: &mut [i16; BLOCK], statistics: &mut Statistics) {
-    let mut slots = [None; crate::DX7_MAX_SLOTS as usize];
-    let (quads, _) = block.as_chunks::<{ crate::DX7_SLOT_BYTES as usize }>();
+    let mut slots = [None; crate::SYNTH7_MAX_SLOTS as usize];
+    let (quads, _) = block.as_chunks::<{ crate::SYNTH7_SLOT_BYTES as usize }>();
     for (place, bytes) in slots.iter_mut().zip(quads) {
         *place = slot::<P>(*bytes, statistics);
     }
@@ -444,7 +447,7 @@ fn render_slots<P: Player>(player: &mut P, block: &[u8], pcm: &mut [i16; BLOCK],
     // walk is short, and it keeps slot order among equal times.
     let mut rest = pcm.as_mut_slice();
     let mut rendered: usize = 0;
-    for time in 0..=crate::DX7_SLOT_LAST_TIME {
+    for time in 0..=crate::SYNTH7_SLOT_LAST_TIME {
         for message in slots.iter().flatten().filter(|message| message.time == time) {
             // Tenths of a millisecond to samples at 48,000 Hz: 4.8 each.
             let at = usize::from(time).saturating_mul(24) / 5;

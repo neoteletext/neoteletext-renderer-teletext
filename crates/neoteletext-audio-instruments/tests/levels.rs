@@ -6,13 +6,13 @@
 
 // Without every instrument there is nothing here to compare.
 #![cfg(all(
-    feature = "sid",
-    feature = "dx7",
-    feature = "juno",
-    feature = "minimoog",
-    feature = "prophet5",
-    feature = "jupiter8",
-    feature = "cs80"
+    feature = "synth6581",
+    feature = "synth7",
+    feature = "synth106",
+    feature = "synthd",
+    feature = "synth53",
+    feature = "synth8",
+    feature = "synth80"
 ))]
 #![allow(
     clippy::cast_precision_loss,
@@ -24,9 +24,9 @@
 )]
 
 use neoteletext_audio_instruments::output::{LIMIT_CEILING, LIMIT_KNEE};
-use neoteletext_audio_instruments::sid::{ChipClock, ChipModel, Sid};
+use neoteletext_audio_instruments::synth6581::{ChipClock, Synth6581, Variant};
 use neoteletext_audio_instruments::{
-    REFERENCE_LEVEL_TENTHS, SAMPLE_RATE, cs80, dx7, juno, jupiter8, minimoog, prophet5,
+    REFERENCE_LEVEL_TENTHS, SAMPLE_RATE, synth7, synth8, synth53, synth80, synth106, synthd,
 };
 
 /// MIDI's note on.
@@ -70,32 +70,32 @@ fn midi<I: 'static>(
     }
 }
 
-/// The SID: one voice, or all three, each a sawtooth at full volume
+/// synth6581: one voice, or all three, each a sawtooth at full volume
 /// through no filter.
-fn sid(name: &'static str, model: ChipModel) -> Player {
+fn synth6581(name: &'static str, model: Variant) -> Player {
     /// The registers of a voice, and the volume register.
     const VOICE_REGISTERS: u8 = 7;
     const VOLUME: u8 = 0x18;
     /// The control register's sawtooth and gate.
     const SAWTOOTH_GATE: u8 = 0x21;
     let clock = ChipClock::Pal;
-    let shared = std::rc::Rc::new(std::cell::RefCell::new((Sid::new(model, clock), 0u8)));
+    let shared = std::rc::Rc::new(std::cell::RefCell::new((Synth6581::new(model, clock), 0u8)));
     shared.borrow_mut().0.write(VOLUME, 0x0F);
     let (keys, samples) = (shared.clone(), shared);
     Player {
         name,
         polyphony: 3,
         key_down: Box::new(move |key| {
-            let (sid, used) = &mut *keys.borrow_mut();
+            let (synth6581, used) = &mut *keys.borrow_mut();
             let hertz = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
             // Data sheet: Fout = Fn * Fclk / 16777216.
             let register = (hertz * 16_777_216.0 / f64::from(clock.hz())).round() as u16;
             let base = *used * VOICE_REGISTERS;
-            sid.write(base, register as u8);
-            sid.write(base + 1, (register >> 8) as u8);
-            sid.write(base + 5, 0x00);
-            sid.write(base + 6, 0xF0);
-            sid.write(base + 4, SAWTOOTH_GATE);
+            synth6581.write(base, register as u8);
+            synth6581.write(base + 1, (register >> 8) as u8);
+            synth6581.write(base + 5, 0x00);
+            synth6581.write(base + 6, 0xF0);
+            synth6581.write(base + 4, SAWTOOTH_GATE);
             *used += 1;
         }),
         render: Box::new(move |out| samples.borrow_mut().0.render(out)),
@@ -104,41 +104,40 @@ fn sid(name: &'static str, model: ChipModel) -> Player {
 
 /// Every instrument with its reference patch, new each time.
 fn players() -> Vec<Player> {
-    let juno = |name, model| {
-        let mut patch = juno::Patch::DEFAULT;
-        // The switch's flat position: 1 on the Juno-106, 0 on the Juno-60.
-        patch.hpf = u8::from(model == juno::Model::Juno106);
-        let mut instrument = juno::Juno::new(model);
+    let synth106 = |name, model| {
+        let mut patch = synth106::Patch::DEFAULT;
+        // The switch's flat position: 1 on synth106, 0 on synth60.
+        patch.hpf = u8::from(model == synth106::Model::Synth106);
+        let mut instrument = synth106::Synth106::new(model);
         instrument.set_patch(&patch);
-        midi(name, juno::VOICES, instrument, juno::Juno::event, juno::Juno::render)
+        midi(name, synth106::VOICES, instrument, synth106::Synth106::event, synth106::Synth106::render)
     };
-    let prophet = |name, model: prophet5::Model| {
+    let synth53 = |name, model: synth53::Model| {
         let knob = model.frequency_knob(24);
-        let patch = prophet5::Patch::DEFAULT
-            .with(prophet5::Knob::OscAFrequency, knob)
-            .with(prophet5::Knob::OscBFrequency, knob);
-        let mut instrument = prophet5::Prophet5::new(model);
+        let patch =
+            synth53::Patch::DEFAULT.with(synth53::Knob::OscAFrequency, knob).with(synth53::Knob::OscBFrequency, knob);
+        let mut instrument = synth53::Synth53::new(model);
         instrument.set_patch(&patch);
-        midi(name, prophet5::VOICES, instrument, prophet5::Prophet5::event, prophet5::Prophet5::render)
+        midi(name, synth53::VOICES, instrument, synth53::Synth53::event, synth53::Synth53::render)
     };
-    let mut moog = minimoog::Minimoog::new();
-    moog.set_drift(0);
-    moog.set_patch(&minimoog::Patch::DEFAULT);
-    let mut jupiter = jupiter8::Jupiter8::new();
-    jupiter.set_patch(&jupiter8::Patch::DEFAULT);
-    let mut yamaha = cs80::Cs80::new();
-    yamaha.set_patch(&cs80::Patch::DEFAULT);
+    let mut one_voice = synthd::SynthD::new();
+    one_voice.set_drift(0);
+    one_voice.set_patch(&synthd::Patch::DEFAULT);
+    let mut eight = synth8::Synth8::new();
+    eight.set_patch(&synth8::Patch::DEFAULT);
+    let mut touch = synth80::Synth80::new();
+    touch.set_patch(&synth80::Patch::DEFAULT);
     vec![
-        sid("SID 6581", ChipModel::Mos6581),
-        sid("SID 8580", ChipModel::Mos8580),
-        midi("DX7", dx7::rack::NOTES, dx7::Rack::new(), dx7::Rack::event, dx7::Rack::render),
-        juno("Juno-106", juno::Model::Juno106),
-        juno("Juno-60", juno::Model::Juno60),
-        midi("Minimoog", 1, moog, minimoog::Minimoog::event, minimoog::Minimoog::render),
-        prophet("Prophet-5 rev 3", prophet5::Model::Rev3),
-        prophet("Prophet-5 rev 2", prophet5::Model::Rev2),
-        midi("Jupiter-8", jupiter8::VOICES, jupiter, jupiter8::Jupiter8::event, jupiter8::Jupiter8::render),
-        midi("CS-80", cs80::VOICES, yamaha, cs80::Cs80::event, cs80::Cs80::render),
+        synth6581("synth6581", Variant::Synth6581),
+        synth6581("synth8580", Variant::Synth8580),
+        midi("synth7", synth7::rack::NOTES, synth7::Rack::new(), synth7::Rack::event, synth7::Rack::render),
+        synth106("synth106", synth106::Model::Synth106),
+        synth106("synth60", synth106::Model::Synth60),
+        midi("synthD", 1, one_voice, synthd::SynthD::event, synthd::SynthD::render),
+        synth53("synth53", synth53::Model::Synth53),
+        synth53("synth52", synth53::Model::Synth52),
+        midi("synth8", synth8::VOICES, eight, synth8::Synth8::event, synth8::Synth8::render),
+        midi("synth80", synth80::VOICES, touch, synth80::Synth80::event, synth80::Synth80::render),
     ]
 }
 
@@ -169,11 +168,11 @@ fn peak(out: &[i16]) -> u16 {
 
 /// How near the reference level every reference note is, in decibels.
 const NEAR: f64 = 1.0;
-/// How far the 8580 stands below the 6581, in decibels: its output gain
-/// is 17 to the 6581's 22, and its sawtooth is the cleaner one.
+/// How far synth8580 stands below synth6581, in decibels: its output gain
+/// is 17 to synth6581's 22, and its sawtooth is the cleaner one.
 const QUIETER_CHIP: f64 = 2.2;
-/// The 8580's name here.
-const QUIETER_CHIP_NAME: &str = "SID 8580";
+/// synth8580's name here.
+const QUIETER_CHIP_NAME: &str = "synth8580";
 
 #[test]
 fn every_instrument_plays_its_reference_note_at_the_reference_level() {
@@ -182,7 +181,7 @@ fn every_instrument_plays_its_reference_note_at_the_reference_level() {
         (player.key_down)(KEY);
         let out = rendered(&mut player);
         let (rms, peak) = levels(&out);
-        // The one exception: the 8580 keeps its level against the 6581.
+        // The one exception: synth8580 keeps its level against synth6581.
         let expected = if player.name == QUIETER_CHIP_NAME { reference - QUIETER_CHIP } else { reference };
         println!("{}: one note {rms:.1} dBFS RMS for {expected:.1}, peak {peak:.1} dBFS", player.name);
         assert!((rms - expected).abs() < NEAR, "{}: {rms} dBFS", player.name);
@@ -191,7 +190,7 @@ fn every_instrument_plays_its_reference_note_at_the_reference_level() {
 
 /// The largest step from one sample to the next that the whole polyphony
 /// may take. Sawtooths struck together all fall back in the same sample,
-/// and the largest such fall measured is 17,054 (the Juno-106's six); a
+/// and the largest such fall measured is 17,054 (synth106's six); a
 /// sample that wrapped would step by the whole of the 16 bits, 65,536,
 /// less what it had passed full scale by.
 const LARGEST_STEP: i32 = 30_000;

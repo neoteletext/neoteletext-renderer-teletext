@@ -1,15 +1,15 @@
 //! The analogue synthesizers end to end (DEC-6429 foundations item 4): a
-//! sound of the Juno, the Minimoog, the Prophet-5, the Jupiter-8 or the
-//! CS-80 and its patch bank, written by the publishing encoder, read back
+//! sound of synth106, synthD, synth53, synth8 or the
+//! synth80 and its patch bank, written by the publishing encoder, read back
 //! by the receiver, rendered by the instrument and given to a recording
 //! sink as samples.
 #![cfg(all(
     feature = "encode",
-    feature = "juno",
-    feature = "minimoog",
-    feature = "prophet5",
-    feature = "jupiter8",
-    feature = "cs80"
+    feature = "synth106",
+    feature = "synthd",
+    feature = "synth53",
+    feature = "synth8",
+    feature = "synth80"
 ))]
 #![allow(
     clippy::indexing_slicing,
@@ -22,11 +22,11 @@ use neoteletext_audio::encode::{Command, Sound, frame};
 use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
 use neoteletext_audio::record::{
-    JUPITER8_KEYS_DUAL, JUPITER8_KEYS_SPLIT, JUPITER8_KEYS_WHOLE, Record, TAG_BANK_FAMILY, TAG_DX7_BANK,
-    TAG_JUPITER8_KEYS, TAG_MODEL, TYPE_CONTROL, TYPE_DATA, TYPE_OBJECT, parse,
+    Record, SYNTH8_KEYS_DUAL, SYNTH8_KEYS_SPLIT, SYNTH8_KEYS_WHOLE, TAG_BANK_FAMILY, TAG_MODEL, TAG_SYNTH7_BANK,
+    TAG_SYNTH8_KEYS, TYPE_CONTROL, TYPE_DATA, TYPE_OBJECT, parse,
 };
 use neoteletext_audio::{Codec, INSTRUMENT_BLOCK_SAMPLES, INSTRUMENT_RATE, PATCH_BANK_PATCHES};
-use neoteletext_audio_instruments::{cs80, juno, jupiter8, minimoog, prophet5};
+use neoteletext_audio_instruments::{synth8, synth53, synth80, synth106, synthd};
 
 /// The samples of a block, as a length.
 const BLOCK: usize = INSTRUMENT_BLOCK_SAMPLES as usize;
@@ -89,51 +89,51 @@ struct Family {
 }
 
 fn families() -> Vec<Family> {
-    let mut moog = minimoog::Patch::DEFAULT;
-    moog.cutoff = -400;
-    let mut tone = cs80::Tone::DEFAULT;
-    tone.set(cs80::Control::Lpf, 20);
-    let mut yamaha = cs80::Patch::DEFAULT;
-    yamaha.tones[0] = tone;
+    let mut synthd_patch = synthd::Patch::DEFAULT;
+    synthd_patch.cutoff = -400;
+    let mut tone = synth80::Tone::DEFAULT;
+    tone.set(synth80::Control::Lpf, 20);
+    let mut synth80_patch = synth80::Patch::DEFAULT;
+    synth80_patch.tones[0] = tone;
     let faulty = |length: usize| Some(vec![0xFF; length]);
     let families = vec![
         Family {
-            codec: Codec::Juno,
-            plain: juno::Patch::DEFAULT.to_bytes().to_vec(),
-            dull: juno::Patch::DEFAULT.with(juno::Slider::VcfFrequency, 30).to_bytes().to_vec(),
-            faulty: faulty(juno::patch::PATCH_BYTES),
+            codec: Codec::Synth106,
+            plain: synth106::Patch::DEFAULT.to_bytes().to_vec(),
+            dull: synth106::Patch::DEFAULT.with(synth106::Slider::VcfFrequency, 30).to_bytes().to_vec(),
+            faulty: faulty(synth106::patch::PATCH_BYTES),
         },
         Family {
-            codec: Codec::Minimoog,
-            plain: minimoog::Patch::DEFAULT.to_bytes().to_vec(),
-            dull: moog.to_bytes().to_vec(),
-            faulty: faulty(minimoog::PATCH_BYTES),
+            codec: Codec::SynthD,
+            plain: synthd::Patch::DEFAULT.to_bytes().to_vec(),
+            dull: synthd_patch.to_bytes().to_vec(),
+            faulty: faulty(synthd::PATCH_BYTES),
         },
         Family {
-            codec: Codec::Prophet5,
-            plain: prophet5::Patch::DEFAULT.to_bytes().to_vec(),
-            dull: prophet5::Patch::DEFAULT.with(prophet5::Knob::Cutoff, 20).to_bytes().to_vec(),
-            // The Prophet-5's reader holds every byte to its range itself.
+            codec: Codec::Synth53,
+            plain: synth53::Patch::DEFAULT.to_bytes().to_vec(),
+            dull: synth53::Patch::DEFAULT.with(synth53::Knob::Cutoff, 20).to_bytes().to_vec(),
+            // synth53's reader holds every byte to its range itself.
             faulty: None,
         },
         Family {
-            codec: Codec::Jupiter8,
-            plain: jupiter8::Patch::DEFAULT.to_bytes().to_vec(),
-            dull: jupiter8::Patch::DEFAULT.with(jupiter8::Param::VcfCutoff, 40).to_bytes().to_vec(),
-            faulty: faulty(jupiter8::PATCH_BYTES),
+            codec: Codec::Synth8,
+            plain: synth8::Patch::DEFAULT.to_bytes().to_vec(),
+            dull: synth8::Patch::DEFAULT.with(synth8::Param::VcfCutoff, 40).to_bytes().to_vec(),
+            faulty: faulty(synth8::PATCH_BYTES),
         },
         Family {
-            codec: Codec::Cs80,
-            plain: cs80::Patch::DEFAULT.to_bytes().to_vec(),
-            dull: yamaha.to_bytes().to_vec(),
-            faulty: faulty(cs80::PATCH_BYTES),
+            codec: Codec::Synth80,
+            plain: synth80::Patch::DEFAULT.to_bytes().to_vec(),
+            dull: synth80_patch.to_bytes().to_vec(),
+            faulty: faulty(synth80::PATCH_BYTES),
         },
     ];
     // The faulty patches are faulty: the instruments' own readers say so.
-    assert!(juno::Patch::from_bytes(&[0xFF; juno::patch::PATCH_BYTES]).is_err());
-    assert!(minimoog::Patch::from_bytes(&[0xFF; minimoog::PATCH_BYTES]).is_err());
-    assert!(jupiter8::Patch::from_bytes(&[0xFF; jupiter8::PATCH_BYTES]).is_err());
-    assert!(cs80::Patch::from_bytes(&[0xFF; cs80::PATCH_BYTES]).is_err());
+    assert!(synth106::Patch::from_bytes(&[0xFF; synth106::patch::PATCH_BYTES]).is_err());
+    assert!(synthd::Patch::from_bytes(&[0xFF; synthd::PATCH_BYTES]).is_err());
+    assert!(synth8::Patch::from_bytes(&[0xFF; synth8::PATCH_BYTES]).is_err());
+    assert!(synth80::Patch::from_bytes(&[0xFF; synth80::PATCH_BYTES]).is_err());
     families
 }
 
@@ -297,7 +297,7 @@ fn a_faulty_or_missing_patch_leaves_the_default_patch_in_its_place() {
 }
 
 // Verifies REQ-6411 item 3 for each synthesizer's codec: the messages each
-// takes beyond the DX7's, and that the rest are passed over and counted.
+// takes beyond synth7's, and that the rest are passed over and counted.
 #[test]
 fn each_codec_takes_its_own_messages_and_passes_over_the_rest() {
     let messages: [[u8; 4]; 8] = [
@@ -312,16 +312,16 @@ fn each_codec_takes_its_own_messages_and_passes_over_the_rest() {
     ];
     for family in families() {
         let expected = match family.codec {
-            // The CS-80 takes both pressures, and not the three controllers
-            // or the system message. The Jupiter-8 takes the three
+            // synth80 takes both pressures, and not the three controllers
+            // or the system message. synth8 takes the three
             // controllers and its two patches' channels, and neither
             // pressure, a third channel's program or the system message.
-            Codec::Cs80 | Codec::Jupiter8 => 4,
-            // Any channel's program change, as the DX7.
+            Codec::Synth80 | Codec::Synth8 => 4,
+            // Any channel's program change, as synth7.
             _ => 6,
         };
         let mut block: Vec<u8> = messages.iter().flatten().copied().collect();
-        // After them, since a program change on a Jupiter-8 releases notes.
+        // After them, since a program change on a synth8 releases notes.
         block.extend([10, 0x90, 57, 100]);
         let mut sound = Sound::instrument(SOUND, 1, family.codec, 36, &[block, vec![0; 36 * 5]].concat()).unwrap();
         sound.bank = Some(BANK);
@@ -331,13 +331,13 @@ fn each_codec_takes_its_own_messages_and_passes_over_the_rest() {
     }
 }
 
-// Verifies REQ-6411 item 3 for the Juno's codec: it takes the four mode
-// messages, controllers 124 to 127, which to a Juno-106 are each an all
+// Verifies REQ-6411 item 3 for synth106's codec: it takes the four mode
+// messages, controllers 124 to 127, which to a synth106 are each an all
 // notes off (its owner's manual, MIDI Implementation 2.1), and no other
 // codec takes them (TODO-6438: the instrument acted on them and the
 // receiver passed them over, so none ever arrived).
 #[test]
-fn a_juno_takes_the_mode_messages_as_all_notes_off_and_no_other_synthesizer_does() {
+fn a_synth106_takes_the_mode_messages_as_all_notes_off_and_no_other_synthesizer_does() {
     // A note held to the sound's end, but for the message in its fourth
     // block: 25 blocks, half a second.
     let held = |message: [u8; 4]| {
@@ -362,7 +362,7 @@ fn a_juno_takes_the_mode_messages_as_all_notes_off_and_no_other_synthesizer_does
             assert!(tail(&released) * 20 < tail(&sounding), "{:?}: all notes off releases the note", family.codec);
             for controller in 124..=127 {
                 let (pcm, passed) = render(slot(0xB0, controller, 0));
-                if family.codec == Codec::Juno {
+                if family.codec == Codec::Synth106 {
                     assert_eq!(passed, 0, "model {model}: controller {controller} is passed over");
                     assert_eq!(pcm, released, "model {model}: controller {controller} is not an all notes off");
                 } else {
@@ -373,28 +373,28 @@ fn a_juno_takes_the_mode_messages_as_all_notes_off_and_no_other_synthesizer_does
     }
 }
 
-// Verifies REQ-6411 item 4 as DEC-6421 item 4 built it, for the Juno's two
+// Verifies REQ-6411 item 4 as DEC-6421 item 4 built it, for synth106's two
 // models: the default patch left in a missing patch's place is the model's
-// own. The Juno-106's, played on a Juno-60, has that model's high-pass
+// own. synth106's, played on a synth60, has that model's high-pass
 // filter in and no bass (TODO-6438).
 #[test]
-fn a_missing_patch_on_either_juno_leaves_that_models_plain_patch() {
-    let dull = juno::Patch::DEFAULT.with(juno::Slider::VcfFrequency, 30).to_bytes();
-    for (tag, model) in [(0, juno::Model::Juno106), (1, juno::Model::Juno60)] {
-        let plain = juno::Patch::default_for(model).to_bytes();
+fn a_missing_patch_on_either_synth106_leaves_that_models_plain_patch() {
+    let dull = synth106::Patch::DEFAULT.with(synth106::Slider::VcfFrequency, 30).to_bytes();
+    for (tag, model) in [(0, synth106::Model::Synth106), (1, synth106::Model::Synth60)] {
+        let plain = synth106::Patch::default_for(model).to_bytes();
         // Program 1, of a bank that has only patch 0 and of one that has
         // the model's plain patch there.
-        let mut notes = sound(Codec::Juno, &note(&[slot(0xC0, 1, 0)], 10));
+        let mut notes = sound(Codec::Synth106, &note(&[slot(0xC0, 1, 0)], 10));
         notes.model = Some(tag);
-        let (missing, _) = rendered(&bank(Codec::Juno, &[&dull]), &notes);
-        let (given, _) = rendered(&bank(Codec::Juno, &[&dull, &plain]), &notes);
+        let (missing, _) = rendered(&bank(Codec::Synth106, &[&dull]), &notes);
+        let (given, _) = rendered(&bank(Codec::Synth106, &[&dull, &plain]), &notes);
         assert!(loud(&missing), "{model:?}");
         assert_eq!(missing, given, "{model:?}: a missing patch is not the model's plain patch");
     }
 }
 
-// Verifies DEC-6429 foundations item 4: the model tag chooses the Juno-60
-// or the Prophet-5 of revisions 1 and 2, and absent means the first model.
+// Verifies DEC-6429 foundations item 4: the model tag chooses synth60
+// or synth52, and absent means the first model.
 #[test]
 fn the_model_tag_chooses_the_model() {
     for family in families().iter().filter(|family| family.codec.models() > 1) {
@@ -411,38 +411,38 @@ fn the_model_tag_chooses_the_model() {
     }
 }
 
-// Verifies DEC-6429 foundations item 4 for the Jupiter-8: MIDI channel 1's
+// Verifies DEC-6429 foundations item 4 for synth8: MIDI channel 1's
 // program change chooses the upper patch and channel 2's the lower, and the
 // keys tag sets the key mode and the split point.
 #[test]
-fn a_jupiter_8_has_two_patches_a_key_mode_and_a_split_point() {
+fn a_synth8_has_two_patches_a_key_mode_and_a_split_point() {
     let families = families();
-    let family = families.iter().find(|family| family.codec == Codec::Jupiter8).unwrap();
-    let patches = bank(Codec::Jupiter8, &[&family.plain, &family.dull]);
+    let family = families.iter().find(|family| family.codec == Codec::Synth8).unwrap();
+    let patches = bank(Codec::Synth8, &[&family.plain, &family.dull]);
     let render = |keys: Option<[u8; 2]>, before: &[[u8; 4]]| {
-        let mut notes = sound(Codec::Jupiter8, &note(before, 10));
+        let mut notes = sound(Codec::Synth8, &note(before, 10));
         notes.keys = keys;
         rendered(&patches, &notes).0
     };
     let lower_dull = [slot(0xC1, 1, 0)];
     let upper_dull = [slot(0xC0, 1, 0)];
     let whole = render(None, &[[0; 4]]);
-    assert_eq!(render(Some([JUPITER8_KEYS_WHOLE, 60]), &[[0; 4]]), whole, "no tag is the whole keyboard");
+    assert_eq!(render(Some([SYNTH8_KEYS_WHOLE, 60]), &[[0; 4]]), whole, "no tag is the whole keyboard");
     // The whole keyboard plays the upper patch alone.
     assert_eq!(render(None, &lower_dull), whole, "the lower patch is not heard on a whole keyboard");
     assert_ne!(render(None, &upper_dull), whole, "the upper patch is");
     // A dual keyboard plays both.
-    let dual = render(Some([JUPITER8_KEYS_DUAL, 60]), &[[0; 4]]);
-    assert_ne!(render(Some([JUPITER8_KEYS_DUAL, 60]), &lower_dull), dual, "a dual keyboard plays the lower patch");
-    assert_ne!(render(Some([JUPITER8_KEYS_DUAL, 60]), &upper_dull), dual, "and the upper");
+    let dual = render(Some([SYNTH8_KEYS_DUAL, 60]), &[[0; 4]]);
+    assert_ne!(render(Some([SYNTH8_KEYS_DUAL, 60]), &lower_dull), dual, "a dual keyboard plays the lower patch");
+    assert_ne!(render(Some([SYNTH8_KEYS_DUAL, 60]), &upper_dull), dual, "and the upper");
     // The note is key 57: below a split at 60, so the lower patch plays it;
     // at a split at 50 the upper does.
-    let low = render(Some([JUPITER8_KEYS_SPLIT, 60]), &[[0; 4]]);
-    assert_ne!(render(Some([JUPITER8_KEYS_SPLIT, 60]), &lower_dull), low, "below the split, the lower patch");
-    assert_eq!(render(Some([JUPITER8_KEYS_SPLIT, 60]), &upper_dull), low, "and not the upper");
-    let high = render(Some([JUPITER8_KEYS_SPLIT, 50]), &[[0; 4]]);
-    assert_eq!(render(Some([JUPITER8_KEYS_SPLIT, 50]), &lower_dull), high, "from the split up, not the lower patch");
-    assert_ne!(render(Some([JUPITER8_KEYS_SPLIT, 50]), &upper_dull), high, "but the upper");
+    let low = render(Some([SYNTH8_KEYS_SPLIT, 60]), &[[0; 4]]);
+    assert_ne!(render(Some([SYNTH8_KEYS_SPLIT, 60]), &lower_dull), low, "below the split, the lower patch");
+    assert_eq!(render(Some([SYNTH8_KEYS_SPLIT, 60]), &upper_dull), low, "and not the upper");
+    let high = render(Some([SYNTH8_KEYS_SPLIT, 50]), &[[0; 4]]);
+    assert_eq!(render(Some([SYNTH8_KEYS_SPLIT, 50]), &lower_dull), high, "from the split up, not the lower patch");
+    assert_ne!(render(Some([SYNTH8_KEYS_SPLIT, 50]), &upper_dull), high, "but the upper");
 }
 
 /// Plays a live sound of `family`: a note on in block 0 and empty blocks to
@@ -523,22 +523,22 @@ fn an_object_names_its_bank_model_family_and_keys_and_a_faulty_one_is_refused() 
         assert_eq!(family.codec.patch_bytes(), Some(patch));
         // A sound: slots of 4 bytes, 1 to 16 of them, and a bank.
         assert_eq!(
-            good(&object(code, 4, one_block, 1, &[TAG_DX7_BANK, 1, BANK])),
+            good(&object(code, 4, one_block, 1, &[TAG_SYNTH7_BANK, 1, BANK])),
             Some((family.codec, Some(BANK), None, None))
         );
-        assert!(good(&object(code, 64, one_block, 1, &[TAG_DX7_BANK, 1, BANK])).is_some());
+        assert!(good(&object(code, 64, one_block, 1, &[TAG_SYNTH7_BANK, 1, BANK])).is_some());
         assert!(parse(&object(code, 4, one_block, 1, &[])).is_err(), "{code}: no bank");
-        assert!(parse(&object(code, 4, one_block, 1, &[TAG_DX7_BANK, 2, BANK, 0])).is_err(), "{code}: a long bank");
+        assert!(parse(&object(code, 4, one_block, 1, &[TAG_SYNTH7_BANK, 2, BANK, 0])).is_err(), "{code}: a long bank");
         for size in [0, 3, 6, 68] {
-            assert!(parse(&object(code, size, one_block, 1, &[TAG_DX7_BANK, 1, BANK])).is_err(), "{code}: {size}");
+            assert!(parse(&object(code, size, one_block, 1, &[TAG_SYNTH7_BANK, 1, BANK])).is_err(), "{code}: {size}");
         }
         // The model: one the family has.
         for model in 0..=u8::MAX {
-            let record = object(code, 4, one_block, 1, &[TAG_DX7_BANK, 1, BANK, TAG_MODEL, 1, model]);
+            let record = object(code, 4, one_block, 1, &[TAG_SYNTH7_BANK, 1, BANK, TAG_MODEL, 1, model]);
             assert_eq!(parse(&record).is_ok(), model < family.codec.models(), "{code}: model {model}");
         }
-        assert!(parse(&object(code, 4, one_block, 1, &[TAG_DX7_BANK, 1, BANK, TAG_MODEL, 0])).is_err());
-        assert!(parse(&object(code, 4, one_block, 1, &[TAG_DX7_BANK, 1, BANK, TAG_MODEL, 2, 0, 0])).is_err());
+        assert!(parse(&object(code, 4, one_block, 1, &[TAG_SYNTH7_BANK, 1, BANK, TAG_MODEL, 0])).is_err());
+        assert!(parse(&object(code, 4, one_block, 1, &[TAG_SYNTH7_BANK, 1, BANK, TAG_MODEL, 2, 0, 0])).is_err());
         // A bank: the family's patches, 1 to 32 of them, never live.
         let bank = |block: u16, patches: u32, tags: &[u8]| {
             object(Codec::PatchBank.code(), block, patches, u16::try_from(patches).unwrap(), tags)
@@ -552,7 +552,7 @@ fn an_object_names_its_bank_model_family_and_keys_and_a_faulty_one_is_refused() 
         assert!(parse(&bank(patch + 1, 1, &[TAG_BANK_FAMILY, 1, code])).is_err(), "{code}: a longer patch");
         assert!(parse(&bank(patch, 1, &[TAG_BANK_FAMILY, 2, code, 0])).is_err(), "{code}: a long family");
         // Another family's patch size.
-        let other = if family.codec == Codec::Juno { Codec::Cs80 } else { Codec::Juno };
+        let other = if family.codec == Codec::Synth106 { Codec::Synth80 } else { Codec::Synth106 };
         assert!(parse(&bank(other.patch_bytes().unwrap(), 1, &[TAG_BANK_FAMILY, 1, code])).is_err());
         assert!(Sound::patch_bank(BANK, 1, family.codec, &vec![0; family.plain.len() * 33]).is_err());
         assert!(Sound::patch_bank(BANK, 1, family.codec, &vec![0; family.plain.len() + 1]).is_err());
@@ -562,26 +562,26 @@ fn an_object_names_its_bank_model_family_and_keys_and_a_faulty_one_is_refused() 
         let record = object(Codec::PatchBank.code(), 18, 1, 1, &[TAG_BANK_FAMILY, 1, family]);
         assert!(parse(&record).is_err(), "a bank for family {family}");
     }
-    assert!(Sound::patch_bank(BANK, 1, Codec::Dx7, &[0; 128]).is_err(), "the DX7 has its own bank");
+    assert!(Sound::patch_bank(BANK, 1, Codec::Synth7, &[0; 128]).is_err(), "synth7 has its own bank");
     assert!(Sound::instrument(BANK, 1, Codec::PatchBank, 18, &[0; 18]).is_err(), "a bank names its family");
 
-    // The Jupiter-8's keys: a mode it has and a MIDI key, in two bytes.
-    let jupiter = Codec::Jupiter8.code();
+    // synth8's keys: a mode it has and a MIDI key, in two bytes.
+    let synth8 = Codec::Synth8.code();
     let keys = |value: &[u8]| {
-        let mut tags = vec![TAG_DX7_BANK, 1, BANK, TAG_JUPITER8_KEYS, u8::try_from(value.len()).unwrap()];
+        let mut tags = vec![TAG_SYNTH7_BANK, 1, BANK, TAG_SYNTH8_KEYS, u8::try_from(value.len()).unwrap()];
         tags.extend_from_slice(value);
-        object(jupiter, 4, one_block, 1, &tags)
+        object(synth8, 4, one_block, 1, &tags)
     };
     assert_eq!(
-        good(&keys(&[JUPITER8_KEYS_SPLIT, 127])),
-        Some((Codec::Jupiter8, Some(BANK), None, Some([JUPITER8_KEYS_SPLIT, 127])))
+        good(&keys(&[SYNTH8_KEYS_SPLIT, 127])),
+        Some((Codec::Synth8, Some(BANK), None, Some([SYNTH8_KEYS_SPLIT, 127])))
     );
-    assert!(parse(&keys(&[JUPITER8_KEYS_SPLIT + 1, 60])).is_err(), "a key mode it has not");
-    assert!(parse(&keys(&[JUPITER8_KEYS_DUAL, 128])).is_err(), "a split point that is no key");
-    assert!(parse(&keys(&[JUPITER8_KEYS_DUAL])).is_err() && parse(&keys(&[0, 60, 0])).is_err(), "another length");
+    assert!(parse(&keys(&[SYNTH8_KEYS_SPLIT + 1, 60])).is_err(), "a key mode it has not");
+    assert!(parse(&keys(&[SYNTH8_KEYS_DUAL, 128])).is_err(), "a split point that is no key");
+    assert!(parse(&keys(&[SYNTH8_KEYS_DUAL])).is_err() && parse(&keys(&[0, 60, 0])).is_err(), "another length");
     // On another codec the tag is skipped, as any unknown tag is.
-    let tags = [TAG_DX7_BANK, 1, BANK, TAG_JUPITER8_KEYS, 2, 9, 200];
-    assert!(parse(&object(Codec::Juno.code(), 4, one_block, 1, &tags)).is_ok());
+    let tags = [TAG_SYNTH7_BANK, 1, BANK, TAG_SYNTH8_KEYS, 2, 9, 200];
+    assert!(parse(&object(Codec::Synth106.code(), 4, one_block, 1, &tags)).is_ok());
 }
 
 // Verifies REQ-AUD-004 for the codes after the last: an unknown codec's
@@ -594,7 +594,7 @@ fn an_unknown_codec_is_ignored_and_counted() {
     let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
     let mut sink = Recorder::default();
     assert_eq!(Codec::from_code(RESERVED), None);
-    receiver.push_record(&object(RESERVED, 4, INSTRUMENT_BLOCK_SAMPLES, 1, &[TAG_DX7_BANK, 1, BANK]), &mut sink);
+    receiver.push_record(&object(RESERVED, 4, INSTRUMENT_BLOCK_SAMPLES, 1, &[TAG_SYNTH7_BANK, 1, BANK]), &mut sink);
     assert_eq!(receiver.statistics().unsupported, 1);
     assert_eq!(receiver.store().entries().count(), 0);
     assert!(sink.defined.is_empty() && sink.starts.is_empty());
@@ -653,7 +653,7 @@ fn random_blocks_and_random_patches_never_panic() {
             let mut stored = Sound::instrument(SOUND, 1, family.codec, block, &data).unwrap();
             stored.bank = Some(BANK);
             stored.model = Some(random.byte() % family.codec.models());
-            if family.codec == Codec::Jupiter8 {
+            if family.codec == Codec::Synth8 {
                 stored.keys = Some([random.byte() % 3, random.byte() & 0x7F]);
             }
             push(&mut receiver, &stored, &mut sink);
@@ -728,11 +728,11 @@ fn troubling(random: &mut Random, good: &[Vec<u8>]) -> Vec<u8> {
             let length = 13 + random.below(12);
             let mut body = random.bytes(length);
             if random.below(4) != 0 {
-                body[7] = Codec::Juno.code() + random.byte() % 7;
+                body[7] = Codec::Synth106.code() + random.byte() % 7;
                 body[8] = 7;
             }
             // Often with tags that are well formed and of any value.
-            for tag in [TAG_DX7_BANK, TAG_MODEL, TAG_BANK_FAMILY, TAG_JUPITER8_KEYS] {
+            for tag in [TAG_SYNTH7_BANK, TAG_MODEL, TAG_BANK_FAMILY, TAG_SYNTH8_KEYS] {
                 if random.below(2) == 0 {
                     let length = random.below(3);
                     body.extend([tag, u8::try_from(length).unwrap()]);

@@ -8,7 +8,7 @@
 //! what the bending makes above the rate's half comes back. Measured
 //! against the strongest harmonic, for a sawtooth of 220 Hz, 880 Hz,
 //! 1,760 Hz, 4,186 Hz and 7 kHz with no resonance, at twice the output
-//! rate, where the Juno, the Jupiter-8 and the Prophet-5 run it:
+//! rate, where synth106, synth8 and synth53 run it:
 //!
 //! | cutoff | waveforms at full level | 220 Hz | 880 Hz | 1,760 Hz | 4,186 Hz | 7 kHz |
 //! |---|---|---|---|---|---|---|
@@ -21,9 +21,9 @@
 //!
 //! One waveform at full level is each instrument's plain patch, an
 //! eighth of the level at which a stage saturates; two in step are both
-//! oscillators of the Jupiter-8 or the Prophet-5, or the Juno's sawtooth
-//! and pulse; three are the Juno's sawtooth, pulse and sub-oscillator,
-//! and the most the Prophet-5's mixer gives. Each doubling of the level
+//! oscillators of synth8 or synth53, or synth106's sawtooth
+//! and pulse; three are synth106's sawtooth, pulse and sub-oscillator,
+//! and the most synth53's mixer gives. Each doubling of the level
 //! costs 12 dB. A fundamental near or above the cutoff reads worse than
 //! it sounds, since the harmonic it is measured against is itself
 //! reduced.
@@ -67,15 +67,15 @@ const TOP: usize = 20_000 * POINTS / 48_000;
 /// (the top C of a keyboard of five octaves at 8') and 7 kHz. Each is
 /// odd, so that no tone folded once lands on a harmonic.
 const FUNDAMENTALS: [usize; 5] = [301, 1_201, 2_403, 5_715, 9_557];
-/// The right shift of a mixer's sum into the cascade, in the Juno, the
-/// Jupiter-8 and the Prophet-5 alike (each one's `DRIVE_SHIFT`): one
+/// The right shift of a mixer's sum into the cascade, in synth106, the
+/// synth8 and synth53 alike (each one's `DRIVE_SHIFT`): one
 /// waveform at full level is an eighth of the level at which a stage
 /// saturates.
 const DRIVE_SHIFT: u32 = 2;
 
 /// The cutoffs measured, in hertz: as far open as the cascade goes,
-/// 0.45 of a rate of 96 kHz; 20 kHz, where the Jupiter-8's and the
-/// Juno's cutoff sliders end; and 5 kHz.
+/// 0.45 of a rate of 96 kHz; 20 kHz, where synth8's and the
+/// synth106's cutoff sliders end; and 5 kHz.
 const CUTOFFS: [u32; 3] = [43_200, 20_000, 5_000];
 
 /// A sawtooth of `waveforms` oscillators in step at `factor` times the
@@ -110,9 +110,9 @@ const HELD: [[[f64; 5]; 3]; 3] = [
 #[test]
 fn what_the_cascade_folds_back_is_measured() {
     // One waveform at full level is each instrument's plain patch; two
-    // in step are both oscillators of the Jupiter-8 or the Prophet-5, or
-    // the Juno's sawtooth and pulse; three, the Juno's sawtooth, pulse
-    // and sub-oscillator, and the most the Prophet-5's mixer gives.
+    // in step are both oscillators of synth8 or synth53, or
+    // synth106's sawtooth and pulse; three, synth106's sawtooth, pulse
+    // and sub-oscillator, and the most synth53's mixer gives.
     println!("a sawtooth through the cascade, dB: at 220, 880, 1,760, 4,186 and 7,000 Hz");
     // An unoptimised build measures the one cutoff at twice the rate.
     let quick = cfg!(debug_assertions);

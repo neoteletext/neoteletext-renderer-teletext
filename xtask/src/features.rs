@@ -84,34 +84,37 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio", features: "idl,opus" },
     // The instruments, each alone and both with the desktop build
     // (REQ-6411, REQ-6412).
-    Build { package: "neoteletext-audio", features: "sid" },
-    Build { package: "neoteletext-audio", features: "dx7" },
-    Build { package: "neoteletext-audio", features: "idl,opus,sid,dx7" },
+    Build { package: "neoteletext-audio", features: "synth6581" },
+    Build { package: "neoteletext-audio", features: "synth7" },
+    Build { package: "neoteletext-audio", features: "idl,opus,synth6581,synth7" },
     // The analogue synthesizers (DEC-6429 foundations item 4): what they
     // share with no synthesizer, each alone, and all with the desktop
     // build's instruments.
     Build { package: "neoteletext-audio", features: "analog" },
-    Build { package: "neoteletext-audio", features: "juno" },
-    Build { package: "neoteletext-audio", features: "minimoog" },
-    Build { package: "neoteletext-audio", features: "prophet5" },
-    Build { package: "neoteletext-audio", features: "jupiter8" },
-    Build { package: "neoteletext-audio", features: "cs80" },
-    Build { package: "neoteletext-audio", features: "idl,opus,sid,dx7,juno,minimoog,prophet5,jupiter8,cs80" },
+    Build { package: "neoteletext-audio", features: "synth106" },
+    Build { package: "neoteletext-audio", features: "synthd" },
+    Build { package: "neoteletext-audio", features: "synth53" },
+    Build { package: "neoteletext-audio", features: "synth8" },
+    Build { package: "neoteletext-audio", features: "synth80" },
+    Build {
+        package: "neoteletext-audio",
+        features: "idl,opus,synth6581,synth7,synth106,synthd,synth53,synth8,synth80",
+    },
     Build { package: "neoteletext-audio-instruments", features: "" },
-    Build { package: "neoteletext-audio-instruments", features: "sid" },
-    Build { package: "neoteletext-audio-instruments", features: "dx7" },
+    Build { package: "neoteletext-audio-instruments", features: "synth6581" },
+    Build { package: "neoteletext-audio-instruments", features: "synth7" },
     // The analogue building blocks (DEC-6429).
     Build { package: "neoteletext-audio-instruments", features: "analog" },
-    // Roland's Juno-106 and Juno-60 (TODO-6431).
-    Build { package: "neoteletext-audio-instruments", features: "juno" },
-    // Moog's Minimoog Model D (TODO-6432).
-    Build { package: "neoteletext-audio-instruments", features: "minimoog" },
-    // Sequential Circuits' Prophet-5 (TODO-6433).
-    Build { package: "neoteletext-audio-instruments", features: "prophet5" },
-    // Roland's Jupiter-8 (TODO-6435).
-    Build { package: "neoteletext-audio-instruments", features: "jupiter8" },
-    // Yamaha's CS-80 (TODO-6434).
-    Build { package: "neoteletext-audio-instruments", features: "cs80" },
+    // synth106 and synth60 (TODO-6431).
+    Build { package: "neoteletext-audio-instruments", features: "synth106" },
+    // synthD (TODO-6432).
+    Build { package: "neoteletext-audio-instruments", features: "synthd" },
+    // synth53 (TODO-6433).
+    Build { package: "neoteletext-audio-instruments", features: "synth53" },
+    // synth8 (TODO-6435).
+    Build { package: "neoteletext-audio-instruments", features: "synth8" },
+    // synth80 (TODO-6434).
+    Build { package: "neoteletext-audio-instruments", features: "synth80" },
     Build { package: "neoteletext-opus", features: "" },
     Build { package: "neoteletext-opus", features: "error-trait" },
     Build { package: "neoteletext-audio-mix", features: "" },

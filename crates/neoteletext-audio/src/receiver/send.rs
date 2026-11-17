@@ -24,7 +24,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         #[cfg(feature = "opus")]
         self.opus.release(entry.sound);
         // And an instrument's sound is rendered again from its first.
-        #[cfg(any(feature = "sid", feature = "dx7", feature = "analog"))]
+        #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
         self.instruments.release(entry.sound);
         self.send_blocks(entry, 0, entry.blocks, sink);
     }
@@ -40,8 +40,8 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             feature = "pcm16",
             feature = "ima",
             feature = "opus",
-            feature = "sid",
-            feature = "dx7",
+            feature = "synth6581",
+            feature = "synth7",
             feature = "analog"
         )),
         expect(clippy::unused_self, reason = "a build with no decoder holds no sound to send")
@@ -62,12 +62,12 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
             // A bank is patches, never samples (REQ-6411 item 4).
-            Codec::Dx7Bank | Codec::PatchBank => {}
+            Codec::Synth7Bank | Codec::PatchBank => {}
             // An instrument's. A codec the build leaves out renders
             // silence, and none of one is stored.
-            #[cfg(any(feature = "sid", feature = "dx7", feature = "analog"))]
+            #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
             _ => self.instruments.send_stored(&self.store, entry, &mut self.statistics, sink),
-            #[cfg(not(any(feature = "sid", feature = "dx7", feature = "analog")))]
+            #[cfg(not(any(feature = "synth6581", feature = "synth7", feature = "analog")))]
             _ => {}
         }
     }
@@ -81,8 +81,8 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             feature = "pcm16",
             feature = "ima",
             feature = "opus",
-            feature = "sid",
-            feature = "dx7",
+            feature = "synth6581",
+            feature = "synth7",
             feature = "analog"
         )),
         expect(unused_variables, reason = "a build with no decoder holds no sound to send")
@@ -102,13 +102,13 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Opus => {}
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
-            Codec::Dx7Bank | Codec::PatchBank => {}
-            #[cfg(any(feature = "sid", feature = "dx7", feature = "analog"))]
+            Codec::Synth7Bank | Codec::PatchBank => {}
+            #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
             _ => {
                 let next = self.instruments.send_live(&self.store, &entry, &mut self.statistics, sink);
                 self.store.set_live_cursor(sound, next, entry.arrived_ms);
             }
-            #[cfg(not(any(feature = "sid", feature = "dx7", feature = "analog")))]
+            #[cfg(not(any(feature = "synth6581", feature = "synth7", feature = "analog")))]
             _ => {}
         }
     }
