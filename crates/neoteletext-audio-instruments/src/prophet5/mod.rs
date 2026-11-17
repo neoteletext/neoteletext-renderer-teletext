@@ -255,6 +255,14 @@ const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 506 / 1000) as i32;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
+/// The most the volume's gain moves in one sample, in Q28: from nothing
+/// to all of it in 256 samples, 5.3 ms. A volume message between two
+/// calls to render would otherwise step the signal by the gain's whole
+/// change at once, which is a click.
+///
+/// Source: own choice: long against a sample and short against a hand
+/// on a volume control.
+const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
 
 /// The low-frequency oscillator: a sawtooth, a triangle and a square
 /// from one phase, each with its own switch, added together.
@@ -347,6 +355,9 @@ pub struct Prophet5 {
     bend: i32,
     wheel: u8,
     volume: u8,
+    /// The volume's gain as it stands, in Q28, on its way to what the
+    /// controller asks.
+    volume_gain: i32,
     pedal: bool,
     /// The master tune, in octaves.
     tune: i32,
@@ -386,6 +397,7 @@ impl Prophet5 {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            volume_gain: ONE_Q28,
             pedal: false,
             tune: 0,
             glide: 0,
@@ -680,7 +692,9 @@ impl Prophet5 {
         for sample in out {
             let earlier = self.voices_sample();
             let later = self.voices_sample();
-            let signal = amplify(self.decimator.process(earlier, later), volume);
+            let towards = volume.saturating_sub(self.volume_gain).clamp(-VOLUME_SLEW, VOLUME_SLEW);
+            self.volume_gain = self.volume_gain.saturating_add(towards);
+            let signal = amplify(self.decimator.process(earlier, later), self.volume_gain);
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));
         }
     }

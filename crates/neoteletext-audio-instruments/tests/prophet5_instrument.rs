@@ -229,6 +229,31 @@ fn random_patches_and_random_messages_neither_panic_nor_leave_the_bounds() {
 }
 
 #[test]
+fn a_volume_message_between_two_renders_does_not_step_the_signal() {
+    // A low, nearly pure tone moves little from one sample to the next.
+    // The volume falling from full to a quarter between two calls moved
+    // the gain all at once: a step of most of the signal's height.
+    for model in MODELS {
+        let mut prophet = instrument(model, &pure(model));
+        prophet.event(NOTE_ON, 45, 100);
+        render(&mut prophet, 0.5);
+        let largest = |signal: &[f64]| signal.windows(2).fold(0.0f64, |most, pair| most.max((pair[1] - pair[0]).abs()));
+        let steady = render(&mut prophet, 0.2513);
+        let (peak, step) = (steady.iter().fold(0.0f64, |peak, &value| peak.max(value.abs())), largest(&steady));
+        let mut worst = 0.0f64;
+        // Twenty changes, each where the last call happened to end.
+        for turn in 0..20 {
+            let before = *render(&mut prophet, 0.0137).last().unwrap_or(&0.0);
+            prophet.event(CONTROL, 7, if turn % 2 == 0 { 64 } else { 127 });
+            let after = render(&mut prophet, 0.05);
+            worst = worst.max((after[0] - before).abs()).max(largest(&after));
+        }
+        println!("{model:?}: peak {peak:.4}, largest step steady {step:.5}, across volume changes {worst:.5}");
+        assert!(worst < 1.5 * step, "{model:?}: {worst} against {step}");
+    }
+}
+
+#[test]
 fn the_pedal_still_holds_after_all_sound_off() {
     // All sound off silences the voices; it is no message about the
     // pedal, which is still down: a key struck and let go after it is
