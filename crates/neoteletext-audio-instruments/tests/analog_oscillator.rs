@@ -328,3 +328,30 @@ fn noise_is_the_same_from_the_same_seed_and_white() {
         assert!(found.abs() < 1.0, "octave from bin {}: {found} dB", 1 << octave);
     }
 }
+
+#[test]
+fn a_synchronised_pulse_narrower_than_a_sample_falls_where_its_width_ends() {
+    // A pulse of 2% at 6 kHz is high for a third of a sample of twice
+    // the output rate. Started again by the leader within a sample, it
+    // has risen and fallen before the sample ends: it falls its width
+    // after it rose, not at the sample.
+    let leader_bin = 601;
+    for factor in [2, 4] {
+        let mut leader = Oscillator::new();
+        let mut follower = Oscillator::new();
+        leader.enable(0);
+        leader.set_step(bin_step(leader_bin, factor));
+        follower.set_step(bin_step(8_191, factor));
+        follower.set_width(bin_step(8_191, 2) / 3);
+        let count = (POINTS + SETTLE) * factor as usize;
+        let signal: Vec<i32> = (0..count)
+            .map(|_| {
+                let _ = leader.tick(None);
+                follower.tick(leader.started()).pulse
+            })
+            .collect();
+        let found = aliasing(&float(&decimate(&signal, factor)[SETTLE..]), leader_bin);
+        println!("{factor}x synchronised pulse narrower than a sample: {found:.1} dB");
+        assert!(found < -80.0, "{factor}x: {found}");
+    }
+}

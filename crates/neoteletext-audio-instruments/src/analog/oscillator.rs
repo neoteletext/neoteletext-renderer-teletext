@@ -444,6 +444,11 @@ impl Oscillator {
                 }
             }
             self.pulse_edge(fraction, self.width > 0);
+            if since >= self.width {
+                // A pulse narrower than what the cycle has run since has
+                // fallen again already, where the phase passed its width.
+                self.pulse_edge(self.fraction(since.wrapping_sub(self.width)), false);
+            }
             self.start(fraction);
             self.started = Some(fraction);
             new = since;
