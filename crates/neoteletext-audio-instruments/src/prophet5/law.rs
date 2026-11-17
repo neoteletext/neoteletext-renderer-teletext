@@ -390,14 +390,23 @@ pub const REV2: Law = Law {
     // Source: SSM2050 data sheet, page 2, "Time range", typical: 1 to
     // 100,000 ms, taken as the attack's time, 1.466 time constants.
     envelope_bounds: (682, 68_212_824),
-    // Source: Sequential's original patch sheet 1-1, "Brass": the
-    // vibrato is "approximately 5 cycles per second" with the knob drawn
-    // at about 6, 72 steps; TM2 sheet SD312 (page 75): the knob's
-    // voltage is scaled by 75 kΩ into 100 kΩ (R368, R371) ahead of a
-    // converter of a volt to the octave, 0.75 octave to the volt: 0.22
-    // Hz at 0 and 54 Hz at the top. The manual gives no range. The
-    // pulse is 7.5 V against the sawtooth's 10 V (section 2-23).
-    lfo: (221, octaves(75, 1_200), (ONE_Q30_LEVEL as i64 * 3 / 4) as i32),
+    // Source: TM2 sheet SD312 (page 75): the knob's voltage enters an
+    // inverting summer through 75 kΩ (R368) with 100 kΩ back (R371), a
+    // gain of 4/3, and its output reaches the SSM2030's base through
+    // 54.9 kΩ over 1 kΩ (R377, R381), 17.9 mV to the volt, an octave
+    // (SSM2030 data sheet, page 2, the basic connection's 54.9 kΩ and
+    // 1 kΩ): 4/3 octave to the volt, a ninth of an octave a step. Where on that slope the knob stands is from Sequential's
+    // original patch sheet 1-1, "Brass": the vibrato is "approximately
+    // 5 cycles per second" with the knob drawn at 6.6 (the pointer's
+    // angle measured on the scan), 79 steps: 11 thousandths of a hertz
+    // at 0, 4.8 Hz at 79 steps and 195 Hz at the top. The manual gives
+    // no range, and the components do not bear the sheet out: 15 V
+    // through 100 kΩ (R370) offset the summer, and with 2.21 MΩ of
+    // reference and 0.01 µF (R382, C335) the data sheet's 10 V sawtooth
+    // would run at 0.9 Hz at that knob and 37 Hz at the top. The sheet's
+    // words are kept, as the nearer to the instrument. The pulse is
+    // 7.5 V against the sawtooth's 10 V (section 2-23).
+    lfo: (11, octaves(1, 9), (ONE_Q30_LEVEL as i64 * 3 / 4) as i32),
     // Source: TM2 section 2-21 (page 43): diodes "clamp the difference
     // between these to not exceed 0.6V".
     glide_zone: octaves(6, 10),

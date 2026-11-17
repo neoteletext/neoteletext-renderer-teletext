@@ -46,16 +46,18 @@ pub struct Sheet {
 impl Sheet {
     /// The sheet as a program of a model. The low-frequency oscillator's
     /// knob is read as revisions 1 and 2, for which the sheets were
-    /// drawn, take it (5 Hz at 6 on the dial, by sheet 1-1's own
-    /// "approximately 5 cycles per second"), and set to give the same
-    /// rate on revision 3, whose knob runs from 0.04 Hz.
+    /// drawn, take it (11 thousandths of a hertz at 0 and a ninth of an
+    /// octave a step, which is sheet 1-1's "approximately 5 cycles per
+    /// second" where it draws the knob), and set to give the same rate
+    /// on revision 3, whose knob runs from 0.04 Hz at 0.909 octave to
+    /// the volt.
     #[must_use]
     pub fn program(&self, model: Model) -> Patch {
         let mut patch = Patch::from_bytes(&[0; 24]);
         for &(knob, tenths) in self.knobs {
             let steps = match (knob, model) {
                 (Knob::LfoFrequency, Model::Rev3) => {
-                    let hertz = 5.0 * (0.75 * (f64::from(tenths) / 10.0 - 6.0)).exp2();
+                    let hertz = 0.011 * (f64::from(dial(tenths)) / 9.0).exp2();
                     (12.0 * (hertz / 0.04).log2() * 1.1).round().clamp(0.0, 120.0) as u8
                 }
                 _ => dial(tenths),
