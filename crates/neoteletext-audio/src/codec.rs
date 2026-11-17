@@ -282,9 +282,8 @@ pub const DX7_BANK_PATCHES: u32 = 32;
 /// millisecond: the block is 20 ms (REQ-6411 item 3).
 pub const DX7_SLOT_LAST_TIME: u8 = 199;
 /// The bytes of one Juno patch: its sixteen sliders and two bytes of
-/// switches, then two of the Juno-60's settings, the layout of
-/// `neoteletext_audio_instruments::juno::Patch`.
-pub const JUNO_PATCH_BYTES: u16 = 20;
+/// switches, the layout of `neoteletext_audio_instruments::juno::Patch`.
+pub const JUNO_PATCH_BYTES: u16 = 18;
 /// The bytes of one Minimoog patch, the layout of
 /// `neoteletext_audio_instruments::minimoog::Patch`.
 pub const MINIMOOG_PATCH_BYTES: u16 = 36;

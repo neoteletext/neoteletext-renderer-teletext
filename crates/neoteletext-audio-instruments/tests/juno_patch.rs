@@ -1,6 +1,5 @@
-//! The Juno's patch: the Juno-106's 18 bytes and the two that carry the
-//! Juno-60's settings, read and checked, for every value of every byte
-//! (TODO-6431; the owner's 20-byte patch of 18 November 2026).
+//! The Juno's patch: the Juno-106's 18 bytes read and checked, for every
+//! value of every byte (TODO-6431).
 
 // Without the feature there is nothing here to test.
 #![cfg(feature = "juno")]
@@ -14,18 +13,15 @@
 
 use std::cmp::Ordering;
 
-use neoteletext_audio_instruments::juno::patch::{MIDI_PATCH_BYTES, PATCH_BYTES, SLIDERS};
+use neoteletext_audio_instruments::juno::patch::{PATCH_BYTES, SLIDERS};
 use neoteletext_audio_instruments::juno::{ChorusMode, Juno, Model, Patch, PatchError, PwmSource, Range, Slider};
 
 /// The patch of the owner's manual's example of the Manual button's
-/// message (MIDI Implementation 3.2), with no Juno-60 setting.
-const MANUAL: [u8; PATCH_BYTES] = [0x03, 0, 0, 0, 0, 0x3f, 0x3c, 0, 0, 0x7f, 0x45, 0, 0, 0x7f, 0, 0, 0x2a, 0x19, 0, 0];
+/// message (MIDI Implementation 3.2).
+const MANUAL: [u8; PATCH_BYTES] = [0x03, 0, 0, 0, 0, 0x3f, 0x3c, 0, 0, 0x7f, 0x45, 0, 0, 0x7f, 0, 0, 0x2a, 0x19];
 /// The patch of its example of a patch change's message (3.1).
 const CHANGED: [u8; PATCH_BYTES] =
-    [0x39, 0x2d, 0, 0x37, 0, 0x55, 0, 0, 0, 0x19, 0x34, 0x3b, 0x20, 0x56, 0x28, 0, 0x1a, 0x18, 0, 0];
-/// Byte 18: the Juno-60's settings; byte 19, reserved.
-const JUNO_60: usize = MIDI_PATCH_BYTES;
-const RESERVED: usize = MIDI_PATCH_BYTES + 1;
+    [0x39, 0x2d, 0, 0x37, 0, 0x55, 0, 0, 0, 0x19, 0x34, 0x3b, 0x20, 0x56, 0x28, 0, 0x1a, 0x18];
 
 #[test]
 fn the_manuals_two_examples_read_as_the_manual_says() {
@@ -67,17 +63,10 @@ fn every_value_of_every_byte_is_a_patch_or_is_refused_for_its_reason() {
         for value in 0..=u8::MAX {
             let mut bytes = MANUAL;
             bytes[position] = value;
-            // MANUAL's chorus is off, so I+II (bit 2 of byte 18) is refused.
-            let expected = if position == JUNO_60 {
-                (value > 3).then_some(PatchError::Juno60)
-            } else if position == RESERVED {
-                (value != 0).then_some(PatchError::Juno60)
-            } else {
-                match position.cmp(&SLIDERS) {
-                    Ordering::Less => (value > 127).then_some(PatchError::Slider(position as u8)),
-                    Ordering::Equal => (value > 127 || ![1, 2, 4].contains(&(value & 7))).then_some(PatchError::Range),
-                    Ordering::Greater => (value > 31).then_some(PatchError::Switches),
-                }
+            let expected = match position.cmp(&SLIDERS) {
+                Ordering::Less => (value > 127).then_some(PatchError::Slider(position as u8)),
+                Ordering::Equal => (value > 127 || ![1, 2, 4].contains(&(value & 7))).then_some(PatchError::Range),
+                Ordering::Greater => (value > 31).then_some(PatchError::Switches),
             };
             match (Patch::from_bytes(&bytes), expected) {
                 (Ok(patch), None) => {
@@ -118,28 +107,15 @@ fn the_switch_bytes_mean_what_the_table_says() {
 }
 
 #[test]
-fn the_juno_60s_settings_are_carried_and_the_juno_106_bytes_hold_the_nearest_it_has() {
+fn what_the_juno_106_has_not_is_written_as_the_nearest_it_has() {
     let mut patch = Patch::DEFAULT.with(Slider::Sub, 90).with(Slider::Noise, 200);
     assert_eq!(patch.get(Slider::Noise), 127);
     patch.chorus = ChorusMode::Both;
     patch.pwm = PwmSource::Envelope;
     patch.sub = false;
-    let bytes = patch.to_bytes();
-    let read = Patch::from_bytes(&bytes).expect("a patch");
-    // The Juno-60's settings come back whole, and the sub level is kept.
-    assert_eq!(
-        (read.chorus, read.pwm, read.sub, read.get(Slider::Sub)),
-        (ChorusMode::Both, PwmSource::Envelope, false, 90)
-    );
-    // The Juno-106's bytes say II and manual, the nearest it has.
-    assert_eq!((bytes[16] & 0x60, bytes[17] & 1, bytes[JUNO_60], bytes[RESERVED]), (0, 1, 0b111, 0));
-    // A held-high high-pass position is written as the highest there is.
     patch.hpf = 9;
-    assert_eq!(Patch::from_bytes(&patch.to_bytes()).expect("a patch").hpf, 3);
-    // I+II with the chorus off is no patch.
-    let mut off = MANUAL;
-    off[JUNO_60] = 0b100;
-    assert_eq!(Patch::from_bytes(&off), Err(PatchError::Juno60));
+    let read = Patch::from_bytes(&patch.to_bytes()).expect("a patch");
+    assert_eq!((read.chorus, read.pwm, read.get(Slider::Sub), read.hpf), (ChorusMode::Two, PwmSource::Manual, 0, 3));
 }
 
 #[test]
