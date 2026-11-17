@@ -730,7 +730,7 @@ const RATE_HZ: f64 = 48_000.0;
 /// octave band's level and the whole's with the effect on, against off,
 /// and how far the level swings.
 #[test]
-fn the_effect_on_a_held_string_chord_in_figures() {
+fn the_effect_on_a_held_string_chord_lifts_the_bottom_and_takes_the_top() {
     use neoteletext_audio_instruments::cs80::presets::PRESETS;
     assert_eq!(PRESETS[0].0, "STRING 1");
     let chord = |effect: u8, tremolo: u8, chorus: u8| {
@@ -756,15 +756,42 @@ fn the_effect_on_a_held_string_chord_in_figures() {
         decibels(most / least)
     };
     println!("STRING 1 chord, effect off: the level over tenths of a second swings {:.2} dB", spread(&off));
+    // The comb of `the_effect_is_the_comb_the_drawings_make` on the
+    // chord's own partials: the band about 125 Hz holds the comb's first
+    // crest (163 Hz, +4.4 dB), the bands from 2 kHz up have little of the
+    // delayed sound left behind its filter of 499 Hz and come down
+    // towards the dry sound's share alone, 68 / 168, -7.9 dB; the whole
+    // loses under a decibel. The figures are this chord's, measured, and
+    // held to half a decibel.
+    let expected_bands: [f64; 7] = [4.3, -1.6, 1.1, -2.1, -6.1, -7.3, -7.9];
+    let expected_whole = -0.8;
+    let mut still = [0.0; 7];
     for (name, signal) in [("neither tab", chord(1, 0, 0)), ("TREMOLO", chord(1, 1, 0)), ("CHORUS", chord(1, 0, 1))] {
         let (on_bands, on_whole) = bands(&signal);
-        let differences: Vec<String> =
-            on_bands.iter().zip(&off_bands).map(|(on, off)| format!("{:+.1}", on - off)).collect();
+        let moved: Vec<f64> = on_bands.iter().zip(&off_bands).map(|(on, off)| on - off).collect();
+        let differences: Vec<String> = moved.iter().map(|moved| format!("{moved:+.1}")).collect();
         println!(
             "STRING 1 chord, effect on with {name}: whole {:+.2} dB; octave bands 125 Hz to 8 kHz {} dB; the level over tenths of a second swings {:.2} dB",
             on_whole - off_whole,
             differences.join(" "),
             spread(&signal)
         );
+        assert!((on_whole - off_whole - expected_whole).abs() < 0.5, "{name}: whole {}", on_whole - off_whole);
+        for ((moved, expected), still) in moved.iter().zip(&expected_bands).zip(&mut still) {
+            assert!((moved - expected).abs() < 0.5, "{name}: {moved} for {expected}");
+            // In the mono sum a tab moves the delayed sound's level by
+            // 7 / 246 for each oscillator at the most, a quarter of a
+            // decibel: the bands stay where they are with neither tab.
+            if name == "neither tab" {
+                *still = *moved;
+            }
+            assert!((moved - *still).abs() < 0.4, "{name}: {moved} for {still} with neither tab");
+        }
+        // The effect adds no swing of its own beyond the oscillators'
+        // few per cent: the chord's own beating is what swings.
+        assert!(spread(&signal) < spread(&off) + 2.0, "{name}: {} dB", spread(&signal));
     }
+    // The top band is the dry sound's share alone, within the delayed
+    // sound's last tenth.
+    assert!((expected_bands[6] - decibels(EFFECT.0)).abs() < 0.2);
 }
