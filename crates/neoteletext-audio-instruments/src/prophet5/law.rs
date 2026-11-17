@@ -156,9 +156,10 @@ pub struct Law {
     /// The pulse's width as a share of a cycle in Q24: at the knob's 0,
     /// and what each step adds.
     pub pulse_width: (i32, i32),
-    /// The share of a cycle that one unit of Wheel-Mod, and one volt of
-    /// Poly-Mod, move the pulse width, in Q24.
-    pub pulse_width_modulation: (i32, i32),
+    /// The share of a cycle that one unit of Wheel-Mod moves oscillator
+    /// A's pulse width and oscillator B's, and that one volt of Poly-Mod
+    /// moves oscillator A's, in Q24.
+    pub pulse_width_modulation: (i32, i32, i32),
     /// How one oscillator's waveforms come together.
     pub mixing: Mixing,
     /// The levels of the pulse and of the triangle against the
@@ -236,7 +237,11 @@ pub const REV3: Law = Law {
     // summers through 15 kΩ (R397, R398, sheet SD334, page 47) against
     // 52.3 kΩ back: 3.49 V at the pin, 69.7% of a cycle, for each volt;
     // Poly-Mod through 30.1 kΩ (R4172): 34.8%.
-    pulse_width_modulation: ((UNIT as i64 * 697 / 1_000) as i32, (UNIT as i64 * 348 / 1_000) as i32),
+    pulse_width_modulation: (
+        (UNIT as i64 * 697 / 1_000) as i32,
+        (UNIT as i64 * 697 / 1_000) as i32,
+        (UNIT as i64 * 348 / 1_000) as i32,
+    ),
     // Source: TM3 SD431 (page 50): each waveform through its own
     // resistor into the mixer amplifier's input, a 330 Ω shunt: the
     // sawtooth through 150 kΩ, the pulse through 200 kΩ, the triangle
@@ -362,11 +367,18 @@ pub const REV2: Law = Law {
     // Source: TM2 section 2-23 (page 45): "Control sensitivity is 10%/V
     // (100% @ 0V decreasing to 0% at 10V)".
     pulse_width: (UNIT, -(UNIT / 120)),
-    // Source: TM2 sheets SD411 and SD312: Wheel-Mod enters the
-    // pulse-width summer through 13.3 kΩ (R492) against 100 kΩ: 7.5 V,
-    // 75% of a cycle, for each volt; Poly-Mod through 30.1 kΩ (R494):
-    // 33.2%. More voltage is a narrower pulse.
-    pulse_width_modulation: (-((UNIT as i64 * 750 / 1_000) as i32), -((UNIT as i64 * 332 / 1_000) as i32)),
+    // Source: TM2 sheet SD411 (page 85): Wheel-Mod enters oscillator A's
+    // pulse-width summer in each voice through 13.3 kΩ (R492) against
+    // 100 kΩ back (R493): 7.5 V, 75% of a cycle, for each volt; Poly-Mod
+    // through 30.1 kΩ (R494): 33.2%. Sheet SD312 (page 76): oscillator
+    // B's pulse-width summer, one for all the voices, takes Wheel-Mod
+    // through 15 kΩ (R392) against 100 kΩ back (R395): 6.67 V, 66.7%.
+    // More voltage is a narrower pulse.
+    pulse_width_modulation: (
+        -((UNIT as i64 * 750 / 1_000) as i32),
+        -((UNIT as i64 * 667 / 1_000) as i32),
+        -((UNIT as i64 * 332 / 1_000) as i32),
+    ),
     // Source: TM2 SD411 (pages 85 and 86): the waveforms that are
     // switched on meet at nodes before the mixer's amplifier, all at
     // its one input ([`Mixing`], [`node`] and [`followed_node`]).

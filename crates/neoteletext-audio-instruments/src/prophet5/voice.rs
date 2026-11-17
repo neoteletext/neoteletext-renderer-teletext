@@ -387,7 +387,7 @@ impl Settings {
             source_b,
             poly_pitch: through(to_pitch, POLY_MOD_PITCH),
             poly_cutoff: through(to_cutoff, POLY_MOD_CUTOFF),
-            poly_width: through(to_width, law.pulse_width_modulation.1 << (28 - law::OCTAVE_BITS)),
+            poly_width: through(to_width, law.pulse_width_modulation.2 << (28 - law::OCTAVE_BITS)),
             poly_envelope: law::gain(POLY_MOD_ENVELOPE_VOLTS, amount(Knob::PolyModFilterEnvelope)),
             poly_to_pitch: to_pitch,
             poly_to_width: to_width,
@@ -624,15 +624,15 @@ impl Voice {
             .saturating_add(through(settings.wheel_pitch_b, scale(wheel, WHEEL_PITCH)));
         self.oscillator_b.set_step(law::raise(STEP_OF_C0, pitch_b.clamp(PITCH_BOUNDS.0, PITCH_BOUNDS.1)));
 
-        let (wheel_width, poly_width) = law.pulse_width_modulation;
+        let (wheel_width_a, wheel_width_b, poly_width) = law.pulse_width_modulation;
         let moved =
             |amount: i32, by: i32| i32::try_from((i64::from(amount).saturating_mul(i64::from(by))) >> law::OCTAVE_BITS);
         self.width_a = settings
             .width_a
-            .saturating_add(through(settings.wheel_width_a, moved(wheel, wheel_width).unwrap_or(0)))
+            .saturating_add(through(settings.wheel_width_a, moved(wheel, wheel_width_a).unwrap_or(0)))
             .saturating_add(through(settings.poly_to_width, moved(poly_envelope, poly_width).unwrap_or(0)));
         let width_b =
-            settings.width_b.saturating_add(through(settings.wheel_width_b, moved(wheel, wheel_width).unwrap_or(0)));
+            settings.width_b.saturating_add(through(settings.wheel_width_b, moved(wheel, wheel_width_b).unwrap_or(0)));
         self.width_b = width(width_b);
         self.oscillator_b.set_width(self.width_b);
         self.carried = None;
@@ -897,7 +897,7 @@ const _: () = assert!(SEMITONES == 12 && ONE_Q28 == 1 << 28 && UNIT == LEVEL);
 #[cfg(test)]
 #[allow(clippy::cast_precision_loss, clippy::arithmetic_side_effects, reason = "a test, in f64")]
 mod tests {
-    use super::{Controls, RATE, STEP_OF_C0, Settings, Voice};
+    use super::{Controls, RATE, STEP_OF_C0, Settings, UNIT, Voice, WIDTH_SHIFT};
     use crate::prophet5::Model;
     use crate::prophet5::patch::{Knob, Patch, Switch};
 
@@ -941,6 +941,26 @@ mod tests {
                 "{model:?}: oscillator A starts its cycle there too"
             );
         }
+    }
+
+    #[test]
+    fn wheel_mod_narrows_revision_2s_two_pulses_through_their_own_resistors() {
+        // TM2 SD411: 13.3 kΩ against 100 kΩ for oscillator A (R492,
+        // R493); SD312: 15 kΩ against 100 kΩ for oscillator B (R392,
+        // R395). A tenth of a volt of Wheel-Mod narrows A's pulse by
+        // 7.52% of a cycle and B's by 6.67%.
+        let patch = Patch::DEFAULT
+            .with_switch(Switch::WheelPulseWidthA, true)
+            .with_switch(Switch::WheelPulseWidthB, true)
+            .with(Knob::OscAPulseWidth, 60)
+            .with(Knob::OscBPulseWidth, 60);
+        let settings = Settings::new(&patch, Model::Rev2);
+        let mut voice = Voice::new(Model::Rev2, [0; 3]);
+        voice.start(24);
+        voice.tick(&settings, Controls { wheel: UNIT / 10, pitch: 0, unison: None, pedal: false });
+        let share = |width: f64| width / f64::from(UNIT);
+        let (a, b) = (share(f64::from(voice.width_a)), share(f64::from(voice.width_b >> WIDTH_SHIFT)));
+        assert!((a - (0.5 - 0.01 / 0.133)).abs() < 0.001 && (b - (0.5 - 0.01 / 0.15)).abs() < 0.001, "{a} and {b}");
     }
 
     #[test]
