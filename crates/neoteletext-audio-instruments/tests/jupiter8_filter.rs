@@ -20,7 +20,7 @@ mod support;
 
 use neoteletext_audio_instruments::jupiter8::{Param, Patch};
 use support::{
-    A2, C0, C2, C4, bin_hertz, cents, component, decibels, peak, pitch, play, rms, samples, second, spectrum, square,
+    A2, C0, C2, C4, bin_hertz, cents, component, decibels, pitch, play, rms, samples, second, spectrum, square,
 };
 
 /// Samples of a spectrum: 1.4 s.
@@ -211,7 +211,17 @@ fn the_high_pass_filter_is_off_at_its_foot_and_one_pole_above() {
     // The low-pass filter, open at 18 kHz, takes a little of its own.
     assert!((octave - pole(upper)).abs() < 0.6 && (two - pole(lower)).abs() < 0.6);
     assert!(decibels(level(1, A2), flat).abs() < 0.1);
-    assert!(peak(&play(&second(0).with(Param::HpfCutoff, 255), C0, 0.5, 0.0)) > 0.0);
+    // Far below the cutoff the slope is one pole's 6 dB an octave: the
+    // lowest key's 65.4 Hz, six octaves and a quarter under 5 kHz, is
+    // 37.7 dB down.
+    let lowest = 440.0 * (f64::from(C0) - f64::from(A2)).exp2().powf(1.0 / 12.0);
+    let tone = |slider: u8| {
+        let signal = play(&second(0).with(Param::HpfCutoff, slider), C0, 1.3, 0.0)[samples(0.25)..].to_vec();
+        component(&signal, lowest)
+    };
+    let foot = decibels(tone(255), tone(0));
+    println!("the slider at 10: {foot:.2} dB at {lowest:.1} Hz, for {:.2} dB", pole(lowest));
+    assert!((foot - pole(lowest)).abs() < 0.6);
 }
 
 /// The Juno's filter is the same chip in the same circuit, and both
