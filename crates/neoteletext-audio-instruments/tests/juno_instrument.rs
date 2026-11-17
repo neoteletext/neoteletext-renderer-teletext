@@ -24,7 +24,7 @@ use analog::Random;
 use neoteletext_audio_instruments::juno::patch::PATCH_BYTES;
 use neoteletext_audio_instruments::juno::{ChorusMode, Juno, Model, Patch, PwmSource, Slider, VOICES};
 use neoteletext_audio_instruments::{BLOCK_SAMPLES, SAMPLE_RATE};
-use support::{CONTROL, MODELS, NOTE_OFF, NOTE_ON, PITCH_BEND, flat, instrument, render, rms, square};
+use support::{CONTROL, MODELS, NOTE_OFF, NOTE_ON, PITCH_BEND, flat, instrument, render, rms, square, whistle};
 
 /// A patch from random bytes: whatever the Juno-106's 18 bytes can hold,
 /// and at random what only the Juno-60's panel has.
@@ -210,6 +210,58 @@ fn the_pedal_is_down_at_any_value_but_0_on_the_juno_106_and_from_64_on_the_juno_
             render(&mut juno, 0.1);
             assert_eq!(juno.sounding_voices(), 0, "{model:?}: the pedal from {value} to 0");
         }
+    }
+}
+
+#[test]
+fn a_volume_message_between_two_renders_does_not_step_the_signal() {
+    // The largest step from one sample to the next.
+    let step = |signal: &[i16]| signal.windows(2).map(|pair| (pair[1] - pair[0]).unsigned_abs()).max().unwrap_or(0);
+    for model in MODELS {
+        // The filter's own oscillation near middle C, a sine: its
+        // largest step is its slope, and anything sudden is larger. The
+        // volume's gain was worked out once for each call to render, so
+        // a volume message moved it between one sample and the next: a
+        // step of 0.137 of full scale where the sine's own are 0.008
+        // (TODO-6438).
+        let cutoff = match model {
+            Model::Juno106 => 62,
+            Model::Juno60 => 44,
+        };
+        let sine = flat(model, whistle(cutoff));
+        // Half a second for the oscillation to grow; then twenty changes
+        // of the volume 3,058 samples apart, the calls to render cut at
+        // `cut` samples; then the volume at its half.
+        let lead = SAMPLE_RATE as usize / 2;
+        let run = |cut: usize| {
+            let mut juno = instrument(model, &sine);
+            juno.event(NOTE_ON, 60, 100);
+            let mut out = vec![0i16; 21 * 3_058 + SAMPLE_RATE as usize / 2];
+            juno.render(&mut vec![0i16; lead]);
+            for (turn, piece) in out.chunks_mut(3_058).enumerate() {
+                juno.event(CONTROL, 7, [127, 64, 127, 0][turn.min(21) % 4]);
+                for part in piece.chunks_mut(cut) {
+                    juno.render(part);
+                }
+            }
+            out
+        };
+        let out = run(3_058);
+        assert_eq!(out, run(7), "{model:?}: the calls' lengths change the samples");
+        // The note alone, at the full volume of the first 3,058 samples.
+        let (alone, changes) = (&out[..3_058], &out[3_058..21 * 3_058]);
+        let (steady, worst) = (step(alone), step(changes));
+        println!("{model:?}: a step of {worst} units at most across the volume's changes, {steady} in the note");
+        assert!(worst * 5 < steady * 6, "{model:?}: the volume clicks: {worst} against {steady}");
+        // And the volume arrives: half the controller, to the sample of
+        // an instrument that had it from the first.
+        let mut there = instrument(model, &sine);
+        there.event(CONTROL, 7, 64);
+        there.event(NOTE_ON, 60, 100);
+        let mut same = vec![0i16; lead + out.len()];
+        there.render(&mut same);
+        let settled = out.len() - SAMPLE_RATE as usize / 4;
+        assert_eq!(out[settled..], same[lead + settled..], "{model:?}: the volume does not arrive");
     }
 }
 

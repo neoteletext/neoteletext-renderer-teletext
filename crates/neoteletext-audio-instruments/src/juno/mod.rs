@@ -331,6 +331,14 @@ const MICROSECONDS: u64 = 1_000_000;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
+/// The most the volume's gain moves in one sample, in Q28: from nothing
+/// to all of it in 256 samples, 5.3 ms. A volume message between two
+/// calls to render would otherwise step the signal by the gain's whole
+/// change at once, which is a click.
+///
+/// Source: own choice: long against a sample and short against a hand
+/// on a volume control; this crate's Prophet-5 moves its volume so.
+const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
 
 /// The Juno.
 ///
@@ -356,6 +364,9 @@ pub struct Juno {
     bend: i32,
     wheel: u8,
     volume: u8,
+    /// The volume's gain as it stands, in Q28, on its way to what the
+    /// controller asks.
+    volume_gain: i32,
     /// Samples of the voices until the next tick, and ticks until the
     /// next frame.
     tick_wait: u32,
@@ -419,6 +430,7 @@ impl Juno {
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
+            volume_gain: ONE_Q28,
             tick_wait: 0,
             frame_wait: 0,
             smoothing: voice::hold_smoothing(),
@@ -625,7 +637,9 @@ impl Juno {
     ///
     /// - Note off (0x8n), and note on (0x9n) with a velocity of 0.
     /// - Note on (0x9n); the velocity is not used.
-    /// - Control change (0xBn) of the modulation wheel (1), volume (7),
+    /// - Control change (0xBn) of the modulation wheel (1), volume (7,
+    ///   whose gain moves to its new place over five thousandths of a
+    ///   second at the most),
     ///   the sustain pedal (64: down at any value but 0 on the Juno-106,
     ///   as its owner's manual has it, MIDI Implementation 2.1, and from
     ///   64 on the Juno-60, which has no MIDI of its own and is given MIDI
@@ -790,7 +804,9 @@ impl Juno {
                 // A share cut to nothing would never arrive.
                 self.level = if step == 0 { self.level_wanted } else { self.level.saturating_add(step) };
             }
-            signal = amplify(amplify(signal, self.level), volume);
+            let towards = volume.saturating_sub(self.volume_gain).clamp(-VOLUME_SLEW, VOLUME_SLEW);
+            self.volume_gain = self.volume_gain.saturating_add(towards);
+            signal = amplify(amplify(signal, self.level), self.volume_gain);
             self.quiet = if signal.saturating_abs() < QUIET_LEVEL {
                 self.quiet.saturating_add(1).min(CHORUS_FILL_SAMPLES)
             } else {
