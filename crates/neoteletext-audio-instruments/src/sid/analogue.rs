@@ -127,11 +127,12 @@ const CUTOFF_MAX: u32 = (1 << 11) - 1;
 /// of the bend's coefficient below that: as many as keep the square of
 /// the bend's width times the coefficient inside 32 bits.
 const CUTOFF_SLOPE_BITS: u32 = 8;
-const CUTOFF_BEND_BITS: u32 = 12;
+const CUTOFF_BEND_BITS: u32 = 11;
 
-/// The 6581's cutoff curve: one typical chip's, in four parts. From the
-/// bottom of the register the cutoff lies at a floor; it bends upwards to
-/// a straight rise; the rise slackens at a knee; and it stops at a top.
+/// The 6581's cutoff curve: the middle one of seven real chips, in four
+/// parts. From the bottom of the register the cutoff lies at a floor; it
+/// bends upwards to a straight rise; the rise slackens at a knee; and it
+/// stops at a top.
 ///
 /// Source: the shape of its foot is an own model of the designer's
 /// account that the cutoff is set by "FETs as voltage-controlled
@@ -148,53 +149,80 @@ const CUTOFF_BEND_BITS: u32 = 12;
 /// cutoff inversely proportional to them, and the Commodore 64's 470 pF)
 /// and a top of 12 kHz.
 ///
-/// The figures are fitted to the output of reSIDfp's default 6581,
-/// measured 17 November 2026: the corner of its low-pass for noise on one
-/// voice, at full level and at a fifth of it, with no resonance and with
-/// the highest. Its cutoff rises with the signal's level where the curve
-/// bends (at register $100, 390 to 404 Hz for the quiet noise and 752 to
-/// 1,122 Hz for the loud), and this curve runs between the two. In hertz,
-/// measured and then this curve:
+/// The figures are fitted to real chips, measured 17 November 2026 from
+/// what their owners published:
 ///
-/// | Register | Measured | Here |
-/// |---|---|---|
-/// | $000 | 261 to 365 | 320 |
-/// | $080 | 256 to 571 | 320 |
-/// | $100 | 390 to 1,122 | 577 |
-/// | $180 | 1,113 to 2,067 | 1,291 |
-/// | $200 | 1,964 to 2,948 | 2,462 |
-/// | $280 | 3,652 to 4,378 | 4,090 |
-/// | $300 | 5,549 to 6,331 | 5,946 |
-/// | $380 | 7,470 to 8,404 | 7,802 |
-/// | $400 | 8,308 to 9,628 | 9,210 |
-/// | $480 | 10,020 to 12,252 | 10,618 |
-/// | $580 | 13,065 to 16,822 | 13,434 |
-/// | $680 | 15,571 to 17,463 | 16,250 |
-/// | $7FF | 16,706 to 18,794 | 17,000 |
+/// - Stone Oakvalley's recordings of his 6581 R2 (date code 4982) and R4
+///   (3387) playing Plogue's one-page BASIC SID benchmark, which sends
+///   noise through each filter output with no resonance while the
+///   cutoff's upper byte counts from 0 to 255 (6581-8580.com, "The SID
+///   Chips visualized & benched", 1 September 2015). Measured: the corner
+///   of a two-pole low-pass fitted to the noise's spectrum in each 64
+///   register steps, against the same chip's unfiltered noise.
+/// - Michiel Boland's spectrogram of four real 6581s, his b1, b2, b5 and
+///   b6, playing noise through the band-pass while the register sweeps
+///   logarithmically ("SID filter measurements", November 2024).
+///   Measured: the brightest frequency of each column of the picture,
+///   which can be read to about a tenth, and no higher than 6 kHz.
+/// - Stone Oakvalley's recordings of tunes on his 6581 R3 (2383), which
+///   has no test recording: in the two tunes that sweep the filter its
+///   spectrum is brighter than the R2's and darker than no other's.
 ///
-/// The test `the_6581_curve_is_the_one_fitted` holds the curve to them.
-/// (TODO-6427 fault 2: the curve before, with a floor of 140 Hz to
-/// register 384 and a top of 12 kHz, lay two to five times lower between
-/// $080 and $400.)
+/// The seven keep one order of brightness along the register: b2, b6 and
+/// the R3, then the R2, then b5, the R4 and b1. The R2 is the middle chip,
+/// and this curve is fitted to its corners. In hertz, the darkest chip,
+/// the R2, the brightest chip, and this curve:
+///
+/// | Register | Darkest | R2 | Brightest | Here |
+/// |---|---|---|---|---|
+/// | $100 | 275 | 414 | 1,949 | 400 |
+/// | $1A0 | 280 | 799 | 5,600 | 581 |
+/// | $220 | 290 | 1,348 | above 6,000 | 1,388 |
+/// | $2A0 | 330 | 2,723 | above 6,000 | 2,839 |
+/// | $320 | 363 | 4,741 | above 6,000 | 4,936 |
+/// | $3A0 | 450 | 7,479 | above 6,000 | 7,668 |
+/// | $420 | 600 | 11,121 | above 6,000 | 10,612 |
+/// | $4A0 | 800 | 12,010 | above 6,000 | 12,660 |
+/// | $520 | 950 | 15,231 | above 6,000 | 14,708 |
+/// | $7FF | 6,900 | above 16,000 | above 16,000 | 16,000 |
+///
+/// Two emulators run as separate programs (sidplayfp 2.16.0, both
+/// engines at their defaults, measured the same way as the R2) lie
+/// between the R2 and b6 below register $300, at 2.0 and 2.4 kHz for
+/// $220, and with the R2 above it; the darkest and brightest settings of
+/// the one that has a setting span 0.4 to 8.3 kHz there.
+///
+/// On every one of these chips the cutoff also rises with the level of
+/// the signal in the filter, most where the curve bends; that is not
+/// modelled, and the R2's corners are those of one voice of noise at
+/// sustain 12. The test `the_6581_curve_is_the_middle_chips` holds the
+/// curve to them. (TODO-6427 fault 2: the first curve, with a floor of
+/// 140 Hz to register 384 and a top of 12 kHz, lay below the R2 by half
+/// between $220 and $320; the second, fitted to one emulator's output,
+/// lay above it by up to two between $1A0 and $2A0.)
 mod curve_6581 {
     use super::CUTOFF_SLOPE_BITS;
 
     /// The floor, in hertz.
-    pub(super) const FLOOR_HZ: u32 = 320;
+    pub(super) const FLOOR_HZ: u32 = 400;
     /// Where the bend from the floor to the rise starts and stops, in
     /// register steps.
-    pub(super) const BEND: (u32, u32) = (120, 640);
+    pub(super) const BEND: (u32, u32) = (320, 904);
     /// The middle of the bend: where the straight rise would meet the
     /// floor.
     pub(super) const THRESHOLD: u32 = u32::midpoint(BEND.0, BEND.1);
-    /// The rise above the bend: 14.5 Hz a register step.
-    pub(super) const SLOPE: u32 = 29 << (CUTOFF_SLOPE_BITS - 1);
+    /// The rise above the bend, in hertz a register step.
+    pub(super) const SLOPE_HZ: u32 = 23;
+    /// The same in [`CUTOFF_SLOPE_BITS`] fraction bits.
+    pub(super) const SLOPE: u32 = SLOPE_HZ << CUTOFF_SLOPE_BITS;
     /// The register step at which the rise slackens.
-    pub(super) const KNEE: u32 = 896;
-    /// The rise above the knee: 11 Hz a register step.
-    pub(super) const UPPER_SLOPE: u32 = 11 << CUTOFF_SLOPE_BITS;
+    pub(super) const KNEE: u32 = 1056;
+    /// The rise above the knee, in hertz a register step.
+    pub(super) const UPPER_SLOPE_HZ: u32 = 16;
+    /// The same in [`CUTOFF_SLOPE_BITS`] fraction bits.
+    pub(super) const UPPER_SLOPE: u32 = UPPER_SLOPE_HZ << CUTOFF_SLOPE_BITS;
     /// The top, in hertz.
-    pub(super) const TOP_HZ: u32 = 17_000;
+    pub(super) const TOP_HZ: u32 = 16_000;
 }
 /// What a squared distance into the 6581's bend is multiplied by, in
 /// [`CUTOFF_BEND_BITS`] fraction bits more than the slope's: the slope
@@ -718,53 +746,64 @@ mod tests {
 
     #[test]
     fn the_6581_curve_has_a_floor_a_bend_two_rises_and_a_top() {
-        use curve_6581::{BEND, FLOOR_HZ, KNEE, THRESHOLD, TOP_HZ};
+        use curve_6581::{BEND, FLOOR_HZ, KNEE, SLOPE_HZ, THRESHOLD, TOP_HZ, UPPER_SLOPE_HZ};
         let hz = |register: u32| cutoff_hz(ChipModel::Mos6581, register);
         assert_eq!((hz(0), hz(BEND.0)), (FLOOR_HZ, FLOOR_HZ));
-        // The straight rise: 14.5 Hz a step from where it would meet the
-        // floor, half way along the bend; then 11 Hz a step from the knee.
-        for register in [BEND.1, 768, KNEE] {
-            assert_eq!(hz(register), FLOOR_HZ + (register - THRESHOLD) * 29 / 2, "{register}");
+        // The straight rise from where it would meet the floor, half way
+        // along the bend; then the slacker rise from the knee.
+        for register in [BEND.1, u32::midpoint(BEND.1, KNEE), KNEE] {
+            assert_eq!(hz(register), FLOOR_HZ + (register - THRESHOLD) * SLOPE_HZ, "{register}");
         }
-        assert_eq!(hz(KNEE + 100), hz(KNEE) + 1_100);
+        assert_eq!(hz(KNEE + 100), hz(KNEE) + 100 * UPPER_SLOPE_HZ);
         // The bend leaves the floor level and meets the line at the
         // line's slope, and its arithmetic stays inside 32 bits.
         assert!(hz(BEND.0 + 1) - hz(BEND.0) <= 1);
-        assert!((14..=15).contains(&(hz(BEND.1) - hz(BEND.1 - 1))), "{}", hz(BEND.1) - hz(BEND.1 - 1));
-        assert!((14..=15).contains(&(hz(BEND.1 + 1) - hz(BEND.1))));
+        let near = SLOPE_HZ - 1..=SLOPE_HZ + 1;
+        assert!(near.contains(&(hz(BEND.1) - hz(BEND.1 - 1))), "{}", hz(BEND.1) - hz(BEND.1 - 1));
+        assert!(near.contains(&(hz(BEND.1 + 1) - hz(BEND.1))));
         let width = u64::from(BEND.1 - BEND.0);
         assert!(u32::try_from(width * width * u64::from(CUTOFF_BEND_COEFFICIENT)).is_ok());
         // The top is reached inside the register and held.
         assert!(hz(CUTOFF_MAX - 256) == TOP_HZ && hz(CUTOFF_MAX) == TOP_HZ);
-        assert!(hz(KNEE) < TOP_HZ / 2);
+        assert!(hz(KNEE) < TOP_HZ);
     }
 
     #[test]
-    fn the_6581_curve_is_the_one_fitted() {
-        // The corners of the reference program's low-pass, measured from
-        // its output on 17 November 2026 for noise at two levels and two
-        // resonances (the table at `curve_6581`): lowest and highest, in
-        // hertz. The curve passes between them, or within a tenth.
-        // TODO-6427 fault 2: the curve before lay two to five times lower
-        // between $080 and $400.
-        let measured = [
-            (0x000, 261, 365),
-            (0x080, 256, 571),
-            (0x100, 390, 1_122),
-            (0x180, 1_113, 2_067),
-            (0x200, 1_964, 2_948),
-            (0x280, 3_652, 4_378),
-            (0x300, 5_549, 6_331),
-            (0x380, 7_470, 8_404),
-            (0x400, 8_308, 9_628),
-            (0x480, 10_020, 12_252),
-            (0x580, 13_065, 16_822),
-            (0x680, 15_571, 17_463),
-            (0x7FF, 16_706, 18_794),
+    fn the_6581_curve_is_the_middle_chips() {
+        // The low-pass corners of Stone Oakvalley's 6581 R2, the middle
+        // one of seven real chips, measured 17 November 2026 from his
+        // recording of the benchmark (the table at `curve_6581`), in
+        // hertz for each register. The curve passes within three tenths
+        // of each. TODO-6427 fault 2: the curve fitted to one emulator's
+        // output had 2,826 Hz at $220, twice the R2's, and the one before
+        // it 526 Hz, two fifths.
+        let middle = [
+            (0x160, 465),
+            (0x1A0, 799),
+            (0x1E0, 924),
+            (0x220, 1_348),
+            (0x260, 1_662),
+            (0x2A0, 2_723),
+            (0x2E0, 3_603),
+            (0x320, 4_741),
+            (0x360, 6_017),
+            (0x3A0, 7_479),
+            (0x3E0, 9_176),
+            (0x420, 11_121),
+            (0x460, 10_624),
+            (0x4A0, 12_010),
+            (0x4E0, 13_362),
+            (0x520, 15_231),
         ];
-        for (register, lowest, highest) in measured {
+        for (register, measured) in middle {
             let found = cutoff_hz(ChipModel::Mos6581, register);
-            assert!(found * 10 >= lowest * 9 && found * 10 <= highest * 11, "${register:03X}: {found} Hz");
+            assert!(found.abs_diff(measured) * 10 <= measured * 3, "${register:03X}: {found} Hz for {measured}");
+        }
+        // And between the darkest and the brightest of the seven where
+        // both could be read: Michiel Boland's b1 and b2.
+        for (register, darkest, brightest) in [(0x100, 275, 1_949), (0x180, 278, 5_248), (0x200, 288, 6_918)] {
+            let found = cutoff_hz(ChipModel::Mos6581, register);
+            assert!(found > darkest && found < brightest, "${register:03X}: {found} Hz");
         }
     }
 

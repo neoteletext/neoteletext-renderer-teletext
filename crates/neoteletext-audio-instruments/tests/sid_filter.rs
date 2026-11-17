@@ -134,36 +134,37 @@ fn the_8580_cutoff_is_a_straight_line_and_the_6581_is_not() {
     let straight = register_reaching(ChipModel::Mos8580, 2000.0);
     assert!(straight.abs_diff(register_8580(2000.0)) <= 16, "8580: {straight}");
     // The 6581 lies at its floor first, and reaches 500 Hz far later than
-    // the 8580 does: at register 234 by its curve, against 70.
+    // the 8580 does: at register 391 by its curve, against 70.
     let (bent, line) = (register_reaching(ChipModel::Mos6581, 500.0), register_reaching(ChipModel::Mos8580, 500.0));
-    assert!(bent > 2 * line && bent.abs_diff(234) <= 16, "6581: {bent} against {line}");
+    assert!(bent > 2 * line && bent.abs_diff(391) <= 16, "6581: {bent} against {line}");
 }
 
 #[test]
-fn the_6581_cutoff_is_the_curve_fitted_to_the_reference() {
-    // TODO-6427 fault 2: the 6581's filter was two to five times darker
-    // than the reference program's between registers $080 and $400. Its
-    // band-pass for noise peaked there, measured on 17 November 2026, at
-    // 984 Hz for register $100, 2,672 Hz for $200 and 5,602 Hz for $300,
-    // where the curve before had its cutoff at 140, 539 and 2,016 Hz.
+fn the_6581_cutoff_is_the_middle_chips() {
+    // The 6581's cutoff follows the middle one of seven real chips, Stone
+    // Oakvalley's 6581 R2, whose low-pass for noise had its corner at
+    // 1,348 Hz for register $220 and 2,723 Hz for $2A0 (measured 17
+    // November 2026 from his recording of Plogue's benchmark; the table
+    // at the curve). TODO-6427 fault 2: the curve fitted to one
+    // emulator's output had its cutoff at 2,826 and 4,554 Hz there, and
+    // the one before it at 526 and 1,376 Hz.
     let open = |tone: f64| through(ChipModel::Mos6581, tone, 2047, 0, LOW_PASS);
     let at = |register: u16, tone: f64| decibels(through(ChipModel::Mos6581, tone, register, 0, LOW_PASS) / open(tone));
-    // The low-pass's corner, 3 dB down, is now within an octave of each
-    // of the first two: above half of it and below twice it.
-    for (register, hz) in [(0x100, 984.0), (0x200, 2672.0)] {
-        let (below, above) = (at(register, hz / 2.0), at(register, hz * 2.0_f64.min(3800.0 / hz)));
+    // The low-pass's corner, 3 dB down, is within an octave of each:
+    // above half of it, and below 1.7 times it or the highest tone a
+    // voice can play, 3.8 kHz.
+    for (register, hz) in [(0x220, 1348.0), (0x2A0, 2723.0)] {
+        let (below, above) = (at(register, hz / 2.0), at(register, (hz * 1.7_f64).min(3800.0)));
         assert!(below > -3.0 && above < -3.0, "${register:03X}: {below} dB and {above} dB about {hz} Hz");
     }
-    // And at $300 the highest tone a voice can play, 3.8 kHz, passes.
-    assert!(at(0x300, 3800.0) > -1.5, "$300: {} dB at 3.8 kHz", at(0x300, 3800.0));
 }
 
 #[test]
 fn resonance_raises_the_cutoff_and_the_8580_has_more_of_it() {
     let peak = |model: ChipModel, resonance: u8| {
-        // The cutoff register for 1 kHz: on the 6581, by its curve, 341.
+        // The cutoff register for 1 kHz: on the 6581, by its curve, 495.
         let cutoff = match model {
-            ChipModel::Mos6581 => 341,
+            ChipModel::Mos6581 => 495,
             ChipModel::Mos8580 => register_8580(1000.0),
         };
         through(model, 1000.0, cutoff, resonance, LOW_PASS) / through(model, 1000.0, cutoff, resonance, 0)
