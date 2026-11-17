@@ -118,7 +118,8 @@ const DRIVE_SHIFT: u32 = 2;
 const VCF_GAIN: i32 = (ONE_Q28 as i64 * (1 << DRIVE_SHIFT) * 8 / 10) as i32;
 
 /// The amplifier's gain with every level at nominal, in Q30: an eighth,
-/// which leaves 18 dB for what pressure and the keyboard control add.
+/// which leaves 18 dB for what pressure and the keyboard control add,
+/// 8.2 dB with every lever at its top.
 ///
 /// Source: own choice.
 const GAIN_NOMINAL: u32 = (ENVELOPE_ONE >> 3) as u32;
@@ -182,25 +183,46 @@ const TOUCH_BRILLIANCE: i32 = law::octaves(64, 10);
 /// "increases the brightness of any note when you play harder", so the
 /// softest stroke adds nothing.
 const STROKE_HARDEST: (i32, i32) = (79, 85);
-/// The octaves of amplitude the touch response's level levers reach: the
-/// same 6.4 V at 3 dB to the volt.
+/// What a volt at an amplifier's level input is, as a fraction of an
+/// octave of amplitude: 0.9 dB of the 6.02 dB that an octave is. The
+/// touch response's two level voltages and the keyboard control's reach
+/// that input alike (service manual, page 39, R51-52 circuit diagram:
+/// TI, TA and KB through 270 kΩ each to a voice's level line).
 ///
-/// Source: the same page, steps 2 and 4: "+6.4 ± .3V". Own choice of the
-/// 3 dB to the volt: the amplifier's level input is exponential (service
-/// manual, page 52, "VCA IC (IG00151)", pin 1, EI), and its scale is in
-/// no document read.
-const TOUCH_LEVEL: i32 = law::octaves(64 * 3, 10 * 6);
+/// Source: own choice by twelve recordings of a real instrument's BRASS
+/// 1, whose INITIAL LEVEL row stands at the top; no document read gives
+/// the scale ("the level exponentially", service manual, page 52, "VCA IC
+/// (IG00151)", pin 1, EI). A stroke's voltage drains away in 3.3 s
+/// ([`TOUCH_HOLD`]), and with it the level it gave: from 1 s to 10 s
+/// after the key the recordings' fundamentals fall 2.7 to 6.8 dB, 4.3 dB
+/// in the mean, of which this instrument's envelope is 0.6 dB and the
+/// drain of the hardest stroke the rest. Each key by itself gives 0.5 to
+/// 1.4 dB to the volt
+/// (`~/devel/teletext-reference/synthesizers/cs-80/validation/`). At 3 dB
+/// to the volt, as this was first chosen, the same notes fell 13.5 dB.
+const LEVEL_A_VOLT: (i32, i32) = (90, 602);
+/// The octaves of amplitude the touch response's level levers reach: the
+/// 6.4 V that the brilliance levers reach, 5.8 dB. Pressure reaches it;
+/// a stroke does not ([`STROKE_HARDEST`]).
+///
+/// Source: adjustment procedure, page 23, steps 2 and 4: "+6.4 ± .3V",
+/// at [`LEVEL_A_VOLT`].
+const TOUCH_LEVEL: i32 = law::octaves(64 * LEVEL_A_VOLT.0, 10 * LEVEL_A_VOLT.1);
 /// The volts the sub oscillator at its peak adds to the brilliance
-/// either way with its VCF lever at the top: 1.1 V, which
-/// [`law::MODULATION`] makes 0.36 octave of the high-pass filter and 1.34
+/// either way with its VCF lever at the top: 1.6 V, which
+/// [`law::MODULATION`] makes 0.52 octave of the high-pass filter and 1.96
 /// of the low-pass.
 ///
-/// Source: own choice: as pressure gives ([`TOUCH_VCF_REACH`]), since
-/// the touch response's levers "do the same thing as their counterparts
-/// in the Sub Oscillator section" (owner's manual, page 38, item 12).
-const SUB_VCF_REACH: i32 = TOUCH_VCF_REACH;
-/// The same by pressure on a key with the touch response's VCF lever at
-/// the top: 1.1 V either way.
+/// Source: service manual, page 64, Panel 2 circuit diagram: the VCF
+/// lever (VR10, B 10 kΩ) stands between earth and the sub oscillator
+/// board's output SUO, its wiper on the line SUB of the R52 board; page
+/// 29, SUB circuit diagram: SUO is a follower of what the FUNCTION
+/// switch chooses, the chip's sine among them; page 52, "VCO II IC
+/// (IG00150)", pin 6: the sine is "3.20Vpp". The sawtooth's 3.5 Vp-p
+/// (pin 7) would be 1.75 V; every function is given the sine's here.
+const SUB_VCF_REACH: i32 = law::octaves(16, 10);
+/// What pressure on a key lets the sub oscillator add with the touch
+/// response's VCF lever at the top: 1.1 V either way.
 ///
 /// Source: adjustment procedure, page 25, step 8: "2.2 ± .2 Vp-p" at the
 /// terminals F1 to F8, the key firmly depressed.
@@ -225,6 +247,21 @@ const TOUCH_VCO_REACH: i32 = law::cents(100);
 /// procedure (page 25, step 5) gives the control's -4.2 V but not what a
 /// volt of it is in pitch.
 const TOUCH_BEND: (i32, u32) = (law::cents(200), 40_000);
+/// The time constant with which a stroke's voltage dies away once it has
+/// been taken, in millionths of a second: 10 MΩ across 0.33 µF, 3.3 s. A
+/// stroke's brilliance and level are therefore the start of a note, and
+/// a held note comes to rest where the softest stroke would leave it.
+///
+/// Source: service manual, page 17, TWS circuit diagram, and page 18,
+/// the board as printed ("22K", "10M", "0.33/16" beside each of FET1 to
+/// FET8): at a key's trigger a FET puts the stroke's voltage on a
+/// tantalum capacitor of 0.33 µF at a follower's input, whose output is
+/// the voice's initial touch (b1 to b8); the 10 MΩ goes from that input
+/// to the capacitor's earthed side in each of the eight (the FET's gate
+/// has its own 1 MΩ and a diode to the trigger). Pages 19 and 23: b1 to
+/// b8 go only to the cells that the INITIAL levers scale (TRG1 and
+/// TRG4), so nothing holds them further.
+const TOUCH_HOLD: u32 = 3_300_000;
 
 /// The key the keyboard control's levers do nothing at.
 ///
@@ -247,9 +284,9 @@ const KEYBOARD_TRIM_KEYS: (i32, i32) = (KEYBOARD_CENTRE - 48, 85 - KEYBOARD_CENT
 /// choice: the control grows as the square of the distance from the
 /// centre, for the "smooth curve" of the owner's manual (page 38, item 9).
 const KEYBOARD_BRILLIANCE: i32 = law::octaves(276, 100);
-/// The same for the level levers, in octaves of amplitude, at 3 dB to
-/// the volt as [`TOUCH_LEVEL`].
-const KEYBOARD_LEVEL: i32 = law::octaves(276 * 3, 100 * 6);
+/// The same for the level levers, in octaves of amplitude: 2.5 dB, at
+/// [`LEVEL_A_VOLT`].
+const KEYBOARD_LEVEL: i32 = law::octaves(276 * LEVEL_A_VOLT.0, 100 * LEVEL_A_VOLT.1);
 /// The most the keyboard and the touch may lift a level above nominal,
 /// in octaves of amplitude: what [`GAIN_NOMINAL`] leaves.
 const LEVEL_LIFT: i32 = 3 * OCTAVE;
@@ -349,7 +386,8 @@ impl Channel {
             law::scaled(law::share(law::LEVER_VOLTS * law::VOLT, lever(control)), lever_weight)
                 .saturating_add(law::scaled(brilliance, brilliance_weight))
         };
-        // The overall lever adds its travel to each filter's own.
+        // The chip has the mean of each filter's own lever and the
+        // overall one ([`law::damping`]).
         let resonance = u32::from(patch.get(Global::Resonance));
         let damping = |control: Control| {
             let damping = law::damping(u32::from(lever(control)).saturating_add(resonance));
@@ -402,7 +440,12 @@ impl Channel {
                 STROKE_HARDEST.1,
             ),
             pressure_brilliance: law::share(TOUCH_BRILLIANCE, lever(Control::PressureBrilliance)),
-            touch_level: law::share(TOUCH_LEVEL, lever(Control::TouchLevel)),
+            // The stroke's one voltage makes its level as its brilliance.
+            touch_level: law::share_of(
+                law::share(TOUCH_LEVEL, lever(Control::TouchLevel)),
+                STROKE_HARDEST.0,
+                STROKE_HARDEST.1,
+            ),
             pressure_level: law::share(TOUCH_LEVEL, lever(Control::PressureLevel)),
         }
     }
@@ -433,6 +476,8 @@ pub struct Shared {
     glide_step: i32,
     glissando: bool,
     bend_return: i32,
+    /// The share of a stroke's voltage that drains away in a tick.
+    touch_fall: i32,
     damp: i32,
 }
 
@@ -485,6 +530,7 @@ impl Shared {
             },
             glissando: patch.on(Global::Glissando),
             bend_return: time_constant(TOUCH_BEND.1, TICK_RATE),
+            touch_fall: time_constant(TOUCH_HOLD, TICK_RATE),
             damp: coefficient(DAMP_TIME, TIME_CONSTANT_THOUSANDTHS.1),
         }
     }
@@ -744,7 +790,8 @@ pub struct Voice {
     /// The key voltage's interval from the A, in octaves, where the glide
     /// has brought it.
     glide: i32,
-    /// How hard the key was struck and how hard it is pressed, in Q30.
+    /// What is left of how hard the key was struck, which drains away
+    /// ([`TOUCH_HOLD`]), and how hard the key is pressed, in Q30.
     velocity: i32,
     pressure: i32,
     /// The touch's pitch bend, in octaves, on its way back to nothing.
@@ -858,6 +905,7 @@ impl Voice {
             self.glide
         };
         self.bend = self.bend.saturating_sub(scale(self.bend, shared.bend_return));
+        self.velocity = self.velocity.saturating_sub(scale(self.velocity, shared.touch_fall));
 
         let sub = controls.sub;
         let vibrato =

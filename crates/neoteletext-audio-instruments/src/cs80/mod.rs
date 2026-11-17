@@ -20,8 +20,9 @@
 //!   state-variable filter of 12 dB an octave with its own resonance
 //!   ([`StateVariable`](crate::analog::filter::StateVariable)). Their
 //!   cutoffs follow the key, and move an octave for each volt. The
-//!   resonance reaches a Q of 5 by its lever and 9.5 with the overall
-//!   lever's help; the filters do not oscillate by themselves.
+//!   resonance is set by a filter's own lever and the overall lever
+//!   together, a Q of 0.5 with both at their feet and of 5 with both at
+//!   their tops; the filters do not oscillate by themselves.
 //! - **Envelopes.** The filters' (IG00152) starts at an initial level
 //!   below the levers' setting, rises to an attack level above it, decays
 //!   to the setting and on release returns to the initial level. The
@@ -30,12 +31,15 @@
 //!   ([`RcEnvelope`]).
 //! - **Touch.** How hard a key is struck (MIDI velocity) and how hard it
 //!   is then pressed, each key by itself (MIDI polyphonic key pressure),
-//!   move the brilliance and the level by each tone's four levers;
+//!   move the brilliance and the level by each tone's four levers; what
+//!   a stroke gives drains away in a time constant of 3.3 s, as the
+//!   board that holds its voltage drains it;
 //!   pressure also speeds the sub oscillator and deepens its vibrato and
 //!   wah, and a hard stroke can start a note flat.
 //! - **After the voices**, at the output rate: the ring modulator, whose
 //!   own oscillator an attack and decay envelope speeds up; the
-//!   tremolo/chorus; the volume.
+//!   tremolo/chorus, which adds the sound delayed by 2.56 ms, inverted
+//!   and dulled, to the sound itself; the volume.
 //!
 //! # What MIDI's controls are on this instrument
 //!
@@ -73,13 +77,17 @@
 //!   decibels a volt of touch, of the keyboard control and of the sub
 //!   oscillator is, and how far the overall levers reach.
 //! - **BRASS 1 is brighter than the one real instrument heard.** Twelve
-//!   keys of a real instrument's BRASS 1 come to rest 1.39 to 2.00
-//!   octaves above their notes; this reading rests at 2.92 on every key
-//!   at the softest stroke, 1.19 octaves above them in the mean, and
-//!   higher at a harder stroke. The real filter's peak also comes sooner
-//!   (116 to 260 ms after the key for 390 ms), and it falls back more
-//!   slowly (6.5 to 8.3 s to a tenth for 3.3 s). The figures, and a test
-//!   that states them and fails, are in `tests/cs80_filter.rs`
+//!   keys of a real instrument's BRASS 1, struck hard, come to rest 1.39
+//!   to 2.00 octaves above their notes; this reading comes to rest at
+//!   2.92 on every key however it is struck, 1.19 octaves above them in
+//!   the mean (10 s after the hardest stroke it still stands at 3.02).
+//!   The real filter's peak also comes sooner (116 to 260 ms after the
+//!   key for 170 to 390 ms). The fall from the peak agrees since the
+//!   stroke's voltage drains away as the touch board drains it: on
+//!   middle C a time constant of 2.73 s for the recording's 2.80 s, and
+//!   the fundamental 4.0 dB down from 1 s to 10 s for the recordings'
+//!   4.3 dB in the mean. The figures, and a test that states the rest
+//!   level and fails, are in `tests/cs80_filter.rs`
 //!   (`brass_1_rests_where_a_real_instruments_does`, ignored). What the
 //!   documents were asked:
 //!   - *The preset's parts* are as drawn (T51, column C: 5.1 kΩ on the
@@ -94,16 +102,12 @@
 //!     pin 15: the sustain level is "normally fixed to zero(0) volt", and
 //!     page 41 ties the pin to earth), starts at the initial level and
 //!     returns to it: as it is here.
-//!   - *The stroke's voltage is not held for ever* in the instrument: the
-//!     touch board keeps it on 0.33 µF behind a FET, with 10 MΩ from
-//!     the capacitor to the FET's gate as the drawing was read (service
-//!     manual, page 17, TWS circuit diagram), a time constant of 3.3 s,
-//!     which is the time constant the recordings' filters fall with. Here a stroke's
-//!     brilliance and level last the whole note. Where the held voltage
-//!     ends (nothing, or below nothing, which would lower a held note's
-//!     brilliance by the INITIAL BRILLIANCE lever's share and could be
-//!     the whole gap) the drawing does not say without the FET's
-//!     pinch-off voltage, so it is not built.
+//!   - *The stroke's voltage is not held for ever*: the touch board
+//!     keeps it on 0.33 µF with 10 MΩ across it (service manual, pages
+//!     17 and 18), and it drains to nothing in a time constant of 3.3 s,
+//!     as it does here. It ends at nothing, not below, so a held note
+//!     rests where the softest stroke leaves it, and that is where the
+//!     gap is measured.
 //!   - *The overall BRILLIANCE lever* of the recorded instrument would
 //!     have to stand a third of its travel from its centre.
 //!
@@ -113,37 +117,46 @@
 //!   the after-touch is trimmed with
 //!   (`~/devel/teletext-reference/synthesizers/cs-80/validation/`).
 //! - **The resonance between its ends** follows the same recordings and
-//!   not a document ([`law::damping`]). The drawings leave one thing
-//!   open: each voice's Q input is fed by its filter's lever and by the
-//!   overall RESONANCE lever through 220 kΩ each, with no resistor to
-//!   earth (service manual, pages 39 and 41), so that the chip may see
-//!   the mean of the two and not their sum, and the alignment sets both
-//!   to their most for the chip's Q of 5 (adjustment procedure, page
-//!   11). Read so, with the overall lever at its nominal least, no
-//!   preset would have a Q above 1.6 to 2.8, and BRASS 1's would be
-//!   under 1.5, which the recordings' 2.7 does not bear out; the sum is
-//!   kept.
+//!   not a document ([`law::damping`]). What the drawings do say is that
+//!   the chip has the mean of a filter's own lever and the overall
+//!   RESONANCE lever, 220 kΩ from each and no resistor to earth (service
+//!   manual, pages 39 and 41), and its Q of 5 with both at their most
+//!   (page 42; adjustment procedure, page 11). So one lever alone reaches
+//!   a Q of 2.75, and where the overall lever stands matters to every
+//!   sound: the recordings' Q of 2.7 for BRASS 1 is met with it at its
+//!   centre, where the owner's manual pictures it and the panel at rest
+//!   here has it, and is out of reach with it at its foot. That the
+//!   recorded instrument's lever stood at its centre is not known.
 //! - **The real sine is not pure**: recordings have its second and third
 //!   harmonics 20 to 25 dB down, where the sine here has them 77 dB
 //!   down. The documents give no figure for it: the waveshaper's sheet
 //!   (service manual, page 42, IG00158) only names the pins and the
 //!   sine's 3 V, and the adjustment procedure has no step for it.
-//! - **The effect leaves the dry sound in.** On the OE1 board the input
-//!   reaches both output amplifiers through 100 kΩ whether the effect is
-//!   on or off, and the delayed sound joins it, inverted, through 68 kΩ
-//!   (service manual, page 55); the levels at the two are not printed.
-//!   Here the delayed sound takes the dry sound's place. Both of the
-//!   effect's oscillators also run in both modes, CHORUS being the same
-//!   pair at about a sixth of TREMOLO's speed voltage (pages 55 and 66);
-//!   here one runs for each tab.
+//! - **The effect's levels rest on one reading.** The drawings give
+//!   every part of the tremolo/chorus (service manual, pages 55 to 58,
+//!   and the panel's wiring on page 66), and it is built from them: the
+//!   dry sound stays in, the delayed sound is added to it inverted, and
+//!   both oscillators run under either tab. What no page prints is how
+//!   large the sound is where it enters the board, so how large the
+//!   delayed sound is against the dry is a reading of the adjustment
+//!   procedure's trimming figures ([`EFFECT_WET`]); and how many octaves
+//!   a volt is at the oscillators' chip is taken from the pulse width's
+//!   oscillator, which is the same chip behind another pair of resistors
+//!   ([`EFFECT_OCTAVES_A_VOLT`]). The drawings also carry later changes
+//!   by hand (the delayed sound's coupling capacitors of 1 µF made 0.01
+//!   µF, among others) that the boards as printed do not have; the
+//!   boards as printed are what is built.
 //! - **The filters do not distort**, and the loss of resonance at high
 //!   frequencies that Haible finds (180 pF across the damping) is left
 //!   out.
 //! - **The tremolo/chorus is what the mono output has of it.** The
-//!   circuit puts the sound through two delay lines of fixed length and
-//!   moves the levels of the left and right outputs against each other;
-//!   in their sum only the amplifiers' imbalance is left, a tremolo of a
-//!   few per cent. The profile is mono (DEC-6437 item 2).
+//!   circuit puts the sound through two delay lines of one fixed length
+//!   and moves the delayed sound's level in the left and right outputs
+//!   against each other. In their sum the delayed sound is steady but
+//!   for the amplifiers' imbalance, a few per cent: what is heard is the
+//!   comb that the delayed sound makes with the dry, which the owner's
+//!   manual calls "a phasing-type TREMOLO" (page 13, item 15). The
+//!   profile is mono (DEC-6437 item 2).
 //! - **No expression pedal and no wah**, no external input (the sub
 //!   oscillator's EXT position is its off position), no coarse and fine
 //!   PITCH knob, no HIGH/LOW output switch.
@@ -163,7 +176,7 @@ use crate::analog::allocator::{Allocator, Assign, Mode, Stage};
 use crate::analog::chorus::Chorus;
 use crate::analog::decimator::Decimator;
 use crate::analog::envelope::{ENVELOPE_ONE, RcEnvelope, apply, time_constant};
-use crate::analog::filter::ONE_Q28;
+use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::amplify;
 use crate::analog::oscillator::Noise;
 use crate::analog::{frequency, to_sample};
@@ -241,19 +254,30 @@ const SEED: u32 = 0x4353_3830;
 /// step 1; sub oscillator, step 1; ring modulator, step 3: each "150 ms
 /// (± 5%)" with "+5.0V" at its terminal.
 const SPEED_AT_FIVE_VOLTS: u32 = 6_667;
-/// The octaves a volt speeds the pulse width's oscillator and the ring
-/// modulator's: from 150 ms at 5 V to 5 ms at the lever's top, log₂ 30
-/// in five volts.
+/// The octaves a volt speeds the pulse width's oscillator: from 150 ms
+/// at 5 V to 5 ms at the lever's top, log₂ 30 in five volts.
 ///
-/// Source: the same steps: "5 ms (± 5%)" at FAST, and at "SPEED ... max".
-/// Own choice: the same below 5 V, which puts the lever's foot at 4.5 s.
+/// Source: adjustment procedure, page 17, pulse width modulator: "5 ms
+/// (± 5%)" at FAST. Own choice: the same below 5 V, which puts the
+/// lever's foot at 4.5 s; and the lever's top is taken as 10 V, the
+/// lever being one of a tone's, on the tone selector's line (service
+/// manual, page 62).
 const FAST_OCTAVES_A_VOLT: i32 = law::octaves(981_378, 1_000_000);
-/// The same for the sub oscillator: to 18 ms, log₂ (150 / 18) in five
-/// volts, which puts the lever's foot at 1.25 s.
+/// The same for the ring modulator's oscillator, whose SPEED lever's top
+/// is the panel's 10.6 V ([`PANEL_SUPPLY_TENTHS`]): log₂ 30 in 5.6 volts,
+/// which puts the lever's foot at 3.1 s.
+///
+/// Source: adjustment procedure, page 19, ring modulator, step 3: "150
+/// ms" with "+5.0V at VC1 terminal" and "5 ms (± 5%)" at "SPEED ... max".
+/// Own choice: the same below 5 V.
+const RING_OCTAVES_A_VOLT: i32 = law::octaves(876_230, 1_000_000);
+/// The same for the sub oscillator, whose SPEED lever is on the same
+/// line: to 18 ms, log₂ (150 / 18) in 5.6 volts, which puts the lever's
+/// foot at 1.0 s.
 ///
 /// Source: adjustment procedure, page 17, sub oscillator: "18ms (± 5%)"
 /// at FAST.
-const SUB_OCTAVES_A_VOLT: i32 = law::octaves(611_780, 1_000_000);
+const SUB_OCTAVES_A_VOLT: i32 = law::octaves(546_231, 1_000_000);
 /// The share of the mixed output that is a sample, in Q28: 1288 / 1000.
 /// One line's sawtooth through the open filters then peaks 14.5 dB below
 /// full scale, and eight keys struck together 0.4 dB below, the tops of
@@ -283,48 +307,139 @@ const RING_DEPTH_VOLTS: i32 = 5;
 /// voices' envelopes.
 const RING_ATTACK_SHORTEST: u32 = 31_000 >> 5;
 
-/// The tremolo's and the chorus's fastest cycles, in thousandths of a
-/// hertz: 56 ms and 0.5 s.
+/// The fastest cycles of the effect's two oscillators, in thousandths of
+/// a hertz: 56 ms and 0.5 s, with SPEED at its top and the TREMOLO tab
+/// down. Both run under either tab.
 ///
 /// Source: adjustment procedure, page 21, tremolo/chorus, step 1: with
-/// SPEED at max, "56ms (± 5%)" at DO1 and ".5s (± 5%)" at DO2.
+/// "SPEED ... max." and "TREMOLO tab ... on", "56ms (± 5%)" at DO1 and
+/// ".5s (± 5%)" at DO2. Service manual, page 55, OE1 circuit diagram:
+/// the two oscillators (IC3 and IC5, IG00150) take the one speed voltage
+/// C through 100 kΩ each, later 180 kΩ.
 const EFFECT_FASTEST: (u32, u32) = (17_857, 2_000);
-/// The octaves the SPEED knob covers down from the fastest.
+/// The supply of the levers and knobs outside the tones, in tenths of a
+/// volt.
 ///
-/// Source: own choice: the knob's network was not read.
-const EFFECT_SPEED_SPAN: i32 = 3 * OCTAVE;
+/// Source: service manual, page 66, Panel 3 circuit diagram: the SPEED
+/// knob (VR3, B 10 kΩ) stands between earth and the line of the SUSTAIN
+/// lever's end, "RA1-BA-+10.6(20)"; page 64, Panel 2 circuit diagram:
+/// the same orange wire, labelled so at the touch response's levers, is
+/// the top of the sub oscillator's and the ring modulator's SPEED levers
+/// (VR8 and VR6).
+const PANEL_SUPPLY_TENTHS: i32 = 106;
+/// A tenth of a volt, in the units of an octave to the volt.
+const TENTH_OF_A_VOLT: i32 = law::VOLT / 10;
+/// The SPEED knob and what loads its wiper, in hundreds of ohms, which
+/// keep the products of [`effect_speed_volts`] inside a word: the knob's
+/// 10 kΩ,
+/// and the two dividers that make the tabs' speed voltages of it, 22 kΩ
+/// over 100 kΩ for TREMOLO and 8.2 kΩ over 1.2 kΩ for CHORUS.
+///
+/// Source: service manual, page 55, OE1 circuit diagram, between the
+/// terminals SP, T and CH; page 66: "B10K VR3 SPEED".
+const SPEED_KNOB: i64 = 100;
+/// See [`SPEED_KNOB`]: each divider's upper and lower resistor.
+const SPEED_DIVIDERS: [(i64, i64); 2] = [(220, 1_000), (82, 12)];
+/// The octaves a volt of the speed voltage C speeds the effect's
+/// oscillators: the pulse width's oscillator's, 437 / 510 of it.
+///
+/// Source: own reading; no document gives the chip's law. The effect's
+/// oscillators and the pulse width's are the same chip (service manual,
+/// pages 30 and 56: IG00150), and each has its speed voltage through a
+/// resistor to pin 1 and 330 kΩ from pin 1 to -15 V (pages 29 and 55):
+/// 82 kΩ and a trimmer of 50 kΩ at the pulse width's, taken at its
+/// middle, 107 kΩ; 180 kΩ here (drawn 100 kΩ and changed by hand). The
+/// pin is taken to follow the voltage the two resistors leave it, "The
+/// frequency is variable in accordance with the voltage supplied" (page
+/// 52, VCO II IC, pin 1): 330 / 437 of the lever's there and 330 / 510 of
+/// C here. The pulse width's oscillator's octaves a volt are the
+/// adjustment procedure's two points ([`FAST_OCTAVES_A_VOLT`]).
+const EFFECT_OCTAVES_A_VOLT: i32 = ((FAST_OCTAVES_A_VOLT as i64) * 437 / 510) as i32;
 /// The delay of the effect's lines, in millionths of a second: 512
 /// stages clocked with a period of 10 µs.
 ///
-/// Source: service manual, page 58, OE2 board, note 2: "IC 4: MN3001";
-/// adjustment procedure, page 21, step 2: the clock is set "between 7 -
-/// 12.5 µs". That the MN3001 is two lines of 512 stages is general
-/// knowledge of the part; its data sheet is not among the documents
-/// filed.
+/// Source: service manual, page 58, OE2 board, note 2: "IC 4: MN3001",
+/// clocked through a TC4049 by one oscillator (IC1, BA617), so that both
+/// lines are of one length and do not move; adjustment procedure, page
+/// 21, step 2: the clock is set "between 7 - 12.5 µs". That the MN3001
+/// is two lines of 512 stages is general knowledge of the part; its data
+/// sheet is not among the documents filed.
 const EFFECT_DELAY: u32 = 2_560;
 /// The cutoff of the filters about the lines, in thousandths of a hertz.
 ///
-/// Source: service manual, page 57, OE2 circuit diagram, as far as it
-/// was read: each filter stage is 10 kΩ twice with 0.0018 µF and 680 pF,
-/// 1 / (2 π R √(C1 C2)) = 14.4 kHz.
+/// Source: service manual, page 57, OE2 circuit diagram: the filter
+/// before the lines and the one after each are 10 kΩ twice with 0.0018
+/// µF and 680 pF, 1 / (2 π R √(C1 C2)) = 14.4 kHz.
 const EFFECT_FILTER: u32 = 14_400_000;
-/// How far the effect at full depth moves the mono output's level either
-/// way for each of its two oscillators, in Q30: 7 / 246.
+/// The cutoff of the low-pass filter each of the four modulation
+/// amplifiers' outputs makes, in thousandths of a hertz: 499 Hz, 6 dB an
+/// octave.
+///
+/// Source: service manual, page 57, OE2 circuit diagram, and page 58,
+/// the board as printed: each amplifier (IC7 to IC10, IG00151) puts its
+/// output current into 27 kΩ with 0.015 µF across it (drawn 0.0056 µF
+/// and changed by hand; the board has 0.015), and page 55: the OE1 board
+/// takes each through 100 kΩ to a summing amplifier's input. 27 kΩ and
+/// 100 kΩ side by side are 21.26 kΩ, and 1 / (2 π R C) is 499.1 Hz.
+const EFFECT_WET_FILTER: u32 = 499_100;
+/// The share of the dry sound that is left with the effect on, in Q30:
+/// 68 / 168.
+///
+/// Source: service manual, page 55, OE1 circuit diagram: each output
+/// amplifier (IC2) has the sound at its input through 100 kΩ always, and
+/// through 68 kΩ what two switches choose: the sound again with the
+/// effect off (FET2 and FET3, gated by G1), the delayed sound with it on
+/// (FET1 and FET4, gated by G2; page 66, SW7 ON-OFF). Off, the sound
+/// comes through both, 1/100 + 1/68; on, through the 100 kΩ alone, which
+/// is 68 / 168 of that.
+const EFFECT_DRY: i32 = (ENVELOPE_ONE as i64 * 68 / 168) as i32;
+/// The share that the delayed sound has at low frequencies with the
+/// effect on, in Q28, where the sound with the effect off is one: 100 /
+/// 168 of 2.2365, which is 1.3313. It is taken from the dry sound: the
+/// delayed sound is inverted.
+///
+/// Source: the same drawing for the 100 / 168, the delayed sound's 68 kΩ
+/// against both, and for the inversion: the two amplifiers' outputs of
+/// each side are summed by an inverting amplifier (IC1 and IC7, 100 kΩ
+/// each into 82 kΩ of feedback), and nothing else on the way inverts as
+/// far as the drawings tell (the sound enters the modulation amplifiers
+/// at "+IN", page 52). For the 2.2365, own reading of the adjustment
+/// procedure, page 21, step 4: with the sine of the key B4 (the manual's
+/// C1 is the lowest key, so 987.8 Hz at 8') the four amplifiers are
+/// trimmed to ".65", ".58", ".58" and ".65 Vp-p" at the OE2 board's
+/// outputs; each side sums one of 0.65 V and one of 0.58 V (page 58, the
+/// wiring to I2 to I5), times 82 / 100, 1.009 Vp-p. The sine at 10 is
+/// trimmed to "1.00 ± .02 Vp-p" at a voice's amplifier (page 15, VCA,
+/// step 1), and the delayed sound is taken to be trimmed to stand as
+/// large as the dry at that key: that the tone enters the board at that
+/// 1 V is not printed anywhere. At that key the amplifiers' low-pass
+/// filter ([`EFFECT_WET_FILTER`]) has taken the delayed sound down by
+/// √(1 + (987.8 / 499.1)²), 2.2176, which low frequencies are spared:
+/// 1.0086 × 2.2176 = 2.2365 (`tests/cs80_modulation.rs` works it out).
+const EFFECT_WET: i32 = 357_360_555;
+/// How far the effect at full depth under the CHORUS tab moves the
+/// delayed sound's level in the mono output either way for each of its
+/// two oscillators, in Q30: 7 / 246.
 ///
 /// Source: adjustment procedure, page 21, step 4: the four modulation
 /// amplifiers are trimmed to ".65", ".58", ".58" and ".65 Vp-p"; service
 /// manual, pages 55 to 58: the first line feeds the two amplifiers of
 /// 0.65 V and the second the two of 0.58 V; each output is one amplifier
 /// of each line; each oscillator drives one amplifier of each output,
-/// oppositely. The lines carry the same sound, so in the sum of the two
-/// outputs an oscillator's share is (0.65 - 0.58) / (2 × (0.65 + 0.58)).
-/// Own choice: the amplifiers swing their whole gain at full depth.
+/// oppositely (LO1 and its inverse LO3, LO2 and LO4). The lines carry the
+/// same sound, so in the sum of the two outputs an oscillator's share is
+/// (0.65 - 0.58) / (2 × (0.65 + 0.58)), the first oscillator's upwards
+/// when the second's is downwards. Own choice: the amplifiers swing
+/// their whole gain at full depth.
 const EFFECT_MONO_SHARE: i32 = (ENVELOPE_ONE as i64 * 7 / 246) as i32;
-/// The level with the effect on, in Q30: nine tenths.
+/// The share of that depth that the TREMOLO tab gives, in Q30: 333 / 483.
 ///
-/// Source: own choice. Owner's manual, page 13, item 15: the "overall CS-80
-/// output volume decreases slightly".
-const EFFECT_LEVEL: i32 = (ENVELOPE_ONE as i64 * 9 / 10) as i32;
+/// Source: service manual, page 55: each oscillator's output reaches the
+/// DEPTH knob directly under the CHORUS tab (DO1, DO2) and through 150 kΩ
+/// under the TREMOLO tab (DO1', DO2'); page 66: the knob is 500 kΩ (VR4,
+/// B 500 kΩ) and page 55 puts 1 MΩ on its wiper, which side by side at
+/// the knob's top are 333 kΩ: 333 / (150 + 333).
+const EFFECT_TREMOLO_DEPTH: i32 = (ENVELOPE_ONE as i64 * 333 / 483) as i32;
 
 /// Thousandths of a fall's time that are its time constant: the time to
 /// a tenth of the way, as the voices' envelopes.
@@ -373,6 +488,33 @@ fn coefficient(time: u32, thousandths: u64) -> i32 {
     time_constant(u32::try_from(constant).unwrap_or(u32::MAX), TICK_RATE)
 }
 
+/// The speed voltage C that a tab's divider makes of the SPEED knob at a
+/// position, in the units of an octave to the volt: the knob is a
+/// divider of the panel's supply, loaded at its wiper by both of
+/// [`SPEED_DIVIDERS`].
+fn effect_speed_volts(knob: u8, tab: usize) -> i32 {
+    const FULL: i64 = law::LEVER_MAX as i64;
+    let [(tremolo_upper, tremolo_lower), (chorus_upper, chorus_lower)] = SPEED_DIVIDERS;
+    let (tremolo, chorus) = (tremolo_upper.saturating_add(tremolo_lower), chorus_upper.saturating_add(chorus_lower));
+    // The two dividers side by side are tremolo × chorus / (tremolo +
+    // chorus) ohms; a knob at x of its travel gives x of the supply
+    // behind x (1 - x) of its own resistance.
+    let (load_product, load_sum) = (tremolo.saturating_mul(chorus), tremolo.saturating_add(chorus));
+    let position = i64::from(knob.min(law::LEVER_MAX));
+    let behind = position.saturating_mul(FULL.saturating_sub(position)).saturating_mul(SPEED_KNOB);
+    let supply = i64::from(PANEL_SUPPLY_TENTHS.saturating_mul(TENTH_OF_A_VOLT));
+    let whole = FULL.saturating_mul(FULL).saturating_mul(load_product).saturating_add(behind.saturating_mul(load_sum));
+    let wiper = supply
+        .saturating_mul(position)
+        .saturating_mul(FULL)
+        .saturating_mul(load_product)
+        .checked_div(whole)
+        .unwrap_or(0);
+    let (upper, lower) = SPEED_DIVIDERS.get(tab).copied().unwrap_or((0, 0));
+    let volts = wiper.saturating_mul(lower).checked_div(upper.saturating_add(lower)).unwrap_or(0);
+    i32::try_from(volts).unwrap_or(0)
+}
+
 /// The effect's delay lines and their filters, empty.
 fn effect_line() -> Chorus {
     let mut line = Chorus::new(SAMPLE_RATE);
@@ -406,11 +548,13 @@ pub struct Cs80 {
     ring_envelope: RcEnvelope,
     /// The ring modulator's share of the sound, in Q30.
     ring_modulation: i32,
-    /// The tremolo's and the chorus's oscillators, and how far each
-    /// moves the level, in Q30.
+    /// The effect's two oscillators, and how far each moves the delayed
+    /// sound's level, in Q30.
     effect: [Wave; 2],
-    effect_depth: [i32; 2],
+    effect_depth: i32,
     line: Chorus,
+    /// The low-pass filter of the modulation amplifiers' outputs.
+    wet_filter: OnePole,
     /// The pitch bend, less its centre.
     bend: i32,
     wheel: u8,
@@ -458,8 +602,9 @@ impl Cs80 {
             ring_envelope: RcEnvelope::new(),
             ring_modulation: 0,
             effect: [Wave::default(); 2],
-            effect_depth: [0; 2],
+            effect_depth: 0,
             line: effect_line(),
+            wet_filter: OnePole::new(),
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
@@ -490,6 +635,7 @@ impl Cs80 {
         // switched on again.
         if !self.patch.on(Global::Effect) && patch.on(Global::Effect) {
             self.line = effect_line();
+            self.wet_filter.reset();
         }
         self.patch = *patch;
         self.apply_patch();
@@ -523,13 +669,29 @@ impl Cs80 {
         self.ring_envelope.set_decay(coefficient(decay, FALL_THOUSANDTHS));
         self.ring_envelope.set_sustain(0);
 
-        let slower = law::share(EFFECT_SPEED_SPAN, DATA_MAX.saturating_sub(lever(Global::EffectSpeed)));
-        let depth = apply(law::level(lever(Global::EffectDepth)), EFFECT_MONO_SHARE);
-        let [tremolo, chorus] = &mut self.effect;
-        tremolo.step = frequency(law::raise(EFFECT_FASTEST.0, slower.saturating_neg()), SAMPLE_RATE);
-        chorus.step = frequency(law::raise(EFFECT_FASTEST.1, slower.saturating_neg()), SAMPLE_RATE);
-        self.effect_depth =
-            [if patch.on(Global::Tremolo) { depth } else { 0 }, if patch.on(Global::Chorus) { depth } else { 0 }];
+        // The TREMOLO tab takes the speed voltage and the oscillators'
+        // outputs from the CHORUS tab's contacts when it is down, so with
+        // both down it is the tremolo; with neither, the speed voltage's
+        // line and the DEPTH knob's top are open, and nothing moves
+        // (service manual, page 66, SW5 and SW6).
+        let (tab, share) = if patch.on(Global::Tremolo) {
+            (Some(0), EFFECT_TREMOLO_DEPTH)
+        } else if patch.on(Global::Chorus) {
+            (Some(1), ENVELOPE_ONE)
+        } else {
+            (None, 0)
+        };
+        let volts = tab.map_or(0, |tab| effect_speed_volts(lever(Global::EffectSpeed), tab));
+        let below = i64::from(effect_speed_volts(law::LEVER_MAX, 0).saturating_sub(volts));
+        let slower =
+            i32::try_from(below.saturating_mul(i64::from(EFFECT_OCTAVES_A_VOLT)) >> law::OCTAVE_BITS).unwrap_or(0);
+        let [first, second] = &mut self.effect;
+        // The steps are slowed, not the frequencies: a thousandth of a
+        // hertz is a thirtieth of the slow oscillator's under CHORUS.
+        first.step = law::raise(frequency(EFFECT_FASTEST.0, SAMPLE_RATE), slower.saturating_neg());
+        second.step = law::raise(frequency(EFFECT_FASTEST.1, SAMPLE_RATE), slower.saturating_neg());
+        self.effect_depth = apply(apply(law::level(lever(Global::EffectDepth)), EFFECT_MONO_SHARE), share);
+        self.wet_filter.set_cutoff(frequency(EFFECT_WET_FILTER, SAMPLE_RATE));
     }
 
     /// How many messages [`Cs80::event`] has ignored since the
@@ -691,9 +853,10 @@ impl Cs80 {
         if pressed != self.sub_pressed {
             self.sub_pressed = pressed;
             let volts = law::share(TOUCH_SPEED_VOLTS * OCTAVE, patch.get(Global::TouchSpeed));
-            let speed = law::speed(
+            let speed = law::speed_under(
                 SPEED_AT_FIVE_VOLTS,
                 SUB_OCTAVES_A_VOLT,
+                PANEL_SUPPLY_TENTHS,
                 patch.get(Global::SubSpeed),
                 law::scaled(volts, pressed),
             );
@@ -706,9 +869,10 @@ impl Cs80 {
 
         let rise = self.ring_envelope.tick();
         let volts = law::share(RING_DEPTH_VOLTS * OCTAVE, patch.get(Global::RingDepth));
-        let speed = law::speed(
+        let speed = law::speed_under(
             SPEED_AT_FIVE_VOLTS,
-            FAST_OCTAVES_A_VOLT,
+            RING_OCTAVES_A_VOLT,
+            PANEL_SUPPLY_TENTHS,
             patch.get(Global::RingSpeed),
             law::scaled(volts, rise),
         );
@@ -771,7 +935,7 @@ impl Cs80 {
         let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
         let ring = self.ring_modulation;
         let effect = self.patch.on(Global::Effect);
-        let [tremolo_depth, chorus_depth] = self.effect_depth;
+        let depth = self.effect_depth;
         for sample in out {
             let earlier = self.voices_sample();
             let later = self.voices_sample();
@@ -784,16 +948,85 @@ impl Cs80 {
                 signal = apply(signal, gain);
             }
             if effect {
-                let [tremolo, chorus] = &mut self.effect;
-                let moved = apply(sine_level(tremolo.tick()), tremolo_depth)
-                    .saturating_sub(apply(sine_level(chorus.tick()), chorus_depth));
+                // The dry sound's share, less the delayed sound, whose
+                // level the two oscillators move against each other.
+                let [first, second] = &mut self.effect;
+                let moved = apply(sine_level(first.tick()).saturating_sub(sine_level(second.tick())), depth);
                 let [line, _] = self.line.process(signal);
-                signal = apply(
-                    apply(line, EFFECT_LEVEL),
-                    ENVELOPE_ONE.saturating_sub(EFFECT_MONO_SHARE << 1).saturating_add(moved),
-                );
+                let delayed = amplify(self.wet_filter.low_pass(line), EFFECT_WET);
+                signal = apply(signal, EFFECT_DRY).saturating_sub(apply(delayed, ENVELOPE_ONE.saturating_add(moved)));
             }
             *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    reason = "a test, in f64"
+)]
+mod tests {
+    use super::{
+        Cs80, EFFECT_DELAY, EFFECT_FASTEST, EFFECT_WET, EFFECT_WET_FILTER, Global, OCTAVE, Patch, SAMPLE_RATE,
+        effect_speed_volts,
+    };
+
+    /// The frequencies in hertz of the effect's two oscillators under a
+    /// patch.
+    fn speeds(tremolo: u8, chorus: u8, knob: u8) -> [f64; 2] {
+        let mut patch = Patch::DEFAULT;
+        patch.set(Global::Effect, 1);
+        patch.set(Global::Tremolo, tremolo);
+        patch.set(Global::Chorus, chorus);
+        patch.set(Global::EffectSpeed, knob);
+        let mut cs80 = Cs80::new();
+        cs80.set_patch(&patch);
+        cs80.effect.map(|wave| f64::from(wave.step) * f64::from(SAMPLE_RATE) / 4_294_967_296.0)
+    }
+
+    #[test]
+    fn the_effects_figures_are_the_drawings() {
+        // The delayed sound's low-pass filter: 27 kΩ beside 100 kΩ, with
+        // 0.015 µF.
+        let resistance = 27.0e3 * 100.0e3 / 127.0e3;
+        let cutoff = 1.0 / (std::f64::consts::TAU * resistance * 0.015e-6);
+        assert!((cutoff / (f64::from(EFFECT_WET_FILTER) / 1.0e3) - 1.0).abs() < 1.0e-4, "{cutoff}");
+        // The delayed sound: trimmed to stand as large as the dry at the
+        // key B4 of 8', where the filter has already taken it down.
+        let b4 = 440.0 * ((83.0 - 69.0) / 12.0f64).exp2();
+        let wet = (0.65 + 0.58) * 82.0 / 100.0 * (b4 / cutoff).hypot(1.0) * 100.0 / 168.0;
+        assert!((wet / (f64::from(EFFECT_WET) / 268_435_456.0) - 1.0).abs() < 1.0e-4, "{wet}");
+        // 512 stages, two to a period of the clock of 10 µs.
+        assert_eq!(EFFECT_DELAY, 512 / 2 * 10);
+    }
+
+    #[test]
+    fn the_effects_speeds_follow_the_knob_through_each_tabs_divider() {
+        let volts = |knob: u8, tab: usize| f64::from(effect_speed_volts(knob, tab)) / f64::from(OCTAVE);
+        // The knob's top is the supply; its middle is loaded.
+        assert!(
+            (volts(127, 0) - 10.6 * 100.0 / 122.0).abs() < 1.0e-3 && (volts(127, 1) - 10.6 * 1.2 / 9.4).abs() < 1.0e-3
+        );
+        let x = 64.0 / 127.0;
+        let wiper = 10.6 * x / (1.0 + x * (1.0 - x) * 10.0 / (122.0 * 9.4 / 131.4));
+        assert!((volts(64, 0) - wiper * 100.0 / 122.0).abs() < 1.0e-3 && volts(0, 0).abs() < 1.0e-9);
+        // The adjustment procedure's two cycles under TREMOLO at the top.
+        let fastest = [f64::from(EFFECT_FASTEST.0) / 1.0e3, f64::from(EFFECT_FASTEST.1) / 1.0e3];
+        let near = |found: [f64; 2], octaves: f64| {
+            found
+                .iter()
+                .zip(&fastest)
+                .all(|(found, fastest)| (found / (fastest * (-octaves).exp2()) - 1.0).abs() < 2.0e-3)
+        };
+        assert!(near(speeds(1, 0, 127), 0.0) && near(speeds(1, 1, 127), 0.0), "{:?}", speeds(1, 0, 127));
+        // 0.8409 octave to the volt of the speed voltage.
+        let slope = 0.981_378 * 437.0 / 510.0;
+        let top = 10.6 * 100.0 / 122.0;
+        assert!(near(speeds(0, 1, 127), slope * (top - 10.6 * 1.2 / 9.4)), "{:?}", speeds(0, 1, 127));
+        assert!(near(speeds(1, 0, 64), slope * (top - wiper * 100.0 / 122.0)), "{:?}", speeds(1, 0, 64));
+        assert!(near(speeds(1, 0, 0), slope * top) && near(speeds(0, 1, 0), slope * top), "{:?}", speeds(1, 0, 0));
     }
 }

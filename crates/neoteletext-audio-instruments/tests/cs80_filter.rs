@@ -53,11 +53,11 @@ fn cutoff(which: Which, key: u8, lever: u8, more: f64) -> f64 {
     (32.703 * octaves.exp2()).clamp(21.277, 20_000.0)
 }
 
-/// The Q of a resonance lever with the overall lever: 0.5 to 5 by the one
-/// lever in a straight line, as far again by the other, and never above
-/// 12.5.
+/// The Q of a resonance lever with the overall lever: 0.5 with both at
+/// their feet to 5 with both at their tops, in a straight line with
+/// their mean.
 fn q(lever: u8, overall: u8) -> f64 {
-    (0.5 + 4.5 * (f64::from(lever) + f64::from(overall)) / 127.0).min(12.5)
+    0.5 + 4.5 * (f64::from(lever) + f64::from(overall)) / 254.0
 }
 
 /// The gain of the high-pass then the low-pass at a frequency, each a
@@ -133,10 +133,13 @@ fn the_cutoffs_are_the_alignments_two_points_and_follow_the_keys() {
 }
 
 #[test]
-fn the_resonance_is_a_q_of_a_half_to_five_in_a_straight_line_and_nine_and_a_half_at_most() {
-    // Service manual, page 42, VCF IC, pin 7: a Q of 0.5 at the lever's
-    // foot and 5 at its top. Half way it is 2.77, where a real
-    // instrument's BRASS 1 has it (`cs80::law::damping`).
+fn the_resonance_is_a_q_of_a_half_to_five_in_a_straight_line_with_the_two_levers_mean() {
+    // Service manual, page 42, VCF IC, pin 7: a Q of 0.5 at one end of
+    // the control voltage and 5 at the other; pages 39 and 41: the pin
+    // has the mean of the filter's own lever and the overall one. Half
+    // way it is 2.75, and BRASS 1's 61 with the overall lever at its
+    // centre is 2.71, where a real instrument's BRASS 1 has it
+    // (`cs80::law::damping`).
     for (hpf_resonance, lpf_resonance, overall) in
         [(0u8, 127u8, 0u8), (127, 0, 0), (64, 64, 0), (127, 127, 0), (0, 0, 127), (127, 127, 127), (40, 90, 60)]
     {
@@ -166,7 +169,7 @@ fn at_the_most_resonance_the_filters_ring_and_do_not_oscillate() {
     let signal = play(&patch, 48, 100, 2.0, 0.0);
     let level = |from: usize| cs80_support::rms(&signal[from..from + 24_000]);
     let (early, late) = (level(24_000), level(72_000));
-    println!("noise through both filters at a Q of 9.5: {early:.4} then {late:.4} of full scale");
+    println!("noise through both filters at a Q of 5: {early:.4} then {late:.4} of full scale");
     // Steady, and far from what an oscillation would settle at.
     assert!((late / early - 1.0).abs() < 0.25 && late < 0.3);
     // With nothing going in, nothing comes out.
@@ -279,18 +282,17 @@ fn brass_1_rests_where_a_real_instruments_does() {
     //   +2.00 +1.99 +1.96 +1.65 +1.62 +1.61 +1.95 +1.61 +1.87 +1.50 +1.58 +1.39
     // a mean of +1.73, in two groups 0.35 octave apart (the instrument's
     // voices, each with its own trimmers). This reading of the documents
-    // rests at +2.92 on every key at the softest stroke, and higher at a
-    // harder one: 0.92 to 1.53 octaves above the recordings, 1.19 in the
-    // mean. The peak above the rest agrees where the recording's
-    // bandwidth lets it be measured (2.2 to 3.0 octaves for our 2.2, and
-    // the stroke adds to the real one).
+    // comes to rest at +2.92 on every key however it is struck (a
+    // stroke's voltage drains away in 3.3 s): 0.92 to 1.53 octaves above
+    // the recordings, 1.19 in the mean. The peak above the rest agrees
+    // where the recording's bandwidth lets it be measured (2.2 to 3.0
+    // octaves for our 2.2, and the stroke adds to the real one).
     //
     // The same recordings against this reading otherwise: the filter's
-    // peak comes 116 to 260 ms after the key for our 390 ms; the fall
-    // from it is one exponential of 2.8 to 3.6 s, 6.5 to 8.3 s to a
-    // tenth, for our 3.3 s to a tenth; the level falls 5.5 to 9 dB in
-    // 10 s for our 4.4 dB, and is still falling at 6 s where ours has
-    // stopped at 3 s.
+    // peak comes 116 to 260 ms after the key for our 170 to 390 ms; the
+    // fall from it is one exponential of 2.8 to 3.6 s, and ours on
+    // middle C, struck as hard, 2.7 s; the fundamental falls 2.7 to 6.8
+    // dB from 1 s to 10 s, 4.3 dB in the mean, for our 4.0 dB.
     //
     // What the documents were asked and did not answer is in the
     // module's notes ([`neoteletext_audio_instruments::cs80`], "What is
@@ -301,8 +303,9 @@ fn brass_1_rests_where_a_real_instruments_does() {
     for key in [39u8, 60, 88] {
         let note = 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
         let signal = play(&patch, key, 1, 11.5, 0.0);
-        // The Q is the preset's own: 0.5 + 4.5 × 61 / 127.
-        let rest = fitted_cutoff(&signal[samples(9.5)..], note, 2.66);
+        // The Q is the preset's own lever and the overall lever at its
+        // centre: 0.5 + 4.5 × (61 + 64) / 254.
+        let rest = fitted_cutoff(&signal[samples(9.5)..], note, 2.71);
         println!("BRASS 1, key {key}: at rest {rest:+.2} octaves above the note");
         assert!((1.39..=2.00).contains(&rest), "key {key}: {rest:+.2} octaves for the recordings' +1.39 to +2.00");
     }
