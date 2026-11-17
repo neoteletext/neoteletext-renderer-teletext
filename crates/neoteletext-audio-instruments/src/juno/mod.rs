@@ -87,7 +87,7 @@ use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::{amplify, mul_high, scale};
 use crate::analog::lfo::{LFO_ONE, Lfo, Shape};
 use crate::analog::oscillator::Noise;
-use crate::analog::{frequency, to_sample};
+use crate::analog::{LEVEL, frequency, to_sample};
 
 use law::{Law, OCTAVE};
 pub use patch::{ChorusMode, Patch, PatchError, PwmSource, Range, Slider};
@@ -239,6 +239,14 @@ const _: () = assert!(
     CHORUS_FILL_SAMPLES as u64 * 1_000_000 > (CHORUS_DELAY.0 + CHORUS_DELAY.1) as u64 * SAMPLE_RATE as u64
         && CHORUS_FADE_SAMPLES > 0
 );
+/// What the signal into the chorus stays under while nothing in it could
+/// be heard to step: half a unit of a 16-bit sample before the output's
+/// gain. Once it has stayed under for [`CHORUS_FILL_SAMPLES`], longer
+/// than the longest delay, the lines hold nothing either, and the
+/// chorus's switches may move at once.
+///
+/// Source: own choice: under the sample's last bit.
+const QUIET_LEVEL: i32 = LEVEL >> 16;
 
 /// The corner below which the voices' sum does not pass, in thousandths
 /// of a hertz: what takes away the steady part of a pulse that is not a
@@ -346,6 +354,9 @@ pub struct Juno {
     /// before it rises.
     wet: u32,
     fill: u32,
+    /// Samples for which the signal into the chorus has stayed under
+    /// [`QUIET_LEVEL`], counted no further than [`CHORUS_FILL_SAMPLES`].
+    quiet: u32,
     ignored: u64,
 }
 
@@ -395,6 +406,7 @@ impl Juno {
             sweep: ChorusMode::Off,
             wet: 0,
             fill: 0,
+            quiet: CHORUS_FILL_SAMPLES,
             ignored: 0,
         };
         juno.coupling.set_cutoff(frequency(COUPLING_CORNER, SAMPLE_RATE));
@@ -428,9 +440,9 @@ impl Juno {
 
     /// Gives the instrument a patch, which it copies. It takes effect at
     /// once, on the voices that are sounding too, as moving the panel's
-    /// controls does; but the chorus, switched while a voice sounds,
-    /// goes and comes over a hundredth of a second, so that its lines
-    /// are not cut into the output or out of it in one step. A setting
+    /// controls does; but the chorus, switched while anything passes
+    /// into it, goes and comes over a hundredth of a second, so that its
+    /// lines are not cut into the output or out of it in one step. A setting
     /// the model has not is taken as the nearest it has
     /// ([`ChorusMode::Both`], [`PwmSource::Envelope`]).
     pub fn set_patch(&mut self, patch: &Patch) {
@@ -476,8 +488,13 @@ impl Juno {
         self.level = law::raise(ONE_Q28.cast_unsigned(), octaves).cast_signed();
 
         let wanted = self.chorus_mode();
-        if self.allocator.sounding() == 0 {
-            // Nothing sounds, so nothing can click: at once.
+        if self.quiet >= CHORUS_FILL_SAMPLES {
+            // Nothing is in the lines or on its way into them, so nothing
+            // can click: at once. That no voice sounds is not enough: for
+            // seconds after a wide pulse's note the coupling capacitor
+            // gives up the charge the pulse's steady part left on it, and
+            // a line cut out of that, or let into it, is a step as large
+            // as what is left.
             self.sweep_by(wanted);
             self.fill = 0;
             self.wet = if wanted == ChorusMode::Off { 0 } else { CHORUS_FADE_SAMPLES };
@@ -728,6 +745,11 @@ impl Juno {
                 signal = signal.saturating_add(amplify(self.bass.low_pass(signal), BASS_BOOST_GAIN));
             }
             signal = amplify(amplify(signal, self.level), volume);
+            self.quiet = if signal.saturating_abs() < QUIET_LEVEL {
+                self.quiet.saturating_add(1).min(CHORUS_FILL_SAMPLES)
+            } else {
+                0
+            };
             let fade = self.chorus_fade(chorus);
             if self.sweep != ChorusMode::Off {
                 let [first, second] = self.chorus.process(signal);
