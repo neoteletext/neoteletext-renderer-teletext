@@ -82,7 +82,7 @@ pub mod law;
 pub mod patch;
 mod voice;
 
-use crate::analog::allocator::{Allocator, Assign, Mode, Priority, Stage, Trigger};
+use crate::analog::allocator::{Allocator, Assign, HELD_KEYS, Mode, Priority, Stage, Trigger};
 use crate::analog::decimator::Decimator;
 use crate::analog::drift::Variation;
 use crate::analog::filter::{ONE_Q28, OnePole};
@@ -519,10 +519,17 @@ impl Prophet5 {
                 self.allocator.sustain(false);
             }
             CONTROL_ALL_NOTES_OFF => {
-                // As a note off for every key: the pedal still holds.
-                let voices = *self.allocator.voices();
-                for voice in voices.iter().filter(|voice| voice.stage == Stage::Held) {
-                    self.allocator.key_up(voice.key);
+                // As a note off for every key: the pedal still holds. In
+                // unison a key that goes up hands its note to another
+                // still held, so the key that sounds is let go until
+                // none does: once for each key the allocator remembers
+                // at most, and once for each voice otherwise.
+                for _ in 0..HELD_KEYS {
+                    let held = self.allocator.voices().iter().find(|voice| voice.stage == Stage::Held);
+                    let Some(key) = held.map(|voice| voice.key) else {
+                        break;
+                    };
+                    self.allocator.key_up(key);
                 }
             }
             _ => self.ignore(),
@@ -642,3 +649,6 @@ impl Prophet5 {
 /// The shares of this module are of a unit that is also a signal's full
 /// level and an envelope's quarter.
 const _: () = assert!(WHEEL_MOD == crate::analog::LEVEL);
+/// All notes off lets go of one key in each turn, and has a turn for
+/// every key the allocator remembers: there are as many for the voices.
+const _: () = assert!(VOICES <= HELD_KEYS);
