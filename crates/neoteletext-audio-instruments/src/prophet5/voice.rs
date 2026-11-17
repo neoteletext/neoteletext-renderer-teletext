@@ -314,7 +314,7 @@ impl Settings {
         let whole = |on: bool| if on { ENVELOPE_ONE } else { 0 };
         let (shares_a, shares_b) = match law.mixing {
             Mixing::Currents => ([whole(a_saw), whole(a_pulse), 0], [whole(b_saw), whole(b_pulse), whole(b_triangle)]),
-            Mixing::Node => (law::node(a_saw, a_pulse, false), law::node(b_saw, b_pulse, b_triangle)),
+            Mixing::Node => (law::node(a_saw, a_pulse), law::followed_node(b_saw, b_pulse, b_triangle)),
         };
         let levels = [ENVELOPE_ONE, pulse_level, triangle_level];
         let weigh = |shares: [i32; 3], level: i32| {
@@ -329,7 +329,9 @@ impl Settings {
         // the other (R4366; R4250 and R4285), so those two are upside
         // down against the sawtooth in the mix. Poly-Mod's own node
         // (R4243, R4251, R4260) takes all three one way round. Revision
-        // 2's waveforms meet at one node before the mixer (TM2 SD411).
+        // 2's waveforms all reach the one input marked "+" of their
+        // mixer amplifier, the other grounded (TM2 SD411, pages 85 and
+        // 86: half of U473, an SSM2020, for each oscillator).
         let turned = |[saw, pulse, triangle]: [i32; 3]| match law.mixing {
             Mixing::Currents => [saw, pulse.saturating_neg(), triangle.saturating_neg()],
             Mixing::Node => [saw, pulse, triangle],

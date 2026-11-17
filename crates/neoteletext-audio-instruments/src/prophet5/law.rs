@@ -131,8 +131,9 @@ pub enum Mixing {
     /// the currents add: what is on is at its full level whatever else
     /// is.
     Currents,
-    /// Each through its own resistor to one node that a follower reads:
-    /// what is on shares the node, and two waveforms are each halved.
+    /// Each through its own resistor to a node that a follower or an
+    /// amplifier reads: what is on shares the node, and two waveforms
+    /// are each halved.
     Node,
 }
 
@@ -366,11 +367,15 @@ pub const REV2: Law = Law {
     // 75% of a cycle, for each volt; Poly-Mod through 30.1 kΩ (R494):
     // 33.2%. More voltage is a narrower pulse.
     pulse_width_modulation: (-((UNIT as i64 * 750 / 1_000) as i32), -((UNIT as i64 * 332 / 1_000) as i32)),
-    // Source: TM2 SD411 (page 85): the waveforms that are switched on
-    // meet at one node before a follower or an amplifier ([`Mixing`],
-    // and [`node`]). Section 2-23 (page 45): "The sawtooth is 0-10V",
-    // "Pulse output is 0-7.5V". Own choice: the triangle, whose size the
-    // manual does not give, is taken as large as the sawtooth.
+    // Source: TM2 SD411 (pages 85 and 86): the waveforms that are
+    // switched on meet at nodes before the mixer's amplifier, all at
+    // its one input ([`Mixing`], [`node`] and [`followed_node`]).
+    // Section 2-23 (page 45): "The sawtooth is 0-10V", "Pulse output is
+    // 0-7.5V". The triangle's size is in no words of the manual; its
+    // converter (the sawtooth through 10 kΩ, R445, to an inverting
+    // input with 20 kΩ back, R447: "amplifying by X2", the same page)
+    // makes 10 V from peak to peak of the sawtooth's 10 V: as large as
+    // the sawtooth.
     mixing: Mixing::Node,
     levels: ((ONE_Q30_LEVEL as i64 * 3 / 4) as i32, ONE_Q30_LEVEL),
     // Source: TM2 adjustment 4-17 (pages 114 and 115): with the cutoff
@@ -433,26 +438,57 @@ pub const REV2: Law = Law {
     oscillation_flat: cents(89),
 };
 
-/// The conductances that meet at revision 2's waveform node, in units
-/// of a millionth of a siemens: the sawtooth's and the pulse's 10 kΩ,
-/// the triangle's 3.3 kΩ, and the 200 kΩ to ground.
+/// The conductances about revision 2's waveform nodes, in units of a
+/// millionth of a siemens: 10 kΩ, 3.3 kΩ and 200 kΩ.
 ///
-/// Source: TM2 SD411 (page 85): R436 and R435, 10 kΩ; R433, 3.3 kΩ; R434,
-/// 200 kΩ; and of oscillator A R456, R457 and R481, the same.
-const NODE_MICROSIEMENS: (i64, i64, i64, i64) = (100, 100, 303, 5);
+/// Source: TM2 SD411 (pages 85 and 86). Oscillator A: its sawtooth and
+/// its pulse each through 10 kΩ (R456, R457) to one node, which a
+/// capacitor (C409) joins to 200 kΩ to ground (R481) at the mixer
+/// amplifier's input. Oscillator B: its sawtooth and its pulse each
+/// through 10 kΩ (R436, R435) to a node with 200 kΩ to ground (R434),
+/// which a follower reads (half of U456); the follower through 10 kΩ
+/// (R438) and the triangle through 3.3 kΩ (R433) to a second node,
+/// which a capacitor (C408) joins to 200 kΩ to ground (R459) at the
+/// mixer amplifier's input, and which Poly-Mod's amplifier reads too.
+const NODE_MICROSIEMENS: (i64, i64, i64) = (100, 303, 5);
 
-/// The share of each waveform at the node where those that are switched
-/// on meet, in Q30: its conductance over the sum of those that are on
-/// and the load's. Sawtooth, pulse, triangle.
+/// `part / (sum)` in Q30.
+fn conductance_share(part: i64, sum: i64) -> i32 {
+    i32::try_from((part << 30).checked_div(sum).unwrap_or(0)).unwrap_or(0)
+}
+
+/// The share of each waveform of revision 2's oscillator A at the node
+/// where those that are switched on meet, in Q30: its conductance over
+/// the sum of those that are on and the load's. Sawtooth, pulse, and
+/// nothing for the triangle it has not.
 #[must_use]
-pub fn node(sawtooth: bool, pulse: bool, triangle: bool) -> [i32; 3] {
-    let (saw, pul, tri, load) = NODE_MICROSIEMENS;
-    let on = [(sawtooth, saw), (pulse, pul), (triangle, tri)];
-    let sum = on.iter().filter(|(on, _)| *on).map(|&(_, siemens)| siemens).sum::<i64>().saturating_add(load);
-    on.map(|(on, siemens)| {
-        let part = if on { siemens } else { 0 };
-        i32::try_from((part << 30).checked_div(sum).unwrap_or(0)).unwrap_or(0)
-    })
+pub fn node(sawtooth: bool, pulse: bool) -> [i32; 3] {
+    let (ten, _, load) = NODE_MICROSIEMENS;
+    let on = |on: bool| if on { ten } else { 0 };
+    let sum = on(sawtooth).saturating_add(on(pulse)).saturating_add(load);
+    [conductance_share(on(sawtooth), sum), conductance_share(on(pulse), sum), 0]
+}
+
+/// The share of each waveform of revision 2's oscillator B where the
+/// mixer and Poly-Mod take them, in Q30. Sawtooth, pulse, triangle.
+///
+/// The sawtooth and the pulse share a first node as oscillator A's do;
+/// a follower reads it and feeds a second node through 10 kΩ, where the
+/// triangle comes in through 3.3 kΩ when it is switched on. The follower
+/// stands at that node whether or not it carries a waveform, so the
+/// triangle alone is three quarters of itself and not the whole, and
+/// with the triangle on the other two are a quarter of what they were.
+#[must_use]
+pub fn followed_node(sawtooth: bool, pulse: bool, triangle: bool) -> [i32; 3] {
+    let (ten, third, load) = NODE_MICROSIEMENS;
+    let [first_sawtooth, first_pulse, _] = node(sawtooth, pulse);
+    let sum = ten.saturating_add(if triangle { third } else { 0 }).saturating_add(load);
+    let follower = conductance_share(ten, sum);
+    [
+        gain(first_sawtooth, follower),
+        gain(first_pulse, follower),
+        if triangle { conductance_share(third, sum) } else { 0 },
+    ]
 }
 
 /// The feedback at which a four-pole loop begins to oscillate, in Q28.
@@ -495,7 +531,35 @@ pub fn resonance(law: &Law, steps: i32) -> i32 {
 #[cfg(test)]
 #[allow(clippy::cast_precision_loss, clippy::arithmetic_side_effects, reason = "a test, in f64")]
 mod tests {
-    use super::{OCTAVE, bend, share};
+    extern crate std;
+    use super::{OCTAVE, bend, followed_node, node, share};
+
+    #[test]
+    fn revision_2s_waveforms_share_their_nodes_as_the_resistors_divide_them() {
+        // TM2 SD411: 10 kΩ each and 200 kΩ to ground at the first node;
+        // the follower's 10 kΩ, the triangle's 3.3 kΩ and 200 kΩ at the
+        // second.
+        let shares = |found: [i32; 3]| found.map(|share| f64::from(share) / f64::from(1u32 << 30));
+        let near =
+            |found: [f64; 3], expected: [f64; 3]| found.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1.0e-6);
+        let (alone, both) = (10.0 / 10.5, 10.0 / 20.5);
+        assert!(near(shares(node(true, false)), [alone, 0.0, 0.0]));
+        assert!(near(shares(node(true, true)), [both, both, 0.0]));
+        // Without the triangle the follower's 10 kΩ meet the 200 kΩ.
+        assert!(near(shares(followed_node(true, false, false)), [alone * alone, 0.0, 0.0]));
+        assert!(near(shares(followed_node(true, true, false)), [both * alone, both * alone, 0.0]));
+        // With it: 1/10, 1/3.3 and 1/200 of a millisiemens.
+        let sum = 0.1 + 1.0 / 3.3 + 0.005;
+        let (follower, triangle) = (0.1 / sum, (1.0 / 3.3) / sum);
+        let found = shares(followed_node(false, false, true));
+        assert!((found[2] - triangle).abs() < 1.0e-3 && found[0] == 0.0, "{found:?}: the triangle alone");
+        let found = shares(followed_node(true, true, true));
+        assert!(
+            (found[0] - both * follower).abs() < 1.0e-3 && (found[2] - triangle).abs() < 1.0e-3,
+            "{found:?}: all three"
+        );
+        std::println!("all three: {found:?}; the triangle alone {triangle:.3}");
+    }
 
     #[test]
     fn a_share_is_the_quotient_and_never_panics() {

@@ -169,7 +169,8 @@ fn poly_mod_from_oscillator_b_sweeps_oscillator_a_and_the_filter() {
     for model in MODELS {
         // Oscillator B slow and off the keyboard, its sawtooth to
         // oscillator A's frequency: from nothing up to 3.5 V through
-        // 301 kΩ (revision 2: 300 kΩ, and the node's 0.952 of it).
+        // 301 kΩ (revision 2: 300 kΩ, and the 0.952 of it that each of
+        // its two nodes leaves).
         let slow = plain(model)
             .with_switch(Switch::OscBSawtooth, true)
             .with_switch(Switch::OscBLowFrequency, true)
@@ -183,7 +184,7 @@ fn poly_mod_from_oscillator_b_sweeps_oscillator_a_and_the_filter() {
                 .map(|(time, hertz)| (time, cents(base, hertz)))
                 .collect();
         let (low, high, rate) = swing(&track[track.len() / 4..]);
-        let share = if model == Model::Rev3 { 1.0 } else { 100.0 / 105.0 };
+        let share = if model == Model::Rev3 { 1.0 } else { (100.0f64 / 105.0).powi(2) };
         let expected = 1200.0 * 3.5 / 3.01 * share;
         println!(
             "{model:?}: oscillator B's sawtooth sweeps A from {low:.0} to {high:.0} cents at {rate:.2} Hz (0 to {expected:.0})"
@@ -241,6 +242,34 @@ fn oscillator_bs_triangle_is_as_large_as_its_sawtooth_on_revision_3() {
         "revision 3: fundamental of the sawtooth {sawtooth:.4}, of the triangle {triangle:.4}: {ratio:.3} (4 / π: 1.273)"
     );
     assert!((ratio - 4.0 / std::f64::consts::PI).abs() < 0.04, "{ratio}");
+}
+
+#[test]
+fn on_revision_2_oscillator_bs_triangle_alone_is_three_quarters_of_itself() {
+    // TM2 SD411: the sawtooth through 10 kΩ (R436) to a node with 200 kΩ
+    // to ground (R434), a follower, and 10 kΩ (R438) to the node that
+    // 200 kΩ load (R459): 0.952 twice. The triangle through 3.3 kΩ
+    // (R433) to that second node, where the follower's 10 kΩ and the
+    // 200 kΩ stand whether or not the follower carries anything: 0.743.
+    // Both are 10 V from peak to peak, so the fundamentals are 4 / π
+    // apart but for those shares.
+    let alone = |shape: Switch| {
+        let patch = plain(Model::Rev2)
+            .with(Knob::MixerOscA, 0)
+            .with(Knob::MixerOscB, 120)
+            .with_switch(Switch::OscASawtooth, false)
+            .with_switch(shape, true);
+        let signal = play(Model::Rev2, &patch, 60, 1.0, 0.0);
+        let steady = &signal[samples(0.2)..];
+        amplitude(steady, pitch(steady))
+    };
+    let (sawtooth, triangle) = (alone(Switch::OscBSawtooth), alone(Switch::OscBTriangle));
+    let ratio = triangle / sawtooth;
+    let expected = 4.0 / std::f64::consts::PI * (303.0 / 408.0) / (100.0f64 / 105.0).powi(2);
+    println!(
+        "revision 2: fundamental of the sawtooth {sawtooth:.4}, of the triangle {triangle:.4}: {ratio:.3} ({expected:.3})"
+    );
+    assert!((ratio - expected).abs() < 0.04, "{ratio}");
 }
 
 #[test]
