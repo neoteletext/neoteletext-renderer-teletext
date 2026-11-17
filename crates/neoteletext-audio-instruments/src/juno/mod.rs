@@ -322,6 +322,8 @@ const _: () = assert!(HIGH_PASS_SLEW > 0);
 ///
 /// Source: own choice: the fade's time ([`HIGH_PASS_FADE_SAMPLES`]).
 const HIGH_PASS_DISCHARGE: u32 = 15_915;
+/// [`HIGH_PASS_DISCHARGE`] as a frequency step.
+const HIGH_PASS_DISCHARGE_STEP: u32 = frequency(HIGH_PASS_DISCHARGE, SAMPLE_RATE);
 
 /// The amplifier's level slider moves the level by this either way, in
 /// octaves of amplitude: 6 dB.
@@ -629,8 +631,7 @@ impl Juno {
     /// Sets the high-pass filter to its corner as it stands; with the
     /// filter out of the path, to the corner its capacitor empties at.
     fn set_high_pass(&mut self) {
-        let step = if self.corner == 0 { frequency(HIGH_PASS_DISCHARGE, SAMPLE_RATE) } else { self.corner };
-        self.high_pass.set_cutoff(step);
+        self.high_pass.set_cutoff(if self.corner == 0 { HIGH_PASS_DISCHARGE_STEP } else { self.corner });
     }
 
     /// One sample of the high-pass switch: the filter at its corner, which
