@@ -1,6 +1,8 @@
 //! One output level for every instrument: the reference note of each
 //! stands at the crate's reference level, and each instrument's whole
-//! polyphony of that note stays under full scale.
+//! polyphony of that note goes through the output's limiter, which keeps
+//! it under full scale and unwrapped. The limiter's own tests are beside
+//! it, in `src/output.rs`.
 
 // Without every instrument there is nothing here to compare.
 #![cfg(all(
@@ -21,9 +23,10 @@
     reason = "a test"
 )]
 
+use neoteletext_audio_instruments::output::{LIMIT_CEILING, LIMIT_KNEE};
 use neoteletext_audio_instruments::sid::{ChipClock, ChipModel, Sid};
 use neoteletext_audio_instruments::{
-    POLYPHONY_HEADROOM_TENTHS, REFERENCE_LEVEL_TENTHS, SAMPLE_RATE, cs80, dx7, juno, jupiter8, minimoog, prophet5,
+    REFERENCE_LEVEL_TENTHS, SAMPLE_RATE, cs80, dx7, juno, jupiter8, minimoog, prophet5,
 };
 
 /// MIDI's note on.
@@ -139,15 +142,29 @@ fn players() -> Vec<Player> {
     ]
 }
 
-/// The RMS and the peak of what a player renders after its settling,
-/// in decibels of full scale.
-fn levels(player: &mut Player) -> (f64, f64) {
+/// What a player renders, from the keys' going down.
+fn rendered(player: &mut Player) -> Vec<i16> {
     let mut out = vec![0i16; (SECONDS * f64::from(SAMPLE_RATE)) as usize];
     (player.render)(&mut out);
+    out
+}
+
+/// A level in decibels of full scale.
+fn decibels(level: f64) -> f64 {
+    20.0 * (level / 32_768.0).log10()
+}
+
+/// The RMS of what was rendered after its settling, and the peak of all
+/// of it, in decibels of full scale.
+fn levels(out: &[i16]) -> (f64, f64) {
     let steady = &out[(SETTLING * f64::from(SAMPLE_RATE)) as usize..];
-    let power = steady.iter().map(|&sample| (f64::from(sample) / 32_768.0).powi(2)).sum::<f64>() / steady.len() as f64;
-    let peak = out.iter().map(|&sample| f64::from(sample).abs() / 32_768.0).fold(0.0, f64::max);
-    (10.0 * power.log10(), 20.0 * peak.log10())
+    let power = steady.iter().map(|&sample| f64::from(sample).powi(2)).sum::<f64>() / steady.len() as f64;
+    (decibels(power.sqrt()), decibels(f64::from(peak(out))))
+}
+
+/// The largest magnitude of what was rendered.
+fn peak(out: &[i16]) -> u16 {
+    out.iter().map(|sample| sample.unsigned_abs()).max().unwrap_or(0)
 }
 
 /// How near the reference level every reference note is, in decibels.
@@ -163,7 +180,8 @@ fn every_instrument_plays_its_reference_note_at_the_reference_level() {
     let reference = f64::from(REFERENCE_LEVEL_TENTHS) / 10.0;
     for mut player in players() {
         (player.key_down)(KEY);
-        let (rms, peak) = levels(&mut player);
+        let out = rendered(&mut player);
+        let (rms, peak) = levels(&out);
         // The one exception: the 8580 keeps its level against the 6581.
         let expected = if player.name == QUIETER_CHIP_NAME { reference - QUIETER_CHIP } else { reference };
         println!("{}: one note {rms:.1} dBFS RMS for {expected:.1}, peak {peak:.1} dBFS", player.name);
@@ -171,17 +189,35 @@ fn every_instrument_plays_its_reference_note_at_the_reference_level() {
     }
 }
 
+/// The largest step from one sample to the next that the whole polyphony
+/// may take. Sawtooths struck together all fall back in the same sample,
+/// and the largest such fall measured is 17,054 (the Juno-106's six); a
+/// sample that wrapped would step by the whole of the 16 bits, 65,536,
+/// less what it had passed full scale by.
+const LARGEST_STEP: i32 = 30_000;
+
 #[test]
-fn every_instruments_whole_polyphony_stays_under_full_scale() {
-    let ceiling = -f64::from(POLYPHONY_HEADROOM_TENTHS) / 10.0;
+fn every_instruments_whole_polyphony_stays_under_full_scale_and_unwrapped() {
     for mut player in players() {
         // A cluster of semitones about the reference note, struck
         // together: the notes start in step, which is the worst they do.
         for index in 0..player.polyphony {
             (player.key_down)(KEY - 4 + index as u8);
         }
-        let (rms, peak) = levels(&mut player);
-        println!("{}: {} notes {rms:.1} dBFS RMS, peak {peak:.1} dBFS", player.name, player.polyphony);
-        assert!(peak < ceiling, "{}: {} notes peak at {peak} dBFS", player.name, player.polyphony);
+        let out = rendered(&mut player);
+        let (rms, peak_decibels) = levels(&out);
+        let bent = out.iter().filter(|sample| sample.unsigned_abs() > LIMIT_KNEE.unsigned_abs()).count();
+        let step = out.windows(2).map(|pair| (i32::from(pair[1]) - i32::from(pair[0])).abs()).max().unwrap_or(0);
+        println!(
+            "{}: {} notes {rms:.1} dBFS RMS, peak {peak_decibels:.1} dBFS ({}), {bent} of {} samples above the knee, largest step {step}",
+            player.name,
+            player.polyphony,
+            peak(&out),
+            out.len()
+        );
+        // The limiter's ceiling is the largest positive sample, so the
+        // most negative sample is never made.
+        assert!(peak(&out) <= LIMIT_CEILING.unsigned_abs(), "{}: peak {}", player.name, peak(&out));
+        assert!(step < LARGEST_STEP, "{}: a step of {step}", player.name);
     }
 }

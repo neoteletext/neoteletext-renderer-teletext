@@ -102,7 +102,7 @@ pub mod sid;
 pub const SAMPLE_RATE: u32 = 48_000;
 
 /// The level every instrument plays its reference note at, in tenths of a
-/// decibel of full scale, RMS: -27.0 dBFS.
+/// decibel of full scale, RMS: -23.0 dBFS.
 ///
 /// An instrument's reference note is one sustained note of its plainest
 /// full-level sound with a sawtooth's harmonics: one voice's sawtooth
@@ -114,25 +114,23 @@ pub const SAMPLE_RATE: u32 = 48_000;
 /// (`tests/levels.rs`). The 8580 alone stands below it, by the 2.2 dB by
 /// which that chip is quieter than a 6581.
 ///
+/// Every note an instrument can sound, struck together, is then more
+/// than a sample holds on some of them: the DX7's sixteen sines in step
+/// are 24.1 dB above one and would peak 4.1 dB above full scale. Nothing
+/// is left under the level for that. Each instrument's last sample goes
+/// through [`output::limit`], which changes nothing up to 2.5 dB below
+/// full scale and bends what is above under it, so no output wraps and
+/// none is cut flat.
+///
 /// Source: own choice, from what the instruments measured when each
 /// still had a level of its own (dBFS RMS of that note: Minimoog -17.3,
 /// SID 6581 -21.6, Juno-106 and Juno-60 -22.9, Prophet-5 -22.9 and -23.3,
-/// CS-80 -25.2, Jupiter-8 -25.4, DX7 -27.1). It is the highest level that
-/// [`POLYPHONY_HEADROOM_TENTHS`] allows: the DX7's sixteen sines struck
-/// together add in step, 24.1 dB above one, so one may peak no higher
-/// than 24.1 dB below full scale, which is 27.1 dBFS RMS. The DX7 was
-/// there and stays; the others come down to it.
-pub const REFERENCE_LEVEL_TENTHS: i32 = -270;
-
-/// The room every instrument leaves under full scale when every note it
-/// can sound plays its reference note at once, struck together, in
-/// tenths of a decibel: the peak of that is 0.5 dB or more below full
-/// scale (`tests/levels.rs`).
-///
-/// Source: own choice: enough that the rule is no accident of rounding,
-/// and no more, since each decibel of it is a decibel off every
-/// instrument's level.
-pub const POLYPHONY_HEADROOM_TENTHS: i32 = 5;
+/// CS-80 -25.2, Jupiter-8 -25.4, DX7 -27.1): the level the Junos and
+/// the Prophet-5 had, which the owner had heard and found good, with
+/// the Jupiter-8 a little under it. A level 4 dB lower, the highest at
+/// which the DX7's whole polyphony in step stays under full scale with no
+/// limiter, was tried first and made the whole set quiet.
+pub const REFERENCE_LEVEL_TENTHS: i32 = -230;
 
 /// Samples in one block of 20 milliseconds at [`SAMPLE_RATE`].
 pub const BLOCK_SAMPLES: usize = 960;

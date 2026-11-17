@@ -223,15 +223,16 @@ const BASS_BOOST_GAIN: i32 = ((100i64 << 28) / 47) as i32;
 const VCA_LEVEL_RANGE: i32 = OCTAVE;
 /// The slider's middle.
 const VCA_LEVEL_CENTRE: i32 = 64;
-/// The share of the mixed output that is a sample, in Q28: 312 / 1000.
-/// One voice's sawtooth through an open filter then peaks 20.8 dB below
-/// full scale, and six struck together 7.4 dB below.
-/// What is beyond full scale is saturated.
+/// The share of the mixed output that is a sample, in Q28: 494 / 1000.
+/// One voice's sawtooth through an open filter then peaks 16.8 dB below
+/// full scale, and six struck together 3.4 dB below.
+/// What nears full scale is bent under it by the output's limiter
+/// ([`crate::output::limit`]).
 ///
 /// Source: own choice: the gain at which the reference note stands at
 /// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the
-/// output's half, as it was first, the note stood 4.1 dB above it.
-const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 312 / 1000) as i32;
+/// output's half, as it was first, the note stood 0.1 dB above it.
+const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 494 / 1000) as i32;
 
 /// The whole of the low-frequency oscillator's delay that is silence;
 /// the rise to full depth then takes half as long again.

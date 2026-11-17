@@ -143,11 +143,11 @@ fn the_output_level_leaves_headroom_for_three_voices() {
     // 2026): 9,271 and 9,530 output units on a 6581, 7,017 and 7,437 on
     // an 8580. Before, the 8580's span was 7,534, above both. The gains
     // that gave those spans were 40 and 31; since every instrument plays
-    // at one level (`tests/levels.rs`) they are 22 and 17, and the spans
+    // at one level (`tests/levels.rs`) they are 34 and 26, and the spans
     // that share of the emulators'.
     const NEAR_DB: f64 = 0.25;
     for (model, spans, share) in
-        [(ChipModel::Mos6581, (9_271.0, 9_530.0), 22.0 / 40.0), (ChipModel::Mos8580, (7_017.0, 7_437.0), 17.0 / 31.0)]
+        [(ChipModel::Mos6581, (9_271.0, 9_530.0), 34.0 / 40.0), (ChipModel::Mos8580, (7_017.0, 7_437.0), 26.0 / 31.0)]
     {
         let clock = ChipClock::Pal;
         let register = frequency_register(440.0, clock);

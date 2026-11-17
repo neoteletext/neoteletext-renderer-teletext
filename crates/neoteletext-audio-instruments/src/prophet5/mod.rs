@@ -234,16 +234,17 @@ const CONTROL_ALL_NOTES_OFF: u8 = 123;
 ///
 /// Source: own choice: any number; the same instrument every time.
 const SEED: u32 = 0x5072_6f35;
-/// The share of the mixed output that is a sample, in Q28: 319 / 1000.
-/// One voice's sawtooth through an open filter then peaks 21.3 dB below
-/// full scale on a rev 3, and five struck together 8.7 dB below.
-/// What is beyond full scale is saturated.
+/// The share of the mixed output that is a sample, in Q28: 506 / 1000.
+/// One voice's sawtooth through an open filter then peaks 17.3 dB below
+/// full scale on a rev 3, and five struck together 4.7 dB below.
+/// What nears full scale is bent under it by the output's limiter
+/// ([`crate::output::limit`]).
 ///
 /// Source: own choice: the gain at which the reference note stands at
 /// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the
-/// output's half, as it was first, the note stood 4.1 dB above it on a
-/// rev 3 and 3.7 dB on a rev 2.
-const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 319 / 1000) as i32;
+/// output's half, as it was first, the note stood 0.1 dB above it on a
+/// rev 3 and 0.3 dB below it on a rev 2.
+const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 506 / 1000) as i32;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);

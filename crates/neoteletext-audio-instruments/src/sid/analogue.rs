@@ -381,12 +381,14 @@ const SATURATION_POST_SHIFT: u32 = SATURATION_WIDTH_BITS + 1 - 2 * SATURATION_PR
 /// Source: own choice of scale. A sample's 16 bits stand for no voltage,
 /// so the level is the crate's: one voice's sawtooth at full volume, past
 /// the filter, stands on a 6581 at [`crate::REFERENCE_LEVEL_TENTHS`]
-/// (`tests/levels.rs`: -26.8 dBFS RMS), and on an 8580 2.2 dB below.
+/// (`tests/levels.rs`: -23.0 dBFS RMS), and on an 8580 2.3 dB below.
 /// Three pulses in step at full volume, the loudest three voices can be
-/// with no filter, then peak at 8,580 of a sample's 32,767 on a 6581 and
-/// 6,635 on an 8580, 11.6 dB and 13.9 dB below full scale. (The gains
-/// were 40 and 31 before every instrument was given one level, and 64 for
-/// both chips at first, which clipped three of nine tunes: TODO-6427
+/// with no filter, then peak at 13,260 of a sample's 32,767 on a 6581 and
+/// 10,150 on an 8580, 7.9 dB and 10.2 dB below full scale; what the
+/// filter's resonance brings near full scale is bent under it by the
+/// output's limiter ([`crate::output::limit`]). (The gains were 40 and 31
+/// before every instrument was given one level, and 64 for both chips at
+/// first, with a hard clamp, which clipped three of nine tunes: TODO-6427
 /// fault 5.) No real chip was measured for how loud one chip is against
 /// the other: the recordings of real chips used elsewhere here are each
 /// brought to full scale by their maker. From emulators only: one
@@ -394,11 +396,11 @@ const SATURATION_POST_SHIFT: u32 = SATURATION_WIDTH_BITS + 1 - 2 * SATURATION_PR
 /// units on a 6581 in two of them run as separate programs (sidplayfp
 /// 2.16.0, both engines, measured 17 November 2026) and 7,017 and 7,437
 /// on an 8580, a ratio between the chips of 1.32 and 1.28; these gains'
-/// ratio is 1.29.
+/// ratio is 1.31.
 const fn output_gain(model: ChipModel) -> u32 {
     match model {
-        ChipModel::Mos6581 => 22,
-        ChipModel::Mos8580 => 17,
+        ChipModel::Mos6581 => 34,
+        ChipModel::Mos8580 => 26,
     }
 }
 

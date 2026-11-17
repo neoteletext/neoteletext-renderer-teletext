@@ -159,10 +159,16 @@ fn the_touch_moves_the_level_and_the_brilliance() {
     // stroke to the hardest, and as much again under pressure, held to
     // the 18 dB there is room for.
     let level = |patch: &Patch, velocity: u8, pressure: u8| {
+        // The firmest pressure brings one line to the whole of the mixed
+        // output, which the output's limiter would bend: the volume is
+        // at 64 of 127, a quarter by its square law, and allowed for.
+        const VOLUME: u8 = 64;
+        let quieter = (f64::from(VOLUME) / 127.0).powi(2);
         let mut cs80 = instrument(patch);
+        cs80.event(cs80_support::CONTROL, 7, VOLUME);
         cs80.event(NOTE_ON, 69, velocity);
         cs80.event(KEY_PRESSURE, 69, pressure);
-        decibels(rms(&render(&mut cs80, 0.5)[12_000..]) * 2.0f64.sqrt() / 0.125)
+        decibels(rms(&render(&mut cs80, 0.5)[12_000..]) * 2.0f64.sqrt() / 0.125 / quieter)
     };
     let mut touch = panel(&SINE);
     touch.tones[0].set(Control::TouchLevel, 127);

@@ -7,11 +7,14 @@
 //! number of carriers, so a note at the patch's full output level (99) with
 //! no velocity sensitivity peaks at about ±8,186, whatever its algorithm;
 //! velocity sensitivity at the hardest velocity can raise that to about
-//! ±15,000. The notes are added and the sum is shifted right by
-//! [`MIX_SHIFT`]: a full-level note is 24 decibels below full scale, and
-//! sixteen of them exactly in phase just reach it. The sum goes through the
-//! output's limiter ([`crate::output::limit`]), which bends what is near
-//! full scale under it and never wraps.
+//! ±15,000. The notes are added and [`MIX_GAIN`] of the sum is taken: a
+//! full-level note then peaks 20 decibels below full scale, where every
+//! instrument of the crate has its reference note
+//! ([`crate::REFERENCE_LEVEL_TENTHS`]), and eight of them exactly in
+//! phase pass the knee of the output's limiter
+//! ([`crate::output::limit`]), which the sum goes through: it bends what
+//! is near full scale under it, sixteen in phase among it, and never
+//! wraps.
 //!
 //! # Time
 //!
@@ -40,10 +43,15 @@ pub const PARTS: usize = 16;
 /// sound chip": "The DX7 supports 16 simultaneous notes".
 pub const NOTES: usize = 16;
 
-/// The right shift of the sum of all notes that makes a sample.
+/// The share of the sum of all notes that is a sample: 821 / 2,048.
 ///
-/// Source: own choice, explained under "Gain" above.
-pub const MIX_SHIFT: u32 = 2;
+/// Source: own choice, explained under "Gain" above: the gain at which
+/// one carrier at full output level stands at
+/// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with a quarter
+/// of the sum, as it was first, it stood 4.1 dB below.
+pub const MIX_GAIN: i32 = 821;
+/// Bits of [`MIX_GAIN`]'s fraction.
+pub const MIX_GAIN_BITS: u32 = 11;
 
 /// How far the pitch bend wheel bends at either end, in semitones.
 ///
@@ -480,7 +488,7 @@ impl Rack {
                 }
             }
             for (sample, &sum) in now.iter_mut().zip(&mix) {
-                *sample = crate::output::limit(sum >> MIX_SHIFT);
+                *sample = crate::output::limit(sum.saturating_mul(MIX_GAIN) >> MIX_GAIN_BITS);
             }
             self.block_remaining = self.block_remaining.saturating_sub(count);
             rest = later;

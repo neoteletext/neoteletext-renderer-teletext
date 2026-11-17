@@ -181,7 +181,8 @@ fn amplitude_modulation_follows_its_sensitivity() {
             voice.lfo_amp_mod_depth = depth;
             voice.operators[0].amp_mod_sensitivity = sensitivity;
         }));
-        assert!((2000..=2047).contains(&loud), "sensitivity {sensitivity}: loudest {loud}");
+        // A carrier's 8,186 at the rack's gain, 821 / 2,048.
+        assert!((3208..=3282).contains(&loud), "sensitivity {sensitivity}: loudest {loud}");
         (f64::from(loud) / f64::from(quiet.max(1))).log2()
     };
     assert!(swing(0, 99) < 0.01);

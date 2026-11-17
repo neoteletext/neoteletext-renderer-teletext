@@ -295,7 +295,8 @@ fn carriers_are_compensated_for_their_number() {
             operator.output_level = 0;
         }
     })));
-    assert!((2040..=2047).contains(&single), "single carrier peaks at {single}");
+    // A carrier's 8,186 at the rack's gain, 821 / 2,048.
+    assert!((3272..=3282).contains(&single), "single carrier peaks at {single}");
     for (number, algorithm) in ALGORITHMS.iter().enumerate() {
         let samples = render(&mut rack_with(number as u8, |voice| {
             for (index, operator) in voice.operators.iter_mut().enumerate() {

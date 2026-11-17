@@ -202,15 +202,16 @@ const FAST_OCTAVES_A_VOLT: i32 = law::octaves(981_378, 1_000_000);
 /// Source: adjustment procedure, page 17, sub oscillator: "18ms (± 5%)"
 /// at FAST.
 const SUB_OCTAVES_A_VOLT: i32 = law::octaves(611_780, 1_000_000);
-/// The share of the mixed output that is a sample, in Q28: 813 / 1000.
-/// One line's sawtooth through the open filters then peaks 18.5 dB below
-/// full scale, and eight keys struck together 3.1 dB below.
-/// What is beyond full scale is saturated.
+/// The share of the mixed output that is a sample, in Q28: 1288 / 1000.
+/// One line's sawtooth through the open filters then peaks 14.5 dB below
+/// full scale, and eight keys struck together 0.4 dB below, the tops of
+/// them bent by the output's limiter ([`crate::output::limit`]), as is
+/// whatever else nears full scale.
 ///
 /// Source: own choice: the gain at which the reference note stands at
 /// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the whole
-/// of the output, as it was first, the note stood 1.8 dB above it.
-pub const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 813 / 1000) as i32;
+/// of the output, as it was first, the note stood 2.2 dB below it.
+pub const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 1288 / 1000) as i32;
 /// The volts pressure adds to the sub oscillator's speed with the touch
 /// response's SPEED lever at the top.
 ///
