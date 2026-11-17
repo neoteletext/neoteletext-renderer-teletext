@@ -103,10 +103,14 @@ const PULSE_SPAN: u32 = ((49_215u64 << 32) / 100_000) as u32;
 /// divisions to 2 before the next edge; adjustment 13 turns that
 /// trimmer "fully clockwise" to make "the VCFs resonate" for tuning, so
 /// at its factory setting they do not. Own reading of the figure: a
-/// burst of 10 to 20 cycles falling to a quarter is a feedback of 3.5 to
-/// 3.83 in a linear four-pole loop. Own choice: the slider is a straight
-/// line from none.
-const RESONANCE_TOP: i32 = (ONE_Q28 as i64 * 38 / 10) as i32;
+/// burst of 10 to 20 cycles falling to a quarter. Own choice of the
+/// figure: just short of four. Driven by a square wave as the adjustment
+/// drives it, the square's own level stands in the feedback amplifier
+/// and lowers its gain by a twelfth, and the ringing falls to a quarter
+/// in 8.5 cycles (`tests/jupiter8_filter.rs`); a higher figure would meet
+/// the drawing better and oscillate when nothing drives it. Own choice:
+/// the slider is a straight line from none.
+const RESONANCE_TOP: i32 = (ONE_Q28 as i64 * 395 / 100) as i32;
 /// Half: the share of the resonance that is added to the filter's input
 /// gain, so that the passband falls less as the resonance rises.
 ///
