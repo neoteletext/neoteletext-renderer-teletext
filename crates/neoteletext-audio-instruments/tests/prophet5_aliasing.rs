@@ -126,10 +126,13 @@ const AMOUNTS: [u8; 3] = [30, 60, 120];
 /// B's band-limited output, the worst was -47 dB.
 const FREQUENCY: f64 = -88.0;
 /// The same for oscillator A's pulse width: at a quarter and a half of
-/// the amount (the worst measured -92 dB) and at all of it (-80 dB, on
-/// revision 3, where the width then runs into its end within a cycle).
-/// With one width for each sample the worst was -32 dB.
-const PULSE_WIDTH: [f64; 3] = [-88.0, -88.0, -77.0];
+/// the amount (the worst measured -92 dB) and at all of it. There, on
+/// revision 3, the width is at the end of its range for most of every
+/// cycle and little of the pulse is left to measure against: -80 dB as
+/// the levels stand, and -74 dB with the levels of the triangle and the
+/// envelopes that another change of this round gives revision 3. With
+/// one width for each sample the worst was -32 dB.
+const PULSE_WIDTH: [f64; 3] = [-88.0, -88.0, -71.0];
 /// The same for the cutoff, for each amount and each key: the worse of
 /// the two revisions as measured, and 3 dB. With the cutoff set from
 /// oscillator B's band-limited output these were -75 to -34 dB at a

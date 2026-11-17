@@ -32,7 +32,9 @@
 //! 2,093 Hz, with oscillator A synchronised to B. The frequency: 91 dB
 //! down or better at every amount on every key (47 dB at worst before).
 //! The pulse width: 92 dB or better to half the amount, and 80 dB at all
-//! of it (32 dB before). The cutoff, from B's sawtooth with the knob at
+//! of it (32 dB before), where on revision 3 the width is at the end of
+//! its range for most of every cycle and little of the pulse is left to
+//! measure against. The cutoff, from B's sawtooth with the knob at
 //! 6: at a quarter of the amount 94, 92, 85, 75 and 53 dB on the five
 //! keys; at a half 94, 90, 73, 56 and 52 dB; at all of it 74, 65, 59, 53
 //! and 54 dB (before: 75 to 34 dB, 59 to 25 dB and 31 to 22 dB). The
@@ -69,8 +71,13 @@ pub const RATE: u32 = OVERSAMPLING.rate();
 const TICK_BITS: u32 = 4;
 /// Samples of the voices between two ticks: a sixth of a millisecond.
 ///
-/// Source: own choice: short against the shortest envelope, and a power
-/// of two for the amplifier's slope.
+/// Source: own choice: a power of two for the amplifier's slope, and
+/// short enough for the shortest envelope. An attack whose time constant
+/// is 0.44 ms, 2.6 ticks, takes four ticks to its peak: the amplifier's
+/// gain, which runs in a straight line through each tick, stays within
+/// 2% of the peak of the curve the envelope's capacitor draws; the
+/// cutoff, which is set once a tick, takes that envelope in four steps
+/// of 41%, 28%, 19% and 12% of its swing.
 pub const TICK_SAMPLES: u32 = 1 << TICK_BITS;
 /// Ticks a second.
 pub const TICK_RATE: u32 = RATE / TICK_SAMPLES;
