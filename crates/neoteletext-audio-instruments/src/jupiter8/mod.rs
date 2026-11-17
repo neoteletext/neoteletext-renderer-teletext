@@ -84,7 +84,9 @@
 //! - **Eight voices cost** 8 to 14 times less than real time on one core
 //!   of a 3.7 GHz Intel Core i9-10900KF.
 //! - **No arpeggiator**, no tape memory, no external control voltages;
-//!   the hold is one pedal for both halves.
+//!   the hold is the pedal alone, without the panel's two selectors: it
+//!   holds both halves in whole and dual and the lower half in split, as
+//!   the instrument's pedal does.
 //! - **Velocity is ignored**, as the instrument's keyboard has none.
 
 mod assign;
@@ -179,9 +181,13 @@ impl Performance {
     /// The most the bender and the wheel move the pitch: an octave.
     ///
     /// Source: service notes, adjustment 25-1, BENDER LEVEL: with the
-    /// bender "at extreme left" the key A3 is trimmed to show the one
-    /// cycle that A2 showed, and with it "at extreme right" the key A1:
-    /// an octave either way with the sensitivity at its top. Own choice:
+    /// bender "at extreme left" on the key A3, "adjust VCO BEND to
+    /// display 1 cycle", the one cycle that A2 showed, and with it "at
+    /// extreme right" on the key A1 a trimmer is set for the same: an
+    /// octave either way. The adjustment moves the panel's own VCO BEND
+    /// slider to reach the octave, and its drawing has that slider's
+    /// knob below the top, so the slider's top is an octave or more, by
+    /// how much no document says. Own choice: the octave is the top; and
     /// the wheel's share of the oscillator the same, which adjustment
     /// 22's octave for the panel's own LFO MOD agrees with.
     pub const BEND_MAX: u16 = 1_200;
@@ -303,6 +309,8 @@ pub struct Jupiter8 {
     voices: [Voice; VOICES],
     /// The trigger count and the key each voice last acted on.
     seen: [(u32, u8); VOICES],
+    /// Whether the hold pedal is down.
+    pedal: bool,
     /// The pitch bend, less its centre.
     bend: i32,
     wheel: u8,
@@ -344,6 +352,7 @@ impl Jupiter8 {
             noises: [Noise::new(SEED), Noise::new(SEED.rotate_left(16))],
             voices,
             seen: [(0, 0); VOICES],
+            pedal: false,
             bend: 0,
             wheel: 0,
             volume: DATA_MAX,
@@ -373,7 +382,8 @@ impl Jupiter8 {
     /// Gives the instrument its upper patch, which [`KeyMode::Whole`]
     /// plays on every voice. It takes effect at once, on the voices that
     /// are sounding too, as moving the panel's controls does; a change
-    /// of the assign mode releases the voices it assigns.
+    /// of the assign mode releases the voices it assigns, those the hold
+    /// kept too, and a pedal that is down holds what is played after.
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patches[UPPER] = *patch;
         self.apply();
@@ -400,7 +410,10 @@ impl Jupiter8 {
     }
 
     /// Sets how the keyboard is shared between the patches. A change
-    /// releases every voice.
+    /// between whole and the other two releases every voice, and a
+    /// change to split releases what the hold kept of the upper half; a
+    /// pedal that is down holds what is played after, in the halves it
+    /// reaches ([`Jupiter8::event`]).
     pub fn set_key_mode(&mut self, key_mode: KeyMode) {
         let moved = (self.key_mode == KeyMode::Whole) != (key_mode == KeyMode::Whole);
         self.key_mode = key_mode;
@@ -487,6 +500,22 @@ impl Jupiter8 {
                 voice.configure(settings);
             }
         }
+        // A change of mode let every hold go: the pedal still stands.
+        self.hold();
+    }
+
+    /// Gives each half the hold the pedal asks of it.
+    ///
+    /// Source: owner's manual, printed page 13, "Hold Selectors": "In
+    /// either the Whole or Dual Key Modes, the DP-2 will activate the
+    /// Hold function for the entire keyboard ... When used with the Split
+    /// Key Mode, the DP-2 will activate the Hold function on the Lower
+    /// end of the keyboard only".
+    fn hold(&mut self) {
+        let split = self.key_mode == KeyMode::Split;
+        for (assigner, half) in self.assigners.iter_mut().zip(0usize..) {
+            assigner.hold(self.pedal && !(split && half == UPPER));
+        }
     }
 
     /// How many messages [`Jupiter8::event`] has ignored since the
@@ -510,7 +539,8 @@ impl Jupiter8 {
     /// - Control change (0xBn) of the modulation wheel (1: the bender
     ///   panel's LFO modulation, as far as [`Performance`] says),
     ///   portamento time (5), volume (7), balance (8), the sustain pedal
-    ///   (64: the hold, on from 64), portamento (65: on from 64 for both
+    ///   (64: the hold, on from 64; of the lower half alone in
+    ///   [`KeyMode::Split`]), portamento (65: on from 64 for both
     ///   halves, off below), all sound off (120), reset all controllers
     ///   (121, which leaves the volume, the balance and the portamento)
     ///   and all notes off (123).
@@ -574,9 +604,8 @@ impl Jupiter8 {
             CONTROL_VOLUME => self.volume = value,
             CONTROL_BALANCE => self.balance = value,
             CONTROL_SUSTAIN => {
-                for assigner in &mut self.assigners {
-                    assigner.hold(value >= SWITCH_ON);
-                }
+                self.pedal = value >= SWITCH_ON;
+                self.hold();
             }
             CONTROL_PORTAMENTO => {
                 self.performance.portamento = if value >= SWITCH_ON { Portamento::On } else { Portamento::Off };
@@ -593,9 +622,8 @@ impl Jupiter8 {
             CONTROL_RESET_CONTROLLERS => {
                 self.wheel = 0;
                 self.bend = 0;
-                for assigner in &mut self.assigners {
-                    assigner.hold(false);
-                }
+                self.pedal = false;
+                self.hold();
             }
             CONTROL_ALL_NOTES_OFF => {
                 // As a note off for every key: the hold still holds.
@@ -610,6 +638,7 @@ impl Jupiter8 {
     /// Releases every voice, held by a key or by the hold, and lets the
     /// hold go: for when the input stops and no note off will come.
     pub fn release_all(&mut self) {
+        self.pedal = false;
         for assigner in &mut self.assigners {
             assigner.release_all();
         }

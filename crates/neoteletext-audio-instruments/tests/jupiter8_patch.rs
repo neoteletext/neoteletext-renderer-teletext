@@ -114,4 +114,12 @@ fn the_factory_patches_are_patches_and_sound() {
         println!("{number} {name}: peak {peak} of 32768, {clipped} samples at a rail");
         assert!(peak > 1_000 && clipped == 0, "{number} {name}");
     }
+    // What each sheet names under its panel: the two patches in unison,
+    // and the one whose bender reaches VCO-2 alone.
+    let numbers = |wanted: &dyn Fn(&Patch) -> bool| -> Vec<u8> {
+        factory::all().iter().filter(|(_, _, patch)| wanted(patch)).map(|&(number, _, _)| number).collect()
+    };
+    assert_eq!(numbers(&|patch| patch.get(Param::AssignMode) == 2), [14, 58]);
+    assert_eq!(numbers(&|patch| patch.get(Param::AssignMode) != 0 && patch.get(Param::AssignMode) != 2), []);
+    assert_eq!(numbers(&|patch| !patch.on(Param::Vco1Bend) && patch.on(Param::Vco2Bend)), [14]);
 }

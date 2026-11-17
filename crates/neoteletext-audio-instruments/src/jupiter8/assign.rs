@@ -14,7 +14,8 @@ use super::patch::AssignMode;
 pub const VOICES: usize = 8;
 
 /// Keys the solo and unison modes remember as held: more than two hands
-/// hold.
+/// hold, and more than MIDI usually sends. Of more keys than these, solo
+/// remembers the lowest, whose key it plays, and unison the first.
 ///
 /// Source: own choice.
 const HELD_KEYS: usize = 16;
@@ -144,6 +145,17 @@ impl Assigner {
                     {
                         self.forget(|held| held.key == kept);
                     }
+                    // With every place taken by a key under a finger,
+                    // solo gives up its highest key for a lower one: the
+                    // lowest key down is then always among those
+                    // remembered.
+                    if solo
+                        && self.holding >= HELD_KEYS
+                        && let Some(highest) = self.held().iter().map(|held| held.key).max()
+                        && key < highest
+                    {
+                        self.forget(|held| held.key == highest);
+                    }
                     if let Some(place) = self.held.get_mut(self.holding) {
                         *place = Held { key, down: true };
                         self.holding = self.holding.wrapping_add(1);
@@ -179,7 +191,13 @@ impl Assigner {
     /// Own reading: poly 1 takes, of the voices whose key is up, the one
     /// that was given its key longest ago, which is the service notes'
     /// "modules from A to H one by one"; poly 2 takes the first such
-    /// voice and cuts short every other. A key that is already sounding
+    /// voice and cuts short every other. So in poly 2 "the last note or
+    /// notes played together" are the keys that are down when the newest
+    /// key is struck, with that key: each of them has its natural release
+    /// when it goes up, until another key is struck, which cuts short
+    /// whatever is then dying away. A key held from before and let go
+    /// after later ones were struck keeps its natural release, having
+    /// been down together with them. A key that is already sounding
     /// (which a keyboard cannot send, and MIDI can) starts its own voice
     /// again.
     ///
@@ -251,6 +269,9 @@ impl Assigner {
     /// notes played to carry on indefinitely at their programmed Sustain
     /// levels".
     pub fn hold(&mut self, on: bool) {
+        if on == self.hold {
+            return;
+        }
         self.hold = on;
         if !on {
             for slot in self.active_mut().iter_mut().filter(|slot| slot.kept) {

@@ -234,6 +234,30 @@ fn solo_plays_the_lowest_key_on_one_voice() {
 }
 
 #[test]
+fn solo_plays_the_lowest_of_more_keys_than_it_remembers() {
+    // Sixteen keys are remembered; a seventeenth below them all, which
+    // MIDI can send, is the lowest key down and the one solo plays.
+    let mut jupiter = instrument(&square().with(Param::AssignMode, 1));
+    for key in (A2 + 1..=A2 + 16).rev() {
+        jupiter.event(NOTE_ON, key, 100);
+    }
+    jupiter.event(NOTE_ON, A2 - 12, 100);
+    let lowest = cents(220.0, pitch(&render(&mut jupiter, 0.4)[samples(0.1)..]));
+    assert!(lowest.abs() < 2.0, "the seventeenth key, the lowest: {lowest} cents from it");
+    // Let go, it gives the note back to the lowest of the others; a key
+    // above them all changes nothing; and every key up ends the note.
+    jupiter.event(NOTE_OFF, A2 - 12, 0);
+    jupiter.event(NOTE_ON, A2 + 30, 100);
+    let next = cents(440.0 * (1.0f64 / 12.0).exp2(), pitch(&render(&mut jupiter, 0.4)[samples(0.1)..]));
+    assert!(next.abs() < 2.0, "the lowest of the sixteen: {next} cents from it");
+    for key in 0..=127 {
+        jupiter.event(NOTE_OFF, key, 0);
+    }
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 0);
+}
+
+#[test]
 fn unison_shares_all_eight_voices_among_the_keys() {
     // Owner's manual: "All 8 synthesizers will be assigned to any one key
     // pressed, dividing to four each for two keys, and so on".
@@ -391,6 +415,58 @@ fn a_key_beyond_the_voices_takes_the_voice_the_hold_has_kept_longest() {
     jupiter.event(NOTE_ON, KEYS[8], 100);
     let levels = heard(&mut jupiter, &[KEYS[8], KEYS[1], KEYS[0]]);
     assert!(levels[1].abs() < 1.5 && levels[2] < -40.0, "unison: {levels:?}");
+}
+
+#[test]
+fn the_pedal_holds_the_lower_half_alone_in_split_and_outlasts_a_change_of_mode() {
+    // Owner's manual, printed page 13: "In either the Whole or Dual Key
+    // Modes, the DP-2 will activate the Hold function for the entire
+    // keyboard ... When used with the Split Key Mode, the DP-2 will
+    // activate the Hold function on the Lower end of the keyboard only".
+    let patch = square().with(Param::Env2Release, 0);
+    let (low, high) = (A2 - 24, A2 + 12);
+    let tap = |jupiter: &mut Jupiter8, key: u8| {
+        jupiter.event(NOTE_ON, key, 100);
+        render(jupiter, 0.05);
+        jupiter.event(NOTE_OFF, key, 0);
+    };
+    let mut jupiter = instrument(&patch);
+    jupiter.set_lower_patch(&patch);
+    jupiter.set_key_mode(KeyMode::Split);
+    jupiter.event(CONTROL, 64, 127);
+    tap(&mut jupiter, low);
+    tap(&mut jupiter, high);
+    let held = render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 1, "split: the pedal holds the lower key alone");
+    assert!(cents(110.0, pitch(&held[samples(0.1)..])).abs() < 2.0);
+    // In dual it holds both halves; going to split lets the upper go.
+    jupiter.event(CONTROL, 64, 0);
+    jupiter.set_key_mode(KeyMode::Dual);
+    jupiter.event(CONTROL, 64, 127);
+    tap(&mut jupiter, high);
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 2, "dual: the pedal holds both halves");
+    jupiter.set_key_mode(KeyMode::Split);
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 1, "dual to split: the upper half's hold is let go");
+    // The pedal is still down after a change of the key mode or of the
+    // assign mode, each of which releases every voice: what is played
+    // then is held.
+    jupiter.set_key_mode(KeyMode::Whole);
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 0, "split to whole releases every voice");
+    tap(&mut jupiter, high);
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 1, "the pedal holds after a change of the key mode");
+    jupiter.set_patch(&patch.with(Param::AssignMode, 3));
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 0, "a change of the assign mode releases every voice");
+    tap(&mut jupiter, high);
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 1, "the pedal holds after a change of the assign mode");
+    jupiter.event(CONTROL, 64, 0);
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 0);
 }
 
 #[test]

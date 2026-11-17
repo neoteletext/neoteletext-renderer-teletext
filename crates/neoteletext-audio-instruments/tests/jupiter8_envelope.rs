@@ -146,11 +146,12 @@ fn lfo_rate(patch: &Patch, seconds: f64) -> f64 {
 }
 
 #[test]
-fn the_low_frequency_oscillator_runs_from_a_twentieth_of_a_hertz_to_forty() {
-    // Roland's specifications: 0.05 Hz to 40 Hz. Service notes,
-    // adjustment 21: three cycles in 100 ms, 30 Hz, which this law has
-    // at 9.6 of the slider's 10 (245 of 255).
-    for (slider, hertz) in [(128u8, 1.433), (245, 30.78), (255, 40.0)] {
+fn the_low_frequency_oscillator_runs_from_a_twentieth_of_a_hertz_to_thirty() {
+    // Roland's specifications for the foot: 0.05 Hz. Service notes,
+    // adjustment 21, for the top: three cycles in 100 ms, 30 Hz, with
+    // the RATE slider drawn at 10. Between them the law is exponential:
+    // 0.05 Hz x 600^(128 / 255) = 1.240 Hz at the middle.
+    for (slider, hertz) in [(128u8, 1.240), (255, 30.0)] {
         let found = lfo_rate(&square().with(Param::LfoRate, slider), 3.0);
         println!("rate at {slider}: {found:.3} Hz, for {hertz} Hz");
         assert!((found / hertz - 1.0).abs() < 0.03);
