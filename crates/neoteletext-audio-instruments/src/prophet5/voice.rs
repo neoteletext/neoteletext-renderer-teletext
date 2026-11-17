@@ -47,10 +47,13 @@
 //! about the voices' rate; rounding the corner the jump makes in the
 //! filter's output was tried and gained 3 dB.
 //!
-//! Five voices with everything on render 13.8 times faster than real
-//! time, 16.4 before the stretches (`tests/prophet5_instrument.rs`,
-//! `rendering_speed`, 17 November 2026, one core of a 3.7 GHz Intel Core
-//! i9-10900KF).
+//! Five voices with everything on render 12.8 times faster than real
+//! time (16.4 before the stretches), and 8.4 to 10.2 times with
+//! oscillator B at the top of its knob under the keyboard's top octave,
+//! where every other sample is made in two stretches or three: the most
+//! a sample costs (`tests/prophet5_instrument.rs`, `rendering_speed`,
+//! 17 November 2026, one core of a 3.7 GHz Intel Core i9-10900KF, with
+//! other work on the machine).
 
 use crate::analog::envelope::{ENVELOPE_ONE, REST_LEVEL, RcEnvelope, Stage, apply, time_constant};
 use crate::analog::filter::{ONE_Q28, OnePole, OtaCascade};
@@ -80,7 +83,14 @@ const TICK_BITS: u32 = 4;
 /// gain, which runs in a straight line through each tick, stays within
 /// 2% of the peak of the curve the envelope's capacitor draws; the
 /// cutoff, which is set once a tick, takes that envelope in four steps
-/// of 41%, 28%, 19% and 12% of its swing.
+/// of 41%, 28%, 19% and 12% of its swing. Measured on 17 November 2026
+/// against a build with a tick of one sample, over the first 6 ms of a
+/// sawtooth with both attacks at 0: where the note has anything of its
+/// own (from the C of 262 Hz up) each band's energy is within 0.4 dB;
+/// under the lowest C with the envelope amount at its top, the steps
+/// add 7 to 10 dB to what is there from 6 kHz to 20 kHz, which is then
+/// 53 dB below the attack's energy under 2 kHz. No click and no zipper
+/// was found, and the cutoff is left as it is.
 pub const TICK_SAMPLES: u32 = 1 << TICK_BITS;
 /// Ticks a second.
 pub const TICK_RATE: u32 = RATE / TICK_SAMPLES;

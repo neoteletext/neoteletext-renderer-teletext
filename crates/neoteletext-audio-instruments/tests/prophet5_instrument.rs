@@ -418,9 +418,19 @@ fn rendering_speed() {
         // open, no glide.
         bytes[7] = 0x7f;
         let patch = Patch::from_bytes(&bytes).with(Knob::Resonance, 60).with(Knob::AmplifierRelease, 127);
-        for (name, patch) in [("everything on", patch), ("the plain patch", plain(model))] {
+        // Oscillator B out of its low-frequency mode and at the top of
+        // its knob, under the keyboard's top octave: its voltage jumps
+        // or turns in every other sample, and each of those samples is
+        // made in two stretches or three.
+        let fast = patch.with_switch(Switch::OscBLowFrequency, false).with(Knob::OscBPulseWidth, 40);
+        let (middle, top) = ([48u8, 55, 60, 64, 67], [96u8, 100, 103, 106, 108]);
+        for (name, patch, keys) in [
+            ("everything on", patch, middle),
+            ("everything on, oscillator B at its fastest", fast, top),
+            ("the plain patch", plain(model), middle),
+        ] {
             let mut prophet = instrument(model, &patch);
-            for key in [48u8, 55, 60, 64, 67] {
+            for key in keys {
                 prophet.event(NOTE_ON, key, 100);
             }
             let mut out = vec![0i16; 48_000];
