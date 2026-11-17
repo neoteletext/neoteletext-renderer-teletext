@@ -100,5 +100,38 @@ pub mod sid;
 /// instrument block of the audio profile (REQ-6411 item 1).
 pub const SAMPLE_RATE: u32 = 48_000;
 
+/// The level every instrument plays its reference note at, in tenths of a
+/// decibel of full scale, RMS: -27.0 dBFS.
+///
+/// An instrument's reference note is one sustained note of its plainest
+/// full-level sound with a sawtooth's harmonics: one voice's sawtooth
+/// through an open filter with the amplifier held full on an analogue
+/// instrument, one voice's sawtooth at full volume past the filter on the
+/// SID, and one carrier at full output level, a sine, on the DX7. Each
+/// instrument's last gain is set so that the note stands at this level,
+/// so that the same score is as loud on one instrument as on another
+/// (`tests/levels.rs`). The 8580 alone stands below it, by the 2.2 dB by
+/// which that chip is quieter than a 6581.
+///
+/// Source: own choice, from what the instruments measured when each
+/// still had a level of its own (dBFS RMS of that note: Minimoog -17.3,
+/// SID 6581 -21.6, Juno-106 and Juno-60 -22.9, Prophet-5 -22.9 and -23.3,
+/// CS-80 -25.2, Jupiter-8 -25.4, DX7 -27.1). It is the highest level that
+/// [`POLYPHONY_HEADROOM_TENTHS`] allows: the DX7's sixteen sines struck
+/// together add in step, 24.1 dB above one, so one may peak no higher
+/// than 24.1 dB below full scale, which is 27.1 dBFS RMS. The DX7 was
+/// there and stays; the others come down to it.
+pub const REFERENCE_LEVEL_TENTHS: i32 = -270;
+
+/// The room every instrument leaves under full scale when every note it
+/// can sound plays its reference note at once, struck together, in
+/// tenths of a decibel: the peak of that is 0.5 dB or more below full
+/// scale (`tests/levels.rs`).
+///
+/// Source: own choice: enough that the rule is no accident of rounding,
+/// and no more, since each decibel of it is a decibel off every
+/// instrument's level.
+pub const POLYPHONY_HEADROOM_TENTHS: i32 = 5;
+
 /// Samples in one block of 20 milliseconds at [`SAMPLE_RATE`].
 pub const BLOCK_SAMPLES: usize = 960;

@@ -458,7 +458,8 @@ fn random_patches_and_messages_never_panic_and_never_stick_at_the_rail() {
     for seed in [1, 2, 3] {
         let out = storm(seed, blocks, BLOCK_SAMPLES);
         let railed = out.iter().filter(|&&sample| sample == i16::MAX || sample == i16::MIN).count();
-        let loud = out.iter().filter(|&&sample| sample.unsigned_abs() > 300).count();
+        // A hundredth of the reference note's peak.
+        let loud = out.iter().filter(|&&sample| sample.unsigned_abs() > 26).count();
         println!("seed {seed}: {loud} of {} samples sound, {railed} at the rail", out.len());
         assert!(loud > out.len() / 20, "the storm makes sound");
         assert!(railed < out.len() / 1_000, "{railed}");

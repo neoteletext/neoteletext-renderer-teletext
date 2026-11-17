@@ -142,13 +142,16 @@ const PITCH_STEP: u32 = frequency(law::PITCH, RATE);
 const CUTOFF_STEP: u32 = frequency(law::CUTOFF_ANCHOR, RATE);
 /// Bits of a contour's and of the glide's coefficient.
 const COEFFICIENT_BITS: u32 = 31;
-/// The right shift of the output before it is a sample: one oscillator's
-/// sawtooth through the open filter then peaks 12 dB below full scale,
-/// and the filter driven as hard as it goes 6 dB below. What is beyond
-/// is saturated.
+/// The share of the mixed output that is a sample, in Q28: 818 / 10000.
+/// One oscillator's sawtooth through the open filter then peaks 22.0 dB
+/// below full scale; the instrument has one voice, and no more of it
+/// adds.
+/// What is beyond full scale is saturated.
 ///
-/// Source: own choice.
-const OUTPUT_SHIFT: u32 = 2;
+/// Source: own choice: the gain at which the reference note stands at
+/// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the
+/// output's quarter, as it was first, the note stood 9.7 dB above it.
+pub const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 818 / 10000) as i32;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
@@ -683,7 +686,7 @@ impl Minimoog {
             let earlier = self.sample();
             let later = self.sample();
             let signal = amplify(self.decimator.process(earlier, later), volume);
-            *sample = to_sample(signal >> OUTPUT_SHIFT);
+            *sample = to_sample(amplify(signal, OUTPUT_GAIN));
             if self.contours.last().is_some_and(|contour| contour.stage() == Stage::Rest) {
                 self.allocator.finished(0);
             }

@@ -254,13 +254,13 @@ fn the_volume_register_plays_samples_on_a_6581_and_quietly_on_an_8580() {
     let (old, new) = (played(ChipModel::Mos6581), played(ChipModel::Mos8580));
     // The 6581's three silent voices and its mixer add (3 * 0.26 + 0.08)
     // / 1.05 of a voice's full swing, 4,095 * 255 units, which the
-    // volume's fifteen steps and the 6581's output gain, 40 / 65,536,
+    // volume's fifteen steps and the 6581's output gain, 22 / 65,536,
     // bring to samples; a square wave of that has 2/π of it at its
     // fundamental.
-    let expected = (3.0 * 0.26 + 0.08) / 1.05 * 4095.0 * 255.0 * 15.0 * 40.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    let expected = (3.0 * 0.26 + 0.08) / 1.05 * 4095.0 * 255.0 * 15.0 * 22.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((old / expected - 1.0).abs() < 0.05, "6581: {old} for {expected}");
-    // The 8580's add 3 * 0.05 of it, at an output gain of 31 / 65,536.
-    let expected = 0.15 * 4095.0 * 255.0 * 15.0 * 31.0 / 65536.0 * 2.0 / std::f64::consts::PI;
+    // The 8580's add 3 * 0.05 of it, at an output gain of 17 / 65,536.
+    let expected = 0.15 * 4095.0 * 255.0 * 15.0 * 17.0 / 65536.0 * 2.0 / std::f64::consts::PI;
     assert!((new / expected - 1.0).abs() < 0.05, "8580: {new} for {expected}");
 }
 

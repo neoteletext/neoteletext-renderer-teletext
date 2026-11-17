@@ -35,11 +35,18 @@ pub fn samples(seconds: f64) -> usize {
     (seconds * RATE).round() as usize
 }
 
-/// Renders so many seconds, as full scale 1.
+/// Renders so many seconds in the instrument's own scale, in which these
+/// tests' levels were taken: a quarter of the mixed output as full scale
+/// 1, with the output's gain, which sets the level the crate's
+/// instruments share, taken out again.
 pub fn render(minimoog: &mut Minimoog, seconds: f64) -> Vec<f64> {
+    /// One in Q28, and the quarter.
+    const ONE_Q28: f64 = 268_435_456.0;
+    const QUARTER: f64 = 0.25;
+    let gain = f64::from(neoteletext_audio_instruments::minimoog::OUTPUT_GAIN) / ONE_Q28 / QUARTER;
     let mut out = vec![0i16; samples(seconds)];
     minimoog.render(&mut out);
-    out.iter().map(|&sample| f64::from(sample) / 32_768.0).collect()
+    out.iter().map(|&sample| f64::from(sample) / 32_768.0 / gain).collect()
 }
 
 /// An instrument playing a patch, its oscillators not drifting.

@@ -120,7 +120,7 @@ const VCF_GAIN: i32 = (ONE_Q28 as i64 * (1 << DRIVE_SHIFT) * 8 / 10) as i32;
 const GAIN_NOMINAL: u32 = (ENVELOPE_ONE >> 3) as u32;
 /// The right shift of a line's output into the sum of sixteen: with
 /// [`GAIN_NOMINAL`], one line's sine at full level peaks 18 dB below the
-/// output's full scale.
+/// mixed output's full scale, before the instrument's output gain.
 ///
 /// Source: own choice.
 const OUTPUT_SHIFT: u32 = 0;

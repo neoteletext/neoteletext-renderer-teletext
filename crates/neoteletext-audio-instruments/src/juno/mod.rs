@@ -223,13 +223,15 @@ const BASS_BOOST_GAIN: i32 = ((100i64 << 28) / 47) as i32;
 const VCA_LEVEL_RANGE: i32 = OCTAVE;
 /// The slider's middle.
 const VCA_LEVEL_CENTRE: i32 = 64;
-/// The right shift of the mixed output before it is a sample: one voice's
-/// sawtooth through an open filter then peaks 18 dB below full scale, and
-/// six with the chorus come to about full scale. What is beyond is
-/// saturated.
+/// The share of the mixed output that is a sample, in Q28: 312 / 1000.
+/// One voice's sawtooth through an open filter then peaks 20.8 dB below
+/// full scale, and six struck together 7.4 dB below.
+/// What is beyond full scale is saturated.
 ///
-/// Source: own choice.
-const OUTPUT_SHIFT: u32 = 1;
+/// Source: own choice: the gain at which the reference note stands at
+/// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the
+/// output's half, as it was first, the note stood 4.1 dB above it.
+const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 312 / 1000) as i32;
 
 /// The whole of the low-frequency oscillator's delay that is silence;
 /// the rise to full depth then takes half as long again.
@@ -579,7 +581,7 @@ impl Juno {
                 let [first, second] = self.chorus.process(signal);
                 signal = signal.saturating_add(scale(first.saturating_add(second), CHORUS_LINE_GAIN));
             }
-            *sample = to_sample(signal >> OUTPUT_SHIFT);
+            *sample = to_sample(amplify(signal, OUTPUT_GAIN));
         }
     }
 }

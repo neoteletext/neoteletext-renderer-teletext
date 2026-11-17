@@ -171,7 +171,12 @@ fn the_filter_falls_24_db_an_octave_and_resonance_lifts_the_cutoff() {
         let slider =
             (0..=127u8).min_by_key(|&slider| cents(440.0, documented(model, slider)).abs() as i64).unwrap_or(0);
         let saw = |cutoff: u8, resonance: u8| {
-            let patch = Patch::DEFAULT.with(Slider::VcfFrequency, cutoff).with(Slider::VcfResonance, resonance);
+            // The amplifier at its top, so that harmonics 50 dB down
+            // stand clear of a sample's last bit.
+            let patch = Patch::DEFAULT
+                .with(Slider::VcfFrequency, cutoff)
+                .with(Slider::VcfResonance, resonance)
+                .with(Slider::VcaLevel, 127);
             let mut patch = flat(model, patch);
             patch.vca_gate = true;
             play(model, &patch, 45, 1.5, 0.0).split_off(samples(0.5))

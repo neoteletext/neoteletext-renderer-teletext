@@ -379,23 +379,26 @@ const SATURATION_POST_SHIFT: u32 = SATURATION_WIDTH_BITS + 1 - 2 * SATURATION_PR
 /// chip.
 ///
 /// Source: own choice of scale. A sample's 16 bits stand for no voltage,
-/// so the level is chosen for headroom: three pulses in step at full
-/// volume, the loudest three voices can be with no filter, peak at 15,600
-/// of a sample's 32,767 on a 6581 and 12,100 on an 8580, 6.5 dB and
-/// 8.7 dB below full scale for the filter's resonance and the volume
-/// register's steps (TODO-6427 fault 5; a gain of 64 for both chips at first clipped
-/// three of nine tunes). No real chip was measured for how loud one chip
-/// is against the other: the recordings of real chips used elsewhere here
-/// are each brought to full scale by their maker. From emulators only:
-/// one triangle at full envelope and full volume spans 9,271 and 9,530
-/// output units on a 6581 in two of them run as separate programs
-/// (sidplayfp 2.16.0, both engines, measured 17 November 2026) and 7,017
-/// and 7,437 on an 8580, a ratio between the chips of 1.32 and 1.28; with
-/// these gains it spans 9,417 and 7,298 here, a ratio of 1.29.
+/// so the level is the crate's: one voice's sawtooth at full volume, past
+/// the filter, stands on a 6581 at [`crate::REFERENCE_LEVEL_TENTHS`]
+/// (`tests/levels.rs`: -26.8 dBFS RMS), and on an 8580 2.2 dB below.
+/// Three pulses in step at full volume, the loudest three voices can be
+/// with no filter, then peak at 8,580 of a sample's 32,767 on a 6581 and
+/// 6,635 on an 8580, 11.6 dB and 13.9 dB below full scale. (The gains
+/// were 40 and 31 before every instrument was given one level, and 64 for
+/// both chips at first, which clipped three of nine tunes: TODO-6427
+/// fault 5.) No real chip was measured for how loud one chip is against
+/// the other: the recordings of real chips used elsewhere here are each
+/// brought to full scale by their maker. From emulators only: one
+/// triangle at full envelope and full volume spans 9,271 and 9,530 output
+/// units on a 6581 in two of them run as separate programs (sidplayfp
+/// 2.16.0, both engines, measured 17 November 2026) and 7,017 and 7,437
+/// on an 8580, a ratio between the chips of 1.32 and 1.28; these gains'
+/// ratio is 1.29.
 const fn output_gain(model: ChipModel) -> u32 {
     match model {
-        ChipModel::Mos6581 => 40,
-        ChipModel::Mos8580 => 31,
+        ChipModel::Mos6581 => 22,
+        ChipModel::Mos8580 => 17,
     }
 }
 

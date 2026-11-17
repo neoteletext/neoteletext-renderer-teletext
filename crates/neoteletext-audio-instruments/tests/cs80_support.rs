@@ -39,11 +39,17 @@ pub fn samples(seconds: f64) -> usize {
     (seconds * RATE).round() as usize
 }
 
-/// Renders so many seconds, as full scale 1.
+/// Renders so many seconds in the instrument's own scale, in which the
+/// levels Yamaha gives are stated: the whole of the mixed output as full
+/// scale 1, with the output's gain, which sets the level the crate's
+/// instruments share, taken out again.
 pub fn render(cs80: &mut Cs80, seconds: f64) -> Vec<f64> {
+    /// One in Q28.
+    const ONE_Q28: f64 = 268_435_456.0;
+    let gain = f64::from(neoteletext_audio_instruments::cs80::OUTPUT_GAIN) / ONE_Q28;
     let mut out = vec![0i16; samples(seconds)];
     cs80.render(&mut out);
-    out.iter().map(|&sample| f64::from(sample) / 32_768.0).collect()
+    out.iter().map(|&sample| f64::from(sample) / 32_768.0 / gain).collect()
 }
 
 /// An instrument playing a patch.

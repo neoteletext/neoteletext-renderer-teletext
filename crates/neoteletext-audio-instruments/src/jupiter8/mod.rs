@@ -267,13 +267,16 @@ const SEED: u32 = 0x4a75_7038;
 /// (service notes, interface board schematic, "S/H PORTAMENTO"), so it
 /// covers the same share of any interval in the same time.
 const PORTAMENTO_LONGEST: u32 = 1_000_000;
-/// The right shift of the mixed output before it is a sample: one voice's
-/// sawtooth through an open filter at the amplifier's full level then
-/// peaks 18 dB below full scale, and eight together come to about full
-/// scale. What is beyond is saturated.
+/// The share of the mixed output that is a sample, in Q28: 416 / 1000.
+/// One voice's sawtooth through an open filter at the amplifier's full
+/// level then peaks 22.2 dB below full scale, and eight struck together
+/// 7.2 dB below.
+/// What is beyond full scale is saturated.
 ///
-/// Source: own choice, as for this crate's Juno.
-const OUTPUT_SHIFT: u32 = 1;
+/// Source: own choice: the gain at which the reference note stands at
+/// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the
+/// output's half, as it was first, the note stood 1.6 dB above it.
+const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 416 / 1000) as i32;
 /// The square of the largest volume, which the volume's square is a share
 /// of.
 const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
@@ -707,7 +710,7 @@ impl Jupiter8 {
             let earlier = mixed(self.voices_sample());
             let later = mixed(self.voices_sample());
             let signal = self.decimator.process(earlier, later);
-            *sample = to_sample(amplify(signal, volume) >> OUTPUT_SHIFT);
+            *sample = to_sample(amplify(amplify(signal, volume), OUTPUT_GAIN));
         }
     }
 }

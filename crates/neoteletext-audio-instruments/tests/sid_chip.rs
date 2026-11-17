@@ -141,9 +141,14 @@ fn the_output_level_leaves_headroom_for_three_voices() {
     // it spans in two emulators run as separate programs (sidplayfp
     // 2.16.0, both engines, measured from their output on 17 November
     // 2026): 9,271 and 9,530 output units on a 6581, 7,017 and 7,437 on
-    // an 8580. Before, the 8580's span was 7,534, above both.
+    // an 8580. Before, the 8580's span was 7,534, above both. The gains
+    // that gave those spans were 40 and 31; since every instrument plays
+    // at one level (`tests/levels.rs`) they are 22 and 17, and the spans
+    // that share of the emulators'.
     const NEAR_DB: f64 = 0.25;
-    for (model, spans) in [(ChipModel::Mos6581, (9_271.0, 9_530.0)), (ChipModel::Mos8580, (7_017.0, 7_437.0))] {
+    for (model, spans, share) in
+        [(ChipModel::Mos6581, (9_271.0, 9_530.0), 22.0 / 40.0), (ChipModel::Mos8580, (7_017.0, 7_437.0), 17.0 / 31.0)]
+    {
         let clock = ChipClock::Pal;
         let register = frequency_register(440.0, clock);
         let extremes = |sid: &mut Sid| {
@@ -157,7 +162,7 @@ fn the_output_level_leaves_headroom_for_three_voices() {
         sid.write(MODE_VOLUME, FULL_VOLUME);
         start(&mut sid, 0, register, TRIANGLE);
         let (lowest, highest) = extremes(&mut sid);
-        let middle = f64::midpoint(spans.0, spans.1);
+        let middle = f64::midpoint(spans.0, spans.1) * share;
         let found = decibels(f64::from(highest - lowest) / middle);
         assert!(found.abs() < NEAR_DB, "{model:?}: a triangle spans {} units, {found} dB", highest - lowest);
         // Three pulses in step, the loudest the three voices can be with
