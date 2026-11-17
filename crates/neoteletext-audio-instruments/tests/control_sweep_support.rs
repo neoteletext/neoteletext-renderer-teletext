@@ -305,6 +305,19 @@ pub fn sweep<I: Instrument>(sounds: &[Sound<I>], changes: &(dyn Fn(&I) -> Vec<Ch
     })
 }
 
+/// After all sound off under each sound, the instrument is silent
+/// within `within` samples and stays so: what the message is for.
+pub fn all_sound_off_silences<I: Instrument>(sounds: &[Sound<I>], off: &(dyn Fn(&mut I) + Sync), within: usize) {
+    for sound in sounds {
+        let mut instrument = (sound.make)();
+        (sound.play)(&mut instrument);
+        off(&mut instrument);
+        run(&mut instrument, within);
+        let after = run(&mut instrument, 2 * AFTER);
+        assert!(after.iter().all(|&sample| sample == 0), "{}: it still sounds after all sound off", sound.name);
+    }
+}
+
 /// Controls whose change steps the signal on the instrument itself.
 pub struct Allowed {
     /// The controls, as the rows name them.

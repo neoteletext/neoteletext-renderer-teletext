@@ -485,6 +485,9 @@ pub struct Minimoog {
     /// The volume's gain as it stands, in Q28, on its way to what the
     /// controller asks.
     volume_gain: VolumeGain,
+    /// All sound off has come and the sound is on its way out: the gain
+    /// that takes it there, which the note is cut at the end of.
+    cut: Option<VolumeGain>,
     /// From the voice's rate to twice the output rate, and from there to
     /// the output rate.
     wide: Decimator,
@@ -544,6 +547,7 @@ impl Minimoog {
             wheel_now: 0,
             volume: DATA_MAX,
             volume_gain: VolumeGain::full(),
+            cut: None,
             wide: Decimator::wide(),
             decimator: Decimator::sharp(),
             ignored: 0,
@@ -651,8 +655,10 @@ impl Minimoog {
     ///   whose gain moves to its new place over five thousandths of a
     ///   second at the most),
     ///   the sustain pedal (64, down from 64, which holds the note as a
-    ///   key does), all sound off (120), reset all controllers (121,
-    ///   which leaves the volume) and all notes off (123).
+    ///   key does), all sound off (120, which takes the sound out over
+    ///   five thousandths of a second and then empties the voice; a key
+    ///   struck before then empties it at once), reset all controllers
+    ///   (121, which leaves the volume) and all notes off (123).
     /// - Pitch bend (0xEn), 14 bits, `data1` the low seven: the pitch
     ///   wheel, [`law::BEND`] either way.
     ///
@@ -667,7 +673,15 @@ impl Minimoog {
         match status & 0xf0 {
             STATUS_NOTE_OFF => self.allocator.key_up(data1),
             STATUS_NOTE_ON if data2 == 0 => self.allocator.key_up(data1),
-            STATUS_NOTE_ON => self.allocator.key_down(data1, data2),
+            STATUS_NOTE_ON => {
+                // A key struck while all sound off is taking the last
+                // note out starts from an empty voice, as it would have
+                // a moment later.
+                if self.cut.is_some() {
+                    self.cut();
+                }
+                self.allocator.key_down(data1, data2);
+            }
             STATUS_CONTROL_CHANGE => self.control_change(data1, data2),
             STATUS_PITCH_BEND => {
                 let bend = (i32::from(data2) << 7 | i32::from(data1)).saturating_sub(PITCH_BEND_CENTRE);
@@ -693,16 +707,14 @@ impl Minimoog {
             }
             CONTROL_VOLUME => self.volume = value,
             CONTROL_SUSTAIN => self.allocator.sustain(value >= PEDAL_DOWN),
+            // The sound goes out over the 5.3 ms a volume's gain takes,
+            // and the note is cut when it has gone: cut where it stood,
+            // the signal would fall to nothing in one sample.
             CONTROL_ALL_SOUND_OFF => {
                 self.allocator.all_keys_up();
-                self.allocator.finished(0);
-                self.contours = [RcEnvelope::new(), RcEnvelope::new()];
-                self.apply_patch();
-                self.pots = self.settings.pots;
-                self.ladder.reset();
-                self.coupling.reset();
-                self.return_coupling.reset();
-                self.returned = 0;
+                if self.sounding() && self.cut.is_none() {
+                    self.cut = Some(VolumeGain::full());
+                }
             }
             CONTROL_RESET_CONTROLLERS => {
                 self.wheel = 0;
@@ -721,6 +733,19 @@ impl Minimoog {
             }
             _ => self.ignore(),
         }
+    }
+
+    /// Empties the voice at once: what all sound off comes to.
+    fn cut(&mut self) {
+        self.cut = None;
+        self.allocator.finished(0);
+        self.contours = [RcEnvelope::new(), RcEnvelope::new()];
+        self.apply_patch();
+        self.pots = self.settings.pots;
+        self.ladder.reset();
+        self.coupling.reset();
+        self.return_coupling.reset();
+        self.returned = 0;
     }
 
     /// Releases the note, held by a key or by the pedal, and lifts the
@@ -866,7 +891,17 @@ impl Minimoog {
     pub fn render(&mut self, out: &mut [i16]) {
         let volume = volume::wanted(self.volume);
         for sample in out {
-            let [first, second, third, fourth] = core::array::from_fn(|_| self.sample());
+            let mut voice: [i32; 4] = core::array::from_fn(|_| self.sample());
+            // Faded before the decimators, which then end on silence:
+            // what they still hold when the voice is emptied is nothing.
+            if let Some(cut) = &mut self.cut {
+                let gain = cut.towards(0);
+                voice = voice.map(|sample| amplify(sample, gain));
+                if gain == 0 {
+                    self.cut();
+                }
+            }
+            let [first, second, third, fourth] = voice;
             let (earlier, later) = (self.wide.process(first, second), self.wide.process(third, fourth));
             let signal = amplify(self.decimator.process(earlier, later), self.volume_gain.towards(volume));
             *sample = to_sample(amplify(signal, OUTPUT_GAIN));

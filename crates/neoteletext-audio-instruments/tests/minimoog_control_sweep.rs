@@ -17,7 +17,7 @@ mod control_sweep_support;
 
 use control_sweep_support::{
     AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
-    PROGRAM, Sound, check, continuous, on_off, run, sweep, switch, to_crest,
+    PROGRAM, Sound, all_sound_off_silences, check, continuous, on_off, run, sweep, switch, to_crest,
 };
 use neoteletext_audio_instruments::minimoog::{ContourPatch, Minimoog, OscillatorPatch, Patch, Range, Waveform};
 
@@ -298,13 +298,15 @@ fn no_control_steps_the_signal_but_the_switches_that_do() {
             // jump with it.
             Allowed { controls: &["OSC 3 WAVEFORM"], why: SWITCHES },
             Allowed {
-                controls: &["all sound off (120)"],
-                why: "OUR FAULT, not the instrument's: the voice is emptied in one sample (TODO-6438)",
-            },
-            Allowed {
                 controls: &["reset"],
                 why: "no control: the caller's own cut, which puts the instrument back as new at once",
             },
         ],
     );
+}
+
+#[test]
+fn all_sound_off_takes_the_sound_out_and_leaves_silence() {
+    // The 256 samples the sound takes to go, and the decimators' tail.
+    all_sound_off_silences(&sounds(), &|minimoog: &mut Minimoog| minimoog.event(CONTROL, 120, 0), 256 + 64);
 }
