@@ -298,9 +298,6 @@ const PORTAMENTO_LONGEST: u32 = 1_000_000;
 /// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the
 /// output's half, as it was first, the note stood 2.4 dB below it.
 const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 659 / 1000) as i32;
-/// The square of the largest volume, which the volume's square is a share
-/// of.
-const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
 /// Cents in an octave.
 const CENTS: i32 = 1_200;
 
@@ -754,10 +751,7 @@ impl Jupiter8 {
     /// second. The work of a sample is at most that of eight voices,
     /// whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        // The square of the controller's share, in Q28 (own choice of
-        // the law, as a volume control's taper).
-        let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
-        let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
+        let volume = crate::analog::volume::wanted(self.volume);
         // Each half is in full from the centre to its own end, and falls
         // in a straight line to nothing at the other (own choice).
         let share = |towards: u8, centre: u8| {

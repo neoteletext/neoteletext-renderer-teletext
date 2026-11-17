@@ -101,7 +101,7 @@ use crate::analog::envelope::{IMMEDIATE, RcEnvelope, Stage, apply, time_constant
 use crate::analog::filter::{Ladder, ONE_Q28, OnePole, saturate};
 use crate::analog::fixed::{accumulate, amplify, mul_high, scale};
 use crate::analog::oscillator::{Noise, Oscillator, Waves, waveform};
-use crate::analog::volume::VolumeGain;
+use crate::analog::volume::{self, VolumeGain};
 use crate::analog::{frequency, to_sample};
 
 use law::{OCTAVE, RATE};
@@ -172,9 +172,6 @@ const COEFFICIENT_BITS: u32 = 31;
 /// [`crate::REFERENCE_LEVEL_TENTHS`] (`tests/levels.rs`); with the
 /// output's quarter, as it was first, the note stood 5.7 dB above it.
 pub const OUTPUT_GAIN: i32 = (ONE_Q28 as i64 * 1296 / 10000) as i32;
-/// The square of the largest volume, which the volume's square is a share
-/// of.
-const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
 /// The rate the noise generators run at, in hertz: twice the output
 /// rate, each of their samples held for two of the voice's.
 ///
@@ -729,10 +726,7 @@ impl Minimoog {
     /// Renders the next `out.len()` samples: 16 bits, mono, 48,000 a
     /// second. The work of a sample is the same whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        // The square of the controller's share, in Q28 (own choice of
-        // the law, as a volume control's taper).
-        let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
-        let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
+        let volume = volume::wanted(self.volume);
         for sample in out {
             let [first, second, third, fourth] = core::array::from_fn(|_| self.sample());
             let (earlier, later) = (self.wide.process(first, second), self.wide.process(third, fourth));

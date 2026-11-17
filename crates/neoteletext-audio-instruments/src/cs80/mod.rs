@@ -196,7 +196,7 @@ use crate::analog::envelope::{ENVELOPE_ONE, RcEnvelope, apply, time_constant};
 use crate::analog::filter::{ONE_Q28, OnePole};
 use crate::analog::fixed::amplify;
 use crate::analog::oscillator::Noise;
-use crate::analog::volume::VolumeGain;
+use crate::analog::volume::{self, VolumeGain};
 use crate::analog::{frequency, to_sample};
 
 use law::OCTAVE;
@@ -488,9 +488,6 @@ const FALL_THOUSANDTHS: u64 = 434;
 const RISE_THOUSANDTHS: u64 = 1_000_000 / RcEnvelope::ATTACK_TIME_CONSTANTS_THOUSANDTHS as u64;
 /// Thousandths.
 const THOUSAND: u64 = 1_000;
-/// The square of the largest volume, which the volume's square is a share
-/// of.
-const VOLUME_FULL: i64 = (DATA_MAX as i64) * (DATA_MAX as i64);
 /// Samples of output in a tick of the voices.
 const TICK_OUTPUT_SAMPLES: u32 = TICK_SAMPLES / OVERSAMPLING.factor();
 /// Ticks of the output's slow oscillators a second: they move with the
@@ -985,10 +982,7 @@ impl Cs80 {
     /// second. The work of a sample is at most that of sixteen lines and
     /// the effect, whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        // The square of the controller's share, in Q28 (own choice of
-        // the law, as a volume control's taper).
-        let square = i64::from(self.volume).saturating_mul(i64::from(self.volume));
-        let volume = i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / VOLUME_FULL).unwrap_or(ONE_Q28);
+        let volume = volume::wanted(self.volume);
         let ring = self.ring_modulation;
         let effect = self.patch.on(Global::Effect);
         let depth = self.effect_depth;
