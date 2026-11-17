@@ -396,6 +396,27 @@ impl Oscillator {
         self.pulse_high = self.width > 0;
     }
 
+    /// Moves the phase back by `amount`, in units of 2⁻³² cycle, and
+    /// forgets every edge and every sample still on its way out: for a
+    /// caller that changes the rate it runs the oscillator at, whose
+    /// samples on their way out are spaced for the old rate. The next
+    /// [`Oscillator::DELAY`] samples are of nothing but what is made from
+    /// here on, and the same number after them lack what an edge from
+    /// before the phase this leaves would still have added: both are
+    /// for the caller to discard. Every sample is the waveform
+    /// [`Oscillator::DELAY`] steps before the phase, as ever.
+    pub const fn rewind(&mut self, amount: u32) {
+        self.phase = self.phase.wrapping_sub(amount);
+        self.width_before = self.width;
+        self.pulse_high = self.phase < self.width;
+        self.started = None;
+        self.midway = false;
+        self.sawtooth = Ring::new();
+        self.pulse = Ring::new();
+        self.triangle = Ring::new();
+        self.sub = Ring::new();
+    }
+
     /// The phase, in units of 2⁻³² cycle.
     #[must_use]
     pub const fn phase(&self) -> u32 {

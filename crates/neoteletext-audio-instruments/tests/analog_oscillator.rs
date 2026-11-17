@@ -588,3 +588,35 @@ fn a_synchronised_pulse_narrower_than_a_sample_falls_where_its_width_ends() {
         assert!(found < -80.0, "{factor}x: {found}");
     }
 }
+
+#[test]
+fn an_oscillator_set_back_makes_again_what_it_made() {
+    // Set back by a number of its steps, with everything on its way out
+    // forgotten, an oscillator makes the same samples again that number
+    // of samples later, once the samples it is told to discard are
+    // past: twice its delay.
+    let mut random = support::Random(17);
+    for back in [1u32, 5, 23, 31] {
+        let mut oscillator = Oscillator::new();
+        let step = random.word() >> 4;
+        oscillator.set_step(step);
+        oscillator.set_width(random.word());
+        for _ in 0..1_000 {
+            let _ = oscillator.tick(None);
+        }
+        let mut again = oscillator.clone();
+        again.rewind(step.wrapping_mul(back));
+        let first: Vec<Waves> = (0..100).map(|_| oscillator.tick(None)).collect();
+        let second: Vec<Waves> = (0..100 + back).map(|_| again.tick(None)).collect();
+        let discarded = 2 * Oscillator::DELAY;
+        for (index, (first, second)) in first.iter().zip(&second[back as usize..]).enumerate().skip(discarded) {
+            // The sub-oscillator keeps its side through the starts made
+            // again; the rest are the same to a unit of the tables.
+            for (first, second) in
+                [(first.sawtooth, second.sawtooth), (first.pulse, second.pulse), (first.triangle, second.triangle)]
+            {
+                assert!(first.abs_diff(second) <= 2, "{back} back, sample {index}: {first} and {second}");
+            }
+        }
+    }
+}

@@ -447,6 +447,11 @@ impl Settings {
         }
     }
 
+    /// How far above the output rate the oscillators run.
+    const fn oscillators_at(&self) -> Oversampling {
+        if self.cross == 0 { OVERSAMPLING } else { OSCILLATOR_OVERSAMPLING }
+    }
+
     /// The waveforms each oscillator must make.
     const fn waveforms(&self) -> (u8, u8) {
         let first = match self.wave1 {
@@ -503,6 +508,9 @@ pub struct Voice {
     /// VCO-1's step as VCO-2's waveform left it at the end of the last
     /// sample, while nothing but VCO-2's cycle has moved it since.
     carried: Option<u32>,
+    /// How far above the output rate the oscillators run: what cross
+    /// modulation asks, or the filters' rate.
+    oscillators_at: Oversampling,
     /// The pulse's width as VCO-2 was last given it.
     width: u32,
     /// The amplifier's gain in Q30 and what it gains each sample.
@@ -531,6 +539,7 @@ impl Voice {
             placed: false,
             step: 0,
             carried: None,
+            oscillators_at: OVERSAMPLING,
             width: HALF_CYCLE,
             gain: 0,
             gain_step: 0,
@@ -544,12 +553,82 @@ impl Voice {
         let (first, second) = settings.waveforms();
         self.first.enable(first);
         self.second.enable(second);
+        if self.oscillators_at != settings.oscillators_at() {
+            self.change_rate(settings);
+        }
         self.high_pass.set_cutoff(settings.hpf);
         if settings.hpf == 0 {
             self.high_pass.reset();
         }
         self.carried = None;
         self.set_envelopes(settings);
+    }
+
+    /// Takes the oscillators from the rate they run at without cross
+    /// modulation to the rate they run at with it, or back, so that a
+    /// note that is sounding goes on where it was.
+    ///
+    /// Their steps are for the old rate until the next tick, and are
+    /// doubled or halved here. What they have on its way out is spaced
+    /// for the old rate, and the decimator's samples are of an earlier
+    /// note or of none: both are forgotten, each oscillator is set back
+    /// by what the forgetting and the decimator's delay cost, and the
+    /// two are run unheard until what comes next follows the last
+    /// sample heard.
+    fn change_rate(&mut self, settings: &Settings) {
+        /// Samples by which an oscillator's output is behind its phase.
+        const DELAY: u32 = Oscillator::DELAY as u32;
+        /// Samples the oscillators run unheard after they are set back:
+        /// those that are of nothing, and as many again, in which an
+        /// edge from before would still have been dying away.
+        const WARM: u32 = 2 * DELAY;
+        let crossing = settings.cross != 0;
+        self.oscillators_at = settings.oscillators_at();
+        self.carried = None;
+        self.decimator = Decimator::wide();
+        // Samples of the oscillators' higher rate by which the wide
+        // decimator's output is behind its newest input.
+        let behind = u32::try_from(self.decimator.delay()).unwrap_or(0);
+        // To the higher rate: samples to fill the decimator either side
+        // of its first output's centre, unheard too.
+        let fill = if crossing { behind.saturating_mul(2) } else { 0 };
+        // All in steps of the higher rate, of which the lower rate's
+        // step is two. How far behind its phase the last sample heard
+        // was: at the lower rate the oscillator's delay; at the higher,
+        // that and the decimator's.
+        let heard = if crossing { DELAY.saturating_mul(2) } else { DELAY.saturating_add(behind) };
+        // How far past the phase set here the first sample heard will
+        // be. To the higher rate it is the decimator's output for the
+        // first pair after the unheard samples, centred `behind` before
+        // the pair's second; to the lower, the sample after the unheard
+        // ones.
+        let unheard = WARM.saturating_sub(DELAY);
+        let ahead = if crossing {
+            unheard.saturating_add(fill).saturating_add(2).saturating_sub(behind)
+        } else {
+            unheard.saturating_add(1).saturating_mul(2)
+        };
+        // The first sample heard is to follow the last by one sample of
+        // the rate heard, two steps.
+        let back = ahead.saturating_add(heard).saturating_sub(2);
+        let rescale = |step: u32| if crossing { step >> 1 } else { step.saturating_mul(2) };
+        // VCO-1's own step is the voice's: under cross modulation the
+        // oscillator is given a step for each stretch and keeps none.
+        let second = self.second.step();
+        for (oscillator, old) in [(&mut self.first, self.step), (&mut self.second, second)] {
+            let higher = if crossing { old >> 1 } else { old };
+            oscillator.rewind(higher.wrapping_mul(back));
+            oscillator.set_step(rescale(old));
+        }
+        self.step = rescale(self.step);
+        for _ in 0..WARM {
+            let _ = self.oscillators(settings, 0);
+        }
+        for _ in 0..fill / 2 {
+            let earlier = self.oscillators(settings, 0);
+            let later = self.oscillators(settings, 0);
+            let _ = self.decimator.process(earlier, later);
+        }
     }
 
     fn set_envelopes(&mut self, settings: &Settings) {

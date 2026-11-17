@@ -191,6 +191,31 @@ fn each_waveform_of_vco_2_moves_vco_1_by_its_own_voltage() {
     assert!(lowest > 55.0 * (-depth / 2.0).exp2() && lowest < 55.0 * (-0.9 * depth / 2.0).exp2(), "{lowest}");
 }
 
+#[test]
+fn switching_the_cross_modulation_during_a_note_does_not_click() {
+    // With cross modulation the oscillators run at twice the rate they
+    // run at without, through a filter of their own. Moving the slider
+    // from 0 to its first step under a held note, and back, changes the
+    // sound by next to nothing: the largest step from one sample to the
+    // next is what the steady note has.
+    let plain = Patch::DEFAULT.with(Param::Vco1Wave, 0);
+    let crossed = plain.with(Param::CrossMod, 1);
+    let largest = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
+    for (name, from, to) in [("on", &plain, &crossed), ("off", &crossed, &plain)] {
+        let mut jupiter = support::instrument(from);
+        jupiter.event(support::NOTE_ON, A2 + 12, 100);
+        let steady = largest(&support::render(&mut jupiter, 0.3)[samples(0.2)..]);
+        // The sample before the change, and three milliseconds after.
+        let last = support::render(&mut jupiter, 1.0 / support::RATE);
+        jupiter.set_patch(to);
+        let mut after = last;
+        after.extend(support::render(&mut jupiter, 0.003));
+        let found = largest(&after);
+        println!("cross modulation switched {name}: the largest step {found:.4}, {steady:.4} in the steady note");
+        assert!(found < 1.25 * steady, "switched {name}: {found} against {steady}");
+    }
+}
+
 /// What the cross modulation's aliasing is held below, in decibels, with
 /// the slider at 5 or less and keys to the A of 880 Hz, and at any
 /// setting: the worst measured (-77.2 dB and -38.8 dB), and 3 dB. Both
