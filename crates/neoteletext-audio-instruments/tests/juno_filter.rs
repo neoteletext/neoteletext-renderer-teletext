@@ -198,11 +198,13 @@ fn the_high_pass_switch_cuts_or_lifts_the_bass() {
     let levels = [0u8, 2, 3].map(|position| decibels(fundamental(Model::Juno106, position) / flat));
     println!("Juno106: 55 Hz at positions 0, 2 and 3 against 1: {levels:.1?} dB");
     assert!((levels[0] - 8.2).abs() < 0.5 && (levels[1] + 12.5).abs() < 0.5 && (levels[2] + 22.4).abs() < 0.5);
-    // JUNO-60: 0 is flat, and each position above cuts more.
+    // JUNO-60: 0 is flat, and 1, 2 and 3 are one-pole high-pass filters
+    // at its schematic's 234.6 Hz, 516.2 Hz and 1,098.2 Hz, which leave
+    // 55 Hz 12.8 dB, 19.5 dB and 26.0 dB down.
     let flat = fundamental(Model::Juno60, 0);
     let levels = [1u8, 2, 3].map(|position| decibels(fundamental(Model::Juno60, position) / flat));
     println!("Juno60: 55 Hz at positions 1, 2 and 3 against 0: {levels:.1?} dB");
-    assert!(levels[0] < -10.0 && levels[1] < levels[0] - 3.0 && levels[2] < levels[1] - 3.0);
+    assert!((levels[0] + 12.8).abs() < 0.5 && (levels[1] + 19.5).abs() < 0.5 && (levels[2] + 26.0).abs() < 0.5);
 }
 
 #[test]

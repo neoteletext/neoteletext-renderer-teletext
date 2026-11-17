@@ -63,8 +63,7 @@
 //!   lines' filters are the building block's third-order ones at the
 //!   schematic's 10 kHz, where the instrument has fourth-order ones; the
 //!   chip's noise, which the instrument is known for, is left out.
-//! - **The Juno-60's high-pass filter's corners** were not read from its
-//!   schematic, and its low-frequency oscillator is taken as a triangle.
+//! - **The Juno-60's low-frequency oscillator** is taken as a triangle.
 //! - **The bass lift** of the Juno-106's high-pass switch at 0 is one
 //!   pole's shelf from two resistors and a capacitor of a path whose
 //!   other parts were not read.
@@ -221,9 +220,9 @@ const CHORUS_LINE_GAIN: i32 = ((47i64 << 31) / 78) as i32;
 ///
 /// Source: JUNO-106 service notes, jack board schematic (page 15): the
 /// voices' sum enters the board through C14, 10 µF, across R39, 33 kΩ,
-/// before the high-pass switch IC3: 1 / (2 π R C) is 0.48 Hz. Own
-/// choice for the Juno-60, whose schematic was not read for it: the
-/// same.
+/// before the high-pass switch IC3: 1 / (2 π R C) is 0.48 Hz. JUNO-60
+/// service notes, chorus board schematic (page 11): the same parts
+/// before its high-pass switch IC5, C47, 10 µF, across R70, 33 kΩ.
 const COUPLING_CORNER: u32 = 482;
 
 /// The corner of the bass lift, in thousandths of a hertz.
