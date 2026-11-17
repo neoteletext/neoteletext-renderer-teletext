@@ -605,7 +605,7 @@ impl Prophet5 {
             } else {
                 voice.release();
             }
-            if !voice.silent() {
+            if !voice.at_rest() {
                 voice.tick(&self.settings, controls);
             }
         }
@@ -622,7 +622,7 @@ impl Prophet5 {
         let noise = self.noise.tick();
         let mut sum = 0i32;
         for (voice, key) in self.voices.iter_mut().zip(self.allocator.voices()) {
-            if key.stage != Stage::Rest && !voice.silent() {
+            if key.stage != Stage::Rest && !voice.at_rest() {
                 sum = sum.wrapping_add(voice.sample(&self.settings, noise));
             }
         }

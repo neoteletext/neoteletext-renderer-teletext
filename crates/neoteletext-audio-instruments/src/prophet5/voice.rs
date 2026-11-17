@@ -505,6 +505,16 @@ impl Voice {
         !self.gate && self.amplifier_envelope.stage() == Stage::Rest && self.gain < REST_LEVEL
     }
 
+    /// Whether nothing of the voice moves that a later note would hear:
+    /// it is silent and its filter envelope has fallen to rest too. Only
+    /// then is the voice left unrendered. The filter envelope's capacitor
+    /// discharges whatever the amplifier passes, and the filter follows
+    /// it: a voice stopped while the cutoff was still up would give its
+    /// next key the envelope, and the filter, of the moment it stopped.
+    pub fn at_rest(&self) -> bool {
+        self.silent() && self.filter_envelope.stage() == Stage::Rest
+    }
+
     /// A tick: the envelopes move on, and the pitches, the pulse widths,
     /// the cutoff and the amplifier's slope are set.
     pub fn tick(&mut self, settings: &Settings, controls: Controls) {
@@ -614,7 +624,7 @@ fn width(share: i32) -> u32 {
 }
 
 /// The mean of a pulse between -[`LEVEL`] and [`LEVEL`] that is high
-/// for a share of a cycle in Q24. A voice that is silent is not
+/// for a share of a cycle in Q24. A voice that is at rest is not
 /// rendered, so what blocks direct current in the instrument, where
 /// every oscillator runs for ever, has not settled when a note starts:
 /// the pulse's mean, which is all the direct current a voice has, is

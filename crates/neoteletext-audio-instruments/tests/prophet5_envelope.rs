@@ -17,7 +17,9 @@ mod prophet5_support;
 
 use neoteletext_audio_instruments::prophet5::patch::dial;
 use neoteletext_audio_instruments::prophet5::{Knob, Model, Switch};
-use prophet5_support::{CONTROL, MODELS, NOTE_OFF, NOTE_ON, instrument, peaks, play, pure, render};
+use prophet5_support::{
+    CONTROL, MODELS, NOTE_OFF, NOTE_ON, instrument, peaks, plain, play, pure, render, rms, samples,
+};
 
 /// The window the level is read in, in seconds: four cycles of the key
 /// played.
@@ -166,5 +168,41 @@ fn the_sustain_knob_is_the_level_and_the_release_switch_cuts_the_release() {
                 && at(&held, 0.25) > 0.01
                 && at(&after, 0.09) < 0.001
         );
+    }
+}
+
+#[test]
+fn the_filter_envelope_goes_on_falling_while_its_voice_is_silent() {
+    // The chip's capacitor discharges whether or not the amplifier passes
+    // anything. Here the amplifier's envelope has no sustain and no
+    // release, so the voice is silent as soon as the key is up, while
+    // the filter envelope stands at its sustain, the peak. Three seconds
+    // later, a thousand of its release's time constants, the same key
+    // must find the filter as shut as the first did, and open it as
+    // slowly. The first hundredth of a second is left out: there the
+    // first key of all has the filter's start from nothing in it. A
+    // voice that stopped where it fell silent, with the filter open,
+    // gave the second key 25 times the first's level here.
+    for model in MODELS {
+        let patch = plain(model)
+            .with(Knob::Cutoff, 20)
+            .with(Knob::FilterEnvelopeAmount, 100)
+            .with(Knob::FilterAttack, 72)
+            .with(Knob::FilterSustain, 120)
+            .with(Knob::FilterRelease, 0)
+            .with(Knob::AmplifierDecay, 60)
+            .with(Knob::AmplifierSustain, 0)
+            .with(Knob::AmplifierRelease, 0);
+        let mut prophet = instrument(model, &patch);
+        let start = samples(0.01)..samples(0.05);
+        prophet.event(NOTE_ON, 60, 100);
+        let first = rms(&render(&mut prophet, 3.0)[start.clone()]);
+        prophet.event(NOTE_OFF, 60, 0);
+        render(&mut prophet, 3.0);
+        assert_eq!(prophet.sounding_voices(), 0);
+        prophet.event(NOTE_ON, 60, 100);
+        let second = rms(&render(&mut prophet, 3.0)[start]);
+        println!("{model:?}: from 10 to 50 ms of the key: {first:.5}, and of the same key again {second:.5}");
+        assert!(first > 0.001 && (second / first - 1.0).abs() < 0.25, "{model:?}: {first} then {second}");
     }
 }
