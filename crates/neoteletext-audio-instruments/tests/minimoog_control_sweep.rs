@@ -17,8 +17,8 @@ mod control_sweep_support;
 
 use control_sweep_support::{
     AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Clock, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
-    PROGRAM, Sound, all_sound_off_leaves_the_pedal, all_sound_off_silences, check, continuous, on_off, run, sweep,
-    switch, to_crest,
+    PROGRAM, Sound, all_sound_off_leaves_the_pedal, all_sound_off_silences, check, continuous,
+    messages_after_all_sound_off_are_taken, on_off, run, sweep, switch, to_crest,
 };
 use neoteletext_audio_instruments::minimoog::{ContourPatch, Minimoog, OscillatorPatch, Patch, Range, Waveform};
 
@@ -319,4 +319,9 @@ fn all_sound_off_takes_the_sound_out_and_leaves_silence() {
 #[test]
 fn all_sound_off_leaves_the_pedal_where_it_is() {
     all_sound_off_leaves_the_pedal(&|| instrument(&bright(), 0), &Minimoog::event);
+}
+
+#[test]
+fn messages_that_come_during_all_sound_off_are_taken_after_it() {
+    messages_after_all_sound_off_are_taken(&|| instrument(&bright(), 0), &Minimoog::event);
 }

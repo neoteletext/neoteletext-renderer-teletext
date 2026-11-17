@@ -16,8 +16,8 @@ mod control_sweep_support;
 
 use control_sweep_support::{
     AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Clock, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
-    PROGRAM, Sound, all_sound_off_leaves_the_pedal, all_sound_off_silences, check, continuous, on_off, run, sweep,
-    switch, to_crest,
+    PROGRAM, Sound, all_sound_off_leaves_the_pedal, all_sound_off_silences, check, continuous,
+    messages_after_all_sound_off_are_taken, on_off, run, sweep, switch, to_crest,
 };
 use neoteletext_audio_instruments::prophet5::patch::{Knob, Switch};
 use neoteletext_audio_instruments::prophet5::{Model, Patch, Prophet5};
@@ -343,5 +343,12 @@ fn all_sound_off_takes_the_sound_out_and_leaves_silence() {
 fn all_sound_off_leaves_the_pedal_where_it_is() {
     for model in [Model::Rev3, Model::Rev2] {
         all_sound_off_leaves_the_pedal(&|| instrument(model, &bright(model), 0), &Prophet5::event);
+    }
+}
+
+#[test]
+fn messages_that_come_during_all_sound_off_are_taken_after_it() {
+    for model in [Model::Rev3, Model::Rev2] {
+        messages_after_all_sound_off_are_taken(&|| instrument(model, &bright(model), 0), &Prophet5::event);
     }
 }

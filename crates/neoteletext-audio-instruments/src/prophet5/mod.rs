@@ -792,7 +792,7 @@ impl Prophet5 {
     /// second. The work of a sample is at most that of five voices,
     /// whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        let volume = volume::wanted(self.volume);
+        let mut volume = volume::wanted(self.volume);
         for sample in out {
             let mut earlier = self.voices_sample();
             let mut later = self.voices_sample();
@@ -802,7 +802,10 @@ impl Prophet5 {
                 let gain = cut.towards(0);
                 (earlier, later) = (amplify(earlier, gain), amplify(later, gain));
                 if gain == 0 {
+                    // The messages that waited are taken now, the
+                    // volume's among them.
                     self.cut();
+                    volume = volume::wanted(self.volume);
                 }
             }
             let signal = amplify(self.decimator.process(earlier, later), self.volume_gain.towards(volume));

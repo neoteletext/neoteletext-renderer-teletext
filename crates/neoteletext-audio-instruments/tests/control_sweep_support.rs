@@ -348,6 +348,36 @@ pub fn all_sound_off_silences<I: Instrument>(sounds: &[Sound<I>], off: &(dyn Fn(
     }
 }
 
+/// The messages that come while all sound off takes the sound out are
+/// taken when it has gone, the same however the calls to render are
+/// cut: a volume and a key sent straight after the message give the
+/// same samples in calls of 7 samples as in one call.
+pub fn messages_after_all_sound_off_are_taken<I: Instrument>(make: &dyn Fn() -> I, event: &dyn Fn(&mut I, u8, u8, u8)) {
+    let played = |cut: usize| {
+        let mut instrument = make();
+        event(&mut instrument, NOTE_ON, 60, 100);
+        run(&mut instrument, 2 * AFTER);
+        event(&mut instrument, CONTROL, 120, 0);
+        event(&mut instrument, CONTROL, 7, 64);
+        event(&mut instrument, NOTE_ON, 64, 100);
+        let mut out = vec![0i16; 8 * AFTER];
+        for piece in out.chunks_mut(cut) {
+            instrument.play(piece);
+        }
+        out
+    };
+    let whole = played(8 * AFTER);
+    assert_eq!(whole, played(7), "the calls' lengths change the samples");
+    // The key sounds, and at the volume that was asked: a quarter of
+    // the level of the same key with the volume left alone.
+    let mut plain = make();
+    event(&mut plain, NOTE_ON, 64, 100);
+    let full = run(&mut plain, 8 * AFTER);
+    let peak = |signal: &[i16]| signal[4 * AFTER..].iter().map(|&sample| sample.unsigned_abs()).max().unwrap_or(0);
+    let (quiet, loud) = (f64::from(peak(&whole)), f64::from(peak(&full)));
+    assert!(loud > 100.0 && (quiet / loud - 0.254).abs() < 0.03, "the key after: {quiet} against {loud}");
+}
+
 /// All sound off leaves the pedal where it is: with the pedal down, a
 /// key struck after the message and let go still sounds half a second
 /// on, and stops when the pedal goes up. `make` gives an instrument

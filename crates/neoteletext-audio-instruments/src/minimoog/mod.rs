@@ -920,7 +920,7 @@ impl Minimoog {
     /// Renders the next `out.len()` samples: 16 bits, mono, 48,000 a
     /// second. The work of a sample is the same whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
-        let volume = volume::wanted(self.volume);
+        let mut volume = volume::wanted(self.volume);
         for sample in out {
             let mut voice: [i32; 4] = core::array::from_fn(|_| self.sample());
             // Faded before the decimators, which then end on silence:
@@ -929,7 +929,10 @@ impl Minimoog {
                 let gain = cut.towards(0);
                 voice = voice.map(|sample| amplify(sample, gain));
                 if gain == 0 {
+                    // The messages that waited are taken now, the
+                    // volume's among them.
                     self.cut();
+                    volume = volume::wanted(self.volume);
                 }
             }
             let [first, second, third, fourth] = voice;
