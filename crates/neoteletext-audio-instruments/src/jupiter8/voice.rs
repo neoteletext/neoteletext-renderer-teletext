@@ -3,10 +3,12 @@
 //! two envelopes and the amplifier; and the low-frequency oscillator the
 //! voices of one half share.
 //!
-//! The oscillators run at four times the output rate, where VCO-1's
-//! frequency is set afresh for every sample from VCO-2's waveform; their
-//! mix is brought down to twice the output rate for the filters and the
-//! amplifier. What changes slowly is set every [`TICK_SAMPLES`] samples
+//! Under cross modulation the oscillators run at four times the output
+//! rate, where VCO-1's frequency is set afresh for every sample from
+//! VCO-2's waveform, and their mix is brought down to twice the output
+//! rate for the filters and the amplifier; without it they run at twice
+//! the output rate themselves, where the building block's edges are
+//! 91 dB clean. What changes slowly is set every [`TICK_SAMPLES`] samples
 //! of that rate: the envelopes, the pitches, the pulse's width, the
 //! cutoff and the amplifier's slope.
 //!
@@ -37,10 +39,41 @@
 //!   makes them, and a synchronised start is an edge like any other.
 //!
 //! What this leaves: the corner that a jump of VCO-1's frequency makes
-//! in its waveform is not rounded, and exponential modulation at audio
-//! rate has sidebands without end, of which those beyond 172 kHz fold
-//! back below 20 kHz. `tests/jupiter8_oscillator.rs` measures what is
-//! left, and the module's documentation gives the figures.
+//! in its waveform is not rounded; one sample of VCO-1 after a
+//! synchronised start is off as said above; and exponential modulation
+//! at audio rate has partials without end, of which those beyond
+//! 172 kHz fold back below 20 kHz.
+//!
+//! # What is left of the aliasing
+//!
+//! `tests/jupiter8_oscillator.rs` measures it with the sync on, where
+//! the sound has one period and what is no harmonic of it can be told
+//! apart: the strongest such thing below 20 kHz against the strongest
+//! harmonic, for a sine, a sawtooth and a pulse as VCO-2's waveform, on
+//! the five As from 110 Hz to 1,760 Hz, VCO-2 an octave above VCO-1.
+//!
+//! | CROSS MOD | to the A of 440 Hz | the A of 880 Hz | the A of 1,760 Hz |
+//! |---|---|---|---|
+//! | 1 (0.6 octave) | 81 dB down | 90 dB | 78 dB |
+//! | 2.5 (1.5 octaves) | 82 dB | 83 dB | 70 dB |
+//! | 5 (3 octaves) | 78 dB | 70 dB | 56 dB |
+//! | 10 (6 octaves) | 30 dB | 43 dB | 32 dB |
+//!
+//! At 10 the worst is where VCO-1 is driven to its bound of 48 kHz for
+//! part of every cycle: the instrument's own oscillator has a bound
+//! there too, which no document read gives. Without the sync the
+//! partials are sums of multiples of two unrelated frequencies and lie
+//! everywhere, so nothing can be told apart and nothing was measured;
+//! the arithmetic is the same without the start to place.
+//!
+//! # What it costs
+//!
+//! Eight voices render 14 times faster than real time with one
+//! oscillator each, 12.5 times with a factory patch of two oscillators
+//! and a moving pulse, and 9 times under cross modulation with sync, on
+//! one core of a 3.7 GHz Intel Core i9-10900KF
+//! (`tests/jupiter8_instrument.rs`, `rendering_speed`, 17 November
+//! 2026).
 
 use crate::analog::decimator::Decimator;
 use crate::analog::envelope::{ENVELOPE_ONE, IMMEDIATE, REST_LEVEL, RcEnvelope, Stage, apply, time_constant};
@@ -52,7 +85,8 @@ use crate::analog::{LEVEL, LIMIT, Oversampling, frequency};
 use super::law::{self, OCTAVE};
 use super::patch::{LfoWave, Param, Patch, PwmSource, Vco1Wave, Vco2Wave};
 
-/// How far above the output rate the oscillators run.
+/// How far above the output rate the oscillators run under cross
+/// modulation.
 ///
 /// Source: own choice, from the aliasing measured under cross modulation
 /// (`tests/jupiter8_oscillator.rs`).
@@ -79,8 +113,11 @@ pub const TICK_SAMPLES: u32 = 1 << TICK_BITS;
 pub const TICK_RATE: u32 = RATE / TICK_SAMPLES;
 const _: () = assert!(TICK_RATE == 6_000 && RATE.is_multiple_of(TICK_SAMPLES) && OSCILLATOR_SAMPLES == 2);
 
-/// The frequency step of the A above middle C at the oscillators' rate.
+/// The frequency step of the A above middle C at the oscillators' rate
+/// under cross modulation.
 const A4_STEP: u32 = frequency(law::A4.0, OSCILLATOR_RATE);
+/// The same at the rate the oscillators run at without it.
+const A4_STEP_PLAIN: u32 = frequency(law::A4.0, RATE);
 
 /// Half a cycle: the square's width.
 const HALF_CYCLE: u32 = 1 << 31;
@@ -272,6 +309,9 @@ pub struct Settings {
     fine: i32,
     low: bool,
     sync: bool,
+    /// Whether each oscillator is heard, or is needed by the other.
+    first_runs: bool,
+    second_runs: bool,
     /// Octaves VCO-2 at its peak moves VCO-1.
     cross: i32,
     mix1: i32,
@@ -343,6 +383,9 @@ impl Settings {
             fine: law::signed_share(law::FINE_TUNE, patch.signed(Param::FineTune)),
             low: patch.on(Param::LowFrequency),
             sync: patch.on(Param::Sync),
+            // VCO-1 starts VCO-2's cycles; VCO-2 moves VCO-1's frequency.
+            first_runs: patch.get(Param::MixVco1) != 0 || patch.on(Param::Sync),
+            second_runs: patch.get(Param::MixVco2) != 0 || patch.get(Param::CrossMod) != 0,
             cross: law::share(law::CROSS_MODULATION, patch.get(Param::CrossMod)),
             mix1: law::level(patch.get(Param::MixVco1)),
             mix2: law::level(patch.get(Param::MixVco2)),
@@ -557,7 +600,10 @@ impl Voice {
         };
         let [tune_first, tune_second] = self.tune;
         let pitch = self.pitch.saturating_add(settings.range1).saturating_add(tune_first);
-        self.step = law::raise_step(A4_STEP, pitch.saturating_add(moved(settings.modulate1, settings.bend1)));
+        // The oscillators' rate is the filters' when nothing modulates
+        // VCO-1 at audio rate.
+        let a4 = if settings.cross == 0 { A4_STEP_PLAIN } else { A4_STEP };
+        self.step = law::raise_step(a4, pitch.saturating_add(moved(settings.modulate1, settings.bend1)));
         if settings.cross == 0 {
             self.first.set_step(self.step);
         }
@@ -565,7 +611,7 @@ impl Voice {
         let own =
             if settings.low { law::keys(law::A4.1, law::MIDDLE_C).saturating_sub(law::LOW_RANGE) } else { self.pitch };
         let pitch = own.saturating_add(settings.range2).saturating_add(settings.fine).saturating_add(tune_second);
-        self.second.set_step(law::raise_step(A4_STEP, pitch.saturating_add(moved(settings.modulate2, settings.bend2))));
+        self.second.set_step(law::raise_step(a4, pitch.saturating_add(moved(settings.modulate2, settings.bend2))));
 
         let position = match settings.pwm {
             PwmSource::Manual => settings.pulse_width,
@@ -661,58 +707,74 @@ impl Voice {
         }
     }
 
+    /// One sample of the two oscillators, mixed, at the rate they are
+    /// run at: four times the output rate under cross modulation, and
+    /// twice without. An oscillator that is not heard and that the other
+    /// does not need stands still.
+    #[inline]
+    fn oscillators(&mut self, settings: &Settings, noise: i32) -> i32 {
+        let stepped = if settings.cross == 0 {
+            self.step
+        } else {
+            // What the sample before owes is paid in this one.
+            let stepped = self.cross_modulated(settings, noise).saturating_add(self.owed);
+            self.first.set_step(stepped);
+            self.owed = 0;
+            stepped
+        };
+        let first = if settings.first_runs {
+            let waves = self.first.tick(None);
+            match settings.wave1 {
+                Vco1Wave::Triangle => waves.triangle,
+                Vco1Wave::Sawtooth => waves.sawtooth,
+                Vco1Wave::Pulse | Vco1Wave::Square => waves.pulse,
+            }
+        } else {
+            0
+        };
+        if !settings.second_runs {
+            return apply(first, settings.mix1);
+        }
+        // VCO-1 starts VCO-2's cycle (owner's manual, printed page 16:
+        // "forces the pitch of that oscillator to synchronize itself to
+        // that of VCO-1").
+        let sync = if settings.sync { self.first.started() } else { None };
+        let waves = self.second.tick(sync);
+        let second = match settings.wave2 {
+            Vco2Wave::Sine => sine(waves.triangle),
+            Vco2Wave::Sawtooth => waves.sawtooth,
+            Vco2Wave::Pulse => waves.pulse,
+            Vco2Wave::Noise => noise,
+        };
+        if settings.cross != 0
+            && let Some(since) = sync
+        {
+            // VCO-2 started again when VCO-1 did, `since` of a sample
+            // ago, and VCO-1 has run since then at the frequency of the
+            // cycle that ended, not at the one VCO-2's new cycle gives
+            // it. What it ran too far is taken back at once; what it ran
+            // too little is owed to the next sample.
+            let after = self.stretch(settings, 0, self.second.phase(), noise);
+            if after < stepped {
+                self.first.set_back(mul_high_unsigned(stepped.wrapping_sub(after), since));
+            } else {
+                self.owed = mul_high_unsigned(after.wrapping_sub(stepped), since);
+            }
+        }
+        apply(first, settings.mix1).wrapping_add(apply(second, settings.mix2))
+    }
+
     /// One sample at the filters' rate. `noise` holds the noise of the
     /// voice's half for each sample of the oscillators.
     #[inline]
     pub fn sample(&mut self, settings: &Settings, noise: [i32; OSCILLATOR_SAMPLES]) -> i32 {
-        let mut mixed = [0i32; OSCILLATOR_SAMPLES];
-        for (mixed, noise) in mixed.iter_mut().zip(noise) {
-            let noise = noise >> NOISE_SHIFT;
-            let stepped = if settings.cross == 0 {
-                self.step
-            } else {
-                // What the sample before owes is paid in this one.
-                let stepped = self.cross_modulated(settings, noise).saturating_add(self.owed);
-                self.first.set_step(stepped);
-                self.owed = 0;
-                stepped
-            };
-            let waves = self.first.tick(None);
-            let first = match settings.wave1 {
-                Vco1Wave::Triangle => waves.triangle,
-                Vco1Wave::Sawtooth => waves.sawtooth,
-                Vco1Wave::Pulse | Vco1Wave::Square => waves.pulse,
-            };
-            // VCO-1 starts VCO-2's cycle (owner's manual, printed page
-            // 16: "forces the pitch of that oscillator to synchronize
-            // itself to that of VCO-1").
-            let sync = if settings.sync { self.first.started() } else { None };
-            let waves = self.second.tick(sync);
-            let second = match settings.wave2 {
-                Vco2Wave::Sine => sine(waves.triangle),
-                Vco2Wave::Sawtooth => waves.sawtooth,
-                Vco2Wave::Pulse => waves.pulse,
-                Vco2Wave::Noise => noise,
-            };
-            if settings.cross != 0
-                && let Some(since) = sync
-            {
-                // VCO-2 started again when VCO-1 did, `since` of a sample
-                // ago, and VCO-1 has run since then at the frequency of
-                // the cycle that ended, not at the one VCO-2's new cycle
-                // gives it. What it ran too far is taken back at once;
-                // what it ran too little is owed to the next sample.
-                let after = self.stretch(settings, 0, self.second.phase(), noise);
-                if after < stepped {
-                    self.first.set_back(mul_high_unsigned(stepped.wrapping_sub(after), since));
-                } else {
-                    self.owed = mul_high_unsigned(after.wrapping_sub(stepped), since);
-                }
-            }
-            *mixed = apply(first, settings.mix1).wrapping_add(apply(second, settings.mix2));
-        }
-        let [earlier, later] = mixed;
-        let mut signal = self.decimator.process(earlier, later);
+        let mut signal = if settings.cross == 0 {
+            let [noise, _] = noise;
+            self.oscillators(settings, noise >> NOISE_SHIFT)
+        } else {
+            let [earlier, later] = noise.map(|noise| self.oscillators(settings, noise >> NOISE_SHIFT));
+            self.decimator.process(earlier, later)
+        };
         if settings.hpf != 0 {
             signal = self.high_pass.high_pass(signal);
         }
