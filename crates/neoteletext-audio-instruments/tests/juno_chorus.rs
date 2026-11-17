@@ -17,7 +17,7 @@
 mod support;
 
 use neoteletext_audio_instruments::juno::{ChorusMode, Model, Patch, Range, Slider};
-use support::{RATE, flat, play, rms, samples};
+use support::{CONTROL, MODELS, NOTE_ON, RATE, flat, instrument, play, render, rms, samples};
 
 /// Seconds between two readings of the delays, and the length of signal
 /// each is read from.
@@ -126,7 +126,7 @@ fn rate(readings: &[f64]) -> f64 {
 
 #[test]
 fn chorus_off_is_the_dry_signal_alone() {
-    for model in support::MODELS {
+    for model in MODELS {
         let dry = noise(model, ChorusMode::Off, 127, 1.5);
         let strongest = (samples(SHORTEST)..samples(LONGEST)).map(|lag| likeness(&dry, lag)).fold(0.0, f64::max);
         assert!(strongest < 0.03, "{model:?}: an echo of {strongest}");
@@ -138,7 +138,7 @@ fn chorus_one_and_two_sweep_two_lines_oppositely_at_their_rates() {
     // The Juno-60's chorus oscillator: I, one cycle in 2 s; II, in 1.2 s
     // (Anwander's schematic and page: 0.5 Hz and 0.8 Hz). The delays
     // are an own choice: 3.5 ms, swept 1.85 ms either way.
-    for model in support::MODELS {
+    for model in MODELS {
         for (mode, hertz) in [(ChorusMode::One, 0.5), (ChorusMode::Two, 1.0 / 1.2)] {
             let wet = clicks(model, mode, 6.5);
             // One line is above the middle delay while the other is
@@ -200,4 +200,34 @@ fn both_buttons_of_the_juno_60_sweep_both_lines_alike_a_little_and_fast() {
     let wet = clicks(Model::Juno106, ChorusMode::Both, 2.0);
     let longest = delays(&wet, (2.0 * SWEEP + 0.1) / 1000.0, LONGEST).iter().fold(0.0f64, |a, &delay| a.max(delay));
     assert!(longest > 5.0, "{longest}");
+}
+
+/// What counts as silence, as a share of full scale: three units of a
+/// 16-bit sample.
+const SILENCE: f64 = 1.0e-4;
+
+#[test]
+fn a_chorus_switched_on_again_brings_back_nothing_of_what_it_last_held() {
+    // A note through the chorus; the chorus switched off and the note
+    // silenced; then, out of silence, the chorus switched on again. The
+    // lines were not run while it was off (TODO-6438: they held the note
+    // and played 5 ms of it back, at half its level).
+    for model in MODELS {
+        let off = flat(model, Patch::DEFAULT);
+        let mut on = off;
+        on.chorus = ChorusMode::One;
+        let mut juno = instrument(model, &on);
+        juno.event(NOTE_ON, 57, 100);
+        let peak = |signal: &[f64]| signal.iter().fold(0.0f64, |peak, &value| peak.max(value.abs()));
+        let loud = peak(&render(&mut juno, 0.5));
+        assert!(loud > 0.1, "{model:?}: {loud}");
+        juno.set_patch(&off);
+        juno.event(CONTROL, 120, 0);
+        // Silence, once the coupling capacitor's last charge has run out.
+        assert!(peak(&render(&mut juno, 3.0)[samples(2.5)..]) < SILENCE, "{model:?}: not silent");
+        juno.set_patch(&on);
+        let back = peak(&render(&mut juno, 0.1));
+        println!("{model:?}: the chorus switched on in silence gives a peak of {back:.5}, after a note of {loud:.3}");
+        assert!(back < SILENCE, "{model:?}: {back}");
+    }
 }

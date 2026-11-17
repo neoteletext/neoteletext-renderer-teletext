@@ -138,7 +138,9 @@ fn six_voices_and_the_seventh_key_takes_the_first() {
         juno.event(NOTE_ON | 9, 66, 0);
         render(&mut juno, 0.1);
         assert_eq!(juno.sounding_voices(), 0, "{model:?}");
-        assert!(rms(&render(&mut juno, 0.1)) < 1.0e-4, "{model:?}: not silent");
+        // But for the coupling capacitor's last charge, some five units
+        // of a 16-bit sample, which runs out over a second.
+        assert!(rms(&render(&mut juno, 0.1)) < 3.0e-4, "{model:?}: not silent");
     }
 }
 

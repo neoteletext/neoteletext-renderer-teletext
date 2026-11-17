@@ -121,6 +121,9 @@ const SIXTEEN_FOOT: u64 = SIXTEEN_FOOT_RATIO.1;
 /// adjustments 9-1 and 9-2: 50% and 95%.
 const PULSE_WIDTH: (u32, u32) = (1 << 31, ((45u64 << 32) / 100) as u32);
 
+/// What takes a share in Q30 to Q32: two bits.
+const Q30_TO_Q32: u32 = 1 << 2;
+
 /// The resonance at the slider's top, in Q28, as the feedback of the
 /// filter's loop: the loop oscillates from four, which the slider reaches
 /// at 117 of 127.
@@ -383,6 +386,9 @@ impl Voice {
                 self.analogue.set_decay(time_constant(fall(settings.decay), TICK_RATE));
                 self.analogue.set_release(time_constant(fall(settings.release), TICK_RATE));
                 self.analogue.set_sustain(settings.sustain);
+                // The range is in the divisor, so a note that is
+                // sounding moves with the switch.
+                self.divisor = divisor_60(self.key, settings.range);
             }
         }
     }
@@ -394,11 +400,7 @@ impl Voice {
         self.stepped.retrigger();
         self.analogue.retrigger();
         if self.model == Model::Juno60 {
-            // The divisor is the nearest to the master oscillator at
-            // rest over the key's frequency in its range: the A's 4,305
-            // lowered by the key's interval from it.
-            let pitch = law::keys(A4.1, key).saturating_add(range_octaves(settings.range));
-            self.divisor = divisor(DIVISOR_OF_A_60, pitch) as u32;
+            self.divisor = divisor_60(key, settings.range);
         }
     }
 
@@ -449,7 +451,11 @@ impl Voice {
             PwmSource::Lfo => mul_high(settings.pulse_width, (ENVELOPE_ONE >> 1).saturating_add(lfo >> 1)) << 2,
             PwmSource::Envelope => mul_high(settings.pulse_width, envelope) << 2,
         };
-        let wider = mul_high_unsigned(PULSE_WIDTH.1, position.max(0).cast_unsigned() << 2);
+        // The position from Q30 to Q32, held under one: the slider's top
+        // is one in Q30 exactly, which a word of Q32 cannot hold and a
+        // shift would turn into nothing.
+        let share = position.max(0).cast_unsigned().saturating_mul(Q30_TO_Q32);
+        let wider = mul_high_unsigned(PULSE_WIDTH.1, share);
         self.oscillator.set_width(PULSE_WIDTH.0.saturating_add(wider));
 
         // The key follow turns about middle C: JUNO-60 service notes,
@@ -559,6 +565,14 @@ const _: () = assert!(DIVISOR_OF_A_60 == 4_305 << DIVISOR_BITS);
 fn divisor(of_a: u32, octaves: i32) -> u64 {
     let exact = u64::from(law::raise(of_a, octaves.saturating_neg()));
     (exact.saturating_add(1 << (DIVISOR_BITS - 1)) >> DIVISOR_BITS).clamp(1, DIVISOR_MAX)
+}
+
+/// The Juno-60's divisor for a key in a range: the nearest to the master
+/// oscillator at rest over the key's frequency in that range, the A's
+/// 4,305 lowered by the key's interval from it.
+fn divisor_60(key: u8, range: Range) -> u32 {
+    let pitch = law::keys(A4.1, key).saturating_add(range_octaves(range));
+    u32::try_from(divisor(DIVISOR_OF_A_60, pitch)).unwrap_or(u32::MAX)
 }
 
 /// The nearest whole number to a quotient, held to what a timer divides
