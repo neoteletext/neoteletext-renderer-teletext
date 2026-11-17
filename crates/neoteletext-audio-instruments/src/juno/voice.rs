@@ -386,6 +386,9 @@ impl Voice {
                 self.analogue.set_decay(time_constant(fall(settings.decay), TICK_RATE));
                 self.analogue.set_release(time_constant(fall(settings.release), TICK_RATE));
                 self.analogue.set_sustain(settings.sustain);
+                // The range is in the divisor, so a note that is
+                // sounding moves with the switch.
+                self.divisor = divisor_60(self.key, settings.range);
             }
         }
     }
@@ -397,11 +400,7 @@ impl Voice {
         self.stepped.retrigger();
         self.analogue.retrigger();
         if self.model == Model::Juno60 {
-            // The divisor is the nearest to the master oscillator at
-            // rest over the key's frequency in its range: the A's 4,305
-            // lowered by the key's interval from it.
-            let pitch = law::keys(A4.1, key).saturating_add(range_octaves(settings.range));
-            self.divisor = divisor(DIVISOR_OF_A_60, pitch) as u32;
+            self.divisor = divisor_60(key, settings.range);
         }
     }
 
@@ -566,6 +565,14 @@ const _: () = assert!(DIVISOR_OF_A_60 == 4_305 << DIVISOR_BITS);
 fn divisor(of_a: u32, octaves: i32) -> u64 {
     let exact = u64::from(law::raise(of_a, octaves.saturating_neg()));
     (exact.saturating_add(1 << (DIVISOR_BITS - 1)) >> DIVISOR_BITS).clamp(1, DIVISOR_MAX)
+}
+
+/// The Juno-60's divisor for a key in a range: the nearest to the master
+/// oscillator at rest over the key's frequency in that range, the A's
+/// 4,305 lowered by the key's interval from it.
+fn divisor_60(key: u8, range: Range) -> u32 {
+    let pitch = law::keys(A4.1, key).saturating_add(range_octaves(range));
+    u32::try_from(divisor(DIVISOR_OF_A_60, pitch)).unwrap_or(u32::MAX)
 }
 
 /// The nearest whole number to a quotient, held to what a timer divides

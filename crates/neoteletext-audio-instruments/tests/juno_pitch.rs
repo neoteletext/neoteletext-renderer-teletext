@@ -89,3 +89,26 @@ fn the_bender_at_either_end_bends_by_its_semitones() {
         }
     }
 }
+
+#[test]
+fn the_range_switch_moves_a_note_that_is_sounding() {
+    // A patch takes effect at once on the voices that are sounding, as
+    // moving the panel's controls does: a key held while the range goes
+    // from 8' to 4' and to 16' sounds an octave up and an octave down
+    // (TODO-6438: the Juno-60's kept the divisor its key was struck with).
+    for model in MODELS {
+        let patch = flat(model, square());
+        let mut juno = instrument(model, &patch);
+        juno.event(NOTE_ON, 69, 100);
+        let eight = pitch(&render(&mut juno, 0.7)[support::samples(0.2)..]);
+        for (range, octaves) in [(Range::Four, 1.0), (Range::Sixteen, -1.0)] {
+            let mut moved = patch;
+            moved.range = range;
+            juno.set_patch(&moved);
+            let found = pitch(&render(&mut juno, 0.7)[support::samples(0.2)..]);
+            let off = cents(eight * f64::exp2(octaves), found);
+            println!("{model:?}: held through a change to {range:?}: {found:.2} Hz from {eight:.2} Hz");
+            assert!(off.abs() < 2.0, "{model:?} {range:?}: {found} Hz from {eight} Hz");
+        }
+    }
+}
