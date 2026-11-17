@@ -57,5 +57,13 @@ required-features = ["juno"]
 name = "juno_render"
 required-features = ["juno"]
 
+[[example]]
+name = "jupiter8_demo"
+required-features = ["jupiter8"]
+
+[[example]]
+name = "jupiter8_render"
+required-features = ["jupiter8"]
+
 [lints]
 workspace = true
