@@ -87,7 +87,15 @@ pub fn bend(step: u32, octaves: i32) -> u32 {
     let half = mul_high_unsigned(step, fine);
     if whole >= 0 {
         let shift = whole.unsigned_abs().saturating_add(1);
-        if half.leading_zeros() < shift { u32::MAX } else { half << shift }
+        // Nothing stays nothing; and with something there the shift
+        // is below the word's width wherever it is made.
+        if half == 0 {
+            0
+        } else if half.leading_zeros() < shift {
+            u32::MAX
+        } else {
+            half << shift
+        }
     } else {
         // A step loses its low bits here; a fall of an octave or more
         // from a step that has few is beyond a fiftieth of a cent.
@@ -510,5 +518,16 @@ mod tests {
         }
         assert!(worst < 0.02 * 2.0f64.ln() / 1200.0, "{worst}");
         assert_eq!((bend(5, 40 * OCTAVE), bend(u32::MAX, -70 * OCTAVE), bend(1 << 20, OCTAVE)), (u32::MAX, 0, 1 << 21));
+    }
+
+    #[test]
+    fn nothing_bent_is_nothing_however_far() {
+        // A step of zero raised 31 octaves and more: the shift was then
+        // the word's whole width, which a debug build refuses ("attempt
+        // to shift left with overflow") and a release build wraps.
+        for octaves in [0, 30, 31, 32, 40] {
+            assert_eq!(bend(0, octaves * OCTAVE), 0, "{octaves}");
+        }
+        assert_eq!((bend(1 << 20, 31 * OCTAVE), bend(1 << 20, 11 * OCTAVE)), (u32::MAX, 1 << 31));
     }
 }
