@@ -140,9 +140,14 @@ const ENVELOPE_REACH: i32 = 5 * law::VOLT;
 /// 15 V, which [`law::BRILLIANCE`] makes 0.86 octave of the high-pass
 /// filter and 3.25 of the low-pass.
 ///
-/// Source: own choice of the voltage: the lever "adds voltage to the
-/// VCF's high pass and low pass control inputs" (owner's manual, page 38,
-/// item 7), and what stands across it was not read.
+/// Source: service manual, page 64, Panel 2 circuit diagram: the lever
+/// (VR13, B 10 kΩ) has its end 3 on the tone selector's +15 V, its centre
+/// tap (5) on earth and its wiper on BR, so that it rests at exactly
+/// nothing; its end 1 is on the line of the other levers that rest at
+/// their centres (DETUNE and the keyboard control), whose supply the
+/// page does not name. Own reading: that line is the -15 V. The lever
+/// "adds voltage to the VCF's high pass and low pass control inputs"
+/// (owner's manual, page 38, item 7).
 const BRILLIANCE_REACH: i32 = 15 * law::VOLT;
 /// The volts the touch response's amplifiers give at their levers' tops
 /// for the voltage they are trimmed with: 6.4 V, which
