@@ -329,6 +329,239 @@ fn noise_is_the_same_from_the_same_seed_and_white() {
     }
 }
 
+/// 2³², a cycle and a sample, as f64.
+const WORD: f64 = 4_294_967_296.0;
+
+#[test]
+fn a_sample_made_in_stretches_of_one_frequency_is_the_tick() {
+    // However a sample is cut into stretches, at one frequency and one
+    // width it is the sample `tick` makes: the edges fall where they did,
+    // to the 2⁻²⁸ of a sample a division is good for and the unit of
+    // phase a stretch's length is rounded to. An entry of the step's
+    // table is 2⁻¹⁵ of a step, 1,024 of a pulse's 2²⁵, and an edge so
+    // little moved changes an entry by one, in each of the residuals
+    // that overlap at the highest frequencies.
+    let mut random = support::Random(11);
+    let (mut ticked, mut stretched) = (Oscillator::new(), Oscillator::new());
+    let (mut leader, mut worst) = (Oscillator::new(), 0u32);
+    for round in 0..400_000 {
+        if round % 1_000 == 0 {
+            let step = random.word() >> (2 + random.word() % 10);
+            let width = random.word();
+            for oscillator in [&mut ticked, &mut stretched] {
+                oscillator.set_step(step);
+                oscillator.set_width(width);
+                // The units of phase that the stretches' rounding has
+                // moved the one from the other are set to nothing.
+                oscillator.restart();
+            }
+            leader.set_step(random.word() >> (2 + random.word() % 12));
+        }
+        let _ = leader.tick(None);
+        let sync = leader.started().filter(|_| round % 3_000 >= 1_500);
+        let expected = ticked.tick(sync);
+        let step = stretched.step();
+        // Cut anywhere, and at the leader's start, where the cycle
+        // starts again; but not where the width has just been set, which
+        // it reaches at the end of a stretch as of a tick.
+        for cut in [random.word(), random.word()] {
+            if round % 1_000 != 0 && cut > sync.unwrap_or(0) && cut < stretched.now() {
+                stretched.run(cut, step, step);
+            }
+        }
+        if let Some(at) = sync {
+            stretched.run(at, step, step);
+            stretched.synchronise();
+        }
+        stretched.run(0, step, step);
+        assert_eq!(stretched.started().is_some(), ticked.started().is_some(), "round {round}");
+        let found = stretched.finish();
+        for (found, expected) in [
+            (found.sawtooth, expected.sawtooth),
+            (found.pulse, expected.pulse),
+            (found.triangle, expected.triangle),
+            (found.sub, expected.sub),
+        ] {
+            worst = worst.max(found.abs_diff(expected));
+        }
+    }
+    println!("a sample in stretches is within {worst} of the tick's, of a level of {LEVEL}");
+    assert!(worst <= 4 * 1_024, "{worst}");
+}
+
+/// What moves the carrier's frequency in the test below: its value, from
+/// -1 to 1, at a phase of its cycle, and the phases at which it jumps.
+type Mover = (&'static str, fn(f64) -> f64, &'static [f64]);
+
+/// A sine, which jumps nowhere; a sawtooth, which jumps where it starts;
+/// and a pulse of 30%, which jumps twice.
+const MOVERS: [Mover; 3] = [
+    ("sine", |phase| (2.0 * PI * phase).sin(), &[]),
+    ("sawtooth", |phase| 2.0 * phase - 1.0, &[1.0]),
+    ("pulse", |phase| if phase < 0.3 { 1.0 } else { -1.0 }, &[0.3, 1.0]),
+];
+
+/// A carrier at `factor` times the output rate whose frequency another
+/// waveform moves by `octaves` either way, exponentially, and which that
+/// waveform's cycle starts again, so that everything it makes is a
+/// harmonic of the mover's `bin`. With `stretches` each sample is made in
+/// stretches between the mover's jumps, the frequency of each end of a
+/// stretch given; without, as could be done before: one frequency for a
+/// sample, the mover's at the sample's middle.
+fn moved(factor: u32, mover: Mover, pick: fn(&Waves) -> i32, bin: usize, octaves: f64, stretches: bool) -> Vec<f64> {
+    let (_, shape, jumps) = mover;
+    // The carrier rests 2.83 times as fast as the mover.
+    let rest = f64::from(bin_step(bin, factor)) * 2.83;
+    let step = |phase: f64| (rest * (octaves * shape(phase)).exp2()) as u32;
+    let advance = f64::from(bin_step(bin, factor)) / WORD;
+    let mut carrier = Oscillator::new();
+    carrier.set_width(1 << 30);
+    let mut phase = 0.0f64;
+    let count = (POINTS + SETTLE) * factor as usize;
+    let signal: Vec<i32> = (0..count)
+        .map(|_| {
+            let end = phase + advance;
+            // How long before the sample the mover's cycle started.
+            let started = (end >= 1.0).then(|| (((end - 1.0) / advance) * WORD) as u32);
+            if !stretches {
+                let middle = phase + advance / 2.0;
+                carrier.set_step(step(middle - middle.floor()));
+                phase = end - end.floor();
+                return pick(&carrier.tick(started));
+            }
+            let mut from = phase;
+            for &jump in jumps.iter().filter(|&&jump| jump > phase && jump <= end) {
+                // Up to the jump, from below; the cycle starts at one.
+                let until = (((end - jump) / advance) * WORD) as u32;
+                carrier.run(until, step(from), step(jump - 1.0e-12));
+                from = if jump >= 1.0 { 0.0 } else { jump };
+            }
+            if started.is_some() {
+                if jumps.is_empty() {
+                    carrier.run(started.unwrap_or(0), step(from), step(0.0));
+                    from = 0.0;
+                }
+                carrier.synchronise();
+            }
+            phase = end - end.floor();
+            carrier.run(0, step(from), step(phase));
+            pick(&carrier.finish())
+        })
+        .collect();
+    float(&decimate(&signal, factor)[SETTLE..])
+}
+
+#[test]
+fn a_frequency_that_moves_within_a_sample_leaves_the_edges_and_corners_clean() {
+    // A frequency moved at audio rate through an exponential: with one
+    // frequency for each sample every edge of the carrier is put where
+    // that frequency would have it and not where the moving one does,
+    // and where the mover jumps the carrier's sawtooth and triangle turn
+    // a corner that nothing rounds. Half an octave either way, the mover
+    // at 880 Hz.
+    let bin = 1_201;
+    let waves: [Pick; 3] = [WAVES[0], ("pulse 25%", |waves| waves.pulse, 0), WAVES[3]];
+    for factor in [2, 4] {
+        for mover in MOVERS {
+            for (name, pick, _) in waves {
+                let before = aliasing(&moved(factor, mover, pick, bin, 0.5, false), bin);
+                let found = aliasing(&moved(factor, mover, pick, bin, 0.5, true), bin);
+                println!(
+                    "{factor}x {name} moved by a {}: {found:.1} dB ({before:.1} dB at one frequency a sample)",
+                    mover.0
+                );
+                assert!(found < -80.0, "{name} moved by a {} at {factor}x: {found}", mover.0);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_width_that_jumps_within_a_sample_turns_the_pulse_where_it_jumps() {
+    // A sawtooth moves the pulse's width from 10% to 90% and starts the
+    // pulse's cycle with its own, 880 Hz: where the sawtooth starts
+    // again the width falls by most of a cycle at once, somewhere within
+    // a sample. Given one width for each sample, the pulse turns where a
+    // width sliding through that sample would have turned it.
+    let bin = 1_201;
+    let width = |phase: f64| ((0.1 + 0.8 * phase) * WORD) as u32;
+    for factor in [2, 4] {
+        let advance = f64::from(bin_step(bin, factor)) / WORD;
+        let step = (f64::from(bin_step(bin, factor)) * 2.83) as u32;
+        let count = (POINTS + SETTLE) * factor as usize;
+        let [before, found] = [false, true].map(|stretches| {
+            let mut carrier = Oscillator::new();
+            carrier.set_step(step);
+            let mut phase = 0.0f64;
+            let signal: Vec<i32> = (0..count)
+                .map(|_| {
+                    let end = phase + advance;
+                    let started = (end >= 1.0).then(|| (((end - 1.0) / advance) * WORD) as u32);
+                    phase = end - end.floor();
+                    if !stretches {
+                        carrier.set_width(width(phase));
+                        return carrier.tick(started).pulse;
+                    }
+                    if let Some(at) = started {
+                        carrier.set_width(width(1.0));
+                        carrier.run(at, step, step);
+                        carrier.synchronise();
+                        carrier.jump_width(width(0.0));
+                    }
+                    carrier.set_width(width(phase));
+                    carrier.run(0, step, step);
+                    carrier.finish().pulse
+                })
+                .collect();
+            aliasing(&float(&decimate(&signal, factor)[SETTLE..]), bin)
+        });
+        println!("{factor}x pulse whose width a sawtooth moves: {found:.1} dB ({before:.1} dB at one width a sample)");
+        assert!(found < -80.0, "{factor}x: {found}");
+    }
+}
+
+#[test]
+fn every_stretch_is_valid() {
+    // Any steps, any widths, any cuts, in any order: nothing leaves its
+    // range, and a sample never runs backwards.
+    let mut random = support::Random(13);
+    let mut oscillator = Oscillator::new();
+    for round in 0..200_000 {
+        let mut stretches = 0;
+        while oscillator.now() > 0 && stretches < 4 {
+            let (first, last) = (random.word() >> (random.word() % 32), random.word() >> (random.word() % 32));
+            let until = if stretches == 3 { 0 } else { random.word() & random.word() };
+            match random.word() % 5 {
+                0 => oscillator.synchronise(),
+                1 => oscillator.jump_width(random.word()),
+                2 => oscillator.set_width(random.word() & random.word()),
+                _ => {}
+            }
+            let before = oscillator.now();
+            if round % 2 == 0 {
+                oscillator.run(until, first, last);
+            } else if let Some(at) = oscillator.run_to_start(until, first, last) {
+                assert!(
+                    at <= before && at >= until.min(before) && oscillator.phase() == 0,
+                    "{at} of {before} to {until}"
+                );
+            }
+            assert!(oscillator.now() <= before);
+            stretches += 1;
+        }
+        let waves = oscillator.finish();
+        assert_eq!(oscillator.now(), u32::MAX);
+        for value in [waves.sawtooth, waves.pulse, waves.triangle, waves.sub] {
+            assert!(value.abs() < 8 * LEVEL, "{value}");
+        }
+        // A tick after stretches, and stretches after a tick.
+        if round % 7 == 0 {
+            let waves = oscillator.tick(None);
+            assert!(waves.sawtooth.abs() < 8 * LEVEL);
+        }
+    }
+}
+
 #[test]
 fn a_synchronised_pulse_narrower_than_a_sample_falls_where_its_width_ends() {
     // A pulse of 2% at 6 kHz is high for a third of a sample of twice
