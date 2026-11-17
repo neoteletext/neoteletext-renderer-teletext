@@ -96,7 +96,7 @@ fn random_patches_and_messages_never_panic_and_the_output_stays_alive() {
         let out = random_run(seed, 400, BLOCK_SAMPLES);
         // Not stuck at a rail, and not silent throughout. A random patch
         // may ask for more than full scale (sixteen lines, two resonances,
-        // 18 dB of pressure), and what is beyond is saturated.
+        // 6 dB of pressure), and what is beyond is saturated.
         let clipped = out.iter().filter(|&&sample| sample == i16::MAX || sample == i16::MIN).count();
         let loud = out.iter().filter(|&&sample| sample.unsigned_abs() > 300).count();
         println!("seed {seed}: {clipped} samples at a rail and {loud} above 1% of {}", out.len());

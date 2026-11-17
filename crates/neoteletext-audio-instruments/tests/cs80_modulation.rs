@@ -178,9 +178,12 @@ fn the_pulse_width_moves_between_the_ticks_and_not_in_their_steps() {
 
 #[test]
 fn the_touch_moves_the_level_and_the_brilliance() {
-    // The level: 6.4 V at 3 dB to the volt, 19.2 dB, from the softest
-    // stroke to the hardest, and as much again under pressure, held to
-    // the 18 dB there is room for.
+    // The level: 6.4 V at 0.9 dB to the volt, 5.76 dB, under the firmest
+    // pressure; the hardest stroke gives 7.9 / 8.5 of it, 5.35 dB above
+    // the softest, and what a stroke gives drains away with a time
+    // constant of 3.3 s (service manual, page 17: 10 MΩ across 0.33 µF),
+    // so that over the quarter of a second measured, 0.375 s after the
+    // key in the middle, 0.8926 of it is left.
     let level = |patch: &Patch, velocity: u8, pressure: u8| {
         // The firmest pressure brings one line to the whole of the mixed
         // output, which the output's limiter would bend: the volume is
@@ -197,14 +200,27 @@ fn the_touch_moves_the_level_and_the_brilliance() {
     touch.tones[0].set(Control::TouchLevel, 127);
     let (soft, middle, hard) = (level(&touch, 1, 0), level(&touch, 64, 0), level(&touch, 127, 0));
     println!("INITIAL LEVEL at 10: {soft:.1} dB, {middle:.1} dB and {hard:.1} dB at velocities 1, 64 and 127");
+    let left = (-0.375f64 / 3.3).exp();
+    let stroke = |velocity: f64| -5.76 * 7.9 / 8.5 * (1.0 - left * velocity / 127.0);
     assert!(
-        (soft + 19.2 * 126.0 / 127.0).abs() < 0.2 && (middle + 19.2 * 63.0 / 127.0).abs() < 0.2 && hard.abs() < 0.1
+        (soft - stroke(1.0)).abs() < 0.1 && (middle - stroke(64.0)).abs() < 0.1 && (hard - stroke(127.0)).abs() < 0.1,
+        "{soft} {middle} {hard}"
     );
+    // Held, the hardest stroke's level comes down to the softest's: 4 s
+    // on, three tenths of it are left.
+    let held = {
+        let mut cs80 = instrument(&touch);
+        cs80.event(NOTE_ON, 69, 127);
+        let _ = render(&mut cs80, 3.875);
+        decibels(rms(&render(&mut cs80, 0.25)) * 2.0f64.sqrt() / 0.125)
+    };
+    println!("INITIAL LEVEL at 10, the hardest stroke 4 s on: {held:.2} dB");
+    assert!((held + 5.76 * 7.9 / 8.5 * (1.0 - (-4.0f64 / 3.3).exp())).abs() < 0.1, "{held}");
     let mut after = panel(&SINE);
     after.tones[0].set(Control::PressureLevel, 127);
     let (light, half, full) = (level(&after, 100, 0), level(&after, 100, 64), level(&after, 100, 127));
     println!("AFTER LEVEL at 10: {light:.1} dB, {half:.1} dB and {full:.1} dB at pressures 0, 64 and 127");
-    assert!(light.abs() < 0.1 && (half - 19.2 * 64.0 / 127.0).abs() < 0.2 && (full - 18.06).abs() < 0.2);
+    assert!(light.abs() < 0.1 && (half - 5.76 * 64.0 / 127.0).abs() < 0.1 && (full - 5.76).abs() < 0.1);
     // With the levers down the touch does nothing.
     assert!((level(&panel(&SINE), 1, 127) - level(&panel(&SINE), 127, 0)).abs() < 0.01);
 
@@ -228,7 +244,9 @@ fn the_touch_moves_the_level_and_the_brilliance() {
     // 40 of 127 of 6.4 V is 2.016 V.
     let reach = 6.4 * 40.0 / 127.0;
     let stroke = reach * 7.9 / 8.5;
-    let expected_stroke = gain(stroke * 64.0 / 127.0) - gain(stroke / 127.0);
+    // 0.375 s after the key, 0.8926 of a stroke's voltage is left.
+    let left = (-0.375f64 / 3.3).exp();
+    let expected_stroke = gain(stroke * left * 64.0 / 127.0) - gain(stroke * left / 127.0);
     let expected_pressure = gain(reach * 64.0 / 127.0) - gain(0.0);
     let by_stroke = bright(Control::TouchBrilliance, 64, 0) - bright(Control::TouchBrilliance, 1, 0);
     let by_pressure = bright(Control::PressureBrilliance, 100, 64) - bright(Control::PressureBrilliance, 100, 0);
@@ -239,7 +257,7 @@ fn the_touch_moves_the_level_and_the_brilliance() {
     // The hardest stroke against the firmest pressure, each alone: the
     // stroke's 0.6 V less at the lever's top are 40 / 127 of them here.
     let hardest = bright(Control::TouchBrilliance, 127, 0) - bright(Control::PressureBrilliance, 127, 127);
-    let expected_hardest = gain(stroke) - gain(reach);
+    let expected_hardest = gain(stroke * left) - gain(reach);
     println!("the hardest stroke against the firmest pressure: {hardest:.2} dB for {expected_hardest:.2} dB");
     assert!(expected_hardest < -0.2 && (hardest - expected_hardest).abs() < 0.1);
 }
@@ -248,7 +266,7 @@ fn the_touch_moves_the_level_and_the_brilliance() {
 fn pressure_on_one_key_moves_that_key_alone() {
     let mut patch = panel(&SINE);
     patch.tones[0].set(Control::PressureLevel, 127);
-    // Quiet enough that the pressed key's 18 dB stay below full scale.
+    // Quiet enough that the pressed key's 5.8 dB stay below full scale.
     patch.tones[0].set(Control::Level, 32);
     let mut cs80 = instrument(&patch);
     cs80.event(NOTE_ON, 69, 100);
@@ -260,7 +278,7 @@ fn pressure_on_one_key_moves_that_key_alone() {
     let after = render(&mut cs80, 0.25);
     let change = |hertz: f64| decibels(component(&after, hertz) / component(&before, hertz));
     println!("pressure on the upper key: the lower moves {:.2} dB, the upper {:.2} dB", change(440.0), change(659.26));
-    assert!(change(440.0).abs() < 0.1 && (change(659.26) - 18.06).abs() < 0.3);
+    assert!(change(440.0).abs() < 0.1 && (change(659.26) - 5.76).abs() < 0.1);
     // Channel pressure presses every key that is down.
     cs80.event(CHANNEL_PRESSURE, 0, 0);
     render(&mut cs80, 0.05);
@@ -301,7 +319,7 @@ fn a_key_that_is_up_is_no_longer_pressed() {
 fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     // Adjustment procedure, page 27: -2.76 V at the key 48 with a low
     // lever at its foot, +2.76 V at the key 85 with a high lever at its
-    // top; nothing at the centre. A volt is 3 dB of level.
+    // top; nothing at the centre. A volt is 0.9 dB of level.
     let level = |global: Global, lever: u8, key: u8| {
         let mut patch = panel(&SINE);
         patch.set(global, lever);
@@ -310,7 +328,7 @@ fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     let low = level(Global::KeyboardLevelLow, 0, 48);
     let high = level(Global::KeyboardLevelHigh, 127, 85);
     println!("the keyboard's level levers at their trimmed keys: {low:.2} dB and {high:.2} dB");
-    assert!((low + 8.28).abs() < 0.1 && (high - 8.28).abs() < 0.1);
+    assert!((low + 2.484).abs() < 0.05 && (high - 2.484).abs() < 0.05);
     // Each lever has its own half of the keyboard, and the middle none.
     // The level is taken over a quarter of a second, which on the key 48
     // is 32.7 cycles: the part of a cycle left over moves it by up to
@@ -323,7 +341,7 @@ fn the_keyboard_control_is_2_76_volts_at_its_trimmed_keys() {
     ];
     assert!(none.iter().all(|level| level.abs() < 0.03), "{none:?}");
     // The curve is the square of the distance: half way, a quarter.
-    assert!((level(Global::KeyboardLevelLow, 0, 57) + 8.28 / 4.0).abs() < 0.1);
+    assert!((level(Global::KeyboardLevelLow, 0, 57) + 2.484 / 4.0).abs() < 0.05);
     // The brilliance levers move the filters: 2.76 V at the same keys,
     // 3.37 octaves of the low-pass filter. Its lever at 2.99 V puts it at
     // 412 Hz on this key, and the fourth harmonic's gain at a Q of 0.5 is

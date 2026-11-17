@@ -279,18 +279,17 @@ fn brass_1_rests_where_a_real_instruments_does() {
     //   +2.00 +1.99 +1.96 +1.65 +1.62 +1.61 +1.95 +1.61 +1.87 +1.50 +1.58 +1.39
     // a mean of +1.73, in two groups 0.35 octave apart (the instrument's
     // voices, each with its own trimmers). This reading of the documents
-    // rests at +2.92 on every key at the softest stroke, and higher at a
-    // harder one: 0.92 to 1.53 octaves above the recordings, 1.19 in the
-    // mean. The peak above the rest agrees where the recording's
-    // bandwidth lets it be measured (2.2 to 3.0 octaves for our 2.2, and
-    // the stroke adds to the real one).
+    // comes to rest at +2.92 on every key however it is struck (a
+    // stroke's voltage drains away in 3.3 s): 0.92 to 1.53 octaves above
+    // the recordings, 1.19 in the mean. The peak above the rest agrees
+    // where the recording's bandwidth lets it be measured (2.2 to 3.0
+    // octaves for our 2.2, and the stroke adds to the real one).
     //
     // The same recordings against this reading otherwise: the filter's
-    // peak comes 116 to 260 ms after the key for our 390 ms; the fall
-    // from it is one exponential of 2.8 to 3.6 s, 6.5 to 8.3 s to a
-    // tenth, for our 3.3 s to a tenth; the level falls 5.5 to 9 dB in
-    // 10 s for our 4.4 dB, and is still falling at 6 s where ours has
-    // stopped at 3 s.
+    // peak comes 116 to 260 ms after the key for our 170 to 390 ms; the
+    // fall from it is one exponential of 2.8 to 3.6 s, and ours on
+    // middle C, struck as hard, 2.7 s; the fundamental falls 2.7 to 6.8
+    // dB from 1 s to 10 s, 4.3 dB in the mean, for our 4.0 dB.
     //
     // What the documents were asked and did not answer is in the
     // module's notes ([`neoteletext_audio_instruments::cs80`], "What is

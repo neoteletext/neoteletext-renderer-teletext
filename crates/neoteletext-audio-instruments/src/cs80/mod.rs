@@ -30,7 +30,9 @@
 //!   ([`RcEnvelope`]).
 //! - **Touch.** How hard a key is struck (MIDI velocity) and how hard it
 //!   is then pressed, each key by itself (MIDI polyphonic key pressure),
-//!   move the brilliance and the level by each tone's four levers;
+//!   move the brilliance and the level by each tone's four levers; what
+//!   a stroke gives drains away in a time constant of 3.3 s, as the
+//!   board that holds its voltage drains it;
 //!   pressure also speeds the sub oscillator and deepens its vibrato and
 //!   wah, and a hard stroke can start a note flat.
 //! - **After the voices**, at the output rate: the ring modulator, whose
@@ -74,13 +76,17 @@
 //!   decibels a volt of touch, of the keyboard control and of the sub
 //!   oscillator is, and how far the overall levers reach.
 //! - **BRASS 1 is brighter than the one real instrument heard.** Twelve
-//!   keys of a real instrument's BRASS 1 come to rest 1.39 to 2.00
-//!   octaves above their notes; this reading rests at 2.92 on every key
-//!   at the softest stroke, 1.19 octaves above them in the mean, and
-//!   higher at a harder stroke. The real filter's peak also comes sooner
-//!   (116 to 260 ms after the key for 390 ms), and it falls back more
-//!   slowly (6.5 to 8.3 s to a tenth for 3.3 s). The figures, and a test
-//!   that states them and fails, are in `tests/cs80_filter.rs`
+//!   keys of a real instrument's BRASS 1, struck hard, come to rest 1.39
+//!   to 2.00 octaves above their notes; this reading comes to rest at
+//!   2.92 on every key however it is struck, 1.19 octaves above them in
+//!   the mean (10 s after the hardest stroke it still stands at 3.02).
+//!   The real filter's peak also comes sooner (116 to 260 ms after the
+//!   key for 170 to 390 ms). The fall from the peak agrees since the
+//!   stroke's voltage drains away as the touch board drains it: on
+//!   middle C a time constant of 2.73 s for the recording's 2.80 s, and
+//!   the fundamental 4.0 dB down from 1 s to 10 s for the recordings'
+//!   4.3 dB in the mean. The figures, and a test that states the rest
+//!   level and fails, are in `tests/cs80_filter.rs`
 //!   (`brass_1_rests_where_a_real_instruments_does`, ignored). What the
 //!   documents were asked:
 //!   - *The preset's parts* are as drawn (T51, column C: 5.1 kΩ on the
@@ -95,16 +101,12 @@
 //!     pin 15: the sustain level is "normally fixed to zero(0) volt", and
 //!     page 41 ties the pin to earth), starts at the initial level and
 //!     returns to it: as it is here.
-//!   - *The stroke's voltage is not held for ever* in the instrument: the
-//!     touch board keeps it on 0.33 µF behind a FET, with 10 MΩ from
-//!     the capacitor to the FET's gate as the drawing was read (service
-//!     manual, page 17, TWS circuit diagram), a time constant of 3.3 s,
-//!     which is the time constant the recordings' filters fall with. Here a stroke's
-//!     brilliance and level last the whole note. Where the held voltage
-//!     ends (nothing, or below nothing, which would lower a held note's
-//!     brilliance by the INITIAL BRILLIANCE lever's share and could be
-//!     the whole gap) the drawing does not say without the FET's
-//!     pinch-off voltage, so it is not built.
+//!   - *The stroke's voltage is not held for ever*: the touch board
+//!     keeps it on 0.33 µF with 10 MΩ across it (service manual, pages
+//!     17 and 18), and it drains to nothing in a time constant of 3.3 s,
+//!     as it does here. It ends at nothing, not below, so a held note
+//!     rests where the softest stroke leaves it, and that is where the
+//!     gap is measured.
 //!   - *The overall BRILLIANCE lever* of the recorded instrument would
 //!     have to stand a third of its travel from its centre.
 //!
