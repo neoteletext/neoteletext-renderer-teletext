@@ -14,7 +14,8 @@ use super::patch::AssignMode;
 pub const VOICES: usize = 8;
 
 /// Keys the solo and unison modes remember as held: more than two hands
-/// hold.
+/// hold, and more than MIDI usually sends. Of more keys than these, solo
+/// remembers the lowest, whose key it plays, and unison the first.
 ///
 /// Source: own choice.
 const HELD_KEYS: usize = 16;
@@ -143,6 +144,17 @@ impl Assigner {
                         && let Some(kept) = self.held().iter().find(|held| !held.down).map(|held| held.key)
                     {
                         self.forget(|held| held.key == kept);
+                    }
+                    // With every place taken by a key under a finger,
+                    // solo gives up its highest key for a lower one: the
+                    // lowest key down is then always among those
+                    // remembered.
+                    if solo
+                        && self.holding >= HELD_KEYS
+                        && let Some(highest) = self.held().iter().map(|held| held.key).max()
+                        && key < highest
+                    {
+                        self.forget(|held| held.key == highest);
                     }
                     if let Some(place) = self.held.get_mut(self.holding) {
                         *place = Held { key, down: true };

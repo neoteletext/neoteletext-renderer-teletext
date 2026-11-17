@@ -234,6 +234,30 @@ fn solo_plays_the_lowest_key_on_one_voice() {
 }
 
 #[test]
+fn solo_plays_the_lowest_of_more_keys_than_it_remembers() {
+    // Sixteen keys are remembered; a seventeenth below them all, which
+    // MIDI can send, is the lowest key down and the one solo plays.
+    let mut jupiter = instrument(&square().with(Param::AssignMode, 1));
+    for key in (A2 + 1..=A2 + 16).rev() {
+        jupiter.event(NOTE_ON, key, 100);
+    }
+    jupiter.event(NOTE_ON, A2 - 12, 100);
+    let lowest = cents(220.0, pitch(&render(&mut jupiter, 0.4)[samples(0.1)..]));
+    assert!(lowest.abs() < 2.0, "the seventeenth key, the lowest: {lowest} cents from it");
+    // Let go, it gives the note back to the lowest of the others; a key
+    // above them all changes nothing; and every key up ends the note.
+    jupiter.event(NOTE_OFF, A2 - 12, 0);
+    jupiter.event(NOTE_ON, A2 + 30, 100);
+    let next = cents(440.0 * (1.0f64 / 12.0).exp2(), pitch(&render(&mut jupiter, 0.4)[samples(0.1)..]));
+    assert!(next.abs() < 2.0, "the lowest of the sixteen: {next} cents from it");
+    for key in 0..=127 {
+        jupiter.event(NOTE_OFF, key, 0);
+    }
+    render(&mut jupiter, 0.3);
+    assert_eq!(jupiter.sounding_voices(), 0);
+}
+
+#[test]
 fn unison_shares_all_eight_voices_among_the_keys() {
     // Owner's manual: "All 8 synthesizers will be assigned to any one key
     // pressed, dividing to four each for two keys, and so on".
