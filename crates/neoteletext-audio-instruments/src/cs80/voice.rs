@@ -81,13 +81,13 @@ const PITCH_TOLERANCE: i32 = law::cents(8) / 10;
 /// The pulse's width at the lever's foot, a square, and how much wider
 /// the lever's top makes it: 50% and 40% of a cycle.
 ///
-/// Source: owner's manual, page 32, [22]: "from a symmetrical wave (50%)
+/// Source: owner's manual, page 32, item 22: "from a symmetrical wave (50%)
 /// to a narrow pulse (90%)".
 const PULSE_WIDTH: (u32, u32) = (1 << 31, ((40u64 << 32) / 100) as u32);
 /// How far the pulse width's oscillator at its peak moves the width
 /// either way with PWM at 10: 20% of a cycle, half the lever's travel.
 ///
-/// Source: owner's manual, page 15, [21]: with PW at 75% and PWM at its
+/// Source: owner's manual, page 15, item 21: with PW at 75% and PWM at its
 /// top the effect "is identical to manually moving the PW slider back
 /// and forth all the way". Own choice of the swing from that.
 const PWM_SWING: u32 = ((20u64 << 32) / 100) as u32;
@@ -139,7 +139,7 @@ const ENVELOPE_REACH: i32 = 5 * law::VOLT;
 ///
 /// Source: own choice of the voltage: the lever "adds voltage to the
 /// VCF's high pass and low pass control inputs" (owner's manual, page 38,
-/// [7]), and what stands across it was not read.
+/// item 7), and what stands across it was not read.
 const BRILLIANCE_REACH: i32 = 15 * law::VOLT;
 /// The volts the touch response adds to the brilliance at its levers'
 /// tops: 6.4 V, which [`law::MODULATION`] makes 2.08 octaves of the
@@ -164,7 +164,7 @@ const TOUCH_LEVEL: i32 = law::octaves(64 * 3, 10 * 6);
 ///
 /// Source: own choice: as pressure gives ([`TOUCH_VCF_REACH`]), since
 /// the touch response's levers "do the same thing as their counterparts
-/// in the Sub Oscillator section" (owner's manual, page 38, [12]).
+/// in the Sub Oscillator section" (owner's manual, page 38, item 12).
 const SUB_VCF_REACH: i32 = TOUCH_VCF_REACH;
 /// The same by pressure on a key with the touch response's VCF lever at
 /// the top: 1.1 V either way.
@@ -195,7 +195,7 @@ const TOUCH_BEND: (i32, u32) = (law::cents(200), 40_000);
 
 /// The key the keyboard control's levers do nothing at.
 ///
-/// Source: owner's manual, page 9, [9]: "a transition occurs somewhere
+/// Source: owner's manual, page 9, item 9: "a transition occurs somewhere
 /// near the middle of the keyboard"; the middle of the 61 keys from MIDI
 /// 36 to 96.
 const KEYBOARD_CENTRE: i32 = 66;
@@ -212,7 +212,7 @@ const KEYBOARD_TRIM_KEYS: (i32, i32) = (KEYBOARD_CENTRE - 48, 85 - KEYBOARD_CENT
 ///
 /// Source: the same table: "-2.76 ± .14V" and "+2.76 ± .14V". Own
 /// choice: the control grows as the square of the distance from the
-/// centre, for the "smooth curve" of the owner's manual (page 38, [9]).
+/// centre, for the "smooth curve" of the owner's manual (page 38, item 9).
 const KEYBOARD_BRILLIANCE: i32 = law::octaves(276, 100);
 /// The same for the level levers, in octaves of amplitude, at 3 dB to
 /// the volt as [`TOUCH_LEVEL`].

@@ -20,7 +20,7 @@
 //! Any other value is refused ([`PatchError`]).
 //!
 //! Source: owner's manual, the photograph inside the cover and its list
-//! of controls [1] to [46], and page 36, the memory panel, whose legend
+//! of controls, items 1 to 46, and page 36, the memory panel, whose legend
 //! under the second memory gives the order of a tone's controls; service
 //! manual, page 1, Specifications, which lists the same controls.
 
@@ -302,7 +302,7 @@ const GLOBAL_MAXIMA: [u8; GLOBAL_BYTES] = {
 /// A channel's pitch against the keyboard's, as an organ's stops are
 /// named.
 ///
-/// Source: owner's manual, page 8, [5]: "If 8' is considered normal
+/// Source: owner's manual, page 8, item 5: "If 8' is considered normal
 /// pitch, then 16' is one octave below, 5-1/3' is a perfect fifth up, 4'
 /// is one octave up, 2-2/3' is one octave plus a perfect fifth up, and 2'
 /// is two octaves up."
@@ -340,7 +340,7 @@ impl Feet {
 
 /// The sub oscillator's waveform.
 ///
-/// Source: owner's manual, page 9, [11] A.
+/// Source: owner's manual, page 9, item 11 A.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Function {
@@ -405,7 +405,7 @@ impl Patch {
     /// everything else off or at its foot.
     ///
     /// Source: owner's manual, page 31, the diagram of the nominal
-    /// settings; page 8, [7] and [8]: BRILLIANCE's "nominal lever
+    /// settings; page 8, items 7 and 8: BRILLIANCE's "nominal lever
     /// position for all patches is centered", RESONANCE's "is always
     /// with the lever up". Own choice: the mix at channel I alone, where
     /// the diagram has it at the centre, so that the two channels' equal

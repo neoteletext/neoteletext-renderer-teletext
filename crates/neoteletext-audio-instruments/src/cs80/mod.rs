@@ -27,7 +27,7 @@
 //!   to the setting and on release returns to the initial level. The
 //!   amplifier's (IG00159) is attack, decay, sustain and release. Both
 //!   are capacitors charged and discharged
-//!   ([`RcEnvelope`](crate::analog::envelope::RcEnvelope)).
+//!   ([`RcEnvelope`]).
 //! - **Touch.** How hard a key is struck (MIDI velocity) and how hard it
 //!   is then pressed, each key by itself (MIDI polyphonic key pressure),
 //!   move the brilliance and the level by each tone's four levers;
@@ -134,7 +134,7 @@ pub const WHEEL_CENTS: i32 = 50;
 const PITCH_BEND_CENTRE: i32 = 0x2000;
 /// The least the ribbon makes of a frequency, in Q28: eight octaves down.
 ///
-/// Source: own choice of the floor. Owner's manual, page 14, [19]: "you
+/// Source: own choice of the floor. Owner's manual, page 14, item 19: "you
 /// can move the highest note on the keyboard down to a sub-audio
 /// frequency", and upwards "approximately one octave".
 const RIBBON_FLOOR: u32 = RIBBON_REST >> 8;
@@ -254,7 +254,7 @@ const EFFECT_FILTER: u32 = 14_400_000;
 const EFFECT_MONO_SHARE: i32 = (ENVELOPE_ONE as i64 * 7 / 246) as i32;
 /// The level with the effect on, in Q30: nine tenths.
 ///
-/// Source: own choice. Owner's manual, page 13, [15]: the "overall CS-80
+/// Source: own choice. Owner's manual, page 13, item 15: the "overall CS-80
 /// output volume decreases slightly".
 const EFFECT_LEVEL: i32 = (ENVELOPE_ONE as i64 * 9 / 10) as i32;
 
