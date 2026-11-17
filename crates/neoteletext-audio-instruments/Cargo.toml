@@ -58,5 +58,13 @@ required-features = ["juno"]
 name = "juno_render"
 required-features = ["juno"]
 
+[[example]]
+name = "prophet5_demo"
+required-features = ["prophet5"]
+
+[[example]]
+name = "prophet5_render"
+required-features = ["prophet5"]
+
 [lints]
 workspace = true
