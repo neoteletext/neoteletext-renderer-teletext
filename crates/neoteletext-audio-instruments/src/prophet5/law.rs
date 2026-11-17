@@ -183,6 +183,10 @@ pub struct Law {
     /// thousandths of a hertz, the octaves each step adds, and the level
     /// of its square against its sawtooth in Q30.
     pub lfo: (u32, i32, i32),
+    /// The glide's rate with the knob at its top, in octaves a second in
+    /// Q24; the octaves of rate each step below the top adds; and the
+    /// most the rate is, in whole octaves a second.
+    pub glide: (u32, i32, u32),
     /// The difference, in octaves, within which the glide closes in
     /// along an exponential; beyond it, it moves at its set rate.
     pub glide_zone: i32,
@@ -320,6 +324,24 @@ pub const REV3: Law = Law {
     // cycles per second" with the knob drawn at 6.6, but of revisions 1
     // and 2 ([`REV2`]); here that knob gives 2.5 Hz.
     lfo: (40, octaves(909, 12_000), (ONE_Q30_LEVEL as i64 * 108 / 100) as i32),
+    // Source: TM3 sheet SD334 (page 47), GLIDE. The unison voltage is
+    // followed by a CA3280 (half of U381) that charges C376, 0.1 µF,
+    // with at most its control current: a volt, an octave, a second for
+    // each tenth of a microampere. That current is the collector's of one
+    // half of a matched pair (Q309) through R3123, 100 kΩ; the pair's
+    // emitters share what R3126, 30 kΩ, passes from 15 V, 0.48 mA; the
+    // other half's base is grounded and this half's has the knob's
+    // voltage divided by R3124, 100 kΩ, over R3125, 2.7 kΩ: 26.29 mV to
+    // the volt, where 17.9 mV halve the current (the figure of the
+    // SSM2030 data sheet's page 2 for such a pair): 1.469 octaves to
+    // the volt, 0.12239 to the step. At the knob's 10 the current is
+    // 18.2 nA, 0.182 octave a second, 27 s for five octaves (the test
+    // table, page 61: "MINIMUM: 5 SECS TO SLEW 5 OCTAVES", and at 6
+    // "MEDIUM GLIDE", here 10.7 octaves a second); section 2-12 (page
+    // 22): "as GLIDE CV increases, Iabc decreases". Near the knob's foot
+    // the 100 kΩ pass no more than the 14.9 V across them: 1,490
+    // octaves a second.
+    glide: (3_052_533, octaves(12_239, 100_000), 1_490),
     // Source: own choice: the glide's amplifier is linear only over a
     // small difference (TM3 sheet SD334: a CA3280 with 4.7 kΩ at its
     // input); a semitone is taken.
@@ -441,9 +463,20 @@ pub const REV2: Law = Law {
     // sheet's words are kept, as the nearer to the instrument. The pulse is
     // 7.5 V against the sawtooth's 10 V (section 2-23).
     lfo: (11, octaves(1, 9), (ONE_Q30_LEVEL as i64 * 3 / 4) as i32),
-    // Source: TM2 section 2-21 (page 43): diodes "clamp the difference
-    // between these to not exceed 0.6V".
-    glide_zone: octaves(6, 10),
+    // Source: TM2 sheet SD312 (page 76), GLIDE, read from the scan
+    // enlarged seven times: revision 3's circuit ([`REV3`]) about a
+    // CA3080 (U379) and C348, 0.1 µF, with R3121, 100 kΩ, over R3122,
+    // 2.7 kΩ, at the pair's base and R3125, 100 kΩ, at its collector,
+    // but R3123, 15 kΩ, to the emitters: 0.96 mA. Section 2-21 (page
+    // 43): "Q309 exponential converter". At the knob's top, 127 steps,
+    // the current is 20.1 nA: 0.201 octave a second.
+    glide: (3_371_174, octaves(12_239, 100_000), 1_490),
+    // Source: own choice, as revision 3's: the amplifier is of the same
+    // kind. TM2 section 2-21 (page 43) has diodes "clamp the difference
+    // between these to not exceed 0.6V"; they stand across the
+    // amplifier's inputs (D302, D303) and bound what it sees, far above
+    // the difference over which its output follows its input.
+    glide_zone: octaves(1, SEMITONES),
     // Source: TM2 section 2-15 (page 36): the tuning's steps are "about
     // 1 cent"; own choice of 3 cents for the drift of this revision's
     // oscillators since they were last tuned (Electric Druid, "CEM3340
