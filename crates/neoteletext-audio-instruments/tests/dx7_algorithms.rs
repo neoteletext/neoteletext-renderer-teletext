@@ -13,7 +13,7 @@
 )]
 
 use neoteletext_audio_instruments::dx7::kernel::{
-    ALGORITHMS, ATTENUATION_MAX, Algorithm, MODULATORS_MAX, Voice, carrier_compensation,
+    ALGORITHMS, ATTENUATION_MAX, Algorithm, BLOCK_SAMPLES, MODULATORS_MAX, Voice, carrier_compensation, sine,
 };
 use neoteletext_audio_instruments::dx7::{Bank, Patch, Rack, VoiceParams};
 
@@ -282,6 +282,33 @@ fn a_long_feedback_loop_is_closed_within_two_samples() {
     // Sample 1: operator 6 hears operator 5's sample 0, and operator 5 hears
     // operator 6 at once.
     assert_ne!(open[1], closed[1]);
+}
+
+/// A glide down to an attenuation that is not a whole number of steps
+/// below the last stops at no attenuation: the steps, rounded down, would
+/// take it below zero part way through the block, and an attenuation that
+/// wrapped round would be silence.
+#[test]
+fn a_glide_to_no_attenuation_does_not_pass_it() {
+    const INCREMENT: u32 = 1 << 26;
+    // A single carrier with no modulator: algorithm 32's operator 1.
+    let algorithm = &ALGORITHMS[31];
+    for start in [1, 40, 63, 64, 65, 1000] {
+        let mut voice = Voice::new();
+        voice.set_operator(0, INCREMENT, start);
+        voice.begin_block();
+        let mut first = [0_i32; BLOCK_SAMPLES];
+        voice.render(algorithm, 0, &mut first);
+        voice.set_operator(0, INCREMENT, 0);
+        voice.begin_block();
+        let mut second = [0_i32; BLOCK_SAMPLES];
+        voice.render(algorithm, 0, &mut second);
+        // Under 1,000 parts in 2^24 of a doubling is under one step of the
+        // log-sine table, so every sample is the sine's own.
+        let expected: Vec<i32> =
+            (BLOCK_SAMPLES..2 * BLOCK_SAMPLES).map(|at| sine(INCREMENT.wrapping_mul(at as u32))).collect();
+        assert_eq!(second.to_vec(), expected, "from an attenuation of {start}");
+    }
 }
 
 /// An algorithm of several carriers is about as loud as one of one: with

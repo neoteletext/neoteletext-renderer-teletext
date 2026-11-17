@@ -53,6 +53,9 @@ pub const BLOCK_SAMPLES_LOG2: u32 = LG_N;
 /// the next.
 pub const BLOCK_SAMPLES: usize = 1 << BLOCK_SAMPLES_LOG2;
 
+/// [`BLOCK_SAMPLES`] as the divisor of a signed difference.
+const BLOCK_SAMPLES_I32: i32 = 1 << BLOCK_SAMPLES_LOG2;
+
 /// Bits of an operator's attenuation below one doubling.
 ///
 /// Source: own choice: the parameter layer's fixed point, taken unchanged.
@@ -348,7 +351,10 @@ impl Voice {
             operator.attenuation = if self.fresh { operator.target } else { previous };
             // Both are at most 2^28, so the difference fits an i32.
             let difference = operator.target.cast_signed().wrapping_sub(operator.attenuation.cast_signed());
-            operator.step = difference >> BLOCK_SAMPLES_LOG2;
+            // Rounded towards zero, so that the glide never passes its
+            // target: rounded down, a glide down to no attenuation would
+            // pass zero within the block, and wrap round to silence.
+            operator.step = difference / BLOCK_SAMPLES_I32;
         }
     }
 
