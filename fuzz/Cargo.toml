@@ -35,6 +35,8 @@ neoteletext-audio-instruments = { path = "../crates/neoteletext-audio-instrument
 ] }
 neoteletext-opus = { path = "../crates/neoteletext-opus" }
 neoteletext-input = { path = "../crates/neoteletext-input" }
+# The page rule table (page-rules.md, RULE-83).
+neoteletext-rules = { path = "../crates/neoteletext-rules" }
 # The pipe between neottx's fetcher and decoder processes (REQ-SEC-018),
 # and the terminal replies `neottx` reads when it asks for graphics
 # (DEC-2459). Without its default features the application crate builds
@@ -370,6 +372,27 @@ bench = false
 [[bin]]
 name = "discovery_element"
 path = "fuzz_targets/discovery_element.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rules_decode"
+path = "fuzz_targets/rules_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rules_evaluate"
+path = "fuzz_targets/rules_evaluate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rules_no_unasked_send"
+path = "fuzz_targets/rules_no_unasked_send.rs"
 test = false
 doc = false
 bench = false
