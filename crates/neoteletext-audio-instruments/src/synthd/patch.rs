@@ -1,39 +1,13 @@
-//! A patch: the panel of the instrument as a fixed record.
+//! A patch: the panel of the instrument, in the units its dials are
+//! marked in, and its 60 bytes on the wire (`synthd.md`, SD-17 to SD-22).
 //!
-//! synthD has no memory and no patch format: a sound is the
+//! synthD has no memory and no patch format of its own: a sound is the
 //! positions of its knobs and switches, written down on a sound chart.
-//! The record here is those positions, in the units the dials are marked
-//! in, and its byte form is this crate's own.
-//!
-//! # The byte layout
-//!
-//! [`PATCH_BYTES`] bytes; numbers of two bytes have the low byte first.
-//!
-//! | Bytes | Control | Values |
-//! |---|---|---|
-//! | 0, 1 | TUNE | cents, -242 to 242, signed |
-//! | 2 | GLIDE | 0 to 100: tenths of the dial's 0 to 10 |
-//! | 3 | MODULATION MIX | 0 to 100 (0 is oscillator 3, 100 noise) |
-//! | 4, 5 | Oscillator 1 RANGE, WAVEFORM | 0 to 5 each |
-//! | 6, 7 | Oscillator 2 RANGE, WAVEFORM | 0 to 5 each |
-//! | 8, 9 | Oscillator 2 FREQUENCY | cents, -700 to 700, signed |
-//! | 10, 11 | Oscillator 3 RANGE, WAVEFORM | 0 to 5 each |
-//! | 12, 13 | Oscillator 3 FREQUENCY | cents, -700 to 700, signed |
-//! | 14, 15, 16 | Mixer VOLUME of oscillators 1, 2, 3 | 0 to 100 each |
-//! | 17 | EXTERNAL INPUT VOLUME | 0 to 100 |
-//! | 18 | NOISE VOLUME | 0 to 100 |
-//! | 19, 20 | CUTOFF FREQUENCY | hundredths of the dial's -5 to 5, signed |
-//! | 21 | EMPHASIS | 0 to 100 |
-//! | 22 | AMOUNT OF CONTOUR | 0 to 100 |
-//! | 23, 24 | Filter ATTACK TIME | milliseconds, 0 to 10,000 |
-//! | 25, 26 | Filter DECAY TIME | milliseconds, 0 to 10,000 |
-//! | 27 | Filter SUSTAIN LEVEL | 0 to 100 |
-//! | 28, 29 | Loudness ATTACK TIME | milliseconds, 0 to 10,000 |
-//! | 30, 31 | Loudness DECAY TIME | milliseconds, 0 to 10,000 |
-//! | 32 | Loudness SUSTAIN LEVEL | 0 to 100 |
-//! | 33 | Main output VOLUME | 0 to 100 |
-//! | 34 | Switches | bits 0 to 6, see [`switch`] |
-//! | 35 | Switches | bits 0 to 5, see [`switch`] |
+//! [`Patch`] is those positions, in the dials' units; on the wire a patch
+//! is the values of the 60 controllers that move them, in the order of
+//! [`interface::LAYOUT`] (SD-22). [`Patch::from_values`] reads the values
+//! by SD-18, SD-19 and SD-20's laws, and [`Patch::to_values`] writes each
+//! field's canonical value, which reads back exactly.
 //!
 //! A range is 0 for LO, then 32', 16', 8', 4' and 2'; a waveform is the
 //! switch's position from the left ([`Waveform`]). The external input is
@@ -45,12 +19,10 @@
 //! ("A guide to the operation of the Mini Moog Model D", sections E to J)
 //! and of the service manual's figure 7-1, the front panel control
 //! diagram; the dials' markings are those the 1974 sound charts write
-//! their settings in. The layout is an own choice.
+//! their settings in.
 
+use super::interface::{self, PATCH_BYTES, PatchFault, byte, pair, pair_bytes};
 use super::law::{CONTOUR_TIMES, FREQUENCY_CENTS, KNOB_MAX, TUNE_CENTS};
-
-/// Bytes of a patch.
-pub const PATCH_BYTES: usize = 36;
 
 /// The largest time of a contour's dial, in milliseconds.
 pub const TIME_MAX: u16 = (CONTOUR_TIMES.1 / 1_000) as u16;
@@ -60,57 +32,107 @@ pub const TIME_MAX: u16 = (CONTOUR_TIMES.1 / 1_000) as u16;
 /// adjustment procedure sets it "to -1".
 pub const CUTOFF_MAX: i16 = 500;
 
-/// Where the fields that are not an oscillator's lie: each one's first
-/// byte, as the table of the module's documentation has them.
-mod layout {
-    pub const TUNE: u8 = 0;
-    pub const GLIDE: u8 = 2;
-    pub const MODULATION_MIX: u8 = 3;
-    pub const VOLUMES: u8 = 14;
-    pub const EXTERNAL_VOLUME: u8 = 17;
-    pub const NOISE_VOLUME: u8 = 18;
-    pub const CUTOFF: u8 = 19;
-    pub const EMPHASIS: u8 = 21;
-    pub const CONTOUR_AMOUNT: u8 = 22;
-    pub const FILTER_CONTOUR: u8 = 23;
-    pub const LOUDNESS_CONTOUR: u8 = 28;
-    pub const VOLUME: u8 = 33;
-    pub const SWITCHES: u8 = 34;
+/// The largest 14-bit number of a pair, and its middle (SD-18).
+const PAIR_TOP: i32 = interface::PAIR_MAX as i32;
+const PAIR_MIDDLE: i32 = 8_192;
+const _: () = assert!(PAIR_MIDDLE == (PAIR_TOP + 1) / 2);
+/// The upper half of a pair, which carries AMOUNT OF CONTOUR (SD-18 item 2).
+const CONTOUR_SPAN: i32 = PAIR_TOP - PAIR_MIDDLE;
+/// A knob's top, 100 tenths of a division.
+const KNOB_TOP: i32 = KNOB_MAX as i32;
+/// The largest value of one controller.
+const VALUE_TOP: i32 = crate::midi::DATA_MAX as i32;
+/// A switch is on, and a LO/HI controller HI, from this value (SD-20
+/// items 2 and 4; MIDI 1.0 4.2, printed page 12, PDF 44).
+const SWITCH_ON: u8 = 64;
+/// The canonical values of a switch, off and on (SD-20 item 4).
+const SWITCH_OFF_VALUE: u8 = 0;
+const SWITCH_ON_VALUE: u8 = 127;
+/// The values in each band of an octave controller: 0 to 15 32', 16 to
+/// 31 16', and so on (SD-20 item 1; Voyager 3.4 manual, printed page 77).
+const OCTAVE_BAND: u8 = 16;
+/// The waveform selectors' six positions in 128 values: position
+/// `floor(value × 6 ÷ 128)` (SD-20 item 5).
+const WAVEFORM_POSITIONS: u16 = 6;
+const VALUES: u16 = 128;
+/// The canonical value of each waveform position, the lowest of its band
+/// (SD-20 item 5).
+const WAVEFORM_VALUES: [u8; 6] = [0, 22, 43, 64, 86, 107];
+
+/// A field of a pair from its number, linear over its range (SD-18 item
+/// 1): `lowest + floor((number × span + 8,191) ÷ 16,383)`.
+fn from_pair(number: u16, lowest: i32, span: i32) -> i32 {
+    let scaled = i32::from(number).saturating_mul(span).saturating_add(PAIR_TOP / 2) / PAIR_TOP;
+    lowest.saturating_add(scaled)
 }
 
-/// The bits of the two switch bytes.
-pub mod switch {
-    /// Byte 34: OSCILLATOR MODULATION.
-    pub const OSCILLATOR_MODULATION: u8 = 1;
-    /// Byte 34: OSC. 3 CONTROL, the keyboard's control of oscillator 3.
-    pub const OSCILLATOR_3_CONTROL: u8 = 1 << 1;
-    /// Byte 34: the mixer's switch of oscillator 1.
-    pub const MIX_1: u8 = 1 << 2;
-    /// Byte 34: the mixer's switch of oscillator 2.
-    pub const MIX_2: u8 = 1 << 3;
-    /// Byte 34: the mixer's switch of oscillator 3.
-    pub const MIX_3: u8 = 1 << 4;
-    /// Byte 34: the mixer's switch of the external input.
-    pub const MIX_EXTERNAL: u8 = 1 << 5;
-    /// Byte 34: the mixer's switch of the noise.
-    pub const MIX_NOISE: u8 = 1 << 6;
-    /// The bits of byte 34 that mean something.
-    pub const FIRST_MASK: u8 = (1 << 7) - 1;
-    /// Byte 35: the noise is pink, not white.
-    pub const NOISE_PINK: u8 = 1;
-    /// Byte 35: FILTER MODULATION.
-    pub const FILTER_MODULATION: u8 = 1 << 1;
-    /// Byte 35: KEYBOARD CONTROL 1, a third.
-    pub const KEYBOARD_CONTROL_1: u8 = 1 << 2;
-    /// Byte 35: KEYBOARD CONTROL 2, two thirds.
-    pub const KEYBOARD_CONTROL_2: u8 = 1 << 3;
-    /// Byte 35: GLIDE, beside the wheels.
-    pub const GLIDE: u8 = 1 << 4;
-    /// Byte 35: DECAY, beside the wheels.
-    pub const DECAY: u8 = 1 << 5;
-    /// The bits of byte 35 that mean something.
-    pub const SECOND_MASK: u8 = (1 << 6) - 1;
+/// The canonical number of a field (SD-18 item 1):
+/// `floor(((field − lowest) × 16,383 + floor(span ÷ 2)) ÷ span)`, the field
+/// held to its range.
+fn to_pair(field: i32, lowest: i32, span: i32) -> u16 {
+    let offset = field.saturating_sub(lowest).clamp(0, span);
+    let number = offset.saturating_mul(PAIR_TOP).saturating_add(span / 2).checked_div(span).unwrap_or(0);
+    u16::try_from(number).unwrap_or(0)
 }
+
+/// AMOUNT OF CONTOUR from its number: the pair's upper half (SD-18 item 2).
+fn contour_amount_from_pair(number: u16) -> u8 {
+    let above = i32::from(number).saturating_sub(PAIR_MIDDLE);
+    if above < 0 {
+        return 0;
+    }
+    let amount = above.saturating_mul(KNOB_TOP).saturating_add(CONTOUR_SPAN / 2) / CONTOUR_SPAN;
+    u8::try_from(amount).unwrap_or(KNOB_MAX)
+}
+
+/// AMOUNT OF CONTOUR's canonical number: `8,192 + floor((field × 8,191 +
+/// 50) ÷ 100)` (SD-18 item 2).
+fn contour_amount_to_pair(amount: u8) -> u16 {
+    let number = PAIR_MIDDLE.saturating_add(
+        i32::from(amount.min(KNOB_MAX)).saturating_mul(CONTOUR_SPAN).saturating_add(KNOB_TOP / 2) / KNOB_TOP,
+    );
+    u16::try_from(number).unwrap_or(0)
+}
+
+/// A knob of one controller from its value (SD-19):
+/// `floor((value × 100 + 63) ÷ 127)`.
+fn knob_from_value(value: u8) -> u8 {
+    let knob = i32::from(value).saturating_mul(KNOB_TOP).saturating_add(VALUE_TOP / 2) / VALUE_TOP;
+    u8::try_from(knob).unwrap_or(KNOB_MAX)
+}
+
+/// A knob's canonical value (SD-19): `floor((field × 127 + 50) ÷ 100)`.
+fn knob_to_value(knob: u8) -> u8 {
+    let value = i32::from(knob.min(KNOB_MAX)).saturating_mul(VALUE_TOP).saturating_add(KNOB_TOP / 2) / KNOB_TOP;
+    u8::try_from(value).unwrap_or(0)
+}
+
+/// A switch from its value (SD-20 item 4).
+const fn switch_from_value(value: u8) -> bool {
+    value >= SWITCH_ON
+}
+
+/// A switch's canonical value.
+const fn switch_to_value(on: bool) -> u8 {
+    if on { SWITCH_ON_VALUE } else { SWITCH_OFF_VALUE }
+}
+
+/// The spans of SD-18 item 1: each field's lowest value and its range.
+mod span {
+    use super::{CUTOFF_MAX, FREQUENCY_CENTS, KNOB_MAX, TIME_MAX, TUNE_CENTS};
+    /// TUNE: −242 to +242 cents.
+    pub const TUNE: (i32, i32) = (-(TUNE_CENTS as i32), 2 * TUNE_CENTS as i32);
+    /// A FREQUENCY knob: −700 to +700 cents.
+    pub const FREQUENCY: (i32, i32) = (-(FREQUENCY_CENTS as i32), 2 * FREQUENCY_CENTS as i32);
+    /// CUTOFF FREQUENCY: −500 to +500 hundredths of a division.
+    pub const CUTOFF: (i32, i32) = (-(CUTOFF_MAX as i32), 2 * CUTOFF_MAX as i32);
+    /// An ATTACK or DECAY TIME: 0 to 10,000 milliseconds.
+    pub const TIME: (i32, i32) = (0, TIME_MAX as i32);
+    /// A knob of 0 to 100.
+    pub const KNOB: (i32, i32) = (0, KNOB_MAX as i32);
+}
+const _: () = assert!(span::TUNE.1 == 484 && span::FREQUENCY.1 == 1_400 && span::CUTOFF.1 == 1_000);
+const _: () = assert!(span::TIME.1 == 10_000 && span::KNOB.1 == 100);
 
 /// A range switch's positions.
 ///
@@ -135,8 +157,24 @@ pub enum Range {
 impl Range {
     const ALL: [Self; 6] = [Self::Lo, Self::ThirtyTwo, Self::Sixteen, Self::Eight, Self::Four, Self::Two];
 
-    fn from_byte(byte: u8) -> Option<Self> {
-        Self::ALL.get(usize::from(byte)).copied()
+    /// The footage of an octave controller's band, 0 for 32' to 4 for 2';
+    /// the 1' band and above select 2' (SD-20 item 1).
+    fn from_band(band: u8) -> Self {
+        Self::ALL.get(usize::from(band).saturating_add(1)).copied().unwrap_or(Self::Two)
+    }
+
+    /// The canonical octave value and whether the LO/HI controller is HI
+    /// (SD-20 items 1 and 3): LO is LO/HI 0 with the octave at 8'.
+    fn values(self) -> (u8, bool) {
+        match self {
+            Self::Lo => (Self::Eight.octave_value(), false),
+            footage => (footage.octave_value(), true),
+        }
+    }
+
+    /// The lowest value of a footage's band: 0 (32'), 16, 32, 48, 64 (2').
+    const fn octave_value(self) -> u8 {
+        (self as u8).saturating_sub(1).saturating_mul(OCTAVE_BAND)
     }
 }
 
@@ -166,10 +204,6 @@ pub enum Waveform {
 
 impl Waveform {
     const ALL: [Self; 6] = [Self::Triangle, Self::Shark, Self::Sawtooth, Self::Square, Self::Wide, Self::Narrow];
-
-    fn from_byte(byte: u8) -> Option<Self> {
-        Self::ALL.get(usize::from(byte)).copied()
-    }
 }
 
 /// One oscillator's controls.
@@ -198,27 +232,6 @@ pub struct ContourPatch {
     pub decay: u16,
     /// SUSTAIN LEVEL, 0 to 100.
     pub sustain: u8,
-}
-
-/// Why bytes are not a patch.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PatchError {
-    /// TUNE is beyond 242 cents either way.
-    Tune,
-    /// The knob at this byte is above 100.
-    Knob(u8),
-    /// A range or a waveform, at this byte, is above 5.
-    Position(u8),
-    /// An oscillator's FREQUENCY, whose low byte is this one, is beyond
-    /// 700 cents either way.
-    Frequency(u8),
-    /// CUTOFF FREQUENCY is beyond the dial's -5 to 5.
-    Cutoff,
-    /// A contour's time, whose low byte is this one, is above 10,000
-    /// milliseconds.
-    Time(u8),
-    /// A switch byte has a bit set that means nothing.
-    Switches,
 }
 
 /// A patch.
@@ -314,166 +327,189 @@ impl Patch {
         }
     };
 
-    /// Reads a patch from its bytes, checking every one.
+    /// The panel the 60 values of a patch set, by SD-18, SD-19 and SD-20's
+    /// laws. Every value from 0 to 127 is a position; a value above 127,
+    /// which a checked patch never holds, is read by its low seven bits.
+    #[must_use]
+    pub fn from_values(values: &[u8; PATCH_BYTES]) -> Self {
+        let single = |at: usize| values.get(at).copied().unwrap_or(0) & crate::midi::DATA_MAX;
+        let field = |at: usize, (lowest, span): (i32, i32)| from_pair(pair(values, at), lowest, span);
+        let signed = |at: usize, span: (i32, i32)| i16::try_from(field(at, span)).unwrap_or(0);
+        let time = |at: usize| u16::try_from(field(at, span::TIME)).unwrap_or(TIME_MAX);
+        let knob = |at: usize| u8::try_from(field(at, span::KNOB)).unwrap_or(KNOB_MAX);
+        let switch = |at: usize| switch_from_value(single(at));
+        let range = |octave: usize, lo_hi: usize| {
+            if switch(lo_hi) {
+                // The 1' band, 80 to 127, selects 2' (SD-20 item 1).
+                Range::from_band(single(octave) / OCTAVE_BAND)
+            } else {
+                Range::Lo
+            }
+        };
+        let waveform = |at: usize| {
+            let position = u16::from(single(at)).saturating_mul(WAVEFORM_POSITIONS) / VALUES;
+            Waveform::ALL.get(usize::from(position)).copied().unwrap_or(Waveform::Narrow)
+        };
+        let oscillator = |range: Range, waveform: Waveform, frequency: i16, volume: usize, on: usize| OscillatorPatch {
+            range,
+            waveform,
+            frequency,
+            volume: knob(volume),
+            on: switch(on),
+        };
+        let contour = |attack: usize, decay: usize, sustain: usize| ContourPatch {
+            attack: time(attack),
+            decay: time(decay),
+            sustain: knob(sustain),
+        };
+        Self {
+            tune: signed(byte::TUNE, span::TUNE),
+            glide: knob(byte::GLIDE),
+            modulation_mix: knob_from_value(single(byte::MODULATION_MIX)),
+            oscillators: [
+                oscillator(
+                    range(byte::OSCILLATOR_1_RANGE_OCTAVE, byte::OSCILLATOR_1_RANGE_LO_HI),
+                    waveform(byte::OSCILLATOR_1_WAVEFORM),
+                    0,
+                    byte::OSCILLATOR_1_VOLUME,
+                    byte::OSCILLATOR_1_SWITCH,
+                ),
+                oscillator(
+                    range(byte::OSCILLATOR_2_RANGE_OCTAVE, byte::OSCILLATOR_2_RANGE_LO_HI),
+                    waveform(byte::OSCILLATOR_2_WAVEFORM),
+                    signed(byte::OSCILLATOR_2_FREQUENCY, span::FREQUENCY),
+                    byte::OSCILLATOR_2_VOLUME,
+                    byte::OSCILLATOR_2_SWITCH,
+                ),
+                oscillator(
+                    range(byte::OSCILLATOR_3_RANGE_OCTAVE, byte::OSCILLATOR_3_RANGE_LO_HI),
+                    waveform(byte::OSCILLATOR_3_WAVEFORM),
+                    signed(byte::OSCILLATOR_3_FREQUENCY, span::FREQUENCY),
+                    byte::OSCILLATOR_3_VOLUME,
+                    byte::OSCILLATOR_3_SWITCH,
+                ),
+            ],
+            external_volume: knob(byte::EXTERNAL_INPUT_VOLUME),
+            external_on: switch(byte::EXTERNAL_INPUT_SWITCH),
+            noise_volume: knob(byte::NOISE_VOLUME),
+            noise_on: switch(byte::NOISE_SWITCH),
+            noise_pink: switch(byte::NOISE_COLOUR),
+            cutoff: signed(byte::CUTOFF_FREQUENCY, span::CUTOFF),
+            emphasis: knob(byte::EMPHASIS),
+            contour_amount: contour_amount_from_pair(pair(values, byte::AMOUNT_OF_CONTOUR)),
+            filter_contour: contour(byte::FILTER_ATTACK_TIME, byte::FILTER_DECAY_TIME, byte::FILTER_SUSTAIN_LEVEL),
+            loudness_contour: contour(
+                byte::LOUDNESS_ATTACK_TIME,
+                byte::LOUDNESS_DECAY_TIME,
+                byte::LOUDNESS_SUSTAIN_LEVEL,
+            ),
+            volume: knob_from_value(single(byte::MAIN_OUTPUT_VOLUME)),
+            oscillator_modulation: switch(byte::OSCILLATOR_MODULATION),
+            oscillator_3_control: switch(byte::OSCILLATOR_3_CONTROL),
+            filter_modulation: switch(byte::FILTER_MODULATION),
+            keyboard_control: [switch(byte::KEYBOARD_CONTROL_1), switch(byte::KEYBOARD_CONTROL_2)],
+            glide_on: switch(byte::GLIDE_SWITCH),
+            decay_on: switch(byte::DECAY_SWITCH),
+        }
+    }
+
+    /// The patch's 60 values, each field's canonical value (SD-18 to
+    /// SD-20, SD-22), which [`Patch::from_values`] reads back exactly. A
+    /// field beyond its range is held to it; oscillator 1's frequency,
+    /// which has no control, is not written.
+    #[must_use]
+    pub fn to_values(&self) -> [u8; PATCH_BYTES] {
+        let mut values = [0u8; PATCH_BYTES];
+        let mut put = |at: usize, value: u8| {
+            if let Some(place) = values.get_mut(at) {
+                *place = value;
+            }
+        };
+        let word = |put: &mut dyn FnMut(usize, u8), at: usize, number: u16| {
+            let [coarse, fine] = pair_bytes(number);
+            put(at, coarse);
+            put(at.saturating_add(1), fine);
+        };
+        let field = |value: i32, (lowest, span): (i32, i32)| to_pair(value, lowest, span);
+        let [first, second, third] = self.oscillators;
+        let pairs = [
+            (byte::GLIDE, field(i32::from(self.glide), span::KNOB)),
+            (byte::OSCILLATOR_2_FREQUENCY, field(i32::from(second.frequency), span::FREQUENCY)),
+            (byte::OSCILLATOR_3_FREQUENCY, field(i32::from(third.frequency), span::FREQUENCY)),
+            (byte::EXTERNAL_INPUT_VOLUME, field(i32::from(self.external_volume), span::KNOB)),
+            (byte::OSCILLATOR_1_VOLUME, field(i32::from(first.volume), span::KNOB)),
+            (byte::OSCILLATOR_2_VOLUME, field(i32::from(second.volume), span::KNOB)),
+            (byte::OSCILLATOR_3_VOLUME, field(i32::from(third.volume), span::KNOB)),
+            (byte::NOISE_VOLUME, field(i32::from(self.noise_volume), span::KNOB)),
+            (byte::CUTOFF_FREQUENCY, field(i32::from(self.cutoff), span::CUTOFF)),
+            (byte::EMPHASIS, field(i32::from(self.emphasis), span::KNOB)),
+            (byte::FILTER_ATTACK_TIME, field(i32::from(self.filter_contour.attack), span::TIME)),
+            (byte::FILTER_DECAY_TIME, field(i32::from(self.filter_contour.decay), span::TIME)),
+            (byte::FILTER_SUSTAIN_LEVEL, field(i32::from(self.filter_contour.sustain), span::KNOB)),
+            (byte::AMOUNT_OF_CONTOUR, contour_amount_to_pair(self.contour_amount)),
+            (byte::LOUDNESS_ATTACK_TIME, field(i32::from(self.loudness_contour.attack), span::TIME)),
+            (byte::LOUDNESS_DECAY_TIME, field(i32::from(self.loudness_contour.decay), span::TIME)),
+            (byte::LOUDNESS_SUSTAIN_LEVEL, field(i32::from(self.loudness_contour.sustain), span::KNOB)),
+            (byte::TUNE, field(i32::from(self.tune), span::TUNE)),
+        ];
+        for (at, number) in pairs {
+            word(&mut put, at, number);
+        }
+        let ranges = [
+            (byte::OSCILLATOR_1_RANGE_OCTAVE, byte::OSCILLATOR_1_RANGE_LO_HI, first.range),
+            (byte::OSCILLATOR_2_RANGE_OCTAVE, byte::OSCILLATOR_2_RANGE_LO_HI, second.range),
+            (byte::OSCILLATOR_3_RANGE_OCTAVE, byte::OSCILLATOR_3_RANGE_LO_HI, third.range),
+        ];
+        for (octave, lo_hi, range) in ranges {
+            let (octave_value, hi) = range.values();
+            put(octave, octave_value);
+            put(lo_hi, switch_to_value(hi));
+        }
+        let waveforms = [
+            (byte::OSCILLATOR_1_WAVEFORM, first.waveform),
+            (byte::OSCILLATOR_2_WAVEFORM, second.waveform),
+            (byte::OSCILLATOR_3_WAVEFORM, third.waveform),
+        ];
+        for (at, waveform) in waveforms {
+            put(at, WAVEFORM_VALUES.get(waveform as usize).copied().unwrap_or(0));
+        }
+        let switches = [
+            (byte::GLIDE_SWITCH, self.glide_on),
+            (byte::OSCILLATOR_3_CONTROL, self.oscillator_3_control),
+            (byte::EXTERNAL_INPUT_SWITCH, self.external_on),
+            (byte::OSCILLATOR_1_SWITCH, first.on),
+            (byte::OSCILLATOR_2_SWITCH, second.on),
+            (byte::OSCILLATOR_3_SWITCH, third.on),
+            (byte::NOISE_SWITCH, self.noise_on),
+            (byte::DECAY_SWITCH, self.decay_on),
+            (byte::OSCILLATOR_MODULATION, self.oscillator_modulation),
+            (byte::NOISE_COLOUR, self.noise_pink),
+            (byte::FILTER_MODULATION, self.filter_modulation),
+            (byte::KEYBOARD_CONTROL_1, self.keyboard_control[0]),
+            (byte::KEYBOARD_CONTROL_2, self.keyboard_control[1]),
+        ];
+        for (at, on) in switches {
+            put(at, switch_to_value(on));
+        }
+        put(byte::MODULATION_MIX, knob_to_value(self.modulation_mix));
+        put(byte::MAIN_OUTPUT_VOLUME, knob_to_value(self.volume));
+        values
+    }
+
+    /// Reads a patch from its bytes, checking them (SD-22).
     ///
     /// # Errors
     ///
-    /// The [`PatchError`] of the first byte, in order, that is outside
-    /// its range.
-    pub fn from_bytes(bytes: &[u8; PATCH_BYTES]) -> Result<Self, PatchError> {
-        let byte = |at: u8| bytes.get(usize::from(at)).copied().unwrap_or(0);
-        let word = |at: u8| [byte(at), byte(at.saturating_add(1))];
-        let knob = |at: u8| if byte(at) > KNOB_MAX { Err(PatchError::Knob(at)) } else { Ok(byte(at)) };
-        let range = |at: u8| Range::from_byte(byte(at)).ok_or(PatchError::Position(at));
-        let waveform = |at: u8| Waveform::from_byte(byte(at)).ok_or(PatchError::Position(at));
-        let frequency = |at: u8| {
-            let value = i16::from_le_bytes(word(at));
-            if (-FREQUENCY_CENTS..=FREQUENCY_CENTS).contains(&value) {
-                Ok(value)
-            } else {
-                Err(PatchError::Frequency(at))
-            }
-        };
-        let time = |at: u8| {
-            let value = u16::from_le_bytes(word(at));
-            if value > TIME_MAX { Err(PatchError::Time(at)) } else { Ok(value) }
-        };
-        let contour = |at: u8| -> Result<ContourPatch, PatchError> {
-            Ok(ContourPatch {
-                attack: time(at)?,
-                decay: time(at.saturating_add(2))?,
-                sustain: knob(at.saturating_add(4))?,
-            })
-        };
-
-        let tune = i16::from_le_bytes(word(layout::TUNE));
-        if !(-TUNE_CENTS..=TUNE_CENTS).contains(&tune) {
-            return Err(PatchError::Tune);
-        }
-        let glide = knob(layout::GLIDE)?;
-        let modulation_mix = knob(layout::MODULATION_MIX)?;
-        let off =
-            OscillatorPatch { range: Range::Eight, waveform: Waveform::Triangle, frequency: 0, volume: 0, on: false };
-        let mut oscillators = [
-            OscillatorPatch { range: range(4)?, waveform: waveform(5)?, ..off },
-            OscillatorPatch { range: range(6)?, waveform: waveform(7)?, frequency: frequency(8)?, ..off },
-            OscillatorPatch { range: range(10)?, waveform: waveform(11)?, frequency: frequency(12)?, ..off },
-        ];
-        let (first, second) = (byte(layout::SWITCHES), byte(layout::SWITCHES.saturating_add(1)));
-        let mixed = [switch::MIX_1, switch::MIX_2, switch::MIX_3];
-        for ((oscillator, at), bit) in oscillators.iter_mut().zip(layout::VOLUMES..).zip(mixed) {
-            oscillator.volume = knob(at)?;
-            oscillator.on = first & bit != 0;
-        }
-        let external_volume = knob(layout::EXTERNAL_VOLUME)?;
-        let noise_volume = knob(layout::NOISE_VOLUME)?;
-        let cutoff = i16::from_le_bytes(word(layout::CUTOFF));
-        if !(-CUTOFF_MAX..=CUTOFF_MAX).contains(&cutoff) {
-            return Err(PatchError::Cutoff);
-        }
-        let emphasis = knob(layout::EMPHASIS)?;
-        let contour_amount = knob(layout::CONTOUR_AMOUNT)?;
-        let filter_contour = contour(layout::FILTER_CONTOUR)?;
-        let loudness_contour = contour(layout::LOUDNESS_CONTOUR)?;
-        let volume = knob(layout::VOLUME)?;
-        if first & !switch::FIRST_MASK != 0 || second & !switch::SECOND_MASK != 0 {
-            return Err(PatchError::Switches);
-        }
-        Ok(Self {
-            tune,
-            glide,
-            modulation_mix,
-            oscillators,
-            external_volume,
-            external_on: first & switch::MIX_EXTERNAL != 0,
-            noise_volume,
-            noise_on: first & switch::MIX_NOISE != 0,
-            noise_pink: second & switch::NOISE_PINK != 0,
-            cutoff,
-            emphasis,
-            contour_amount,
-            filter_contour,
-            loudness_contour,
-            volume,
-            oscillator_modulation: first & switch::OSCILLATOR_MODULATION != 0,
-            oscillator_3_control: first & switch::OSCILLATOR_3_CONTROL != 0,
-            filter_modulation: second & switch::FILTER_MODULATION != 0,
-            keyboard_control: [second & switch::KEYBOARD_CONTROL_1 != 0, second & switch::KEYBOARD_CONTROL_2 != 0],
-            glide_on: second & switch::GLIDE != 0,
-            decay_on: second & switch::DECAY != 0,
-        })
+    /// The [`PatchFault`] of a patch not of 60 bytes, or of its first byte
+    /// above 127.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, PatchFault> {
+        interface::check_values(bytes).map(|values| Self::from_values(&values))
     }
 
-    /// The patch as its bytes. A field beyond its range is held to it, so
-    /// that the bytes are always a patch; oscillator 1's frequency, which
-    /// has no byte, is not written.
+    /// The patch as its 60 bytes: [`Patch::to_values`].
     #[must_use]
     pub fn to_bytes(&self) -> [u8; PATCH_BYTES] {
-        let knob = |value: u8| value.min(KNOB_MAX);
-        let time = |value: u16| value.min(TIME_MAX).to_le_bytes();
-        let bit = |on: bool, bit: u8| if on { bit } else { 0 };
-        let [first_oscillator, second_oscillator, third_oscillator] = self.oscillators;
-        let [tune_low, tune_high] = self.tune.clamp(-TUNE_CENTS, TUNE_CENTS).to_le_bytes();
-        let frequency = |value: i16| value.clamp(-FREQUENCY_CENTS, FREQUENCY_CENTS).to_le_bytes();
-        let [frequency_2_low, frequency_2_high] = frequency(second_oscillator.frequency);
-        let [frequency_3_low, frequency_3_high] = frequency(third_oscillator.frequency);
-        let [cutoff_low, cutoff_high] = self.cutoff.clamp(-CUTOFF_MAX, CUTOFF_MAX).to_le_bytes();
-        let [filter_attack_low, filter_attack_high] = time(self.filter_contour.attack);
-        let [filter_decay_low, filter_decay_high] = time(self.filter_contour.decay);
-        let [loudness_attack_low, loudness_attack_high] = time(self.loudness_contour.attack);
-        let [loudness_decay_low, loudness_decay_high] = time(self.loudness_contour.decay);
-        let [first_control, second_control] = self.keyboard_control;
-        let first = bit(self.oscillator_modulation, switch::OSCILLATOR_MODULATION)
-            | bit(self.oscillator_3_control, switch::OSCILLATOR_3_CONTROL)
-            | bit(first_oscillator.on, switch::MIX_1)
-            | bit(second_oscillator.on, switch::MIX_2)
-            | bit(third_oscillator.on, switch::MIX_3)
-            | bit(self.external_on, switch::MIX_EXTERNAL)
-            | bit(self.noise_on, switch::MIX_NOISE);
-        let second = bit(self.noise_pink, switch::NOISE_PINK)
-            | bit(self.filter_modulation, switch::FILTER_MODULATION)
-            | bit(first_control, switch::KEYBOARD_CONTROL_1)
-            | bit(second_control, switch::KEYBOARD_CONTROL_2)
-            | bit(self.glide_on, switch::GLIDE)
-            | bit(self.decay_on, switch::DECAY);
-        [
-            tune_low,
-            tune_high,
-            knob(self.glide),
-            knob(self.modulation_mix),
-            first_oscillator.range as u8,
-            first_oscillator.waveform as u8,
-            second_oscillator.range as u8,
-            second_oscillator.waveform as u8,
-            frequency_2_low,
-            frequency_2_high,
-            third_oscillator.range as u8,
-            third_oscillator.waveform as u8,
-            frequency_3_low,
-            frequency_3_high,
-            knob(first_oscillator.volume),
-            knob(second_oscillator.volume),
-            knob(third_oscillator.volume),
-            knob(self.external_volume),
-            knob(self.noise_volume),
-            cutoff_low,
-            cutoff_high,
-            knob(self.emphasis),
-            knob(self.contour_amount),
-            filter_attack_low,
-            filter_attack_high,
-            filter_decay_low,
-            filter_decay_high,
-            knob(self.filter_contour.sustain),
-            loudness_attack_low,
-            loudness_attack_high,
-            loudness_decay_low,
-            loudness_decay_high,
-            knob(self.loudness_contour.sustain),
-            knob(self.volume),
-            first,
-            second,
-        ]
+        self.to_values()
     }
 }
 

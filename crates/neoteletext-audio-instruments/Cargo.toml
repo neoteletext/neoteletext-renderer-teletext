@@ -36,7 +36,7 @@ analog = []
 synth106 = ["analog", "interface"]
 # synthD, made from the analogue building blocks
 # (TODO-6432), codec 15. Not on by default.
-synthd = ["analog"]
+synthd = ["analog", "interface"]
 # synth53, synth52 and synth51, made
 # from the analogue building blocks (TODO-6433), codec 16. Not on by default.
 synth53 = ["analog"]
