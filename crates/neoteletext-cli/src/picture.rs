@@ -318,7 +318,8 @@ const REGIS_TOP_MARGIN: u32 = 10;
 const REGIS_SETUP: &[u8] = b"S(E)T(S[20,20])T(U[15,20])";
 /// The NAPLPS cell of PAR-10: 1/40 of the unit screen wide and 20 raster
 /// lines high, written at a three-byte operand's precision (eight bits of
-/// fraction); row `r` at the point whose raster line is 20 r.
+/// fraction); row `r` drawn from the foot of its raster lines 20 r to
+/// 20 r + 19, the field's origin being its lower left corner.
 const NAPLPS_ROW_LINES: u32 = 20;
 const NAPLPS_FRACTION_BITS: u32 = 8;
 /// The unit screen's height, 25/32 of its width, as the NAPLPS renderer
@@ -441,8 +442,13 @@ pub fn naplps_page(rows: &[Vec<neoteletext_formats::picture_text::Stretch>]) -> 
     operand(nine_bits(1, u64::from(TEXT_COLUMNS)), nine_bits(field_high, unit_lines), &mut out);
     let first = u64::try_from(NAPLPS_FIRST_LINE).unwrap_or(0);
     for (row, stretches) in (FIRST_TEXT_ROW..).zip(rows) {
-        // The canvas's line of raster line 20 r, counted up from its last.
-        let line = u64::from(NAPLPS_ROW_LINES.saturating_mul(row)).saturating_sub(first);
+        // The point is the character field's origin, its lower left corner
+        // (ANSI X3.110-1983 section 5.3.2.3.2, Figure 17): the field lies up
+        // and to the right of it, so the point is on the row's last raster
+        // line, 20 r + 19, for the field to cover lines 20 r to 20 r + 19.
+        // Counted up from the canvas's last line.
+        let foot = NAPLPS_ROW_LINES.saturating_mul(row).saturating_add(NAPLPS_ROW_LINES.saturating_sub(1));
+        let line = u64::from(foot).saturating_sub(first);
         let up = lines.saturating_sub(1).saturating_sub(line).saturating_mul(UNIT_HEIGHT_NUMERATOR);
         out.push(SHIFT_OUT);
         out.push(NAPLPS_POINT_SET);
@@ -1028,6 +1034,30 @@ mod tests {
             assert!(naplps.indices.iter().any(|&index| index != border), "{text}");
         }
         assert!(wrap(&"x\n".repeat(24), None).is_err(), "24 rows");
+    }
+
+    /// The raster lines on which a drawn picture differs from its first
+    /// pixel's colour.
+    fn lines_drawn(raster: &Raster) -> Vec<usize> {
+        let background = raster.indices[0];
+        let rows = raster.indices.chunks(raster.width).enumerate();
+        rows.filter(|(_, row)| row.iter().any(|&index| index != background)).map(|(line, _)| line).collect()
+    }
+
+    // PAR-10, TODO-6815: a NAPLPS character field lies up and to the right
+    // of the drawing point (ANSI X3.110-1983 section 5.3.2.3.2), so each
+    // row's text is on its own row's raster lines, 20 r to 20 r + 19, not
+    // the row above.
+    #[test]
+    fn naplps_text_pages_draw_each_row_on_its_own_lines() {
+        let rows = wrap("HHHH\nHHHH", None).unwrap();
+        let (raster, found) = draw(Language::Naplps, &naplps_page(&rows).unwrap(), &Fonts::default()).unwrap();
+        assert!(!found.refused, "{found:?}");
+        let lines = lines_drawn(&raster);
+        let row_of = |line: &usize| line / CELL_HEIGHT;
+        assert!(lines.iter().all(|line| (1..=2).contains(&row_of(line))), "{lines:?}");
+        assert!(lines.iter().any(|line| row_of(line) == 1), "{lines:?}");
+        assert!(lines.iter().any(|line| row_of(line) == 2), "{lines:?}");
     }
 
     // PAR-31: a ReGIS picture is stacked between rows 0 and 24 at its
