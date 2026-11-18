@@ -254,14 +254,15 @@ The input system's protocol (DOC-1781 of `neoteletext-common/PROTOCOL.html`), be
 
 ### Page rules — `neoteletext-rules` (REQ-6526)
 
-The page rule table (neoteletext-common's `docs/page-rules.md`, DEC-6522) sits beside the page layers and shares nothing with them: `neoteletext-rules` has no dependency, not even the core, so that the server checks a table with the code every receiver decodes it with, on every target (RULE-56). It is `no_std`, allocates nothing and uses integers only.
-- `limits`: every bound of RULE-57, each defined once.
-- `table`: the decoded table in fixed arrays; `decode`, `encode` and `check` of the RULES record's body; what a table reads and names (`Index`: the watch list and the interest mask); and the channel default table `default_send_all`.
-- `animate`: the animation operations a rule's action and an ANIMATE record share, the animation state they fold into, and frame cycling (neoteletext-common's `docs/animation.md`, ANIM-6 and ANIM-14).
-- `evaluator`: the rule state and the tick, in the fixed order of RULE-5; it reads the page and issues its outputs through the `World` trait, which the receiver implements.
-- `state`: the PAGE_STATE payload. `clock`: which ticks of the presentation clock are due.
+The page rule table (neoteletext-common's `docs/page-rules.md`, DEC-6522, in its second form, DEC-6587 and DEC-6635) sits beside the page layers and shares nothing with them: `neoteletext-rules` has no dependency, not even the core, so that the server checks a table with the code every receiver decodes it with, on every target (RULE-56). It is `no_std`, allocates nothing and uses integers only. A rule binds events to one group of protocol commands, the same records the server can send.
+- `limits`: every bound of RULE-57 (rdm REQ-6608), each defined once, with the table `RULE_57` of names and values.
+- `table`: the decoded table in fixed arrays — rectangles, binding rows of one parameter `p`, rules, groups (their checked bytes, framed) and sequences; `decode`, `encode` and `check` of the image (format 2) a RULES record carries, for one page and sub-code; what a table reads and names (`Index`: the watch list and the interest mask); and the channel default table `default_send_all`.
+- `command`: the bodies of the records of types 28 to 33 (`LOCAL_MIDI`, `VARIABLE`, `TIMER`, `REPORT`, `RUN`, `SEQUENCE`), the bindings of a command's fields, and the check of each command of a group; the bodies of `CONTROL`, `SPRITES` and `NAPLPS_OBJECTS` are read through the `BodyCheck` the caller passes, which `neoteletext-web` provides (`records::body_check`).
+- `animate`: the animation operations an ANIMATE record carries, the animation state they fold into, and frame cycling (neoteletext-common's `docs/animation.md`, ANIM-6 and ANIM-14).
+- `evaluator`: one rule state, changed in handlings (RULE-5): `Evaluator::handle` takes an event — an input, a record of the server's, a cue or a state query — and applies every command of the groups it fires at once, within the present tick's budgets; `Evaluator::tick` runs what time drives (`open`, timers, sequences, `becomes`, frame cycling); `Evaluator::close` the `close` rules. It reads the page and gives its outputs through the `World` trait, which the receiver implements.
+- `state`: the PAGE_STATE payload. `names`: the program protocol's words for each code, for the JSON readers. `clock`: which ticks of the presentation clock are due.
 
-`neoteletext-input` carries its reports (RULE_EVENT, PAGE_STATE, RULES_FAULT) and `neoteletext-web` its records (RULES, RULES_QUERY, ANIMATE); both read a target, a value and an operation with this crate's functions.
+`neoteletext-input` carries its reports (RULE_EVENT, PAGE_STATE, RULES_FAULT) and `neoteletext-web` its records (RULES and its `Assembler`, RULES_QUERY, ANIMATE, SHEET, the six commands); both read a target, a value and a command with this crate's functions. `neottx rules-run` (`neoteletext-cli`) reads a table as an image or as the program protocol's `rules` message (`rules_json`, with `serde_json`).
 
 ### Pictures — `neoteletext-picture`, `neoteletext-picture-cli` (DEC-2325)
 
