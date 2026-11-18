@@ -76,7 +76,8 @@ pub struct CommandRecord<'a> {
     /// The command.
     pub command: Command,
     /// The record's body, which
-    /// [`neoteletext_rules::Evaluator::push_command`] takes as it is.
+    /// [`neoteletext_rules::evaluator::Event::Command`] takes as it is
+    /// for types 29 to 33.
     pub body: &'a [u8],
 }
 
