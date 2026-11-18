@@ -144,10 +144,12 @@ pub enum FrameChange {
     Nothing,
 }
 
-/// One page's open frame.
+/// One page's open frame: a page is its number and its sub-code together
+/// (RULE-112), so each sub-code of a page number has a frame of its own.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct OpenFrame {
     page: PageAddress,
+    subcode: SubCode,
     identifier: u16,
     /// The bytes held so far.
     bytes: usize,
@@ -160,6 +162,15 @@ struct OpenFrame {
 /// [`MAX_FRAME_BYTES`] for at most [`MAX_FRAME_TICKS`]. It holds no bytes
 /// itself: the receiver keeps what it is told to hold, and applies it when
 /// it is told the frame ended.
+///
+/// Every frame is keyed on the page number and the sub-code the FRAME
+/// record names (RULE-112, the owner's DEC-6599: a sub-page is exactly a
+/// page, and nothing is keyed on a page number alone), so two sub-codes of
+/// one page number may each have a frame open, and what is held for one is
+/// never held for the other. A receiver gives a teletext packet the
+/// sub-code of the header that began its page, which it always has before
+/// the page's rows: a packet that comes before any header of its magazine
+/// belongs to no page, and passes as it arrives.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct OpenFrames {
     open: [Option<OpenFrame>; MAX_OPEN_FRAMES],
@@ -172,16 +183,16 @@ impl OpenFrames {
         Self { open: [None; MAX_OPEN_FRAMES] }
     }
 
-    /// Where the page's frame is.
-    fn place(&self, page: PageAddress) -> Option<usize> {
-        self.open.iter().position(|frame| frame.is_some_and(|frame| frame.page == page))
+    /// Where the frame of the page and sub-code is.
+    fn place(&self, page: PageAddress, subcode: SubCode) -> Option<usize> {
+        self.open.iter().position(|frame| frame.is_some_and(|frame| (frame.page, frame.subcode) == (page, subcode)))
     }
 
-    /// Whether the page has a frame open, so that what changes its picture
-    /// is to be held.
+    /// Whether the page `page` with sub-code `subcode` has a frame open,
+    /// so that what changes its picture is to be held.
     #[must_use]
-    pub fn is_open(&self, page: PageAddress) -> bool {
-        self.place(page).is_some()
+    pub fn is_open(&self, page: PageAddress, subcode: SubCode) -> bool {
+        self.place(page, subcode).is_some()
     }
 
     /// How many pages have a frame open.
@@ -190,16 +201,19 @@ impl OpenFrames {
         self.open.iter().flatten().count()
     }
 
-    /// The bytes held for the page's frame.
+    /// The bytes held for the frame of the page and sub-code.
     #[must_use]
-    pub fn held(&self, page: PageAddress) -> usize {
-        self.place(page).and_then(|place| self.open.get(place).copied().flatten()).map_or(0, |frame| frame.bytes)
+    pub fn held(&self, page: PageAddress, subcode: SubCode) -> usize {
+        self.place(page, subcode)
+            .and_then(|place| self.open.get(place).copied().flatten())
+            .map_or(0, |frame| frame.bytes)
     }
 
-    /// Takes a FRAME record.
+    /// Takes a FRAME record, for the page and sub-code it names.
     pub fn record(&mut self, record: &FrameRecord) -> FrameChange {
-        let place = self.place(record.page);
-        let fresh = OpenFrame { page: record.page, identifier: record.identifier, bytes: 0, ticks: 0 };
+        let place = self.place(record.page, record.subcode);
+        let fresh =
+            OpenFrame { page: record.page, subcode: record.subcode, identifier: record.identifier, bytes: 0, ticks: 0 };
         match (record.mark, place) {
             (FrameMark::Begin, Some(place)) => {
                 if let Some(slot) = self.open.get_mut(place) {
@@ -227,13 +241,13 @@ impl OpenFrames {
         }
     }
 
-    /// Something of `bytes` bytes that changes the page's picture arrived.
-    /// `None`: the page has no frame open, and it is applied as it
-    /// arrives. `Some(None)`: hold it. `Some(Some(FrameEnd::Full))`: the
-    /// frame is full and has ended; what was held is applied now, and then
-    /// this.
-    pub fn hold(&mut self, page: PageAddress, bytes: usize) -> Option<Option<FrameEnd>> {
-        let place = self.place(page)?;
+    /// Something of `bytes` bytes that changes the picture of the page and
+    /// sub-code arrived. `None`: that page has no frame open, and it is
+    /// applied as it arrives. `Some(None)`: hold it.
+    /// `Some(Some(FrameEnd::Full))`: the frame is full and has ended; what
+    /// was held is applied now, and then this.
+    pub fn hold(&mut self, page: PageAddress, subcode: SubCode, bytes: usize) -> Option<Option<FrameEnd>> {
+        let place = self.place(page, subcode)?;
         let slot = self.open.get_mut(place)?;
         let frame = slot.as_mut()?;
         frame.bytes = frame.bytes.saturating_add(bytes);
@@ -245,34 +259,34 @@ impl OpenFrames {
     }
 
     /// A tick of the presentation clock passed (ANIM-1): each frame that
-    /// has been open [`MAX_FRAME_TICKS`] ends, and its page is given to
-    /// `ended` for what it held to be applied.
-    pub fn tick(&mut self, ended: &mut dyn FnMut(PageAddress, FrameEnd)) {
+    /// has been open [`MAX_FRAME_TICKS`] ends, and its page and sub-code
+    /// are given to `ended` for what it held to be applied.
+    pub fn tick(&mut self, ended: &mut dyn FnMut(PageAddress, SubCode, FrameEnd)) {
         for slot in &mut self.open {
             let Some(frame) = slot.as_mut() else { continue };
             frame.ticks = frame.ticks.saturating_add(1);
             if frame.ticks >= MAX_FRAME_TICKS {
-                let page = frame.page;
+                let (page, subcode) = (frame.page, frame.subcode);
                 *slot = None;
-                ended(page, FrameEnd::Late);
+                ended(page, subcode, FrameEnd::Late);
             }
         }
     }
 
-    /// The page stopped being shown: its frame, if it has one, ends, and
-    /// what it held is applied. True when it had one.
-    pub fn close(&mut self, page: PageAddress) -> bool {
-        let Some(slot) = self.place(page).and_then(|place| self.open.get_mut(place)) else { return false };
+    /// The page and sub-code stopped being shown: its frame, if it has
+    /// one, ends, and what it held is applied. True when it had one.
+    pub fn close(&mut self, page: PageAddress, subcode: SubCode) -> bool {
+        let Some(slot) = self.place(page, subcode).and_then(|place| self.open.get_mut(place)) else { return false };
         *slot = None;
         true
     }
 
-    /// The connection ended: every frame ends, each page given to `ended`
-    /// for what it held to be applied.
-    pub fn close_all(&mut self, ended: &mut dyn FnMut(PageAddress, FrameEnd)) {
+    /// The connection ended: every frame ends, each page and sub-code
+    /// given to `ended` for what it held to be applied.
+    pub fn close_all(&mut self, ended: &mut dyn FnMut(PageAddress, SubCode, FrameEnd)) {
         for slot in &mut self.open {
             if let Some(frame) = slot.take() {
-                ended(frame.page, FrameEnd::Closed);
+                ended(frame.page, frame.subcode, FrameEnd::Closed);
             }
         }
     }

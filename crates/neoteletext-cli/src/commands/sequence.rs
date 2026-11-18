@@ -79,7 +79,7 @@ impl Player {
                     FrameChange::Opened | FrameChange::Nothing => {}
                 }
             }
-            Action::Record { kind, body } => match self.frames.hold(self.page, body.len()) {
+            Action::Record { kind, body } => match self.frames.hold(self.page, self.subcode, body.len()) {
                 None => self.record(step, *kind, body, tick)?,
                 Some(None) => self.held.push(step.clone()),
                 // The frame is full: what it held is applied, then this.
@@ -135,7 +135,7 @@ impl Player {
     /// end is applied (ANIM-2).
     fn begin_tick(&mut self, tick: u32) -> Result<(), Failure> {
         let mut late = false;
-        self.frames.tick(&mut |_, end| late |= end == FrameEnd::Late);
+        self.frames.tick(&mut |_, _, end| late |= end == FrameEnd::Late);
         if late {
             self.end_frame(tick)?;
         }
