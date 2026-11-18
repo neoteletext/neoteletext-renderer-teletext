@@ -108,6 +108,7 @@
 
 mod assign;
 pub mod law;
+pub mod midi;
 pub mod patch;
 mod voice;
 

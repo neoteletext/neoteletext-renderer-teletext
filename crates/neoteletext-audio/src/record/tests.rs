@@ -58,8 +58,9 @@ fn a_wrong_block_count_is_refused() {
 #[test]
 fn a_reserved_codec_is_read_and_left_for_the_receiver_to_ignore() {
     let mut body = object_body();
-    // Codes 0 to 11 are taken: the first reserved one (REQ-6411, DEC-6429).
-    body[7] = 12;
+    // Codes 0 to 2 and 12 to 19 are taken: the first reserved one after
+    // them (MIDI-107).
+    body[7] = 20;
     let bytes = frame(TYPE_OBJECT, &body);
     let Record::Object(object) = parse(&bytes).unwrap() else { panic!("not an object") };
     assert_eq!(object.codec, None);
@@ -83,55 +84,161 @@ fn codecs_left_out_of_the_build_are_read_as_unsupported() {
     assert_eq!(object.codec.is_some(), cfg!(feature = "pcm16"));
 }
 
-/// An OBJECT of a sound of slots: handle 3, generation 1, id 9, codec
-/// `codec`, 48 kHz, one block of one slot, and the bank at handle 9.
-fn slots_body(codec: u8) -> Vec<u8> {
-    let mut body = std::vec![3, 0, 1, 0, 0, 0, 9, codec, 7, 0, 4];
-    body.extend_from_slice(&crate::INSTRUMENT_BLOCK_SAMPLES.to_be_bytes());
-    body.extend_from_slice(&1_u16.to_be_bytes());
-    body.extend_from_slice(&[TAG_SYNTH7_BANK, 1, 9]);
+/// An event sound's OBJECT (MIDI-40): handle 3, generation 1, id 9,
+/// `codec`, 48 kHz, longest block `block_bytes`, `blocks` blocks (0 for a
+/// live sound), then `tags`.
+fn event_body(codec: u8, block_bytes: u16, blocks: u16, tags: &[u8]) -> Vec<u8> {
+    let mut body = std::vec![3, 0, 1, 0, 0, 0, 9, codec, 7];
+    body.extend_from_slice(&block_bytes.to_be_bytes());
+    body.extend_from_slice(&(u32::from(blocks) * crate::INSTRUMENT_BLOCK_SAMPLES).to_be_bytes());
+    body.extend_from_slice(&blocks.to_be_bytes());
+    body.extend_from_slice(tags);
     body
 }
 
-/// A patch bank's OBJECT: handle 9, generation 1, id 9, 48 kHz, one patch
-/// of `patch` bytes, for the family `family`.
-fn bank_body(patch: u16, family: u8) -> Vec<u8> {
-    let mut body = std::vec![9, 0, 1, 0, 0, 0, 9, Codec::PatchBank.code(), 7];
-    body.extend_from_slice(&patch.to_be_bytes());
-    body.extend_from_slice(&1_u32.to_be_bytes());
-    body.extend_from_slice(&1_u16.to_be_bytes());
-    body.extend_from_slice(&[TAG_BANK_FAMILY, 1, family]);
+/// A bank's OBJECT (MIDI-55): handle 9, generation 1, id 9, an image of
+/// `bytes` in pieces of `piece`, then `tags`.
+fn bank_body(piece: u16, bytes: u32, tags: &[u8]) -> Vec<u8> {
+    let mut body = std::vec![9, 0, 1, 0, 0, 0, 9, Codec::Bank.code(), 7];
+    body.extend_from_slice(&piece.to_be_bytes());
+    body.extend_from_slice(&bytes.to_be_bytes());
+    body.extend_from_slice(&u16::try_from(bytes.div_ceil(u32::from(piece))).unwrap().to_be_bytes());
+    body.extend_from_slice(tags);
     body
 }
 
-/// DEC-6429 foundations item 4: each analogue synthesizer is a codec behind
-/// its feature. A build without it reads the instrument's sounds, and a
-/// patch bank for it, as of no codec it decodes, so the receiver ignores
-/// them as unsupported; a build with it reads both.
+fn read(body: &[u8]) -> Result<Object<'static>, RecordError> {
+    // The frame is built and read here; the object borrows nothing of it
+    // that a test keeps.
+    let bytes = std::boxed::Box::leak(frame(TYPE_OBJECT, body).into_boxed_slice());
+    match parse(bytes)? {
+        Record::Object(object) => Ok(object),
+        other => panic!("not an object: {other:?}"),
+    }
+}
+
+/// The tags of a stored event sound naming bank 9 and stating `total`.
+fn stored_tags(total: u32) -> Vec<u8> {
+    let mut tags = std::vec![TAG_BANKS, 1, 9, TAG_TOTAL_BYTES, 4];
+    tags.extend_from_slice(&total.to_be_bytes());
+    tags
+}
+
+/// MIDI-107, MIDI-108: codes 12 to 18 are the synthesizers and 19 the bank,
+/// each read only with its family built in; codes 3 to 11 are reserved.
 #[test]
-fn synthesizers_left_out_of_the_build_are_read_as_unsupported() {
+fn the_synthesizer_codes_and_the_retired_ones() {
     for (codec, built) in [
+        (Codec::Synth6581, cfg!(feature = "synth6581")),
+        (Codec::Synth7, cfg!(feature = "synth7")),
         (Codec::Synth106, cfg!(feature = "synth106")),
         (Codec::SynthD, cfg!(feature = "synthd")),
         (Codec::Synth53, cfg!(feature = "synth53")),
         (Codec::Synth8, cfg!(feature = "synth8")),
         (Codec::Synth80, cfg!(feature = "synth80")),
     ] {
-        let sound = frame(TYPE_OBJECT, &slots_body(codec.code()));
-        let Record::Object(object) = parse(&sound).unwrap() else { panic!("not an object") };
-        assert_eq!(object.codec, built.then_some(codec), "a sound of {codec:?}");
-        let bank = frame(TYPE_OBJECT, &bank_body(codec.patch_bytes().unwrap(), codec.code()));
-        let Record::Object(object) = parse(&bank).unwrap() else { panic!("not an object") };
-        assert_eq!(object.codec, built.then_some(Codec::PatchBank), "a bank for {codec:?}");
+        assert_eq!(Codec::from_code(codec.code()), built.then_some(codec));
+        let tags = if codec.has_banks() { stored_tags(10) } else { stored_tags(10)[3..].to_vec() };
+        let object = read(&event_body(codec.code(), 10, 2, &tags)).unwrap();
+        assert_eq!(object.codec, built.then_some(codec), "{codec:?}");
+        // A bank for a family left out of the build is ignored with it.
+        let bank = read(&bank_body(100, 100, &[TAG_BANK_FAMILY, 1, codec.code()]));
+        if codec.has_banks() {
+            assert_eq!(bank.unwrap().codec, built.then_some(Codec::Bank), "a bank for {codec:?}");
+        } else if Codec::from_code(Codec::Bank.code()).is_some() {
+            assert_eq!(bank, Err(RecordError::BadValue("family")));
+        }
     }
-    // A bank whose patches are not its family's is refused where the family
-    // is built in, and ignored with the family where it is not.
-    let wrong = frame(TYPE_OBJECT, &bank_body(Codec::Synth80.patch_bytes().unwrap(), Codec::Synth106.code()));
-    if cfg!(feature = "synth106") {
-        assert_eq!(parse(&wrong), Err(RecordError::BadValue("block size")));
-    } else {
-        assert!(matches!(parse(&wrong), Ok(Record::Object(Object { codec: None, .. }))));
+    for code in 3..=11 {
+        assert_eq!(Codec::from_code(code), None, "code {code} is retired");
     }
+}
+
+/// MIDI-40, MIDI-41: an event sound's block bytes, block count, samples and
+/// total bytes.
+#[cfg(feature = "synth7")]
+#[test]
+fn an_event_sound_states_its_longest_block_and_total() {
+    let code = Codec::Synth7.code();
+    let object = read(&event_body(code, 1_005, 6_000, &stored_tags(960_000))).unwrap();
+    assert_eq!(
+        (object.block_bytes, object.blocks, object.total, object.banks()),
+        (1_005, 6_000, Some(960_000), &[9][..])
+    );
+    // An empty sound of empty blocks.
+    assert_eq!(read(&event_body(code, 0, 1, &stored_tags(0))).unwrap().total, Some(0));
+    for (body, why) in [
+        (event_body(code, 1_006, 1, &stored_tags(0)), "block size"),
+        (event_body(code, 1_005, 6_001, &stored_tags(0)), "block count"),
+        (event_body(code, 10, 2, &stored_tags(21)), "total bytes"),
+        (event_body(code, 1_005, 6_000, &stored_tags(960_001)), "total bytes"),
+        (event_body(code, 10, 2, &[TAG_BANKS, 1, 9]), "total bytes"),
+        (event_body(code, 10, 2, &stored_tags(10)[3..]), "banks"),
+        (event_body(code, 1_005, 0, &[TAG_BANKS, 1, 9, TAG_TOTAL_BYTES, 4, 0, 0, 0, 0]), "total bytes"),
+    ] {
+        assert_eq!(read(&body), Err(RecordError::BadValue(why)), "{why}");
+    }
+    // Samples that are not whole blocks.
+    let mut body = event_body(code, 10, 2, &stored_tags(10));
+    body[14] ^= 1;
+    assert_eq!(read(&body), Err(RecordError::BadValue("block count")));
+    // A live sound: no blocks, no samples, no total.
+    let live = read(&event_body(code, 1_005, 0, &[TAG_BANKS, 1, 9])).unwrap();
+    assert_eq!((live.samples, live.blocks, live.total), (0, 0, None));
+}
+
+/// MIDI-48, MIDI-57: the banks a sound names, 1 to 10; the variant; the
+/// synth8 keyboard; and tags of other codecs skipped.
+#[cfg(all(feature = "synth106", feature = "synth53", feature = "synth8", feature = "synth6581"))]
+#[test]
+fn the_synthesizers_tags() {
+    let total = [TAG_TOTAL_BYTES, 4, 0, 0, 0, 0];
+    let with = |codec: Codec, tags: &[u8]| {
+        let mut all = tags.to_vec();
+        all.extend_from_slice(&total);
+        read(&event_body(codec.code(), 0, 1, &all))
+    };
+    let ten: Vec<u8> = [TAG_BANKS, 10].into_iter().chain(1..=10).collect();
+    assert_eq!(with(Codec::Synth53, &ten).unwrap().banks(), &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let eleven: Vec<u8> = [TAG_BANKS, 11].into_iter().chain(1..=11).collect();
+    assert_eq!(with(Codec::Synth53, &eleven), Err(RecordError::BadValue("banks")));
+    assert_eq!(with(Codec::Synth53, &[TAG_BANKS, 0]), Err(RecordError::BadValue("banks")));
+    assert_eq!(with(Codec::Synth53, &[TAG_BANKS, 1, 4, TAG_VARIANT, 1, 2]).unwrap().variant, Some(2));
+    assert_eq!(with(Codec::Synth53, &[TAG_BANKS, 1, 4, TAG_VARIANT, 1, 3]), Err(RecordError::BadValue("variant")));
+    assert_eq!(with(Codec::Synth106, &[TAG_BANKS, 1, 4, TAG_VARIANT, 1, 1]).unwrap().variant, Some(1));
+    assert_eq!(with(Codec::Synth106, &[TAG_BANKS, 1, 4, TAG_VARIANT, 1, 2]), Err(RecordError::BadValue("variant")));
+    assert_eq!(with(Codec::Synth8, &[TAG_BANKS, 1, 4, TAG_SYNTH8_KEYS, 2, 2, 60]).unwrap().keys, Some([2, 60]));
+    assert_eq!(with(Codec::Synth6581, &[TAG_SYNTH6581_CHIP, 1, 3]).unwrap().chip, Some(3));
+    // The synth6581 family names no bank, and its banks tag is skipped.
+    let chip = with(Codec::Synth6581, &[TAG_BANKS, 1, 4, TAG_VARIANT, 1, 7]).unwrap();
+    assert_eq!((chip.banks(), chip.variant), (&[][..], None));
+}
+
+/// MIDI-55: a bank's image of 1 to 16,384 bytes in pieces of at most 1,011,
+/// its family required.
+#[cfg(feature = "synth7")]
+#[test]
+fn a_bank_states_its_image_and_family() {
+    let family = [TAG_BANK_FAMILY, 1, Codec::Synth7.code()];
+    for (piece, bytes) in [(1, 1), (1_011, 1_011), (1_011, 1_012), (1_011, 16_384)] {
+        let object = read(&bank_body(piece, bytes, &family)).unwrap();
+        assert_eq!((object.codec, object.samples, object.family), (Some(Codec::Bank), bytes, Some(13)));
+    }
+    assert_eq!(read(&bank_body(1_012, 1_012, &family)), Err(RecordError::BadValue("block size")));
+    assert_eq!(read(&bank_body(1_011, 16_385, &family)), Err(RecordError::BadValue("bank bytes")));
+    assert_eq!(read(&bank_body(100, 100, &[])), Err(RecordError::BadValue("family")));
+    assert_eq!(read(&bank_body(100, 100, &[TAG_BANK_FAMILY, 1, 12])), Err(RecordError::BadValue("family")));
+}
+
+/// MIDI-42: an event codec's DATA record: the offset, then blocks each with
+/// its length; a length past the record ends the walk as faulty.
+#[test]
+fn event_data_records_carry_an_offset_and_lengths() {
+    let body = [0, 0, 1, 0, 0, 0, 0, 2, 0x90, 60, 0, 1, 7, 0, 5, 1];
+    let (offset, blocks) = event_blocks(&body).unwrap();
+    assert_eq!(offset, 256);
+    assert_eq!(blocks.collect::<Vec<_>>(), [Some(&[] as &[u8]), Some(&[0x90, 60][..]), Some(&[7][..]), None]);
+    assert!(event_blocks(&[0, 0, 1]).is_none());
 }
 
 /// An Opus object: handle 3, generation 1, id 9, codec 2, rate code `rate`,

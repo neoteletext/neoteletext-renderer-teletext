@@ -1,7 +1,11 @@
 //! Writing sounds, for publishing tools (REQ-AUD-020): IMA ADPCM encoding,
 //! records, and records cut into broadcast packets. Opus is not encoded
 //! here: a publisher's encoder writes the packets, and they are carried as
-//! they are (decision E.124). This module allocates.
+//! they are (decision E.124). The synthesizers' sounds are written from
+//! their event lists ([`Sound::events`], [`Sound::live_events`],
+//! [`event_blocks`]) and their banks from bank images ([`Sound::bank`]),
+//! each checked with the receiver's own reader (midi-architecture.md,
+//! MIDI-21). This module allocates.
 
 use alloc::vec::Vec;
 
@@ -9,8 +13,17 @@ use neoteletext_core::packet::Packet;
 
 use crate::idl::{FRAGMENT_DATA, packet};
 use crate::ima::{State, encode as encode_code};
-use crate::record::{DATA_FIXED, TAG_LABEL, TYPE_CONTROL, TYPE_DATA, TYPE_OBJECT, record_length, write};
-use crate::{Codec, MAX_BODY, SERVICE_SCOPE, rate_code};
+use neoteletext_audio_instruments::midi::block::{BlockFault, BlockWriter, WriteError, check};
+use neoteletext_audio_instruments::midi::{Message, TICKS_PER_BLOCK};
+
+use crate::record::{
+    DATA_FIXED, EVENT_BLOCK_LENGTH_BYTES, EVENT_DATA_FIXED, TAG_LABEL, TYPE_CONTROL, TYPE_DATA, TYPE_OBJECT,
+    record_length, write,
+};
+use crate::{
+    Codec, MAX_BODY, MOST_BANK_BYTES, MOST_BANKS, MOST_EVENT_BLOCK_BYTES, MOST_EVENT_SOUND_BLOCKS,
+    MOST_EVENT_SOUND_BYTES, SERVICE_SCOPE, rate_code,
+};
 
 /// A sound ready to publish.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -29,20 +42,24 @@ pub struct Sound {
     pub block_bytes: u16,
     /// Samples in the whole sound.
     pub samples: u32,
-    /// The encoded blocks, back to back.
+    /// The encoded blocks, back to back; for an event codec, each block
+    /// with its 2-byte length before it, as a DATA record carries them
+    /// (MIDI-42).
     pub data: Vec<u8>,
     /// A label, at most [`crate::record::MAX_LABEL`] bytes.
     pub label: Option<Vec<u8>>,
-    /// A synth6581 sound's chip and clock byte ([`crate::record::TAG_SYNTH6581_CHIP`]).
+    /// A sound of the synth6581 family's chip and clock byte
+    /// ([`crate::record::TAG_SYNTH6581_CHIP`]).
     pub chip: Option<u8>,
-    /// The handle of the bank of a sound that plays patches
-    /// ([`crate::record::TAG_SYNTH7_BANK`]).
-    pub bank: Option<u8>,
-    /// The model of an analogue synthesizer's sound
-    /// ([`crate::record::TAG_MODEL`]).
-    pub model: Option<u8>,
-    /// The family a patch bank is for
-    /// ([`crate::record::TAG_BANK_FAMILY`]); [`Sound::patch_bank`] sets it.
+    /// The handles of the banks a sound names, bank index 0 first
+    /// ([`crate::record::TAG_BANKS`]): 1 to [`MOST_BANKS`] for a family with
+    /// banks (MIDI-57). The server sends every one before the sound.
+    pub banks: Vec<u8>,
+    /// The variant a sound plays ([`crate::record::TAG_VARIANT`]), set from
+    /// the sound's kind (MIDI-48).
+    pub variant: Option<u8>,
+    /// The family a bank is for ([`crate::record::TAG_BANK_FAMILY`]);
+    /// [`Sound::bank`] sets it.
     pub family: Option<Codec>,
     /// A synth8 sound's key mode and split point
     /// ([`crate::record::TAG_SYNTH8_KEYS`]).
@@ -66,6 +83,20 @@ pub enum EncodeError {
     /// Opus packets that are not all one length: the profile carries
     /// constant-rate packets, one a block (decision E.124).
     PacketLength,
+    /// A synthesizer's block, counted from 0, that the receiver would not
+    /// wholly act on (MIDI-21, MIDI-30): the fault its reader finds.
+    Block {
+        /// The block.
+        index: usize,
+        /// What is wrong with it.
+        fault: BlockFault,
+    },
+    /// More blocks or more bytes than a stored event sound may have
+    /// (MIDI-41, MIDI-104).
+    Total,
+    /// A sound of a family with banks that names none or more than
+    /// [`MOST_BANKS`], or a sound without banks that names one (MIDI-57).
+    Banks,
 }
 
 impl Sound {
@@ -114,8 +145,8 @@ impl Sound {
             data,
             label: None,
             chip: None,
-            bank: None,
-            model: None,
+            banks: Vec::new(),
+            variant: None,
             family: None,
             keys: None,
         })
@@ -148,8 +179,8 @@ impl Sound {
             data: Vec::new(),
             label: None,
             chip: None,
-            bank: None,
-            model: None,
+            banks: Vec::new(),
+            variant: None,
             family: None,
             keys: None,
         })
@@ -197,74 +228,48 @@ impl Sound {
             data: packets.to_vec(),
             label: None,
             chip: None,
-            bank: None,
-            model: None,
+            banks: Vec::new(),
+            variant: None,
             family: None,
             keys: None,
         })
     }
 
-    /// A stored sound of an instrument codec from its blocks, `block_bytes`
-    /// each, back to back in `blocks` (REQ-6411): a synth6581 sound's register
-    /// images, the slots of a synth7 sound or of an analogue synthesizer's, or
-    /// a synth7 bank's patches. A synth6581 sound's chip, the bank of a sound that
-    /// plays patches, an analogue synthesizer's model and a synth8's
-    /// keyboard are set afterwards, in the fields `chip`, `bank`, `model`
-    /// and `keys`. A patch bank of the analogue synthesizers is
-    /// [`Sound::patch_bank`]'s.
+    /// A stored sound of an event codec from its blocks' event lists
+    /// (MIDI-39 to MIDI-41): 1 to [`MOST_EVENT_SOUND_BLOCKS`] blocks of at
+    /// most [`MOST_EVENT_BLOCK_BYTES`] bytes, at most
+    /// [`MOST_EVENT_SOUND_BYTES`] in all, each read whole by the receiver's
+    /// reader (MIDI-21). Its banks, chip, variant and keyboard are set
+    /// afterwards, in the fields `banks`, `chip`, `variant` and `keys`.
     ///
     /// # Errors
-    /// A codec that is not an instrument's, a block size it does not allow,
-    /// blocks that are not all that length, none, or more than a sound (or
-    /// a bank) may have.
-    pub fn instrument(
+    /// A codec that is not an event codec ([`EncodeError::Encoder`]), a
+    /// block the reader would not wholly act on ([`EncodeError::Block`]),
+    /// or no block, too many or too many bytes ([`EncodeError::Total`]).
+    pub fn events<B: AsRef<[u8]>>(
         handle: u8,
         generation: u16,
         codec: Codec,
-        block_bytes: u16,
-        blocks: &[u8],
+        blocks: &[B],
     ) -> Result<Self, EncodeError> {
-        if !(codec.is_instrument() || codec == Codec::Synth7Bank) {
+        if !codec.is_event() {
             return Err(EncodeError::Encoder);
         }
-        Self::of_blocks(handle, generation, codec, block_bytes, blocks)
-    }
-
-    /// A patch bank for one family of the analogue synthesizers (DEC-6429
-    /// foundations item 4) from its patches, each in the instrument's own
-    /// byte layout and [`Codec::patch_bytes`] long, back to back in
-    /// `patches`.
-    ///
-    /// # Errors
-    /// A `family` that is not one of the analogue synthesizers' codecs,
-    /// patches that are not all a patch's length, none, or more than a
-    /// bank may have.
-    pub fn patch_bank(handle: u8, generation: u16, family: Codec, patches: &[u8]) -> Result<Self, EncodeError> {
-        let block_bytes = family.patch_bytes().ok_or(EncodeError::Encoder)?;
-        let mut bank = Self::of_blocks(handle, generation, Codec::PatchBank, block_bytes, patches)?;
-        bank.family = Some(family);
-        Ok(bank)
-    }
-
-    /// A stored sound of whole blocks, `block_bytes` each.
-    fn of_blocks(
-        handle: u8,
-        generation: u16,
-        codec: Codec,
-        block_bytes: u16,
-        blocks: &[u8],
-    ) -> Result<Self, EncodeError> {
-        if !codec.allows_block(block_bytes) {
-            return Err(EncodeError::BlockSize(block_bytes));
+        let count = u16::try_from(blocks.len()).map_err(|_| EncodeError::Total)?;
+        if count == 0 || count > MOST_EVENT_SOUND_BLOCKS {
+            return Err(EncodeError::Total);
         }
-        if !blocks.len().is_multiple_of(usize::from(block_bytes)) {
-            return Err(EncodeError::PacketLength);
+        let mut data = Vec::new();
+        let mut longest: usize = 0;
+        for (index, block) in blocks.iter().enumerate() {
+            let block = block.as_ref();
+            check(block).map_err(|fault| EncodeError::Block { index, fault })?;
+            longest = longest.max(block.len());
+            push_event_block(&mut data, block);
         }
-        let count = blocks.len().checked_div(usize::from(block_bytes)).unwrap_or(0);
-        let count = u16::try_from(count).map_err(|_| EncodeError::Length)?;
-        let samples = u32::from(count).saturating_mul(codec.samples_per_block(block_bytes));
-        if count == 0 || (codec.is_bank() && samples > crate::PATCH_BANK_PATCHES) {
-            return Err(EncodeError::Length);
+        let total = data.len().saturating_sub(blocks.len().saturating_mul(EVENT_BLOCK_LENGTH_BYTES));
+        if u32::try_from(total).map_or(true, |total| total > MOST_EVENT_SOUND_BYTES) {
+            return Err(EncodeError::Total);
         }
         Ok(Self {
             handle,
@@ -272,16 +277,118 @@ impl Sound {
             id: u32::from(handle),
             codec,
             rate_hz: crate::INSTRUMENT_RATE,
-            block_bytes,
-            samples,
-            data: blocks.to_vec(),
+            block_bytes: u16::try_from(longest).map_err(|_| EncodeError::Total)?,
+            samples: u32::from(count).saturating_mul(crate::INSTRUMENT_BLOCK_SAMPLES),
+            data,
             label: None,
             chip: None,
-            bank: None,
-            model: None,
+            banks: Vec::new(),
+            variant: None,
             family: None,
             keys: None,
         })
+    }
+
+    /// A live sound of an event codec (MIDI-20), announced with no blocks
+    /// and with the largest block as its block bytes, so that any block it
+    /// later carries fits the receiver's ring (MIDI-103). Its blocks go by
+    /// [`Sound::live_event_records`].
+    ///
+    /// # Errors
+    /// A codec that is not an event codec.
+    pub fn live_events(handle: u8, generation: u16, codec: Codec) -> Result<Self, EncodeError> {
+        if !codec.is_event() {
+            return Err(EncodeError::Encoder);
+        }
+        let block_bytes = u16::try_from(MOST_EVENT_BLOCK_BYTES).map_err(|_| EncodeError::BlockSize(u16::MAX))?;
+        Self::live(handle, generation, codec, crate::INSTRUMENT_RATE, block_bytes)
+    }
+
+    /// A bank (MIDI-55) for `family`, a codec of a family with banks, from
+    /// its image of 1 to [`MOST_BANK_BYTES`] bytes in the family's form
+    /// (MIDI-56), cut into pieces of [`crate::BANK_PIECE_BYTES`].
+    ///
+    /// # Errors
+    /// A `family` without banks ([`EncodeError::Encoder`]), or an image
+    /// empty or too long ([`EncodeError::Length`]).
+    pub fn bank(handle: u8, generation: u16, family: Codec, image: &[u8]) -> Result<Self, EncodeError> {
+        if !family.has_banks() {
+            return Err(EncodeError::Encoder);
+        }
+        let samples = u32::try_from(image.len()).map_err(|_| EncodeError::Length)?;
+        if samples == 0 || samples > MOST_BANK_BYTES {
+            return Err(EncodeError::Length);
+        }
+        let piece = u16::try_from(crate::BANK_PIECE_BYTES.min(image.len())).map_err(|_| EncodeError::Length)?;
+        Ok(Self {
+            handle,
+            generation,
+            id: u32::from(handle),
+            codec: Codec::Bank,
+            rate_hz: crate::INSTRUMENT_RATE,
+            block_bytes: piece,
+            samples,
+            data: image.to_vec(),
+            label: None,
+            chip: None,
+            banks: Vec::new(),
+            variant: None,
+            family: Some(family),
+            keys: None,
+        })
+    }
+
+    /// The DATA records of a live event sound's next blocks, numbered from
+    /// block `first` (counting modulo 2¹⁶): each block checked by the
+    /// receiver's reader, as many whole blocks to a record as fit, with an
+    /// offset of 0 (MIDI-42, MIDI-47).
+    ///
+    /// # Errors
+    /// Not a live event sound ([`EncodeError::Encoder`]), or a block the
+    /// receiver would not wholly act on ([`EncodeError::Block`]).
+    pub fn live_event_records<B: AsRef<[u8]>>(&self, first: u16, blocks: &[B]) -> Result<Vec<Vec<u8>>, EncodeError> {
+        if !self.codec.is_event() || self.samples != 0 {
+            return Err(EncodeError::Encoder);
+        }
+        let mut data = Vec::new();
+        for (index, block) in blocks.iter().enumerate() {
+            check(block.as_ref()).map_err(|fault| EncodeError::Block { index, fault })?;
+            push_event_block(&mut data, block.as_ref());
+        }
+        Ok(self.event_records(&data, first, false))
+    }
+
+    /// DATA records of an event codec's length-prefixed blocks, numbered
+    /// from block `first`: as many whole blocks in each as fit (MIDI-47),
+    /// each record carrying the byte offset of its first block within the
+    /// sound, or 0 for a live sound (MIDI-42).
+    fn event_records(&self, data: &[u8], mut first: u16, stored: bool) -> Vec<Vec<u8>> {
+        let mut records = Vec::new();
+        let mut rest = data;
+        let mut offset: u32 = 0;
+        while !rest.is_empty() {
+            let mut body = Vec::with_capacity(MAX_BODY);
+            body.push(self.handle);
+            body.extend_from_slice(&self.generation.to_be_bytes());
+            body.extend_from_slice(&first.to_be_bytes());
+            body.extend_from_slice(&(if stored { offset } else { 0 }).to_be_bytes());
+            while let Some((length, after)) = rest.split_first_chunk::<EVENT_BLOCK_LENGTH_BYTES>() {
+                let length = usize::from(u16::from_be_bytes(*length));
+                let whole = EVENT_BLOCK_LENGTH_BYTES.saturating_add(length);
+                // MIDI-30 makes every block fit an empty record, so a record
+                // always takes at least one.
+                if body.len().saturating_add(whole) > MAX_BODY && body.len() > EVENT_DATA_FIXED {
+                    break;
+                }
+                let (block, after) = after.split_at_checked(length).unwrap_or((after, &[]));
+                push_event_block(&mut body, block);
+                offset = offset.saturating_add(u32::try_from(length).unwrap_or(u32::MAX));
+                first = first.wrapping_add(1);
+                rest = after;
+            }
+            records.push(frame(TYPE_DATA, &body));
+        }
+        records
     }
 
     /// The DATA records of a live Opus sound's next packets, `block_bytes`
@@ -291,9 +398,8 @@ impl Sound {
     /// # Errors
     /// Not an Opus sound, or packets that are not all its length.
     pub fn packet_records(&self, first: u16, packets: &[u8]) -> Result<Vec<Vec<u8>>, EncodeError> {
-        // An instrument's blocks are carried as Opus packets are: whole,
-        // of one length, as they come (REQ-6411).
-        if !(self.codec == Codec::Opus || self.codec.is_instrument()) {
+        // A synthesizer's live blocks go by `Sound::live_event_records`.
+        if self.codec != Codec::Opus {
             return Err(EncodeError::Encoder);
         }
         if !packets.len().is_multiple_of(usize::from(self.block_bytes)) {
@@ -313,6 +419,9 @@ impl Sound {
     /// Blocks in the whole sound.
     #[must_use]
     pub fn blocks(&self) -> u16 {
+        if self.codec.is_event() {
+            return u16::try_from(self.samples / crate::INSTRUMENT_BLOCK_SAMPLES).unwrap_or(u16::MAX);
+        }
         u16::try_from(self.samples.div_ceil(self.codec.samples_per_block(self.block_bytes))).unwrap_or(u16::MAX)
     }
 
@@ -340,24 +449,41 @@ impl Sound {
         }
         for (tag, value) in [
             (crate::record::TAG_SYNTH6581_CHIP, self.chip),
-            (crate::record::TAG_SYNTH7_BANK, self.bank),
-            (crate::record::TAG_MODEL, self.model),
+            (crate::record::TAG_VARIANT, self.variant),
             (crate::record::TAG_BANK_FAMILY, self.family.map(Codec::code)),
         ] {
             if let Some(value) = value {
                 body.extend_from_slice(&[tag, 1, value]);
             }
         }
+        if self.codec.has_banks() == self.banks.is_empty() || self.banks.len() > MOST_BANKS {
+            return Err(EncodeError::Banks);
+        }
+        if !self.banks.is_empty() {
+            body.push(crate::record::TAG_BANKS);
+            body.push(u8::try_from(self.banks.len()).map_err(|_| EncodeError::Banks)?);
+            body.extend_from_slice(&self.banks);
+        }
         if let Some([mode, split]) = self.keys {
             body.extend_from_slice(&[crate::record::TAG_SYNTH8_KEYS, 2, mode, split]);
+        }
+        if self.codec.is_event() && self.samples != 0 {
+            let total =
+                self.data.len().saturating_sub(usize::from(self.blocks()).saturating_mul(EVENT_BLOCK_LENGTH_BYTES));
+            let total = u32::try_from(total).map_err(|_| EncodeError::Total)?;
+            body.extend_from_slice(&[crate::record::TAG_TOTAL_BYTES, 4]);
+            body.extend_from_slice(&total.to_be_bytes());
         }
         Ok(frame(TYPE_OBJECT, &body))
     }
 
     /// The DATA records that carry the sound: as many whole blocks in each
-    /// as fit a record.
+    /// as fit a record (MIDI-47).
     #[must_use]
     pub fn data_records(&self) -> Vec<Vec<u8>> {
+        if self.codec.is_event() {
+            return self.event_records(&self.data, 0, true);
+        }
         let per_record =
             MAX_BODY.saturating_sub(DATA_FIXED).checked_div(usize::from(self.block_bytes)).unwrap_or(1).max(1);
         self.records_of(&self.data, 0, per_record)
@@ -499,6 +625,85 @@ fn ima_blocks(state: &mut State, pcm: &[i16], per_block: usize, out: &mut Vec<u8
             out.push(low | (high << 4));
         }
     }
+}
+
+/// Appends one event block with its 2-byte length (MIDI-42).
+fn push_event_block(data: &mut Vec<u8>, block: &[u8]) {
+    data.extend_from_slice(&u16::try_from(block.len()).unwrap_or(u16::MAX).to_be_bytes());
+    data.extend_from_slice(block);
+}
+
+/// One timed event of a synthesizer's sound, as the server places it: its
+/// absolute tick from the sound's start
+/// ([`neoteletext_audio_instruments::midi::tick_of_microseconds`],
+/// MIDI-17) and its message.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TimedEvent<'a> {
+    /// The tick, 0.1 ms from the sound's start.
+    pub tick: u64,
+    /// The message.
+    pub message: Message<'a>,
+}
+
+/// Why timed events could not be written into blocks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BlocksError {
+    /// An event, counted from 0, earlier than the one before it.
+    Order(usize),
+    /// An event whose tick lies past the sound's last block.
+    PastEnd(usize),
+    /// An event whose message a block does not carry (MIDI-7, MIDI-8,
+    /// MIDI-11, MIDI-27, MIDI-28).
+    Message(usize),
+    /// A block, counted from 0, that would pass its bytes (MIDI-30).
+    Full(usize),
+    /// A block that would hold more than 256 events (MIDI-31).
+    TooManyEvents(usize),
+}
+
+/// Writes timed events into `blocks` blocks of event lists (MIDI-16,
+/// MIDI-23): each event in block `floor(tick ÷ 200)` at time `tick mod
+/// 200` (MIDI-17), in the order given, which must not go back in time
+/// (MIDI-35). The server keeps its groups that must not be split together
+/// (MIDI-37) and adds its restatements (MIDI-93) before calling this.
+///
+/// # Errors
+/// The first event or block at fault, as [`BlocksError`] says.
+pub fn event_blocks(events: &[TimedEvent<'_>], blocks: u16) -> Result<Vec<Vec<u8>>, BlocksError> {
+    let per_block = u64::from(TICKS_PER_BLOCK);
+    let mut out = Vec::with_capacity(usize::from(blocks));
+    let mut buffer = [0_u8; MOST_EVENT_BLOCK_BYTES];
+    let mut writer = BlockWriter::new(&mut buffer);
+    let mut current: u64 = 0;
+    let mut last: u64 = 0;
+    for (index, event) in events.iter().enumerate() {
+        if event.tick < last {
+            return Err(BlocksError::Order(index));
+        }
+        last = event.tick;
+        let block = event.tick.checked_div(per_block).unwrap_or(0);
+        if block >= u64::from(blocks) {
+            return Err(BlocksError::PastEnd(index));
+        }
+        while current < block {
+            out.push(writer.bytes().to_vec());
+            writer.clear();
+            current = current.saturating_add(1);
+        }
+        let time =
+            u8::try_from(event.tick.checked_rem(per_block).unwrap_or(0)).map_err(|_| BlocksError::PastEnd(index))?;
+        let at = usize::try_from(block).unwrap_or(usize::MAX);
+        writer.push(time, &event.message).map_err(|error| match error {
+            WriteError::Full => BlocksError::Full(at),
+            WriteError::TooManyEvents => BlocksError::TooManyEvents(at),
+            WriteError::Time | WriteError::Message => BlocksError::Message(index),
+        })?;
+    }
+    while u64::try_from(out.len()).unwrap_or(u64::MAX) < u64::from(blocks) {
+        out.push(writer.bytes().to_vec());
+        writer.clear();
+    }
+    Ok(out)
 }
 
 /// A command, written as a CONTROL record (REQ-AUD-006).

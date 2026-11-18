@@ -13,9 +13,12 @@ publish.workspace = true
 [dependencies]
 neoteletext-core.workspace = true
 neoteletext-opus = { workspace = true, optional = true }
-# The workspace's own instruments, codecs 3 to 11 (DEC-6410, DEC-6429): no_std,
-# integer-only and allocation-free, as this crate is.
-neoteletext-audio-instruments = { workspace = true, optional = true }
+# The workspace's own instruments (DEC-6410, DEC-6429): no_std, integer-only
+# and allocation-free, as this crate is. Its `midi` module, the event-list
+# reader and writer every synthesizer codec and the publishing encoder use
+# (midi-architecture.md, MIDI-23), is built with none of its features, so
+# the dependency is not optional; each family is a feature below.
+neoteletext-audio-instruments.workspace = true
 
 [features]
 # Decision E.61: each optional area is a feature, all on by default.
@@ -41,28 +44,26 @@ pcm16 = []
 # The Opus decoder (codec 2, decision E.124): one constant-rate packet a block,
 # decoded in order by a few decoders the receiver keeps, each about 28 KB.
 opus = ["dep:neoteletext-opus"]
-# synth6581 (codec 3, REQ-6411): a block is 20 ms of register images,
-# rendered by the workspace's own emulator. Not a default: a microcontroller
-# port names it when it has the room for a chip.
-synth6581 = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/synth6581"]
-# synth7 (codecs 4 and 5, REQ-6411): a block is 20 ms of MIDI
-# messages, and a bank is a sound whose blocks are patches. Not a default.
-synth7 = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/synth7"]
-# What the analogue synthesizers share (DEC-6429 foundations item 4): their
-# notes are synth7's block under a codec each (codecs 6 to 10), and their
-# patches travel as a patch bank (codec 11). Alone it plays nothing: each
-# instrument below names it. None is a default, so a build that names none
-# is unchanged.
-analog = ["dep:neoteletext-audio-instruments", "neoteletext-audio-instruments/analog"]
-# synth106 and synth60 (codec 6).
+# The synthesizers (midi-architecture.md, MIDI-1), each family a codec whose
+# block is an event list (codes 12 to 18, MIDI-107), its banks the bank codec
+# (19). None is a default: a microcontroller port names one when it has the
+# room for it.
+# The synth6581 family, synth6581 and synth8580 (codec 12).
+synth6581 = ["neoteletext-audio-instruments/synth6581"]
+# synth7 (codec 13).
+synth7 = ["neoteletext-audio-instruments/synth7"]
+# What the analogue synthesizers share (DEC-6429 foundations item 4). Alone it
+# plays nothing: each family below names it.
+analog = ["neoteletext-audio-instruments/analog"]
+# The synth106 family, synth106 and synth60 (codec 14).
 synth106 = ["analog", "neoteletext-audio-instruments/synth106"]
-# synthD (codec 7).
+# synthD (codec 15).
 synthd = ["analog", "neoteletext-audio-instruments/synthd"]
-# synth53 (codec 8).
+# The synth53 family, synth53, synth52 and synth51 (codec 16).
 synth53 = ["analog", "neoteletext-audio-instruments/synth53"]
-# synth8 (codec 9).
+# synth8 (codec 17).
 synth8 = ["analog", "neoteletext-audio-instruments/synth8"]
-# synth80 (codec 10).
+# synth80 (codec 18).
 synth80 = ["analog", "neoteletext-audio-instruments/synth80"]
 # Writing sounds: the IMA ADPCM encoder, records and broadcast packets, for
 # publishing tools (REQ-AUD-020). It allocates, so it is not a default.

@@ -62,6 +62,16 @@ impl<'a> Banks<'a> {
         if index < self.count { self.images.get(index).copied() } else { None }
     }
 
+    /// The patch at `program` of bank index `bank` whose image is fixed
+    /// patches of `size` bytes back to back (MIDI-56 form 2: patch k at
+    /// byte `k × size`), or `None` where the image holds no whole patch
+    /// there.
+    #[must_use]
+    pub fn fixed_patch(&self, bank: usize, program: usize, size: usize) -> Option<&'a [u8]> {
+        let start = program.checked_mul(size)?;
+        self.get(bank)?.get(start..start.checked_add(size)?)
+    }
+
     /// How many banks the sound names.
     #[must_use]
     pub const fn len(&self) -> usize {

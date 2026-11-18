@@ -282,6 +282,13 @@ impl<'b> BlockWriter<'b> {
         Self { buffer, length: 0, time: 0, events: 0 }
     }
 
+    /// Empties the block, to write the next one into the same buffer.
+    pub fn clear(&mut self) {
+        self.length = 0;
+        self.time = 0;
+        self.events = 0;
+    }
+
     /// The block written so far.
     #[must_use]
     pub fn bytes(&self) -> &[u8] {

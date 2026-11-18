@@ -16,7 +16,15 @@ mod carriage;
 #[cfg(any(feature = "pcm16", feature = "ima", feature = "opus"))]
 mod fade;
 mod file;
-#[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+#[cfg(any(
+    feature = "synth6581",
+    feature = "synth7",
+    feature = "synth106",
+    feature = "synthd",
+    feature = "synth53",
+    feature = "synth8",
+    feature = "synth80"
+))]
 mod instruments;
 mod loss;
 #[cfg(feature = "opus")]
@@ -59,10 +67,17 @@ pub struct Statistics {
     /// WebSocket messages refused whole: not a whole number of packets
     /// (REQ-AUD-008).
     pub messages_refused: u32,
-    /// Slots passed over in a block of synth7 or of an analogue
-    /// synthesizer: not empty, and not a message the block's codec takes
-    /// (REQ-6411 item 3).
-    pub slots_passed_over: u32,
+    /// Events of a synthesizer's block passed over: a form a block may hold
+    /// but no synthesizer acts on, an event past the 256th, or a message the
+    /// family does not take (midi-architecture.md, MIDI-29, MIDI-31,
+    /// MIDI-34, MIDI-123).
+    pub events_passed_over: u32,
+    /// Synthesizer blocks with a framing error, each counted once; what was
+    /// applied before the error stands (MIDI-33).
+    pub blocks_malformed: u32,
+    /// Patches, in a bank or sent inline, that broke their family's rules
+    /// and were replaced by the family's default (MIDI-63).
+    pub patches_refused: u32,
 }
 
 /// The receiver of one audio service.
@@ -81,7 +96,15 @@ pub struct Receiver<'a, const OBJECTS: usize, const SLOTS: usize> {
     #[cfg(feature = "opus")]
     opus: opus::Lanes,
     /// Instrument sounds' instruments (REQ-6411).
-    #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+    #[cfg(any(
+        feature = "synth6581",
+        feature = "synth7",
+        feature = "synth106",
+        feature = "synthd",
+        feature = "synth53",
+        feature = "synth8",
+        feature = "synth80"
+    ))]
     instruments: instruments::Lanes,
     /// Each channel's stored-sound play, followed for the `concealed`
     /// report (REQ-AUD-013).
@@ -104,7 +127,15 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             now_ms: 0,
             #[cfg(feature = "opus")]
             opus: opus::Lanes::new(),
-            #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+            #[cfg(any(
+                feature = "synth6581",
+                feature = "synth7",
+                feature = "synth106",
+                feature = "synthd",
+                feature = "synth53",
+                feature = "synth8",
+                feature = "synth80"
+            ))]
             instruments: instruments::Lanes::new(),
             progress: [None; CHANNELS as usize],
         }
@@ -136,10 +167,26 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             self.store.set_at_sink(entry.sound, false);
             #[cfg(feature = "opus")]
             self.opus.release(entry.sound);
-            #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+            #[cfg(any(
+                feature = "synth6581",
+                feature = "synth7",
+                feature = "synth106",
+                feature = "synthd",
+                feature = "synth53",
+                feature = "synth8",
+                feature = "synth80"
+            ))]
             self.instruments.release(entry.sound);
         }
-        #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+        #[cfg(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        ))]
         self.render_waiting(sink);
         self.judge(sink);
     }
@@ -147,7 +194,15 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
     /// Goes on rendering the stored instrument sounds whose blocks wait, a
     /// budget's worth each (REQ-6411): a long sound is rendered over several
     /// ticks, well ahead of the voice that plays it.
-    #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+    #[cfg(any(
+        feature = "synth6581",
+        feature = "synth7",
+        feature = "synth106",
+        feature = "synthd",
+        feature = "synth53",
+        feature = "synth8",
+        feature = "synth80"
+    ))]
     fn render_waiting(&mut self, sink: &mut dyn VoiceSink) {
         for sound in self.instruments.waiting(&self.store).into_iter().flatten() {
             if let Some(entry) = self.store.entries().find(|entry| entry.sound == sound).copied() {
@@ -173,9 +228,25 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             .min();
         // A stored instrument sound with blocks still to render wants its
         // next tick at once (REQ-6411).
-        #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+        #[cfg(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        ))]
         let rendering = self.instruments.pending(&self.store).then_some(self.now_ms);
-        #[cfg(not(any(feature = "synth6581", feature = "synth7", feature = "analog")))]
+        #[cfg(not(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        )))]
         let rendering = None;
         [stall, self.next_due_ms(), rendering].into_iter().flatten().min()
     }
@@ -223,7 +294,15 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.reassembler.clear();
         #[cfg(feature = "opus")]
         self.opus.clear();
-        #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+        #[cfg(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        ))]
         self.instruments.clear();
         self.channels = [Channel::default(); CHANNELS as usize];
         self.progress = [None; CHANNELS as usize];
@@ -236,7 +315,15 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.store.sink_lost();
         #[cfg(feature = "opus")]
         self.opus.clear();
-        #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+        #[cfg(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        ))]
         self.instruments.clear();
         for channel in &mut self.channels {
             channel.playing_page = None;
@@ -260,7 +347,43 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         match record {
             Record::Object(object) => {
                 let channels = self.channels;
-                let busy = |sound: SoundId| channels.iter().any(|channel| needs(channel, sound));
+                #[cfg(any(
+                    feature = "synth6581",
+                    feature = "synth7",
+                    feature = "synth106",
+                    feature = "synthd",
+                    feature = "synth53",
+                    feature = "synth8",
+                    feature = "synth80"
+                ))]
+                let following = self.instruments.following();
+                #[cfg(not(any(
+                    feature = "synth6581",
+                    feature = "synth7",
+                    feature = "synth106",
+                    feature = "synthd",
+                    feature = "synth53",
+                    feature = "synth8",
+                    feature = "synth80"
+                )))]
+                let following: [Option<SoundId>; 0] = [];
+                // A sound a channel needs is kept, and so is every bank a
+                // sound a channel needs or a synthesizer plays names
+                // (MIDI-65), by its handle.
+                let needed = |held: SoundId| channels.iter().any(|channel| needs(channel, held));
+                let mut banks_kept = [false; HANDLES];
+                for entry in self.store.entries() {
+                    if needed(entry.sound) || following.contains(&Some(entry.sound)) {
+                        for &handle in entry.banks() {
+                            if let Some(kept) = banks_kept.get_mut(usize::from(handle)) {
+                                *kept = true;
+                            }
+                        }
+                    }
+                }
+                let busy = |sound: SoundId| {
+                    needed(sound) || banks_kept.get(usize::from(sound.handle)).copied().unwrap_or(false)
+                };
                 match self.store.define(&object, &busy) {
                     Defined::New { replaced, evicted } => {
                         let replaced = replaced.filter(|old| old.at_sink).map(|old| old.sound);
@@ -268,7 +391,15 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                             sink.forget(sound);
                             #[cfg(feature = "opus")]
                             self.opus.release(sound);
-                            #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+                            #[cfg(any(
+                                feature = "synth6581",
+                                feature = "synth7",
+                                feature = "synth106",
+                                feature = "synthd",
+                                feature = "synth53",
+                                feature = "synth8",
+                                feature = "synth80"
+                            ))]
                             self.instruments.release(sound);
                         }
                     }
@@ -409,6 +540,9 @@ fn bump(counter: &mut u32) {
 fn needs(channel: &Channel, sound: SoundId) -> bool {
     [channel.armed, channel.waiting, channel.playing].iter().flatten().any(|play| play.sound == sound)
 }
+
+/// The handles a sound may have: one byte.
+const HANDLES: usize = 1 << u8::BITS;
 
 /// Milliseconds in a second, for a rate's samples.
 const MS_PER_SECOND: u32 = 1000;

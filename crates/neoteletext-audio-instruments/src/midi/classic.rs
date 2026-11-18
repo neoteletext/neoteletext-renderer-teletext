@@ -107,3 +107,112 @@ fn bend(value: u16, channel: u8) -> (u8, u8, u8) {
     let high = u8::try_from((value >> 7) & u16::from(DATA_MAX)).unwrap_or(0);
     (status::PITCH_BEND | channel, low, high)
 }
+
+/// An instrument built before the common layer, as its family's interim
+/// front end gives it to the receiver: three-byte messages to its own
+/// `event`, and patches of the instrument's own byte layout, which a
+/// bank image holds as fixed patches (MIDI-56 form 2) until the family's
+/// adopted patch form is built.
+pub trait ClassicFamily {
+    /// The instrument's patch, checked.
+    type Patch: Copy;
+    /// The family's figures for the common layer.
+    const CONFIG: super::common::Config;
+    /// What the instrument's own `event` takes.
+    const CLASSIC: Classic;
+    /// The bytes of one patch in a bank image.
+    const PATCH_BYTES: usize;
+    /// The channels, counted from 0, whose program changes choose a patch:
+    /// 16 for an instrument of one part.
+    const PROGRAM_CHANNELS: u8;
+
+    /// The patch the instrument plays where its bank has none, or one that
+    /// is faulty (MIDI-61, MIDI-63).
+    fn default_patch(&self) -> Self::Patch;
+    /// The patch `bytes` hold, or `None` for a faulty one.
+    fn read_patch(bytes: &[u8]) -> Option<Self::Patch>;
+    /// Sets the patch of the part `channel` addresses, below
+    /// [`ClassicFamily::PROGRAM_CHANNELS`].
+    fn set_patch(&mut self, channel: u8, patch: &Self::Patch);
+    /// The instrument's own message reader.
+    fn event(&mut self, status: u8, data1: u8, data2: u8);
+    /// Releases every note and lifts the pedal: no note off will come.
+    fn release_all(&mut self);
+    /// Renders the next samples.
+    fn render(&mut self, out: &mut [i16]);
+}
+
+/// A [`ClassicFamily`] instrument behind the common layer: the
+/// [`super::Instrument`] the receiver plays.
+#[derive(Clone, Debug)]
+pub struct Fronted<F> {
+    family: F,
+    common: Common,
+}
+
+impl<F: ClassicFamily> Fronted<F> {
+    /// `family`, new, behind a fresh common layer.
+    pub fn new(family: F) -> Self {
+        Self { family, common: Common::new(F::CONFIG) }
+    }
+
+    /// The instrument.
+    pub const fn family(&self) -> &F {
+        &self.family
+    }
+
+    /// The common layer's state.
+    pub const fn common(&self) -> &Common {
+        &self.common
+    }
+
+    /// The patch of `program` of bank index 0, or the default where the
+    /// bank has none there ([`Outcome::PassedOver`], MIDI-59) or it is
+    /// faulty ([`Outcome::PatchRefused`], MIDI-63).
+    fn patch(&self, banks: &super::Banks<'_>, program: u8) -> (F::Patch, Outcome) {
+        match banks.fixed_patch(0, usize::from(program), F::PATCH_BYTES) {
+            None => (self.family.default_patch(), Outcome::PassedOver),
+            Some(bytes) => match F::read_patch(bytes) {
+                Some(patch) => (patch, Outcome::Applied),
+                None => (self.family.default_patch(), Outcome::PatchRefused),
+            },
+        }
+    }
+}
+
+impl<F: ClassicFamily> super::Instrument for Fronted<F> {
+    fn start(&mut self, banks: &super::Banks<'_>) -> Outcome {
+        let (patch, outcome) = self.patch(banks, 0);
+        for channel in 0..F::PROGRAM_CHANNELS {
+            self.family.set_patch(channel, &patch);
+        }
+        // A bank that lacks program 0 leaves the default, which is no
+        // fault of a message.
+        if outcome == Outcome::PassedOver { Outcome::Applied } else { outcome }
+    }
+
+    fn midi(&mut self, message: &super::Message<'_>, banks: &super::Banks<'_>) -> Outcome {
+        // No interim family takes system exclusive.
+        let super::Message::Channel(message) = message else { return Outcome::PassedOver };
+        let taken = self.common.take(*message);
+        if let Action::ProgramChange { program, .. } = taken.action {
+            if taken.channel >= F::PROGRAM_CHANNELS {
+                return Outcome::PassedOver;
+            }
+            let (patch, outcome) = self.patch(banks, program);
+            self.family.set_patch(taken.channel, &patch);
+            return outcome;
+        }
+        let family = &mut self.family;
+        give(&F::CLASSIC, &self.common, &taken, |status, data1, data2| family.event(status, data1, data2))
+    }
+
+    fn lost(&mut self) {
+        self.common.lost();
+        self.family.release_all();
+    }
+
+    fn render(&mut self, out: &mut [i16]) {
+        self.family.render(out);
+    }
+}

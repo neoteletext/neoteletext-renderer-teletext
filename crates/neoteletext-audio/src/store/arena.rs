@@ -20,11 +20,11 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
             block_bytes: object.block_bytes,
             samples: object.samples,
             blocks: if live { crate::LIVE_RING_BLOCKS } else { object.blocks },
-            param: object.chip.or(object.bank).unwrap_or(0),
-            setup: match (object.keys, object.model, object.family) {
-                (Some(keys), _, _) => keys,
-                (None, model, family) => [model.or(family).unwrap_or(0), 0],
-            },
+            setting: object.chip.or(object.variant).or(object.family).unwrap_or(0),
+            keys: object.keys.unwrap_or([crate::record::SYNTH8_KEYS_WHOLE, 0]),
+            banks: object.banks,
+            bank_count: object.bank_count,
+            total: object.total.unwrap_or(0),
             received: 0,
             conflict: false,
             at_sink: false,
@@ -49,8 +49,10 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
                         && existing.rate_hz == fresh.rate_hz
                         && existing.block_bytes == fresh.block_bytes
                         && existing.samples == fresh.samples
-                        && existing.param == fresh.param
-                        && existing.setup == fresh.setup;
+                        && existing.setting == fresh.setting
+                        && existing.keys == fresh.keys
+                        && existing.banks() == fresh.banks()
+                        && existing.total == fresh.total;
                     return if same { Defined::Repeat } else { Defined::Conflict };
                 }
                 if !crate::serial_newer(object.generation, existing.sound.generation) {
@@ -76,9 +78,18 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
         self.clock = self.clock.wrapping_add(1);
         let entry = Entry { offset, stamp: self.clock, ..fresh };
         // A clear bitmap: no block received.
-        let bitmap = offset.saturating_add(entry.data_bytes());
+        let bitmap = entry.bitmap_at();
         if let Some(bits) = self.arena.get_mut(bitmap..bitmap.saturating_add(entry.bitmap_bytes())) {
             bits.fill(0);
+        }
+        // A stored event sound knows no block's offset but the first's
+        // (MIDI-43): the bytes of an unknown offset are all ones.
+        let offsets = entry.offsets_at();
+        if let Some(table) = self.arena.get_mut(offsets..offsets.saturating_add(entry.offsets_bytes())) {
+            table.fill(u8::MAX);
+        }
+        if entry.offsets_bytes() > 0 {
+            self.set_event_offset(&entry, 0, 0);
         }
         if let Some(place) = self.entries.get_mut(slot) {
             *place = Some(entry);

@@ -23,10 +23,12 @@ fn object(handle: u8, generation: u16, samples: u32) -> Object<'static> {
         label: None,
         language: None,
         chip: None,
-        bank: None,
-        model: None,
+        banks: [0; MOST_BANKS],
+        bank_count: 0,
+        variant: None,
         family: None,
         keys: None,
+        total: None,
     }
 }
 
@@ -277,4 +279,157 @@ fn a_live_index_wraps_from_the_largest_to_zero() {
     assert_eq!(store.put(&live(0, &[2; 100])), Stored::Blocks { first: 0, count: 1 });
     assert_eq!(store.entry(1).unwrap().newest, Some(0));
     assert_eq!(store.live_block(sound, u16::MAX), Some(&[1; 100][..]));
+}
+
+/// A stored sound of an event codec (MIDI-40, MIDI-41): `blocks` blocks of
+/// at most `longest` bytes, `total` in all.
+fn events(handle: u8, longest: u16, blocks: u16, total: u32) -> Object<'static> {
+    Object {
+        codec: Some(Codec::Synth7),
+        rate_hz: 48_000,
+        block_bytes: longest,
+        samples: u32::from(blocks) * crate::INSTRUMENT_BLOCK_SAMPLES,
+        blocks,
+        total: Some(total),
+        banks: [9; MOST_BANKS],
+        bank_count: 1,
+        ..object(handle, 1, 1)
+    }
+}
+
+/// A DATA record body of an event codec (MIDI-42): `offset`, then each of
+/// `blocks` with its length.
+fn event_record(offset: u32, blocks: &[&[u8]]) -> Vec<u8> {
+    let mut body = offset.to_be_bytes().to_vec();
+    for block in blocks {
+        body.extend_from_slice(&u16::try_from(block.len()).unwrap().to_be_bytes());
+        body.extend_from_slice(block);
+    }
+    body
+}
+
+fn event_data(first_block: u16, body: &[u8]) -> Data<'_> {
+    Data { handle: 1, generation: 1, first_block, blocks: body }
+}
+
+/// MIDI-42, MIDI-45: blocks of differing lengths, in records arriving in
+/// any order, found by their offsets.
+#[test]
+fn a_stored_event_sound_keeps_blocks_of_any_length() {
+    let mut arena = [0_u8; 1000];
+    let mut store = Store::<4>::new(&mut arena);
+    // Four blocks: 3, 0, 5 and 2 bytes.
+    let blocks: [&[u8]; 4] = [&[0, 0xD0, 1], &[], &[0, 0x90, 60, 100, 0], &[1, 2]];
+    assert!(matches!(store.define(&events(1, 5, 4, 10), IDLE), Defined::New { .. }));
+    let later = event_record(3, &blocks[1..3]);
+    assert_eq!(store.put(&event_data(1, &later)), Stored::Blocks { first: 1, count: 2 });
+    let sound = SoundId { handle: 1, generation: 1 };
+    assert_eq!(store.block(sound, 2), Some(blocks[2]));
+    assert_eq!(store.block(sound, 1), Some(blocks[1]));
+    assert_eq!(store.block(sound, 0), None);
+    let last = event_record(8, &blocks[3..]);
+    assert_eq!(store.put(&event_data(3, &last)), Stored::Blocks { first: 3, count: 1 });
+    let first = event_record(0, &blocks[..1]);
+    assert_eq!(store.put(&event_data(0, &first)), Stored::Blocks { first: 0, count: 1 });
+    assert!(store.entry(1).unwrap().complete());
+    for (index, block) in (0..).zip(blocks) {
+        assert_eq!(store.block(sound, index), Some(block));
+    }
+    // A block sent twice with other bytes puts the sound in conflict
+    // (MIDI-44).
+    assert_eq!(store.put(&event_data(0, &first)), Stored::Repeat);
+    let other = event_record(0, &[&[0, 0xD0, 2]]);
+    assert_eq!(store.put(&event_data(0, &other)), Stored::Conflict);
+}
+
+/// MIDI-45: the space a stored event sound takes is its total, 4 bytes a
+/// block and a bit a block.
+#[test]
+fn a_stored_event_sound_takes_its_total_and_its_tables() {
+    let size = 960_000 + 4 * 6_000 + 6_000 / 8;
+    let mut arena = std::vec![0_u8; size];
+    let mut store = Store::<4>::new(&mut arena);
+    assert!(matches!(store.define(&events(1, 1_005, 6_000, 960_000), IDLE), Defined::New { .. }));
+    let mut arena = std::vec![0_u8; size - 1];
+    let mut store = Store::<4>::new(&mut arena);
+    assert_eq!(store.define(&events(1, 1_005, 6_000, 960_000), IDLE), Defined::ResourceLimit);
+}
+
+/// MIDI-43: a faulty record of a stored event sound stores nothing.
+#[test]
+fn a_faulty_event_record_stores_nothing() {
+    let mut arena = [0_u8; 1000];
+    let mut store = Store::<4>::new(&mut arena);
+    store.define(&events(1, 5, 4, 10), IDLE);
+    let held = event_record(3, &[&[], &[0, 0x90, 60, 100, 0]]);
+    assert_eq!(store.put(&event_data(1, &held)), Stored::Blocks { first: 1, count: 2 });
+    let faulty: [(u16, Vec<u8>); 9] = [
+        // A block longer than the longest.
+        (0, event_record(0, &[&[0; 6]])),
+        // Past the total.
+        (3, event_record(9, &[&[1, 2]])),
+        // Block 0 not at offset 0.
+        (0, event_record(1, &[&[0, 0, 0]])),
+        // An offset that disagrees with one held: block 1 starts at 3.
+        (1, event_record(4, &[&[]])),
+        // An end that overlaps the next block's start, held at 3.
+        (0, event_record(0, &[&[0, 0xD0]])),
+        // A block number past the sound.
+        (4, event_record(8, &[&[]])),
+        // The last block not ending at the total.
+        (3, event_record(8, &[&[1]])),
+        // No block, and a length past the record.
+        (0, 0_u32.to_be_bytes().to_vec()),
+        (0, [0, 0, 0, 0, 0, 9, 1].to_vec()),
+    ];
+    for (first, body) in &faulty {
+        assert_eq!(store.put(&event_data(*first, body)), Stored::Malformed, "{body:?}");
+    }
+    assert_eq!(store.entry(1).unwrap().received, 2);
+}
+
+/// MIDI-46: a live event sound keeps each block in a slot of its longest,
+/// with its length; its records carry an offset of 0.
+#[test]
+fn a_live_event_sound_keeps_each_block_with_its_length() {
+    let mut arena = std::vec![0_u8; 40_000];
+    let mut store = Store::<4>::new(&mut arena);
+    let live = Object { samples: 0, blocks: 0, total: None, ..events(1, 1_005, 1, 0) };
+    assert!(matches!(store.define(&live, IDLE), Defined::New { .. }));
+    let long = [0_u8; 1_005];
+    let body = event_record(0, &[&[], &[7], &long]);
+    assert_eq!(store.put(&event_data(70, &body)), Stored::Blocks { first: 70, count: 3 });
+    let sound = SoundId { handle: 1, generation: 1 };
+    assert_eq!(store.live_block(sound, 70), Some(&[][..]));
+    assert_eq!(store.live_block(sound, 71), Some(&[7][..]));
+    assert_eq!(store.live_block(sound, 72), Some(&long[..]));
+    assert_eq!(store.put(&event_data(73, &event_record(1, &[&[]]))), Stored::Malformed);
+    assert_eq!(store.put(&event_data(73, &event_record(0, &[&[0; 1_006]]))), Stored::Malformed);
+    assert_eq!(store.put(&event_data(70, &event_record(0, &[&[1]]))), Stored::Conflict);
+}
+
+/// MIDI-55, MIDI-52: a bank's pieces make one image, read only once all
+/// have arrived.
+#[test]
+fn a_bank_is_one_image_once_whole() {
+    let mut arena = [0_u8; 3_000];
+    let mut store = Store::<4>::new(&mut arena);
+    let bank = Object {
+        codec: Some(Codec::Bank),
+        rate_hz: 48_000,
+        block_bytes: 1_011,
+        samples: 1_500,
+        blocks: 2,
+        family: Some(Codec::Synth7.code()),
+        ..object(2, 1, 1)
+    };
+    assert!(matches!(store.define(&bank, IDLE), Defined::New { .. }));
+    let image: Vec<u8> = (0..1_500_u32).map(|byte| u8::try_from(byte % 251).unwrap()).collect();
+    let piece = |first_block: u16, blocks: &'static [u8]| Data { handle: 2, generation: 1, first_block, blocks };
+    let image: &'static [u8] = image.leak();
+    assert_eq!(store.put(&piece(1, &image[1_011..])), Stored::Blocks { first: 1, count: 1 });
+    assert_eq!(store.image(2), None);
+    assert_eq!(store.put(&piece(0, &image[..1_011])), Stored::Blocks { first: 0, count: 1 });
+    assert_eq!(store.image(2), Some(image));
+    assert_eq!(store.entry(2).unwrap().setting, Codec::Synth7.code());
 }
