@@ -224,8 +224,12 @@ impl Env {
     pub fn set_outlevel(&mut self, outlevel: i32) {
         if self.outlevel != outlevel {
             self.outlevel = outlevel;
-            if self.ix < STAGE_FINISHED {
-                self.advance(self.ix);
+            // Held at the third level, the envelope goes back to its third
+            // stage to reach the third level the new output level makes;
+            // in any other stage it aims that stage at its new level.
+            let stage = if self.down && self.ix == STAGE_SUSTAIN { STAGE_SUSTAIN.saturating_sub(1) } else { self.ix };
+            if stage < STAGE_FINISHED {
+                self.advance(stage);
             }
         }
     }
