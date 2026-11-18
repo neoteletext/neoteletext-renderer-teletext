@@ -111,6 +111,9 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio-instruments", features: "synthd" },
     // synth53 (TODO-6433).
     Build { package: "neoteletext-audio-instruments", features: "synth53" },
+    // The families' programming interfaces without their synthesis, as the
+    // server builds them (the server document's SRV-88).
+    Build { package: "neoteletext-audio-instruments", features: "interface" },
     // synth8 (TODO-6435).
     Build { package: "neoteletext-audio-instruments", features: "synth8" },
     // synth80 (TODO-6434).
