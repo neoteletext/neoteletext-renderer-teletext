@@ -15,7 +15,8 @@
 //!
 //! - Foundation: [`consts`], [`bytes`], [`base64`], [`sha1`], [`json`];
 //! - addresses and origins: [`url`];
-//! - protocols: [`http`] and [`ws`];
+//! - protocols: [`http`], [`ws`], and [`viewer_state`]: the bytes a viewer
+//!   key signs and the key identifier, which replace cookies (DEC-6471);
 //! - content: [`channel`], [`contents`], [`font_library`] (a font
 //!   library's `fonts.txt` and a font's checksum), [`subpages`] (a page's list
 //!   of sub-pages, and with `std` a page written as a channel's files),
@@ -84,6 +85,8 @@ pub mod proxy;
 pub mod url;
 pub mod user_agent;
 
+pub mod viewer_state;
+
 pub mod http;
 pub mod ws;
 
@@ -138,6 +141,7 @@ mod error_trait {
         crate::map::MapError,
         crate::proxy::ProxyError,
         crate::records::RecordFault,
+        crate::viewer_state::StateError,
         crate::records::index::IndexError,
         crate::user_agent::UserAgentError,
         crate::zxnet::Malformed,
@@ -169,6 +173,7 @@ mod error_trait {
             is_error::<crate::map::MapError>();
             is_error::<crate::proxy::ProxyError>();
             is_error::<crate::records::RecordFault>();
+            is_error::<crate::viewer_state::StateError>();
             is_error::<crate::records::index::IndexError>();
             is_error::<crate::user_agent::UserAgentError>();
             is_error::<crate::zxnet::Malformed>();

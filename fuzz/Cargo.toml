@@ -131,6 +131,20 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "state_records"
+path = "fuzz_targets/state_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "state_messages"
+path = "fuzz_targets/state_messages.rs"
+test = false
+doc = false
+bench = false
+
 [lints.rust]
 unsafe_code = "forbid"
 

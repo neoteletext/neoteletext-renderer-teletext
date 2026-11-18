@@ -11,6 +11,7 @@ use crate::records::denied::DeniedRecord;
 use crate::records::index::IndexRecord;
 use crate::records::links::LinksRecord;
 use crate::records::redirect::RedirectRecord;
+use crate::records::state::{StateChallenge, StateEnd};
 use crate::records::subpages::SubPagesRecord;
 use crate::subpages::PartNumber;
 use crate::url::UrlError;
@@ -421,6 +422,23 @@ pub enum Event<'a> {
     /// A selection was refused, or the channel's program is not answering
     /// (DOC-1961, REQ-1481).
     Denied(DeniedRecord<'a>),
+    /// The channel's server challenges the viewer's key for this channel
+    /// (VS-202, VS-204, VS-205). The port answers exactly once, before it
+    /// sends SELECT on a new connection, with a `STATE_PROOF` or a
+    /// `STATE_NONE` written by [`neoteletext_input::event::write`] and sent
+    /// with [`Input::Send`]; it builds the bytes it signs with
+    /// [`crate::viewer_state::signed_bytes`] from its own channel, never
+    /// from anything the server sent. A port that keeps no state answers
+    /// `STATE_NONE` with [`crate::viewer_state::NoneReason::Stateless`]
+    /// (VS-501, VS-504).
+    StateChallenge(StateChallenge),
+    /// The channel's server ended the viewer's state: the port deletes its
+    /// key for this channel only when that key's identifier
+    /// ([`crate::viewer_state::key_id`]) is this one (VS-204).
+    StateEnd(StateEnd),
+    /// The channel suggests that the viewer have the browser remember them
+    /// (VS-208): only the browser's own interface may act on it.
+    StateKeepOffer,
     /// A live channel (its `channel.ttx` names a push connection,
     /// REQ-WEB-018) is opening its connection: it asks for no bundle, page
     /// file or `contents.txt`, and is connecting, never a page not found,

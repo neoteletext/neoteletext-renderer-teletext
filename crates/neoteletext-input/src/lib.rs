@@ -13,6 +13,9 @@
 //! - [`session`]: a receiver's side of one session, the rate limit with it,
 //!   and the messages kept to send again when a lost connection's session
 //!   is resumed (REQ-RCH-013).
+//! - [`state`]: viewer state's messages from the receiver (DEC-6471,
+//!   VS-204), `STATE_PROOF`, `STATE_NONE` and `STATE_OFFER`, which are extension
+//!   events of the input stream but no input.
 //! - [`pace`]: the pointer's moves at 60 a second, one slot a contact
 //!   (REQ-RCH-031 to REQ-RCH-033); [`contacts`]: the numbers of a touch
 //!   screen's contacts (REQ-RCH-043).
@@ -77,6 +80,7 @@ mod limits;
 pub mod names;
 pub mod pace;
 pub mod session;
+pub mod state;
 pub mod wire;
 
 pub use carriage::is_input_packet;

@@ -19,6 +19,9 @@ neoteletext-audio = { workspace = true, features = ["idl"] }
 # reader's parser, and given on as its `LinkLine`, `NumberLink` and
 # `TextLink` (REQ-1494).
 neoteletext-formats = { workspace = true, features = ["tti"] }
+# Viewer state's messages from the receiver, which the signed bytes and the
+# key identifier take their fields from (DEC-6471, VS-203, VS-204).
+neoteletext-input.workspace = true
 
 [features]
 # Decision E.61: each part of the user agent that a run-time choice reaches

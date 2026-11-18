@@ -167,6 +167,11 @@ impl<R: RandomSource> UserAgent<'_, R> {
             },
             ChannelRecord::Redirect(redirect) => event(sink, Event::Redirect(redirect)),
             ChannelRecord::Denied(denied) => event(sink, Event::Denied(denied)),
+            // Viewer state is the port's: the agent holds no key and keeps
+            // nothing of it (VS-101, VS-116).
+            ChannelRecord::StateChallenge(challenge) => event(sink, Event::StateChallenge(challenge)),
+            ChannelRecord::StateEnd(end) => event(sink, Event::StateEnd(end)),
+            ChannelRecord::StateKeepOffer => event(sink, Event::StateKeepOffer),
             // The agent passes every packet on; the ReGIS renderer of the
             // program that draws pages reads these (DEC-6335).
             ChannelRecord::Regis(_)

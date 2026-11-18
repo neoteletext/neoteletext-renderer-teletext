@@ -895,6 +895,7 @@ dependencies = [
  "neoteletext-audio",
  "neoteletext-core",
  "neoteletext-formats",
+ "neoteletext-input",
  "proptest",
 ]
 

@@ -1988,6 +1988,36 @@ fn log_lines_are_limited_for_each_page_frame() {
     assert_eq!(logged, 2 * MAX_LOG_LINES_PER_PAGE, "{records:?}");
 }
 
+// Verifies VS-204 through the agent: viewer state's records reach the port
+// as events, in the order sent, and the agent answers none of them itself:
+// the key, and so the answer, is the port's (VS-101).
+#[test]
+#[cfg(feature = "push")]
+fn viewer_state_records_reach_the_port() {
+    use neoteletext_web::records::state::{StateChallenge, StateEnd, encode_challenge, encode_end, encode_keep_offer};
+    let mut harness = push_service("ws://tt.example/push");
+    let challenge = StateChallenge { challenge: [7; 32], create: true };
+    let end = StateEnd { key_id: [9; 32] };
+    let message = packets_of(|out| {
+        encode_challenge(challenge, 0, 1, out).unwrap();
+        encode_end(end, 0, 2, out).unwrap();
+        encode_keep_offer(0, 3, out).unwrap();
+    });
+    harness.replay().reply("tt.example:80", Reply::WebSocket(server_frame(0x2, &message)));
+    let records = harness.open("http://tt.example/service.json");
+    let state: Vec<&str> = events(&records).into_iter().filter(|event| event.starts_with("State")).collect();
+    assert_eq!(
+        state,
+        [
+            format!("{:?}", neoteletext_web::agent::Event::StateChallenge(challenge)).as_str(),
+            format!("{:?}", neoteletext_web::agent::Event::StateEnd(end)).as_str(),
+            "StateKeepOffer",
+        ]
+    );
+    assert!(!has_event(&records, "InvalidPackets"), "{records:?}");
+    assert!(push_frames(&mut harness).iter().all(|(opcode, _)| *opcode != 0x2), "the agent sent no answer");
+}
+
 // Verifies REQ-1462 item 3: packet 1/30 among good packets is discarded and
 // counted alone, the good ones delivered in order, the connection kept.
 #[test]

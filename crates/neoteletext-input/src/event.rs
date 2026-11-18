@@ -97,6 +97,18 @@ pub const DRAWING_HOVER: u8 = 0x47;
 /// `DRAWING_HOVER`'s flag: the pointer left the drawing; clear, it entered.
 pub const DRAWING_HOVER_LEAVE: u8 = 1;
 
+/// `STATE_PROOF`'s type, an extension (DEC-6471, VS-204): the answer to a
+/// `STATE_CHALLENGE` with a viewer key, [`crate::state::StateProof`].
+pub const STATE_PROOF: u8 = 0x48;
+/// `STATE_NONE`'s type, an extension (VS-204): the answer to a
+/// `STATE_CHALLENGE` without a key, or a key just forgotten, with its
+/// [`crate::state::NoneReason`].
+pub const STATE_NONE: u8 = 0x49;
+/// `STATE_OFFER`'s type, an extension (VS-204, VS-111): the receiver now
+/// holds a key for this channel, made or remembered on another of its
+/// tabs, and asks to be challenged.
+pub const STATE_OFFER: u8 = 0x4A;
+
 /// KEY's flag bits (DOC-1935).
 const ACTION: u8 = 0b11;
 const FUNCTIONAL: u8 = 1 << 2;
@@ -437,6 +449,12 @@ pub enum Event<'a> {
     /// The session a reconnection asks to resume, after HELLO
     /// (REQ-RCH-013).
     Resume(Resume),
+    /// A viewer key's proof, answering a `STATE_CHALLENGE` (VS-204).
+    StateProof(crate::state::StateProof<'a>),
+    /// No proof, and why (VS-204).
+    StateNone(crate::state::NoneReason),
+    /// A key is now held for this channel: challenge me (VS-204, VS-111).
+    StateOffer,
     /// The page and sub-page the connection has selected (REQ-INT-140),
     /// and the address's page parameters as written, without their `?`, or
     /// nothing (REQ-1693 item 6).
@@ -525,7 +543,8 @@ fn check_text(text: &str) -> Result<(), InputError> {
 /// character of text counts one, and every event counts one, but those
 /// that are never acknowledged (REQ-RCH-012, REQ-RCH-054): a move and gone,
 /// MOUSE's and TOUCH's, HOVER, PICK, `DRAWING_HOVER`, COMPOSE, RESUME and SELECT
-/// count none.
+/// count none, and nor do viewer state's messages, which are no input
+/// (VS-204).
 #[must_use]
 pub fn units(item: &Item<'_>) -> u32 {
     match item {
@@ -545,7 +564,10 @@ fn uncounted(event: &Event<'_>) -> bool {
         | Event::DrawingHover { .. }
         | Event::Compose { .. }
         | Event::Resume(_)
-        | Event::Select(..) => true,
+        | Event::Select(..)
+        | Event::StateProof(_)
+        | Event::StateNone(_)
+        | Event::StateOffer => true,
         _ => false,
     }
 }
