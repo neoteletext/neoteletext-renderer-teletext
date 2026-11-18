@@ -15,6 +15,12 @@ publish.workspace = true
 [dependencies]
 neoteletext-core.workspace = true
 unicode-bidi = { version = "0.3.18", default-features = false, features = ["hardcoded-data"], optional = true }
+# Renderer parity PAR-3 to PAR-6 (REQ-6762, DEC-6760 item 17, under the
+# owner's DEC-6579): the picture text encoder takes the renderers' limits by
+# name and its tests draw its bytes. Behind `picture-text`, which no
+# microcontroller build turns on (REQ-GEN-017).
+regis = { workspace = true, optional = true }
+naplps = { workspace = true, optional = true }
 
 [features]
 # Decision E.61: each format beyond T42 is a feature, all on by default.
@@ -48,6 +54,11 @@ alloc = []
 # triplets (REQ-CLI-010, REQ-2148), and text runs at their places on a page
 # (REQ-2214). With `std` and `tti`, whole pages as TTI files.
 write-text = ["alloc", "neoteletext-core/extended-sets", "dep:unicode-bidi"]
+# The picture text encoder (renderer parity PAR-3 to PAR-6, REQ-6762):
+# Unicode text to stretches of the 55 provided sets, written as ReGIS or
+# NAPLPS. It links the two renderer crates, so it is never a default and
+# never on in a microcontroller build.
+picture-text = ["write-text", "dep:regis", "dep:naplps"]
 # REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types,
 # which needs `core::fmt`.
 error-trait = []

@@ -45,13 +45,15 @@ use {
 mod kana;
 mod rtl;
 mod runs;
-mod sets;
+pub(crate) mod sets;
 mod table44;
 
 pub use runs::{
     Direction, Encoded, FIRST_TEXT_ROW, LAST_TEXT_ROW, LATIN_ENGLISH_TAG, Language, PageText, Report, RunError,
     RunFault, TextRun, designate, languages, packets, write_runs,
 };
+#[cfg(feature = "picture-text")]
+pub(crate) use runs::{stretch_sets, visual_characters, visual_stretches};
 pub use sets::SETS;
 
 /// The first display row the writer fills; row 0 is the header.

@@ -13,7 +13,11 @@ const PERMITTED: &[(&str, &[&str])] = &[
     // The page writer's right-to-left reordering (UAX #9), behind
     // `write-text`: decision E.82 (rdm DEC-606) approved it for the writer,
     // which moved here so the server can encode text (REQ-2214, DEC-2199).
-    ("neoteletext-formats", &["neoteletext-core", "unicode-bidi"]),
+    // And the project's own picture renderers, behind `picture-text`
+    // (renderer parity PAR-3 to PAR-6, DEC-6760 item 17, under the owner's
+    // DEC-6579), for the picture text encoder: no microcontroller build
+    // turns that feature on (the target table builds the crate without it).
+    ("neoteletext-formats", &["neoteletext-core", "unicode-bidi", "regis", "naplps"]),
     ("neoteletext-slicer", &["neoteletext-core"]),
     // The channel's records share the audio profile's frame, and a LOG
     // record the TTI reader's rules for an `LG` line (DOC-1956). Viewer

@@ -56,6 +56,9 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-formats", features: "std,tti" },
     Build { package: "neoteletext-formats", features: "write-text" },
     Build { package: "neoteletext-formats", features: "write-text,std,tti" },
+    // The picture text encoder (renderer parity PAR-3, REQ-6762), which
+    // links the picture renderers.
+    Build { package: "neoteletext-formats", features: "picture-text" },
     Build { package: "neoteletext-formats", features: "error-trait" },
     Build { package: "neoteletext-web", features: "" },
     Build { package: "neoteletext-web", features: "push" },

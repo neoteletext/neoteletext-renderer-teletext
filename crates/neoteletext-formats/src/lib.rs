@@ -135,6 +135,8 @@ pub mod write;
 
 #[cfg(all(feature = "std", feature = "tti"))]
 pub mod author;
+#[cfg(feature = "picture-text")]
+pub mod picture_text;
 #[cfg(feature = "write-text")]
 pub mod write_text;
 

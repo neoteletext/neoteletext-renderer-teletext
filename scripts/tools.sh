@@ -27,7 +27,7 @@ readonly MIRI_COMPONENTS=(miri rust-src)
 # REQ-GEN-001: the workspace builds with its stated minimum version as well
 # as the pinned one; scripts/build-targets.sh checks that this is
 # Cargo.toml's rust-version.
-readonly MSRV_TOOLCHAIN="1.96.0"
+readonly MSRV_TOOLCHAIN="1.97.0"
 # cargo-llvm-cov reads its profiles with the pinned toolchain's own LLVM tools.
 readonly COVERAGE_COMPONENT="llvm-tools"
 

@@ -44,3 +44,9 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# The project's own picture renderers (DEC-6579, DEC-6760 item 17), at their
+# unpushed commits until they reach GitHub (TODO-6786).
+allow-git = [
+    "file:///Users/andrewstuart/devel/neoteletext-renderer-regis",
+    "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps",
+]

@@ -402,6 +402,9 @@ fn run_sets(value: u8, other: bool, own: bool) -> Option<Sets> {
     Some(sets)
 }
 
+/// One stretch of a run: its set's Table 32 value and its cells.
+pub(crate) type Stretch = (u8, Vec<Cell>);
+
 /// Which set writes a character of a run that its own set cannot write
 /// whole.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -427,6 +430,37 @@ fn encode_run(
         return Err(RunFault::OutOfRows);
     }
     let tag = run.language.or(page_language).unwrap_or(LATIN_ENGLISH_TAG);
+    let mut column = usize::from(run.column);
+    let mut stretches = Vec::new();
+    for (value, letters) in run_stretches(run.text, tag, page_value, own)? {
+        let start = u8::try_from(column).unwrap_or(u8::MAX);
+        column = column.saturating_add(letters.len());
+        stretches.push(Placed { row: run.row, column: start, value, other: value != page_value, letters });
+    }
+    if column > COLUMNS {
+        return Err(RunFault::OutOfColumns(column.saturating_sub(1)));
+    }
+    Ok(stretches)
+}
+
+/// The cells of one run's `text` in the language `tag`, in visual order,
+/// as stretches of one set each, with each stretch's Table 32 value: one
+/// stretch in the language's own set when that set writes it all;
+/// otherwise stretches of its own set and of Latin English (TODO-2343,
+/// DEC-2473). Right-to-left text is put in visual order and the letters of
+/// Table 44 take their joined forms first. The picture text encoder uses it
+/// too (renderer parity PAR-3), so a picture's text chooses exactly the sets
+/// a teletext run's does.
+fn run_stretches(text: &str, tag: &str, page_value: u8, own: bool) -> Result<Vec<Stretch>, RunFault> {
+    let (value, characters) = visual_characters(text, tag, page_value, own)?;
+    visual_stretches(&characters, value, page_value, own)
+}
+
+/// A run's `text` in the language `tag` as the characters it is written
+/// with, in visual order, and its set's Table 32 value: kana normalised,
+/// the letters of Table 44 in their joined forms, right-to-left text
+/// reversed by the Unicode Bidirectional Algorithm.
+pub(crate) fn visual_characters(text: &str, tag: &str, page_value: u8, own: bool) -> Result<(u8, Vec<char>), RunFault> {
     let unknown = || RunFault::UnknownLanguage(tag.to_string());
     let value = language_value(tag, own).ok_or_else(unknown)?;
     let sets = run_sets(value, value != page_value, own).ok_or_else(unknown)?;
@@ -434,41 +468,51 @@ fn encode_run(
         CharSet::G0(G0 { set, .. }) => Some(set),
         CharSet::G2(_) | CharSet::G3 => None,
     };
-    let text = kana::normalise(run.text);
+    let text = kana::normalise(text);
     let text = if set == Some(G0Set::Arabic) {
         table44::join(&text, |character| sets.holds(character) || sets.g2_holds(character))
     } else {
         text
     };
     let right_to_left = set.is_some_and(|set| set.is_joined() || set == G0Set::Hebrew || set == G0Set::Arabic);
-    let characters: Vec<char> = if right_to_left { rtl::visual_line(&text) } else { text.chars().collect() };
-    let stretches = match encode_from(&sets, &characters, State::default(), false, LINE) {
-        Ok((letters, _)) => {
-            vec![Placed { row: run.row, column: run.column, value, other: value != page_value, letters }]
-        }
+    Ok((value, if right_to_left { rtl::visual_line(&text) } else { text.chars().collect() }))
+}
+
+/// [`visual_characters`]' output encoded into stretches of one set each.
+pub(crate) fn visual_stretches(
+    characters: &[char],
+    value: u8,
+    page_value: u8,
+    own: bool,
+) -> Result<Vec<Stretch>, RunFault> {
+    let sets = run_sets(value, value != page_value, own).ok_or(RunFault::UnknownLanguage(String::new()))?;
+    match encode_from(&sets, characters, State::default(), false, LINE) {
+        Ok((letters, _)) => Ok(vec![(value, letters)]),
         Err(WriteError::Missing { character, .. }) => {
-            through_english(run, &sets, value, &characters, page_value, own).ok_or(RunFault::Unshown(character))??
+            through_english(&sets, value, characters, page_value, own).ok_or(RunFault::Unshown(character))?
         }
-        Err(error) => return Err(unshown(error)),
-    };
-    let end = stretches.last().map_or(usize::from(run.column), Placed::end);
-    if end > COLUMNS {
-        return Err(RunFault::OutOfColumns(end.saturating_sub(1)));
+        Err(error) => Err(unshown(error)),
     }
-    Ok(stretches)
+}
+
+/// The sets a run in the Table 32 value `value` is written in, as
+/// [`run_stretches`] chose them: for the picture text encoder, which needs
+/// a stretch's G0 set and the G2 set of its marks.
+pub(crate) fn stretch_sets(value: u8, page_value: u8, own: bool) -> Option<(CharSet, CharSet)> {
+    let sets = run_sets(value, value != page_value, own)?;
+    Some((sets.default, CharSet::G2(sets.g2)))
 }
 
 /// The run's stretches when its own set cannot write all of `characters`
 /// (already in visual order) and Latin English writes the rest; `None` when
 /// the run is itself in Latin English, so nothing is left to try.
 fn through_english(
-    run: &TextRun<'_>,
     sets: &Sets,
     value: u8,
     characters: &[char],
     page_value: u8,
     own: bool,
-) -> Option<Result<Vec<Placed>, RunFault>> {
+) -> Option<Result<Vec<Stretch>, RunFault>> {
     let english = language_value(LATIN_ENGLISH_TAG, own)?;
     if english == value {
         return None;
@@ -503,7 +547,6 @@ fn through_english(
     let english_dearer = english != page_value && !own && value == page_value;
     settle(&mut writers, english_dearer);
     let mut stretches = Vec::new();
-    let mut column = usize::from(run.column);
     let mut from = 0;
     while let Some(&writer) = writers.get(from) {
         let to = (from..writers.len()).find(|&at| writers.get(at) != Some(&writer)).unwrap_or(writers.len());
@@ -514,15 +557,7 @@ fn through_english(
             Ok((letters, _)) => letters,
             Err(error) => return Some(Err(unshown(error))),
         };
-        let start = u8::try_from(column).unwrap_or(u8::MAX);
-        column = column.saturating_add(letters.len());
-        stretches.push(Placed {
-            row: run.row,
-            column: start,
-            value: stretch_value,
-            other: stretch_value != page_value,
-            letters,
-        });
+        stretches.push((stretch_value, letters));
         from = to;
     }
     Some(Ok(stretches))

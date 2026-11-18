@@ -80,7 +80,7 @@ const LAST_MARK: u8 = MODE_DIACRITIC_MASK;
 /// One cell: its row code and, for a character the row cannot show, the
 /// triplet that places it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Cell {
+pub(crate) enum Cell {
     Code(u8),
     Marked {
         code: u8,
