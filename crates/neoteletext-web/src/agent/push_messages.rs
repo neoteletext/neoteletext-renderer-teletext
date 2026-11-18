@@ -124,7 +124,7 @@ impl<R: RandomSource> UserAgent<'_, R> {
     pub(super) fn send_input(&mut self, message: InputMessage<'_>, sink: &mut Sink<'_>) {
         let open = cfg!(feature = "push")
             && matches!(self.push.phase, PushPhase::Open { .. })
-            && self.descriptor.as_ref().is_some_and(Descriptor::input);
+            && self.descriptor.as_ref().is_some_and(Descriptor::push_takes_messages);
         if !open || message.bytes.len() > INPUT_MESSAGE_MAX {
             event(sink, Event::InputDropped);
             return;

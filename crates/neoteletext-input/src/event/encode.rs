@@ -4,9 +4,9 @@ use super::decode::read;
 use super::{
     Action, COMPOSE, DEVICE_SHIFT, DRAWING_HOVER, DRAWING_HOVER_LEAVE, Device, EVENT, Event, FIRST_EXTENSION, FOCUS_IN,
     FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO, HOVER, HOVER_LEAVE, InputError, Item, KEY,
-    Key, KeyCode, LAST_EXTENSION, LOST, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE, MouseAction, PASTE, PICK, Point,
-    RESIZE, RESUME, SELECT, STAMP_BYTES, STATE_NONE, STATE_OFFER, STATE_PROOF, Select, Stamp, TOUCH, Touch, WHEEL,
-    check_text, is_page_parameters,
+    Key, KeyCode, LAST_EXTENSION, LOST, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE, MouseAction, PAGE_STATE, PASTE,
+    PICK, Point, RESIZE, RESUME, RULE_EVENT, RULES_FAULT, SELECT, STAMP_BYTES, STATE_NONE, STATE_OFFER, STATE_PROOF,
+    Select, Stamp, TOUCH, Touch, WHEEL, check_text, is_page_parameters,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SELECT_PLACE, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::AGENT;
@@ -246,6 +246,44 @@ fn write_drawing_hover(
     })
 }
 
+/// Writes an extension whose payload is the stamp and then `parts`, in
+/// order, with no copy of them: a `RULE_EVENT` or a `PAGE_STATE` may be
+/// most of a message.
+fn write_stamped(kind: u8, on: Stamp, parts: &[&[u8]], writer: &mut Writer<'_>) -> Result<(), InputError> {
+    let mut stamp = [0_u8; STAMP_BYTES];
+    let mut inner = Writer::new(&mut stamp);
+    write_stamp(on, &mut inner)?;
+    let stamp_length = inner.len();
+    let length = parts.iter().fold(stamp_length, |length, part| length.saturating_add(part.len()));
+    writer.byte(kind)?;
+    writer.uv(u32::try_from(length).map_err(|_| InputError::Message)?)?;
+    writer.bytes(stamp.get(..stamp_length).unwrap_or(&[]))?;
+    for part in parts {
+        writer.bytes(part)?;
+    }
+    Ok(())
+}
+
+/// The rule table's messages (RULE-46 to RULE-48).
+fn write_rules(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputError> {
+    match event {
+        Event::RuleEvent(event) => {
+            let (head, length) = crate::rules::rule_event_head(event);
+            let head = head.get(..length).unwrap_or(&[]);
+            let input = match event.body {
+                crate::rules::RuleBody::Input(bytes) => bytes,
+                _ => &[],
+            };
+            write_stamped(RULE_EVENT, event.on, &[head, input], writer)
+        }
+        Event::PageState(state) => write_stamped(PAGE_STATE, state.on, &[state.body], writer),
+        Event::RulesFault(fault) => {
+            write_stamped(RULES_FAULT, fault.on, &[&crate::rules::rules_fault_bytes(fault)], writer)
+        }
+        _ => Err(InputError::BadValue("not a rule table message")),
+    }
+}
+
 /// Viewer state's messages (VS-204): each a fixed payload.
 fn write_state(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputError> {
     match event {
@@ -350,6 +388,7 @@ fn write_event(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputEr
         })?,
         Event::Select(select, parameters) => write_select(*select, parameters, writer)?,
         Event::StateProof(_) | Event::StateNone(_) | Event::StateOffer => write_state(event, writer)?,
+        Event::RuleEvent(_) | Event::PageState(_) | Event::RulesFault(_) => write_rules(event, writer)?,
         Event::Extension { kind, payload } => {
             if !(FIRST_EXTENSION..=LAST_EXTENSION).contains(kind) {
                 return Err(InputError::Type(*kind));

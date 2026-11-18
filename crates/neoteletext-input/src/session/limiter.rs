@@ -14,6 +14,20 @@ const SECOND_MS: u32 = 1_000;
 /// A move, gone and HOVER go only as the pointer moves, at most 60 a
 /// second (REQ-RCH-031), so they never cost a key.
 pub(super) fn rated(event: &Event<'_>) -> bool {
+    match event {
+        // RULE-46: a RULE_EVENT is held to the rate as what it carries
+        // was under protocol version 8, so a move never costs a key; a
+        // run of text, a firing with no event and a value are held to it.
+        Event::RuleEvent(report) => match report.input() {
+            Some((Item::Event(carried), _)) => rated_alone(&carried),
+            _ => true,
+        },
+        other => rated_alone(other),
+    }
+}
+
+/// [`rated`] for an event that carries no other.
+fn rated_alone(event: &Event<'_>) -> bool {
     matches!(event, Event::Compose { .. }) || units(&Item::Event(*event)) > 0
 }
 
@@ -25,6 +39,13 @@ fn release(event: &Event<'_>) -> bool {
         Event::Key(key) => key.action == Action::Release,
         Event::Mouse(mouse) => mouse.action == MouseAction::Release,
         Event::Touch(touch) => touch.action == MouseAction::Release,
+        // RULE-46: the release a RULE_EVENT carries.
+        Event::RuleEvent(report) => match report.input() {
+            Some((Item::Event(Event::Key(key)), _)) => key.action == Action::Release,
+            Some((Item::Event(Event::Mouse(mouse)), _)) => mouse.action == MouseAction::Release,
+            Some((Item::Event(Event::Touch(touch)), _)) => touch.action == MouseAction::Release,
+            _ => false,
+        },
         _ => false,
     }
 }

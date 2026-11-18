@@ -22,7 +22,16 @@ const PERMITTED: &[(&str, &[&str])] = &[
     // (DEC-6471).
     (
         "neoteletext-web",
-        &["neoteletext-core", "embedded-io", "neoteletext-audio", "neoteletext-formats", "neoteletext-input"],
+        &[
+            "neoteletext-core",
+            "embedded-io",
+            "neoteletext-audio",
+            "neoteletext-formats",
+            "neoteletext-input",
+            // The RULES and ANIMATE records are read with the rule table's
+            // own decoder (page-rules.md RULE-41, animation.md ANIM-6).
+            "neoteletext-rules",
+        ],
     ),
     ("neoteletext-image", &["neoteletext-core"]),
     // Decision E.124 item 5: the Opus decoder, behind the `opus` feature.
@@ -34,7 +43,9 @@ const PERMITTED: &[(&str, &[&str])] = &[
     ("neoteletext-audio-mix", &[]),
     // Decision E.123: an integer Opus decoder written here, with no dependency.
     ("neoteletext-opus", &[]),
-    ("neoteletext-input", &["neoteletext-core", "neoteletext-audio"]),
+    // A rule's reports name the rule table's own targets and values
+    // (page-rules.md RULE-46 to RULE-48).
+    ("neoteletext-input", &["neoteletext-core", "neoteletext-audio", "neoteletext-rules"]),
     // page-rules.md RULE-56: no dependency of any kind, not even another
     // engine crate.
     ("neoteletext-rules", &[]),

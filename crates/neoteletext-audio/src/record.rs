@@ -118,6 +118,7 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_STATE_CHALLENGE
         || kind == TYPE_STATE_END
         || kind == TYPE_STATE_KEEP_OFFER
+        || matches!(kind, 21..=27) // RULES to FRAME, which `neoteletext_web::records` defines and asserts (RULE-41, ANIM-2)
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,

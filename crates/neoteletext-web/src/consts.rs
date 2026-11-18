@@ -312,7 +312,7 @@ pub const INVALID_PACKET_REPORT_SECONDS: u64 = 20;
 /// DEC-1759 lesson 14): `neottx.` and the input protocol's
 /// version, `neoteletext_input::VERSION`. The wire vectors' test asserts
 /// that the two agree, and the server imports this one.
-pub const PUSH_SUBPROTOCOL: &str = "neottx.8";
+pub const PUSH_SUBPROTOCOL: &str = "neottx.9";
 /// The first of the close codes that say stop (DOC-1919,
 /// DEC-1759 lesson 10): the fault will be there on the next attempt, so a
 /// receiver does not try again. A code of this range nobody has defined yet
@@ -467,6 +467,23 @@ pub const MIN_FRAME_INTERVAL_US: u64 = FLASH_CYCLE_US / FLASH_UNITS as u64;
 const _: () = assert!(MIN_FRAME_INTERVAL_US * (FLASH_UNITS as u64) <= FLASH_CYCLE_US);
 // Nor shorter than one field of a 50-field display.
 const _: () = assert!(MIN_FRAME_INTERVAL_US >= FIELD_PERIOD_US);
+
+// ---------------------------------------------------------------------------
+// Atomic frames and sprite sheets (neoteletext-common animation.md ANIM-2,
+// ANIM-16, ANIM-17)
+// ---------------------------------------------------------------------------
+
+/// The most bytes a receiver holds for one open frame (ANIM-2): at the
+/// limit the frame ends, and what it held is applied at once.
+pub const MAX_FRAME_BYTES: usize = 262_144;
+/// The most ticks of one sixtieth of a second a frame stays open with no
+/// end (ANIM-2): two seconds.
+pub const MAX_FRAME_TICKS: u32 = 120;
+/// The most pages with a frame open at once in a decoder (ANIM-2): a
+/// fifth begin is treated as having no frame.
+pub const MAX_OPEN_FRAMES: usize = 4;
+/// The most bytes of a page's sprite sheet of one kind (ANIM-17).
+pub const MAX_SHEET_BYTES: usize = 65_536;
 
 // ---------------------------------------------------------------------------
 // The user agent's defaults (REQ-WEB-004, REQ-SEC-011, REQ-SEC-020)

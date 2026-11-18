@@ -100,7 +100,7 @@ fn a_receive_that_may_not_wait_answers_a_ping_and_sees_the_close() {
 }
 
 /// The subprotocol a channel's WebSocket asks for (DOC-1794).
-const SUBPROTOCOL: &str = "neottx.8";
+const SUBPROTOCOL: &str = "neottx.9";
 
 /// Accepts one client and answers its upgrade naming `answer` as the
 /// subprotocol; reports what the client offered.

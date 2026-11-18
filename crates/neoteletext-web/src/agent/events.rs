@@ -84,7 +84,8 @@ pub enum Input<'a> {
     Subscribe(Subscription<'a>),
     /// One message of the input profile (area INT, decision E.90), sent as
     /// a binary WebSocket message on the push connection: only while it is
-    /// open and the channel's descriptor declares `push.input`, and only up
+    /// open and on the descriptor's own origin
+    /// ([`crate::descriptor::Descriptor::push_takes_messages`]), and only up
     /// to [`crate::consts::INPUT_MESSAGE_MAX`] bytes. Anything else is
     /// dropped, with [`Event::InputDropped`]: what it sends never changes
     /// what is fetched.

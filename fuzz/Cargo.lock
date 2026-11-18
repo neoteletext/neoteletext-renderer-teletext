@@ -584,6 +584,7 @@ version = "0.1.0"
 dependencies = [
  "neoteletext-audio",
  "neoteletext-core",
+ "neoteletext-rules",
 ]
 
 [[package]]
@@ -645,6 +646,7 @@ dependencies = [
  "neoteletext-core",
  "neoteletext-formats",
  "neoteletext-input",
+ "neoteletext-rules",
 ]
 
 [[package]]

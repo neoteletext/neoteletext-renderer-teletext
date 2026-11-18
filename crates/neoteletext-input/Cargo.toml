@@ -13,6 +13,9 @@ publish.workspace = true
 [dependencies]
 neoteletext-core.workspace = true
 neoteletext-audio = { workspace = true, features = ["idl"] }
+# page-rules.md RULE-46 to RULE-48: a rule's reports name the rule table's
+# own targets and values, read by its one crate.
+neoteletext-rules.workspace = true
 
 [features]
 # REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types,

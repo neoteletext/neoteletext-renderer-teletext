@@ -16,6 +16,10 @@
 //! - [`state`]: viewer state's messages from the receiver (DEC-6471,
 //!   VS-204), `STATE_PROOF`, `STATE_NONE` and `STATE_OFFER`, which are extension
 //!   events of the input stream but no input.
+//! - [`rules`]: the page rule table's messages from the receiver
+//!   (DEC-6522, RULE-46 to RULE-48), `RULE_EVENT`, `PAGE_STATE` and
+//!   `RULES_FAULT`. Under protocol version 9 a viewer's input reaches a
+//!   channel only inside a `RULE_EVENT`.
 //! - [`pace`]: the pointer's moves at 60 a second, one slot a contact
 //!   (REQ-RCH-031 to REQ-RCH-033); [`contacts`]: the numbers of a touch
 //!   screen's contacts (REQ-RCH-043).
@@ -79,6 +83,7 @@ pub mod keys;
 mod limits;
 pub mod names;
 pub mod pace;
+pub mod rules;
 pub mod session;
 pub mod state;
 pub mod wire;

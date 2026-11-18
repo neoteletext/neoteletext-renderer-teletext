@@ -7,9 +7,9 @@ use super::{
     ACTION, Action, COMPOSE, CORE_LAST_TYPE, DEVICE_MASK, DEVICE_SHIFT, DRAWING_HOVER, DRAWING_HOVER_LEAVE, Device,
     EVENT, Event, FIRST_EXTENSION, FOCUS_IN, FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO,
     HOVER, HOVER_LEAVE, InputError, Item, KEY, KEY_RESERVED, Key, KeyCode, LAST_CORE, LAST_EXTENSION, MAX_PICK_OFFSET,
-    MAX_PICK_POSITION, MOUSE, MOUSE_RESERVED, Mouse, MouseAction, NEVER_UTF8, NEVER_UTF8_FROM, PASTE, PICK, Pick,
-    Point, RESIZE, RESUME, Resume, SELECT, STATE_NONE, STATE_OFFER, STATE_PROOF, Select, Stamp, TOUCH, TOUCH_RESERVED,
-    Touch, WHEEL, WHEEL_RESERVED, Wheel, check_text, is_page_parameters, printable,
+    MAX_PICK_POSITION, MOUSE, MOUSE_RESERVED, Mouse, MouseAction, NEVER_UTF8, NEVER_UTF8_FROM, PAGE_STATE, PASTE, PICK,
+    Pick, Point, RESIZE, RESUME, RULE_EVENT, RULES_FAULT, Resume, SELECT, STATE_NONE, STATE_OFFER, STATE_PROOF, Select,
+    Stamp, TOUCH, TOUCH_RESERVED, Touch, WHEEL, WHEEL_RESERVED, Wheel, check_text, is_page_parameters, printable,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::{AGENT, RETIRED_PAGE_BIT};
@@ -207,7 +207,22 @@ fn read_extension<'a>(kind: u8, reader: &mut Reader<'a>) -> Result<Event<'a>, In
             crate::state::read_offer(payload)?;
             Event::StateOffer
         }
+        RULE_EVENT | PAGE_STATE | RULES_FAULT => read_rules(kind, payload).map_err(whole)?,
         _ => Event::Extension { kind, payload },
+    })
+}
+
+/// The payload of one of the rule table's three messages (RULE-46 to
+/// RULE-48): the stamp, then what [`crate::rules`] reads.
+fn read_rules(kind: u8, payload: &[u8]) -> Result<Event<'_>, InputError> {
+    let mut reader = Reader::new(payload);
+    let on = read_stamp(&mut reader)?;
+    let stamp_bytes = reader.used();
+    let rest = payload.get(stamp_bytes..).unwrap_or(&[]);
+    Ok(match kind {
+        RULE_EVENT => Event::RuleEvent(crate::rules::read_rule_event(on, rest)?),
+        PAGE_STATE => Event::PageState(crate::rules::read_page_state(on, stamp_bytes, rest)?),
+        _ => Event::RulesFault(crate::rules::read_rules_fault(on, rest)?),
     })
 }
 
@@ -394,13 +409,34 @@ fn read_key<'a>(reader: &mut Reader<'a>) -> Result<Key<'a>, InputError> {
     Ok(Key { on, action, key, mods, text, base, lost })
 }
 
-/// Decodes one whole message (DOC-1929): whole items only, at most
+/// Decodes one whole message of the top level of the stream (DOC-1929),
+/// as a channel's server reads it: whole items only, at most
 /// [`MAX_MESSAGE`] bytes, each passed to `each` in order.
 ///
 /// # Errors
-/// Any item DOC-1781 refuses, an item cut by the message's end, or a
-/// message over [`MAX_MESSAGE`].
+/// Any item DOC-1781 refuses, an item cut by the message's end, a
+/// message over [`MAX_MESSAGE`], or a viewer's input outside a
+/// `RULE_EVENT` ([`InputError::Bare`], RULE-46), at which nothing more of
+/// the message is read.
 pub fn read_message<'a>(message: &'a [u8], each: &mut dyn FnMut(Item<'a>)) -> Result<(), InputError> {
+    read_whole(message, true, each)
+}
+
+/// Decodes whole items with no rule about which may stand where: what a
+/// `RULE_EVENT` carries, read by a program that has taken it out
+/// ([`crate::rules::RuleEvent::input`] reads one event and its PICK), and
+/// what a tool or a test reads of recorded input. A server reads the
+/// stream itself with [`read_message`].
+///
+/// # Errors
+/// As [`read_message`], but a viewer's input is no error here.
+pub fn read_items<'a>(bytes: &'a [u8], each: &mut dyn FnMut(Item<'a>)) -> Result<(), InputError> {
+    read_whole(bytes, false, each)
+}
+
+/// Whole items of `message`, each passed to `each`; at the top level of
+/// the stream a viewer's input is refused (RULE-46).
+fn read_whole<'a>(message: &'a [u8], top_level: bool, each: &mut dyn FnMut(Item<'a>)) -> Result<(), InputError> {
     if message.len() > MAX_MESSAGE {
         return Err(InputError::Message);
     }
@@ -409,6 +445,10 @@ pub fn read_message<'a>(message: &'a [u8], each: &mut dyn FnMut(Item<'a>)) -> Re
         InputError::Wire(WireError::Incomplete) => InputError::Message,
         other => other,
     })? {
+        // RULE-46: a viewer's input travels only inside a RULE_EVENT.
+        if top_level && super::is_page_input(&item) {
+            return Err(InputError::Bare);
+        }
         each(item);
         rest = rest.get(used..).unwrap_or(&[]);
     }
@@ -445,9 +485,28 @@ impl<const N: usize> StreamDecoder<N> {
     /// not yet whole.
     ///
     /// # Errors
-    /// Any item DOC-1781 refuses, or an item longer than `N`: either ends
-    /// the stream.
-    pub fn push(&mut self, mut bytes: &[u8], each: &mut dyn FnMut(Item<'_>)) -> Result<(), InputError> {
+    /// Any item DOC-1781 refuses, an item longer than `N`, or a viewer's
+    /// input outside a `RULE_EVENT` ([`InputError::Bare`], RULE-46): each
+    /// ends the stream.
+    pub fn push(&mut self, bytes: &[u8], each: &mut dyn FnMut(Item<'_>)) -> Result<(), InputError> {
+        self.push_whole(bytes, true, each)
+    }
+
+    /// Takes `bytes` as [`StreamDecoder::push`] does, with no rule about
+    /// which items may stand where, as [`read_items`] reads a message.
+    ///
+    /// # Errors
+    /// As [`StreamDecoder::push`], but a viewer's input is no error here.
+    pub fn push_items(&mut self, bytes: &[u8], each: &mut dyn FnMut(Item<'_>)) -> Result<(), InputError> {
+        self.push_whole(bytes, false, each)
+    }
+
+    fn push_whole(
+        &mut self,
+        mut bytes: &[u8],
+        top_level: bool,
+        each: &mut dyn FnMut(Item<'_>),
+    ) -> Result<(), InputError> {
         while !bytes.is_empty() {
             let room = N.saturating_sub(self.length);
             if room == 0 {
@@ -462,6 +521,9 @@ impl<const N: usize> StreamDecoder<N> {
             loop {
                 let pending = self.held.get(used..self.length).unwrap_or(&[]);
                 match read(pending) {
+                    // RULE-46: a viewer's input travels only inside a
+                    // RULE_EVENT.
+                    Ok(Some((item, _))) if top_level && super::is_page_input(&item) => return Err(InputError::Bare),
                     Ok(Some((item, length))) => {
                         each(item);
                         used = used.saturating_add(length);

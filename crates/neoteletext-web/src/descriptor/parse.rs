@@ -183,33 +183,20 @@ impl Descriptor {
     /// names no address, and the object's presence alone makes the channel
     /// live. It is always a WebSocket (DEC-1738), so nothing names a transport.
     fn read_push(&mut self, reader: &mut JsonReader<'_>, base: &Url, channel: bool) -> Result<(), DescriptorError> {
-        let (url, input, wheel) = Self::parse_push(reader, base, channel)?;
-        // Keys go back only to the descriptor's own origin, for a
-        // service as for a channel (DOC-1865, finding F-90).
-        if input && !url.origin().same(&base.origin()) {
-            return Err(DescriptorError::Invalid(Member::PushInput));
-        }
+        let url = Self::parse_push(reader, base, channel)?;
+        // The input session's messages go back only to the descriptor's
+        // own origin, for a service as for a channel (DOC-1865, finding
+        // F-90).
+        self.push_same_origin = url.origin().same(&base.origin());
         self.push = Some(url);
-        // The wheel is a kind of input: a channel that takes none takes no wheel.
-        if wheel && !input {
-            return Err(DescriptorError::Invalid(Member::PushWheel));
-        }
-        self.input = input;
-        self.wheel = wheel;
         Ok(())
     }
 
-    fn parse_push(
-        reader: &mut JsonReader<'_>,
-        base: &Url,
-        channel: bool,
-    ) -> Result<(Url, bool, bool), DescriptorError> {
+    fn parse_push(reader: &mut JsonReader<'_>, base: &Url, channel: bool) -> Result<Url, DescriptorError> {
         if reader.next_token()? != Some(Token::BeginObject) {
             return Err(DescriptorError::Invalid(Member::Push));
         }
         let mut url = None;
-        let mut input = None;
-        let mut wheel = None;
         while let Some(token) = reader.next_token()? {
             let key = match token {
                 Token::Key(key) => key,
@@ -223,22 +210,13 @@ impl Descriptor {
                 let value: TextBuf<MAX_URL_LENGTH> =
                     text(expect_string(reader.next_token()?, Member::PushAddress)?, Member::PushAddress)?;
                 url = Some(address(base, value.as_str(), Member::PushAddress)?);
-            } else if key.equals(b"input") {
-                if input.is_some() {
-                    return Err(DescriptorError::Duplicate(Member::PushInput));
-                }
-                input = match reader.next_token()? {
-                    Some(Token::Bool(value)) => Some(value),
-                    _ => return Err(DescriptorError::Invalid(Member::PushInput)),
-                };
-            } else if key.equals(b"wheel") {
-                if wheel.is_some() {
-                    return Err(DescriptorError::Duplicate(Member::PushWheel));
-                }
-                wheel = match reader.next_token()? {
-                    Some(Token::Bool(value)) => Some(value),
-                    _ => return Err(DescriptorError::Invalid(Member::PushWheel)),
-                };
+            } else if key.equals(b"input") || key.equals(b"wheel") {
+                // Withdrawn by push protocol 9 (page-rules.md RULE-49): a
+                // page's rule table is the only thing that asks for input,
+                // so a descriptor written for an earlier version still
+                // reads, and these two members mean nothing.
+                let first = reader.next_token()?.ok_or(DescriptorError::Invalid(Member::Push))?;
+                reader.skip(first)?;
             } else {
                 return Err(DescriptorError::Unknown);
             }
@@ -251,6 +229,6 @@ impl Descriptor {
         if !url.scheme().is_websocket() {
             return Err(DescriptorError::Invalid(Member::PushAddress));
         }
-        Ok((url, input.unwrap_or(false), wheel.unwrap_or(false)))
+        Ok(url)
     }
 }

@@ -171,7 +171,7 @@ impl Held {
 )]
 mod tests {
     use super::*;
-    use crate::event::{Device, Mouse, Point, Touch, read_message};
+    use crate::event::{Device, Mouse, Point, Touch, read_items};
     use std::vec::Vec;
 
     /// The stamp's bytes on page 100, sub-code 0000.
@@ -180,7 +180,7 @@ mod tests {
     fn released_by(stream: &[u8]) -> Vec<Released> {
         let mut held = Held::new();
         let mut released = Vec::new();
-        read_message(stream, &mut |item| held.take(&item, &mut |each, _| released.push(each))).unwrap();
+        read_items(stream, &mut |item| held.take(&item, &mut |each, _| released.push(each))).unwrap();
         held.release_all(&mut |each, _| released.push(each));
         released
     }
@@ -198,7 +198,7 @@ mod tests {
         ];
         let mut held = Held::new();
         let mut released = Vec::new();
-        read_message(&stream, &mut |item| held.take(&item, &mut |each, on| released.push((each, on)))).unwrap();
+        read_items(&stream, &mut |item| held.take(&item, &mut |each, on| released.push((each, on)))).unwrap();
         assert_eq!(released, [(Released::Key(KeyCode::Functional(80)), ON), (Released::Button(0), ON)]);
         assert!(!held.any(), "nothing held after");
     }
@@ -225,7 +225,7 @@ mod tests {
         ];
         let mut held = Held::new();
         let mut released = Vec::new();
-        read_message(&stream, &mut |item| held.take(&item, &mut |each, _| released.push(each))).unwrap();
+        read_items(&stream, &mut |item| held.take(&item, &mut |each, _| released.push(each))).unwrap();
         assert_eq!(released, [Released::Button(0), Released::Contact(3)]);
         held.release_all(&mut |each, _| released.push(each));
         assert_eq!(released[2..], [Released::Button(2), Released::Contact(5)], "what is left, on a lost connection");

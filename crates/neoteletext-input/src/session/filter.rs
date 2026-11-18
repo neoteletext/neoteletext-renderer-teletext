@@ -10,8 +10,13 @@ use crate::caps::TOUCH_CAP;
 use crate::event::{Device, Event, Item, KeyCode, needs};
 
 impl<const KEPT: usize> SessionOf<KEPT> {
-    /// `item` as it is sent, or `None`.
-    pub(super) fn filter<'a>(&self, item: &Item<'a>) -> Option<Item<'a>> {
+    /// `item` as it goes under the capabilities agreed, or `None` when it
+    /// does not go. Under protocol version 9 a viewer's input goes only
+    /// inside a `RULE_EVENT` (RULE-46): a receiver encodes what this gives
+    /// as that event's body, and [`SessionOf::send`] takes the
+    /// `RULE_EVENT`.
+    #[must_use]
+    pub fn carried<'a>(&self, item: &Item<'a>) -> Option<Item<'a>> {
         let event = match *item {
             Item::Text(text) => return Some(Item::Text(text)),
             Item::Event(event) => event,
