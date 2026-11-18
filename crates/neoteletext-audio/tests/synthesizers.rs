@@ -134,11 +134,29 @@ fn families() -> Vec<Family> {
             image: dump,
             faulty: bad_dump,
         },
-        analogue(
-            Codec::Synth106,
-            synth106::Patch::DEFAULT.to_bytes().to_vec(),
-            synth106::Patch::DEFAULT.with(synth106::Slider::VcfFrequency, 30).to_bytes().to_vec(),
-        ),
+        {
+            // S106-38: a bank image of function type 30 messages, patch k
+            // carrying k in its byte e.
+            let packed = |patch: &synth106::Patch| {
+                let mut bytes = [0; synth106::interface::MOST_PATCH_BYTES];
+                let length = synth106::interface::pack_patch(synth106::Model::Synth106, patch, 0, 0, &mut bytes);
+                bytes[..length].to_vec()
+            };
+            let plain = packed(&synth106::Patch::DEFAULT);
+            Family {
+                codec: Codec::Synth106,
+                faulty: faulty(&plain),
+                dull: packed(&synth106::Patch::DEFAULT.with(synth106::Slider::VcfFrequency, 30)),
+                plain,
+                image: |patches| {
+                    let mut image = patches.concat();
+                    for (program, patch) in image.chunks_mut(synth106::interface::PATCH_MESSAGE_BYTES).enumerate() {
+                        patch[4] = program as u8;
+                    }
+                    image
+                },
+            }
+        },
         analogue(Codec::SynthD, synthd::Patch::DEFAULT.to_bytes().to_vec(), synthd_patch.to_bytes().to_vec()),
         analogue(
             Codec::Synth8,

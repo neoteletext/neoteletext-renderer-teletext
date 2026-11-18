@@ -103,6 +103,9 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio-instruments", features: "synth7" },
     // The analogue building blocks (DEC-6429).
     Build { package: "neoteletext-audio-instruments", features: "analog" },
+    // Every family's interface without its sound, for the server
+    // (server.md, SRV-88).
+    Build { package: "neoteletext-audio-instruments", features: "interface" },
     // synth106 and synth60 (TODO-6431).
     Build { package: "neoteletext-audio-instruments", features: "synth106" },
     // synthD (TODO-6432).

@@ -108,6 +108,9 @@ fn the_switch_bytes_mean_what_the_table_says() {
     assert_eq!((all.vca_gate, all.envelope_inverted, all.pwm), (true, true, PwmSource::Manual));
 }
 
+// Verifies S106-31: the 18 values a sender writes are the nearest Juno-106
+// patch, I+II as II and the envelope as manual; the sub-oscillator's switch
+// is not among them, and its level is written as it stands.
 #[test]
 fn what_the_synth106_has_not_is_written_as_the_nearest_it_has() {
     let mut patch = Patch::DEFAULT.with(Slider::Sub, 90).with(Slider::Noise, 200);
@@ -117,7 +120,10 @@ fn what_the_synth106_has_not_is_written_as_the_nearest_it_has() {
     patch.sub = false;
     patch.hpf = 9;
     let read = Patch::from_bytes(&patch.to_bytes()).expect("a patch");
-    assert_eq!((read.chorus, read.pwm, read.get(Slider::Sub), read.hpf), (ChorusMode::Two, PwmSource::Manual, 0, 3));
+    assert_eq!(
+        (read.chorus, read.pwm, read.get(Slider::Sub), read.sub, read.hpf),
+        (ChorusMode::Two, PwmSource::Manual, 90, true, 3)
+    );
 }
 
 #[test]

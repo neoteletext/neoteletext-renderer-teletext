@@ -1,21 +1,29 @@
-//! A patch: the panel of the instrument as a fixed record.
+//! A patch: the panel of the instrument as a fixed record, and its 18
+//! values (S106-17, S106-18, S106-22).
 //!
-//! synth106 sends and takes a patch as 18 bytes, sixteen sliders and
-//! two bytes of switches, and [`Patch::from_bytes`] reads exactly those,
-//! checking each. synth60's panel has the same sliders and a few more
-//! switch positions (a switch for the sub-oscillator, a third source for
-//! the pulse width, a third chorus setting), which the same record
-//! holds; synth60 itself has no MIDI, so there is no byte form of its
-//! own.
+//! A synth106 patch is the Juno-106's 18 values: sixteen sliders and two
+//! bytes of switches, which [`Patch::from_bytes`] reads exactly, checking
+//! each. synth60's panel has the same sliders and three settings more
+//! (the sub-oscillator switch, the envelope as the pulse width's source,
+//! and chorus I+II), which the same record holds and which a synth60
+//! patch carries as three JU-06A controller values after the 18 (S106-31,
+//! [`super::interface`]).
 //!
-//! Source: Roland JUNO-106 owner's manual, "MIDI Implementation",
-//! sections 3.1 to 3.4 (the last printed page): the patch messages of 18
-//! value bytes and the parameter number table. Roland's JUNO-106/SYSTEM-8
+//! Source: Roland JUNO-106 owner's manual, page 35, "MIDI
+//! Implementation", sections 3.1 to 3.4: the patch messages of 18 value
+//! bytes and the parameter number table. Roland's JUNO-106/SYSTEM-8
 //! Parameter Correspondence Table (2016) lists the same controls. Roland
 //! JUNO-60 service notes, page 16, tables 3 and 4: synth60's
 //! programmable switches.
 
-use super::Model;
+/// Which instrument.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Model {
+    /// synth106.
+    Synth106,
+    /// synth60.
+    Synth60,
+}
 
 /// Bytes of a synth106 patch.
 ///
@@ -118,7 +126,7 @@ pub enum PwmSource {
     Envelope,
 }
 
-/// Why eighteen bytes are no patch.
+/// Why eighteen bytes, or one parameter's value, are no patch (S106-19).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PatchError {
     /// The slider of this parameter number is above [`SLIDER_MAX`].
@@ -128,7 +136,15 @@ pub enum PatchError {
     Range,
     /// The second switch byte has one of its three top bits set.
     Switches,
+    /// No parameter has this number: the Juno-106's are 0 to 17.
+    Parameter(u8),
 }
+
+/// The parameter number of the first switch byte (S106-17).
+pub const FIRST_SWITCHES: u8 = 16;
+/// The parameter number of the second switch byte (S106-17).
+pub const SECOND_SWITCHES: u8 = 17;
+const _: () = assert!(FIRST_SWITCHES as usize == SLIDERS && SECOND_SWITCHES as usize + 1 == PATCH_BYTES);
 
 /// Byte 16, bits 0 to 2: the range, one bit for each.
 ///
@@ -221,9 +237,9 @@ impl Patch {
     /// synth106's flat one, synth60 has a high-pass filter at 235
     /// Hz, which would leave its plain sound without its bass.
     ///
-    /// Source: own choice of a plain starting sound; the positions are
-    /// the schematics' ([`law::SYNTH106`](super::law::SYNTH106) and
-    /// [`law::SYNTH60`](super::law::SYNTH60), `hpf`).
+    /// Source: S106-21, own choice of a plain starting sound; the
+    /// positions are the schematics' (`law::SYNTH106` and `law::SYNTH60`,
+    /// `hpf`).
     #[must_use]
     pub const fn default_for(model: Model) -> Self {
         let mut patch = Self::DEFAULT;
@@ -234,7 +250,10 @@ impl Patch {
         patch
     }
 
-    /// Reads a synth106 patch from its 18 bytes.
+    /// Reads a patch from its 18 values (S106-13, S106-18), with the
+    /// sub-oscillator switch on, the pulse width's source LFO or manual and
+    /// the chorus off, I or II: what the 18 values say on synth60 too
+    /// (S106-32).
     ///
     /// # Errors
     ///
@@ -243,55 +262,87 @@ impl Patch {
     /// name exactly one range; [`PatchError::Switches`] if byte 17 has a
     /// bit set above the five that are defined.
     pub fn from_bytes(bytes: &[u8; PATCH_BYTES]) -> Result<Self, PatchError> {
-        let [values @ .., first, second] = bytes;
-        let mut sliders = [0u8; SLIDERS];
-        for ((slider, &value), number) in sliders.iter_mut().zip(values).zip(0u8..) {
-            if value > SLIDER_MAX {
-                return Err(PatchError::Slider(number));
-            }
-            *slider = value;
+        let mut patch = Self::DEFAULT;
+        for (&value, number) in bytes.iter().zip(0u8..) {
+            patch.set_parameter(number, value)?;
         }
+        patch.sub = true;
+        Ok(patch)
+    }
+
+    /// Sets parameter `number`, 0 to 17, to `value`, as the Juno-106's
+    /// function type `32` message does (S106-17): a slider, or one of the
+    /// two switch bytes whole. The sub-oscillator switch is left as it is;
+    /// a switch byte sets the pulse width's source to LFO or manual and the
+    /// chorus to off, I or II (S106-32). A value that is refused changes
+    /// nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`Patch::from_bytes`], for the one value, and
+    /// [`PatchError::Parameter`] for a number above 17.
+    pub fn set_parameter(&mut self, number: u8, value: u8) -> Result<(), PatchError> {
+        match number {
+            FIRST_SWITCHES => self.set_first_switches(value),
+            SECOND_SWITCHES => self.set_second_switches(value),
+            _ => {
+                let place = self.sliders.get_mut(usize::from(number)).ok_or(PatchError::Parameter(number))?;
+                if value > SLIDER_MAX {
+                    return Err(PatchError::Slider(number));
+                }
+                *place = value;
+                Ok(())
+            }
+        }
+    }
+
+    /// Parameter `number`'s value, 0 to 17, as the 18 values hold it.
+    #[must_use]
+    pub fn parameter(&self, number: u8) -> Option<u8> {
+        match number {
+            FIRST_SWITCHES => Some(self.first_switches()),
+            SECOND_SWITCHES => Some(self.second_switches()),
+            _ => self.sliders.get(usize::from(number)).copied(),
+        }
+    }
+
+    /// Reads the first switch byte (S106-18): range, pulse, sawtooth and
+    /// chorus.
+    fn set_first_switches(&mut self, first: u8) -> Result<(), PatchError> {
         let range = RANGE_BITS.iter().find(|(bits, _)| first & RANGE_MASK == *bits).map(|&(_, range)| range);
         let Some(range) = range.filter(|_| first & !DATA_MASK == 0) else {
             return Err(PatchError::Range);
         };
+        self.range = range;
+        self.pulse = first & PULSE_BIT != 0;
+        self.sawtooth = first & SAWTOOTH_BIT != 0;
+        self.chorus = if first & CHORUS_OFF_BIT != 0 {
+            ChorusMode::Off
+        } else if first & CHORUS_ONE_BIT != 0 {
+            ChorusMode::One
+        } else {
+            ChorusMode::Two
+        };
+        Ok(())
+    }
+
+    /// Reads the second switch byte (S106-18): the pulse width's source,
+    /// the envelope's polarity, the amplifier's control and the high-pass
+    /// filter.
+    fn set_second_switches(&mut self, second: u8) -> Result<(), PatchError> {
         if second & !SWITCHES_MASK != 0 {
             return Err(PatchError::Switches);
         }
-        Ok(Self {
-            sliders,
-            range,
-            pulse: first & PULSE_BIT != 0,
-            sawtooth: first & SAWTOOTH_BIT != 0,
-            sub: true,
-            chorus: if first & CHORUS_OFF_BIT != 0 {
-                ChorusMode::Off
-            } else if first & CHORUS_ONE_BIT != 0 {
-                ChorusMode::One
-            } else {
-                ChorusMode::Two
-            },
-            pwm: if second & PWM_MANUAL_BIT != 0 { PwmSource::Manual } else { PwmSource::Lfo },
-            envelope_inverted: second & ENVELOPE_INVERTED_BIT != 0,
-            vca_gate: second & VCA_GATE_BIT != 0,
-            hpf: HPF_MAX.saturating_sub((second >> HPF_SHIFT) & HPF_MAX),
-        })
+        self.pwm = if second & PWM_MANUAL_BIT != 0 { PwmSource::Manual } else { PwmSource::Lfo };
+        self.envelope_inverted = second & ENVELOPE_INVERTED_BIT != 0;
+        self.vca_gate = second & VCA_GATE_BIT != 0;
+        self.hpf = HPF_MAX.saturating_sub((second >> HPF_SHIFT) & HPF_MAX);
+        Ok(())
     }
 
-    /// The patch as synth106's 18 bytes, as far as that instrument
-    /// has it: I+II is written as II, the envelope as the pulse width's
-    /// source as manual, and a sub-oscillator switched off as a level of
-    /// zero.
-    #[must_use]
-    pub fn to_bytes(&self) -> [u8; PATCH_BYTES] {
-        let mut bytes = [0u8; PATCH_BYTES];
-        let [values @ .., first, second] = &mut bytes;
-        *values = self.sliders;
-        if !self.sub
-            && let Some(level) = values.last_mut()
-        {
-            *level = 0;
-        }
+    /// The first switch byte, as a sender writes it: chorus off as bits 6
+    /// and 5 at `01`, I+II as II (S106-31; `server.md`, SRV-30).
+    fn first_switches(&self) -> u8 {
         let range = RANGE_BITS.iter().find(|(_, range)| *range == self.range).map_or(0, |&(bits, _)| bits);
         let chorus = match self.chorus {
             // As the owner's manual's own example of a patch writes it.
@@ -300,11 +351,29 @@ impl Patch {
             ChorusMode::Two | ChorusMode::Both => 0,
         };
         let flag = |on: bool, bit: u8| if on { bit } else { 0 };
-        *first = range | flag(self.pulse, PULSE_BIT) | flag(self.sawtooth, SAWTOOTH_BIT) | chorus;
-        *second = flag(self.pwm != PwmSource::Lfo, PWM_MANUAL_BIT)
+        range | flag(self.pulse, PULSE_BIT) | flag(self.sawtooth, SAWTOOTH_BIT) | chorus
+    }
+
+    /// The second switch byte, as a sender writes it: the envelope as the
+    /// pulse width's source as manual (S106-31).
+    fn second_switches(&self) -> u8 {
+        let flag = |on: bool, bit: u8| if on { bit } else { 0 };
+        flag(self.pwm != PwmSource::Lfo, PWM_MANUAL_BIT)
             | flag(self.envelope_inverted, ENVELOPE_INVERTED_BIT)
             | flag(self.vca_gate, VCA_GATE_BIT)
-            | (HPF_MAX.saturating_sub(self.hpf.min(HPF_MAX)) << HPF_SHIFT);
+            | (HPF_MAX.saturating_sub(self.hpf.min(HPF_MAX)) << HPF_SHIFT)
+    }
+
+    /// The patch as its 18 values, as a sender writes them (S106-31):
+    /// I+II is written as II and the envelope as the pulse width's source
+    /// as manual, which a synth60 patch's three controller values then
+    /// refine; the sub-oscillator's switch is not among them.
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; PATCH_BYTES] {
+        let mut bytes = [0u8; PATCH_BYTES];
+        for (byte, number) in bytes.iter_mut().zip(0u8..) {
+            *byte = self.parameter(number).unwrap_or(0);
+        }
         bytes
     }
 

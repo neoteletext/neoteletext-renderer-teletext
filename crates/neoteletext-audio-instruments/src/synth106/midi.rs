@@ -1,68 +1,100 @@
-//! synth106's front end to the receiver (MIDI-10, [`crate::midi::Instrument`]):
-//! the common layer ([`crate::midi::common`]) before the instrument's own
-//! message reader, and its patches read from bank index 0 as fixed patches
-//! of its own byte layout.
-//!
-//! This is the interim front end the new carriage was built with. The
-//! family's adopted interface (its family document's messages, control map,
-//! patch form, banks, mapping of program changes and restatement) is to be
-//! built here, replacing [`crate::midi::classic`]'s bridge.
+//! synth106 and synth60 as the receiver plays them ([`crate::midi::Instrument`]):
+//! every message read by the family's [`Tracker`], as
+//! `neoteletext-common/docs/audio/synth106-synth60.md` says, and what it
+//! does to the sound given to the engine ([`Synth106`]).
 
-use crate::midi::classic::{Classic, ClassicFamily, Fronted};
-use crate::midi::common::Config;
+use super::interface::{Effect, Tracker};
+use super::{Patch, Synth106};
+use crate::midi::{Banks, Instrument, Message, Outcome};
 
-use super::Synth106;
+/// synth106 or synth60 as the receiver plays it.
+#[derive(Clone, Debug)]
+pub struct Midi {
+    engine: Synth106,
+    tracker: Tracker,
+    /// Whether the panel has moved since the engine was last given it.
+    /// The engine is given the panel only before a key or before samples,
+    /// so that the messages of one instant (a restatement's program change
+    /// and patch message, S106-40) are one change of the panel, and the
+    /// panel the engine already plays changes nothing (MIDI-97).
+    panel_moved: bool,
+}
 
-/// synth106 as the receiver plays it.
-pub type Midi = Fronted<Synth106>;
-
-/// The instrument's bend at either end, in cents:
-/// [`super::PITCH_BEND_SEMITONES`].
-const BEND_CENTS: u16 = 200;
-const _: () =
-    assert!(super::PITCH_BEND_SEMITONES * crate::midi::common::CENTS_PER_SEMITONE as i32 == BEND_CENTS as i32);
-
-impl ClassicFamily for Synth106 {
-    type Patch = super::Patch;
-    const CONFIG: Config = Config {
-        bend_range_cents: BEND_CENTS,
-        most_bend_range_cents: BEND_CENTS,
-        bank_select: false,
-        non_registered: false,
-    };
-    const CLASSIC: Classic = Classic {
-        controllers: &[crate::midi::controller::MODULATION],
-        voice_bend_range_cents: BEND_CENTS,
-        reset_pedals: &[],
-        expression: false,
-        channel_pressure: false,
-        key_pressure: false,
-    };
-    const PATCH_BYTES: usize = super::patch::PATCH_BYTES;
-    const PROGRAM_CHANNELS: u8 = crate::midi::CHANNEL_MASK + 1;
-
-    fn default_patch(&self) -> Self::Patch {
-        super::Patch::default_for(self.model())
+impl Midi {
+    /// `engine`, behind a fresh tracker of its model.
+    #[must_use]
+    pub fn new(engine: Synth106) -> Self {
+        let tracker = Tracker::new(engine.model());
+        Self { engine, tracker, panel_moved: true }
     }
 
-    fn read_patch(bytes: &[u8]) -> Option<Self::Patch> {
-        super::Patch::from_bytes(bytes.try_into().ok()?).ok()
+    /// The engine.
+    #[must_use]
+    pub const fn engine(&self) -> &Synth106 {
+        &self.engine
     }
 
-    fn set_patch(&mut self, channel: u8, patch: &Self::Patch) {
-        let _ = channel;
-        self.set_patch(patch);
+    /// The state the messages have set.
+    #[must_use]
+    pub const fn tracker(&self) -> &Tracker {
+        &self.tracker
     }
 
-    fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        Synth106::event(self, status, data1, data2);
+    /// The panel as the messages have set it (S106-13).
+    #[must_use]
+    pub const fn panel(&self) -> &Patch {
+        self.tracker.panel()
     }
 
-    fn release_all(&mut self) {
-        Synth106::release_all(self);
+    /// Gives the engine the panel, if it has moved.
+    fn settle(&mut self) {
+        if self.panel_moved {
+            self.panel_moved = false;
+            self.engine.set_patch(self.tracker.panel());
+        }
+    }
+}
+
+impl Instrument for Midi {
+    fn start(&mut self, banks: &Banks<'_>) -> Outcome {
+        let outcome = self.tracker.start(banks);
+        self.panel_moved = true;
+        outcome
+    }
+
+    fn midi(&mut self, message: &Message<'_>, banks: &Banks<'_>) -> Outcome {
+        let (outcome, effect) = self.tracker.take(message, banks);
+        match effect {
+            Effect::None => {}
+            Effect::Panel => self.panel_moved = true,
+            Effect::KeyDown(key) => {
+                // A note sounds with the panel as it stands at its instant
+                // (S106-20).
+                self.settle();
+                self.engine.key_down(key);
+            }
+            Effect::KeyUp(key) => self.engine.key_up(key),
+            Effect::Sustain(down) => self.engine.sustain(down),
+            Effect::AllNotesOff => self.engine.all_notes_off(),
+            Effect::AllSoundOff => self.engine.all_sound_off(),
+            Effect::ResetControllers => self.engine.reset_controllers(),
+            Effect::Bend(value) => self.engine.set_bend(value),
+            Effect::BendRange(cents) => self.engine.set_bend_range_cents(cents),
+            Effect::Volume(value) => self.engine.set_volume(value),
+            Effect::Wheel(value) => self.engine.set_wheel(value),
+        }
+        outcome
+    }
+
+    fn lost(&mut self) {
+        self.tracker.lost();
+        self.engine.release_all();
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        Synth106::render(self, out);
+        if !out.is_empty() {
+            self.settle();
+        }
+        self.engine.render(out);
     }
 }

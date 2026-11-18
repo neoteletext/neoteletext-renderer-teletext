@@ -87,7 +87,7 @@ extern crate std;
 pub mod analog;
 pub mod midi;
 pub mod output;
-#[cfg(feature = "synth106")]
+#[cfg(feature = "interface")]
 pub mod synth106;
 #[cfg(feature = "synth53")]
 pub mod synth53;

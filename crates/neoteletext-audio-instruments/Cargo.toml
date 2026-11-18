@@ -19,8 +19,11 @@ publish.workspace = true
 default = ["synth6581", "synth7"]
 # synth6581 and synth8580 (codec 12, MIDI-107; REQ-6412 item 4).
 synth6581 = []
-# The interfaces alone, for the server (`server.md`, SRV-87, SRV-88): each
-# family's tables, readers, packers and trackers, with no synthesis.
+# Every family's interface alone, for the server (`server.md`, SRV-87,
+# SRV-88): which messages it takes, its patch's packer and check, its bank
+# image's builder and reader, and its restatement's tracker. No synthesis
+# code, no allocation, no floating point. A family whose interface module
+# is also its synthesis's own (synth106, synthD, synth8) turns it on.
 interface = []
 # synth7 (codec 13, its banks codec 19, MIDI-107; REQ-6412 items 5 and 6).
 synth7 = []
@@ -30,7 +33,7 @@ synth7 = []
 analog = []
 # synth106 and synth60, made from the analogue building blocks
 # (TODO-6431), codec 14. Not on by default.
-synth106 = ["analog"]
+synth106 = ["analog", "interface"]
 # synthD, made from the analogue building blocks
 # (TODO-6432), codec 15. Not on by default.
 synthd = ["analog"]
