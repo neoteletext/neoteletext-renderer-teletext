@@ -3,10 +3,12 @@
 //! input to 16-bit mono samples at 48,000 Hz (REQ-6412).
 //!
 //! An instrument is a codec of the profile, and a block is 20 milliseconds
-//! of the instrument's input: register images for synth6581, timed MIDI
-//! messages for synth7. This crate holds the instruments alone. It reads
-//! no record and drives no hardware; the audio receiver gives it blocks and
-//! a port's voice sink takes its samples.
+//! of the instrument's input: a list of timed MIDI 1.0 events (module
+//! [`midi`], `neoteletext-common/docs/audio/midi-architecture.md`), which
+//! the receiver plays into each family through [`midi::Instrument`]. This
+//! crate holds the instruments and that MIDI layer alone. It reads no
+//! record and drives no hardware; the audio receiver gives it blocks and a
+//! port's voice sink takes its samples.
 //!
 //! Everything here is `no_std`, integer-only and allocation-free; every
 //! buffer has a size fixed by its type. No input makes a block cost more
