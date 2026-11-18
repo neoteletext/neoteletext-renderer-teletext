@@ -26,6 +26,7 @@ mod noto;
 #[rustfmt::skip]
 mod g3;
 pub mod conformance;
+mod joining;
 #[cfg(feature = "glyph-cache")]
 mod line_cache;
 mod loaded_font;
@@ -34,6 +35,7 @@ use crate::charset::{CharRef, CharSet, compose, to_unicode, without_dot_below};
 use crate::consts::{CELL_FIELD_LINES, CELL_HEIGHT, DIACRITIC_NONE, G3_CODES, G3_FIRST_CODE};
 use conformance::{FONT_SET_COUNT, font_set_of};
 
+pub use joining::{JOINED_SETS, Joining, JoiningClass, joining, joining_in};
 #[cfg(feature = "glyph-cache")]
 pub use line_cache::GlyphLineCache;
 pub use loaded_font::{FontTableError, LoadedFont, LoadedGlyph};
