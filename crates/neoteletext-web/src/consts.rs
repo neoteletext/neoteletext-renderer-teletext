@@ -2,7 +2,9 @@
 //! with the clause it comes from (implementation decision 6). Teletext
 //! values come only from `neoteletext_core::consts`.
 
-use neoteletext_core::consts::{FIELD_PERIOD_US, FLASH_CYCLE_US, FLASH_UNITS};
+use neoteletext_core::consts::{
+    FLASH_CYCLE_US, FLASH_UNIT_TICKS, FLASH_UNITS, PRESENTATION_TICKS_PER_SECOND, presentation_tick_due_us,
+};
 
 // ---------------------------------------------------------------------------
 // Time: the caller's clock counts microseconds (REQ-GEN-005).
@@ -453,20 +455,21 @@ pub const ZXNET_MAX_PAGES: usize = neoteletext_core::limits::PAGE_NUMBERS;
 // ---------------------------------------------------------------------------
 
 /// The shortest interval between two legitimately different renderings of
-/// one page: one unit of the Level 2.5 and 3.5 flash cycle, a twelfth of
-/// a second (EN 300 706 Table 29, Additional Flash Functions, timed as
-/// decision E.48 says). With slow and fast flash on one page, the slow
-/// flash goes off at unit 9 and the fast phases change at every second
-/// unit, so two changes can be one unit apart, and none closer. A port
-/// may hold a page's frames to one in each such interval, keeping the
-/// newest, without losing any change a viewer could see (NeoTeletext's
-/// security review, finding F-11). Rounded down, so never longer than a
-/// unit.
-pub const MIN_FRAME_INTERVAL_US: u64 = FLASH_CYCLE_US / FLASH_UNITS as u64;
-// Twelve intervals fit in one cycle: the interval is not longer than a unit.
-const _: () = assert!(MIN_FRAME_INTERVAL_US * (FLASH_UNITS as u64) <= FLASH_CYCLE_US);
-// Nor shorter than one field of a 50-field display.
-const _: () = assert!(MIN_FRAME_INTERVAL_US >= FIELD_PERIOD_US);
+/// one page: one tick of the presentation clock, a sixtieth of a second
+/// (neoteletext-common animation.md ANIM-1). Everything a receiver shows is
+/// timed on that clock, so a flash phase, a cycling object's frame, a
+/// rule's animation and the end of an atomic frame each change a picture
+/// on a tick, and no two changes are closer. A port may hold a page's
+/// frames to one in each such interval, keeping the newest, without losing
+/// any change a viewer could see (NeoTeletext's security review, finding
+/// F-11). Before the clock it was one unit of the Level 2.5 and 3.5 flash
+/// cycle, a twelfth of a second, which is five of these. Rounded down, so
+/// never longer than a tick.
+pub const MIN_FRAME_INTERVAL_US: u64 = presentation_tick_due_us(1);
+// Sixty intervals fit in one second: the interval is not longer than a tick.
+const _: () = assert!(MIN_FRAME_INTERVAL_US * (PRESENTATION_TICKS_PER_SECOND as u64) <= FLASH_CYCLE_US);
+// And a flash unit, the least interval before the clock, is whole ticks.
+const _: () = assert!(FLASH_UNIT_TICKS as u64 * MIN_FRAME_INTERVAL_US <= FLASH_CYCLE_US / FLASH_UNITS as u64);
 
 // ---------------------------------------------------------------------------
 // Atomic frames and sprite sheets (neoteletext-common animation.md ANIM-2,

@@ -41,35 +41,17 @@ pub mod state;
 pub mod subpages;
 
 pub use neoteletext_audio::record::{
-    TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_NAPLPS, TYPE_REDIRECT, TYPE_REGIS,
-    TYPE_REGIS_CURSOR, TYPE_SUBPAGES,
+    TYPE_ANIMATE, TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_FRAME, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_NAPLPS,
+    TYPE_NAPLPS_OBJECTS, TYPE_REDIRECT, TYPE_REGIS, TYPE_REGIS_CURSOR, TYPE_RULES, TYPE_RULES_QUERY, TYPE_SHEET,
+    TYPE_SPRITES, TYPE_SUBPAGES,
 };
 
-/// Record type: a page's rule table (page-rules.md RULE-41).
-pub const TYPE_RULES: u8 = 21;
-/// Record type: a query of a page's rule state (RULE-47).
-pub const TYPE_RULES_QUERY: u8 = 22;
-/// Record type: animation operations (animation.md ANIM-6).
-pub const TYPE_ANIMATE: u8 = 23;
-/// Record type: a sub-page's teletext sprites (ANIM-7).
-pub const TYPE_SPRITES: u8 = 24;
-/// Record type: a sub-page's NAPLPS objects (ANIM-11).
-pub const TYPE_NAPLPS_OBJECTS: u8 = 25;
-/// Record type: bytes of a page's sprite sheet (ANIM-17).
-pub const TYPE_SHEET: u8 = 26;
-/// Record type: the begin or the end of an atomic frame (ANIM-2).
-pub const TYPE_FRAME: u8 = 27;
-
-// The audio receiver leaves these seven alone by their numbers
-// (`is_channel_type`), which must be the numbers read here.
-const _: () = {
-    let mut kind = TYPE_RULES;
-    while kind <= TYPE_FRAME {
-        assert!(neoteletext_audio::record::is_channel_type(kind));
-        kind += 1;
-    }
-    assert!(TYPE_RULES == state::TYPE_STATE_KEEP_OFFER + 1 && !neoteletext_audio::record::is_channel_type(kind));
-};
+// ANIM-1: the rule table's ticks and the core's are one clock's. The rule
+// table's crate has no dependency (page-rules.md RULE-56) and the core
+// none either (REQ-GEN-017), so each states the figure, and here, where
+// both are linked, they are held equal.
+const _: () =
+    assert!(neoteletext_rules::limits::TICKS_PER_SECOND == neoteletext_core::consts::PRESENTATION_TICKS_PER_SECOND);
 
 // The rule table's crate has no dependency (page-rules.md RULE-56), so it
 // states the page and sub-code bounds itself; here both are linked, and

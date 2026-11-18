@@ -10,6 +10,10 @@ use neoteletext_rules::table::TargetKind;
 // ANIM-1: the two crates' ticks are one clock's.
 const _: () =
     assert!(neoteletext_core::consts::PRESENTATION_TICKS_PER_SECOND == neoteletext_rules::limits::TICKS_PER_SECOND);
+// RULE-13: a rule names the controls a teletext page can have, 1 to 32.
+// The web crate may not use the core's `controls` (the layer table), so
+// the two figures are held equal here, where both are linked.
+const _: () = assert!(neoteletext_core::controls::MAX_CONTROLS == neoteletext_rules::limits::MAX_CONTROL as usize);
 // ANIM-6, ANIM-14: and their ranges are the same ranges.
 const _: () = assert!(neoteletext_core::limits::LAST_FRAME == neoteletext_rules::limits::MAX_FRAME);
 const _: () = assert!(neoteletext_core::limits::MAX_CYCLE_PERIOD == neoteletext_rules::limits::MAX_CYCLE_PERIOD);

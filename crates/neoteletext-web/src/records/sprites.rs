@@ -28,11 +28,18 @@ use neoteletext_rules::limits::{MAX_FRAME, MAX_LAYER};
 
 use super::{RecordFault, TYPE_SPRITES, take_place, take_u16, write_packets};
 
-/// The most sprites a sub-page has (ANIM-7, ANIM-16). The engine core's
-/// limits define the same figure for the renderer; this is the record's.
-pub const MAX_SPRITES: usize = 32;
-/// The most frames a sprite has (ANIM-14): frames 0 to 15.
-pub const MAX_OBJECT_FRAMES: usize = MAX_FRAME as usize + 1;
+/// The most sprites a sub-page has (ANIM-7, ANIM-16): the engine core's
+/// limit, which the renderer holds, so that a record never gives more
+/// than is drawn.
+pub const MAX_SPRITES: usize = neoteletext_core::limits::MAX_SPRITES;
+/// The most frames a sprite has (ANIM-14): frames 0 to 15, the core's
+/// limit too.
+pub const MAX_OBJECT_FRAMES: usize = neoteletext_core::limits::MAX_OBJECT_FRAMES;
+// And the highest frame an operation of the rule table's crate names is
+// the last of them (ANIM-6).
+const _: () = assert!(MAX_OBJECT_FRAMES == MAX_FRAME as usize + 1);
+// A layer, likewise: the record's highest is the core's.
+const _: () = assert!(MAX_LAYER == neoteletext_core::limits::LAST_LAYER);
 /// The fixed fields: page, sub-code, count and the reserved byte.
 const FIXED: usize = 2 + 2 + 1 + 1;
 /// A sprite's fixed fields, before its object references.

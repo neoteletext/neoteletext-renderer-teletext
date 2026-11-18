@@ -90,6 +90,23 @@ pub const TYPE_STATE_END: u8 = 19;
 /// Record type: an offer to keep viewer state (DEC-6471, VS-204), read by
 /// the web agent; this receiver leaves it alone.
 pub const TYPE_STATE_KEEP_OFFER: u8 = 20;
+/// Record type: a page's rule table (neoteletext-common page-rules.md
+/// RULE-41), read by neoteletext-web's record reader, as the six that
+/// follow are; this receiver leaves them alone.
+pub const TYPE_RULES: u8 = 21;
+/// Record type: a query of a page's rule state (RULE-47).
+pub const TYPE_RULES_QUERY: u8 = 22;
+/// Record type: animation operations (neoteletext-common animation.md
+/// ANIM-6).
+pub const TYPE_ANIMATE: u8 = 23;
+/// Record type: a sub-page's teletext sprites (ANIM-7).
+pub const TYPE_SPRITES: u8 = 24;
+/// Record type: a sub-page's NAPLPS objects (ANIM-11).
+pub const TYPE_NAPLPS_OBJECTS: u8 = 25;
+/// Record type: bytes of a page's sprite sheet (ANIM-17).
+pub const TYPE_SHEET: u8 = 26;
+/// Record type: the begin or the end of an atomic frame (ANIM-2).
+pub const TYPE_FRAME: u8 = 27;
 
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
@@ -100,7 +117,8 @@ pub const fn is_input_type(kind: u8) -> bool {
 
 /// Whether a record type is one of the channel's records beside sound
 /// (DOC-1951): the input profile's, the index, LOG, links, sub-pages,
-/// redirect, denied, ReGIS, NAPLPS and the three of viewer state. The audio
+/// redirect, denied, ReGIS, NAPLPS, the three of viewer state, and the seven
+/// of the page rule table and animation. The audio
 /// receiver leaves every one alone, and counts none as refused.
 #[must_use]
 pub const fn is_channel_type(kind: u8) -> bool {
@@ -118,7 +136,14 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_STATE_CHALLENGE
         || kind == TYPE_STATE_END
         || kind == TYPE_STATE_KEEP_OFFER
-        || matches!(kind, 21..=27) // RULES to FRAME, which `neoteletext_web::records` defines and asserts (RULE-41, ANIM-2)
+        // The page rule table's and animation's seven (RULE-41, ANIM-2).
+        || kind == TYPE_RULES
+        || kind == TYPE_RULES_QUERY
+        || kind == TYPE_ANIMATE
+        || kind == TYPE_SPRITES
+        || kind == TYPE_NAPLPS_OBJECTS
+        || kind == TYPE_SHEET
+        || kind == TYPE_FRAME
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,
