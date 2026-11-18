@@ -103,3 +103,29 @@ fn anything_else_is_refused() {
     assert!(encode(page, subcode, &[full], 3, 7, &mut |_| {}).is_ok());
     assert_eq!(MAX_BYTES, 6 + 32 * 42);
 }
+
+/// ANIM-7, RULE-119 (REQ-6529, REQ-6612): the body alone, as a group of a
+/// rule table holds it, is the bytes the reader reads, byte for byte, and
+/// the group's body check accepts it for its page and sub-code; a buffer
+/// one byte short is refused.
+#[test]
+fn a_sprites_body_is_written_alone() {
+    let walker = Sprite::new(10, true, true, 2, -1, (-39, 24), (40, 25), &FRAMES);
+    let (page, subcode) = place();
+    let mut body = [0_u8; MAX_BYTES];
+    let length = write_body(page, subcode, &[walker], &mut body).unwrap();
+    #[rustfmt::skip]
+    let expected: &[u8] = &[
+        0x01, 0x50, 0x00, 0x01, 1, 0,
+        0, 10, 3, 2, 0xFF, 0xD9, 24, 40, 25, 2, 0x0A, 0x05, 0x1D, 0xFF,
+    ];
+    assert_eq!(&body[..length], expected);
+    assert_eq!(read(&body[..length]).unwrap().sprites().collect::<Vec<_>>(), [walker]);
+    let facts = crate::records::body_check(TYPE_SPRITES, &body[..length]).unwrap();
+    assert_eq!((facts.page, facts.sub), (Some(0x150), Some(0x0001)));
+    let mut short = [0_u8; 19];
+    assert_eq!(write_body(page, subcode, &[walker], &mut short), Err(RecordFault::Length));
+    // What the reader refuses, the writer refuses too.
+    let unplaced = Sprite::new(0, true, true, 2, -1, (0, 0), (1, 1), &FRAMES);
+    assert!(write_body(page, subcode, &[unplaced], &mut body).is_err());
+}

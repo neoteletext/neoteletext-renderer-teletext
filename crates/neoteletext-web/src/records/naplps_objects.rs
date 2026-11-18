@@ -253,20 +253,20 @@ pub fn read(body: &[u8]) -> Result<NaplpsObjectsRecord<'_>, RecordFault> {
     Ok(NaplpsObjectsRecord { page, subcode, generation, count, bytes })
 }
 
-/// Writes a `NAPLPS_OBJECTS` record of `objects` for a sub-page and a
-/// stream generation as packets 4/31 of audio service `service`, record
-/// id `record_id`. Returns the packets written.
+/// Writes the body of a `NAPLPS_OBJECTS` record of `objects` for a
+/// sub-page and a stream generation into `body`, and gives its length:
+/// the bytes [`read`] reads, which are also the body a group of a page's
+/// rule table holds for this command (page-rules.md RULE-119), without the
+/// record frame. `body` of [`MAX_BYTES`] always has room.
 ///
 /// # Errors
-/// What the reader would refuse.
-pub fn encode(
+/// What the reader would refuse, or [`RecordFault::Length`] when `body`
+/// is too short.
+pub fn write_body(
     (page, subcode, generation): (PageAddress, SubCode, u16),
     objects: &[NaplpsObject<'_>],
-    service: u8,
-    record_id: u8,
-    out: &mut dyn FnMut(Packet),
+    body: &mut [u8],
 ) -> Result<usize, RecordFault> {
-    let mut body = [0_u8; MAX_BYTES];
     let mut length = 0_usize;
     let mut put = |bytes: &[u8]| {
         let end = length.checked_add(bytes.len()).ok_or(RecordFault::Length)?;
@@ -308,6 +308,25 @@ pub fn encode(
     {
         return Err(RecordFault::BadValue("does not read back"));
     }
+    Ok(length)
+}
+
+/// Writes a `NAPLPS_OBJECTS` record of `objects` for a sub-page and a
+/// stream generation as packets 4/31 of audio service `service`, record
+/// id `record_id`. Returns the packets written.
+///
+/// # Errors
+/// What the reader would refuse.
+pub fn encode(
+    place: (PageAddress, SubCode, u16),
+    objects: &[NaplpsObject<'_>],
+    service: u8,
+    record_id: u8,
+    out: &mut dyn FnMut(Packet),
+) -> Result<usize, RecordFault> {
+    let mut body = [0_u8; MAX_BYTES];
+    let length = write_body(place, objects, &mut body)?;
+    let body = body.get(..length).ok_or(RecordFault::Length)?;
     write_packets(TYPE_NAPLPS_OBJECTS, body, service, record_id, out).ok_or(RecordFault::Length)
 }
 

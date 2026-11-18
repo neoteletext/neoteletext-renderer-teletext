@@ -143,3 +143,27 @@ fn anything_else_is_refused() {
     assert_eq!(read(&body), Err(RecordFault::Length));
     assert_eq!(MAX_BYTES, 8 + 64 * 40);
 }
+
+/// ANIM-11, RULE-119 (REQ-6529, REQ-6612): the body alone, as a group of
+/// a rule table holds it, is the bytes the reader reads, byte for byte,
+/// and the group's body check accepts it for its page and sub-code; a
+/// buffer one byte short is refused.
+#[test]
+fn a_naplps_objects_body_is_written_alone() {
+    let objects = [macro_object(301, &[0x20, 0x7F])];
+    let mut body = [0_u8; MAX_BYTES];
+    let length = write_body(place(), &objects, &mut body).unwrap();
+    #[rustfmt::skip]
+    let expected: &[u8] = &[
+        0x01, 0x60, 0x00, 0x01, 0x00, 0x09, 1, 0,
+        0x01, 0x2D, 1, 3, 2, 0xFD, 0xFF, 0xF6, 0x01, 0x2C, 0x02, 0x80, 0x01, 0xE0, 0x00, 0x05, 0xFF, 0xFA,
+        2, 0, 0x21, 0, 0x7F, 0,
+        0x20, 0x7F,
+    ];
+    assert_eq!(&body[..length], expected);
+    assert_eq!(read(&body[..length]).unwrap().objects().collect::<Vec<_>>(), objects);
+    let facts = crate::records::body_check(TYPE_NAPLPS_OBJECTS, &body[..length]).unwrap();
+    assert_eq!((facts.page, facts.sub), (Some(0x160), Some(0x0001)));
+    let mut short = [0_u8; 33];
+    assert_eq!(write_body(place(), &objects, &mut short), Err(RecordFault::Length));
+}
