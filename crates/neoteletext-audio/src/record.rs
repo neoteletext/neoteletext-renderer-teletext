@@ -63,14 +63,17 @@ pub const TYPE_DENIED: u8 = 12;
 /// alone. Type 13 is kept for the CHANNEL record (REQ-3581).
 pub const TYPE_REGIS: u8 = 14;
 
-/// Record type: the numbered drawings of a sub-page's ReGIS picture that
-/// are links, and where each leads (REQ-6370), read by the web agent's
-/// record reader; this receiver leaves it alone.
+/// Record type: the numbered drawings of a sub-page's ReGIS picture, or the
+/// objects of its NAPLPS picture (ANIM-11), that are links, and where each
+/// leads (REQ-6370; widened to NAPLPS objects by renderer parity PAR-2,
+/// REQ-6761, its bytes unchanged), read by the web agent's record reader;
+/// this receiver leaves it alone.
 pub const TYPE_DRAWING_LINKS: u8 = 15;
 
-/// Record type: the numbered drawing of a sub-page's ReGIS picture that is
-/// its cursor (REQ-6371), read by the web agent's record reader; this
-/// receiver leaves it alone.
+/// Record type: the numbered drawing of a sub-page's ReGIS picture, or the
+/// object of its NAPLPS picture, that is its cursor (REQ-6371; widened to
+/// NAPLPS objects by renderer parity PAR-2, REQ-6761, its bytes unchanged),
+/// read by the web agent's record reader; this receiver leaves it alone.
 pub const TYPE_REGIS_CURSOR: u8 = 16;
 
 /// Record type: bytes of a sub-page's NAPLPS (REQ-6408 item 2), read by

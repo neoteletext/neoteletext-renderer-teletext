@@ -1,11 +1,13 @@
 //! The `REGIS_CURSOR` record (REQ-6371): the numbered drawing of a
-//! sub-page's ReGIS picture that is its cursor, the mark that shows where
-//! typing goes. The channel draws it and moves it; a receiver blinks it.
+//! sub-page's ReGIS picture, or the object of its NAPLPS picture (renderer
+//! parity PAR-2, REQ-6761: the meaning widened, the bytes and the name
+//! unchanged), that is its cursor, the mark that shows where typing goes.
+//! The channel draws it and moves it; a receiver blinks it.
 //!
 //! ```text
 //! bytes 0-1   page: 0x100 to 0x8FF
 //! bytes 2-3   sub: the sub-code, 0x0000 to 0x3F7E
-//! bytes 4-5   drawing: 1 to 65,535, or 0 for no cursor
+//! bytes 4-5   drawing or object: 1 to 65,535, or 0 for no cursor
 //! ```
 //!
 //! It carries no input count: the cursor record of type 4 goes on

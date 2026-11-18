@@ -1,14 +1,18 @@
-//! The `DRAWING_LINKS` record (REQ-6370): the numbered drawings of a
-//! sub-page's ReGIS picture that are links, and where each leads. A
-//! receiver follows a click on such a drawing itself, as it follows a text
-//! link of a teletext page (the LINKS record, DOC-1958).
+//! The `DRAWING_LINKS` record (REQ-6370): the numbered drawings or objects
+//! of a sub-page's picture that are links, and where each leads. A number
+//! is a ReGIS numbered drawing when the sub-page's picture is ReGIS, and a
+//! NAPLPS object (ANIM-11) when it is NAPLPS (renderer parity PAR-2,
+//! REQ-6761: the meaning widened, the bytes unchanged, so the field keeps
+//! its name `drawing`). A receiver follows a click on such a drawing or
+//! object itself, as it follows a text link of a teletext page (the LINKS
+//! record, DOC-1958).
 //!
 //! ```text
 //! bytes 0-1  page: 0x100 to 0x8FF
 //! bytes 2-3  sub: the sub-code, 0x0000 to 0x3F7E
 //! byte 4     part: 0 to parts - 1
 //! byte 5     parts: 1 to 64
-//! byte 6     count: 0 to 64, then each: drawing u16, target
+//! byte 6     count: 0 to 64, then each: drawing or object u16, target
 //! ```
 //!
 //! A target is a `u16` length and 1 to 8,004 bytes of printable ASCII, in
