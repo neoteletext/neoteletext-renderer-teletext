@@ -31,7 +31,7 @@
 //!   to the setting and on release returns to the initial level. The
 //!   amplifier's (IG00159) is attack, decay, sustain and release. Both
 //!   are capacitors charged and discharged
-//!   ([`RcEnvelope`]).
+//!   ([`RcEnvelope`](crate::analog::envelope::RcEnvelope)).
 //! - **Touch.** How hard a key is struck (MIDI velocity) and how hard it
 //!   is then pressed, each key by itself (MIDI polyphonic key pressure),
 //!   move the brilliance and the level by each tone's four levers; what

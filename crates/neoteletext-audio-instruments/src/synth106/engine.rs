@@ -727,7 +727,7 @@ impl Synth106 {
     }
 
     /// A key goes down (S106-3, S106-34). It sounds at
-    /// [`sounding_key`] (S106-5) and is known by the key received. While
+    /// the key `sounding_key` gives (S106-5) and is known by the key received. While
     /// six keys are held, a seventh does not sound: "If 6 keys are
     /// simultaneously pressed, no more key will sound" (Juno-106 manual,
     /// page 22; DEC-6465 answer 22). A key already sounding takes its own

@@ -9,7 +9,7 @@
 //! values, pitch bend, channel pressure, volume, modulation and the sustain
 //! pedal. What only a family's document can say, which system exclusive
 //! message is its inline patch and which is a parameter change and of which
-//! parameter, the family's code tells [`Part::take`] through a
+//! parameter, the family's code tells [`Parts::take`] through a
 //! [`SysexKind`]. Every table is of a fixed size, so the state is bounded
 //! by the parameter tables and the 16 channels (MIDI-94).
 
