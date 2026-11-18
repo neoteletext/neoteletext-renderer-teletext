@@ -331,7 +331,7 @@ fn check_reports_a_failed_regis_commit() {
 /// Raise when what a picture draws changes on purpose, and regenerate the
 /// golden images with `NEOTELETEXT_UPDATE_GOLDEN=1` (DEVELOPMENT.md
 /// section 8).
-const PICTURE_FORMAT_VERSION: u32 = 1;
+const PICTURE_FORMAT_VERSION: u32 = 2;
 
 // PAR-7: one file of each language, and a `.t42` carrying each record
 // kind, render to the golden images.

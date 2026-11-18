@@ -1,4 +1,4 @@
-format 1
+format 2
 regis.png
 naplps.png
 regis-t42.png
