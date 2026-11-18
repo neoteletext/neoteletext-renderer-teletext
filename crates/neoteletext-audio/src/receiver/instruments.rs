@@ -137,10 +137,12 @@ impl Synthesizer {
             Codec::SynthD => Self::SynthD(synthd::midi::Midi::new(synthd::SynthD::new())),
             #[cfg(feature = "synth53")]
             Codec::Synth53 => {
-                // `record::TAG_VARIANT`: 0 synth53; 1 synth52 and 2 synth51,
-                // which are one model today (MIDI-1).
-                let model = if entry.setting == 0 { synth53::Model::Synth53 } else { synth53::Model::Synth52 };
-                Self::Synth53(synth53::midi::Midi::new(synth53::Synth53::new(model)))
+                // `record::TAG_VARIANT`: 0 synth53, 1 synth52, 2 synth51; the
+                // kind alone chooses the model (S53-1), checked when it was
+                // read.
+                let variant = synth53::interface::Variant::from_tag(entry.setting)
+                    .unwrap_or(synth53::interface::Variant::Synth53);
+                Self::Synth53(synth53::midi::Midi::new(synth53::Synth53::new(synth53::Model::of(variant))))
             }
             #[cfg(feature = "synth8")]
             Codec::Synth8 => {
