@@ -8,9 +8,13 @@ use crate::sinc::{FILTER, ONE, PHASES, TAPS_BEFORE};
 use crate::sound::{STREAM_TARGET_MS, Sound, SoundKey, Source};
 use alloc::vec::Vec;
 
+mod cues;
 mod meter;
 mod pulled;
 mod stream;
+
+pub(crate) use cues::Marks;
+pub use cues::{HeardCue, MAX_PENDING_CUE_MARKS};
 
 pub use meter::{PEAK_FULL_SCALE, PEAK_PER_LEVEL, meter_level};
 pub use pulled::{LOCAL_BLOCK_SAMPLES, PULLED_LOOKAHEAD_SAMPLES, PULLED_RATE_HZ, Pull};
@@ -52,6 +56,8 @@ pub struct Mixer {
     metered: u8,
     /// Each metered voice's peak since it was last asked for.
     peaks: [u16; VOICES],
+    /// Cue marks dropped (RULE-109).
+    cue_marks_dropped: u32,
 }
 
 /// A sound on a voice.
@@ -101,6 +107,7 @@ impl Mixer {
             muted: false,
             metered: 0,
             peaks: [0; VOICES],
+            cue_marks_dropped: 0,
         }
     }
 
@@ -167,12 +174,16 @@ impl Mixer {
             return;
         }
         slot.pending = None;
-        if let Some(mut old) = slot.playing.take() {
+        let replaced = slot.playing.take().map(|mut old| {
             old.gain.to(0, u32::from(start.fade_ms), rate);
             old.stopping = true;
             slot.outgoing = Some(old);
-        }
+            old.key
+        });
         slot.playing = Some(begin(&start, source, rate));
+        if let Some(key) = replaced {
+            self.forget_stopped_cues(key);
+        }
     }
 
     /// Ramps a voice to silence and stops it, dropping its waiting sound.
@@ -180,9 +191,13 @@ impl Mixer {
         let rate = self.rate_hz;
         let Some(slot) = self.voices.get_mut(voice) else { return };
         slot.pending = None;
-        if let Some(playing) = slot.playing.as_mut() {
+        let stopped = slot.playing.as_mut().map(|playing| {
             playing.gain.to(0, u32::from(fade_ms), rate);
             playing.stopping = true;
+            playing.key
+        });
+        if let Some(key) = stopped {
+            self.forget_stopped_cues(key);
         }
     }
 

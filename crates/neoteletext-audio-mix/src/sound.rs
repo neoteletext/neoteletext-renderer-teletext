@@ -1,6 +1,7 @@
 //! A sound held for playing: its samples, or a live sound's ring of them,
 //! and the targets a live sound is buffered to (REQ-AUD-014).
 
+use crate::mixer::Marks;
 use alloc::vec::Vec;
 
 /// A sound's identity: the audio receiver's handle and generation.
@@ -34,6 +35,8 @@ pub(crate) struct Sound {
     /// A pulled sound (RULE-62): `samples` is a ring, as a live sound's
     /// is, filled by the mixer as it mixes and never ahead.
     pulled: bool,
+    /// A live sound's cue marks waiting to be heard (RULE-109).
+    marks: Marks,
 }
 
 /// What a voice starting a sound needs of it.
@@ -50,13 +53,22 @@ pub(crate) enum Source {
 impl Sound {
     /// A sound at `rate_hz` holding `samples`, the buffer as given.
     pub(crate) fn new(key: SoundKey, rate_hz: u32, samples: Vec<i16>) -> Self {
-        Self { key, rate_hz, samples, forgotten: false, stream: false, written: 0, pulled: false }
+        Self { key, rate_hz, samples, forgotten: false, stream: false, written: 0, pulled: false, marks: Marks::new() }
     }
 
     /// A live sound at `rate_hz` whose ring is `ring`, the buffer as given:
     /// what it holds before samples are written is never played.
     pub(crate) fn live(key: SoundKey, rate_hz: u32, ring: Vec<i16>) -> Self {
-        Self { key, rate_hz, samples: ring, forgotten: false, stream: true, written: 0, pulled: false }
+        Self {
+            key,
+            rate_hz,
+            samples: ring,
+            forgotten: false,
+            stream: true,
+            written: 0,
+            pulled: false,
+            marks: Marks::new(),
+        }
     }
 
     /// A pulled sound (RULE-62) whose ring is `ring`, the buffer as given,
@@ -70,7 +82,18 @@ impl Sound {
             stream: true,
             written: 0,
             pulled: true,
+            marks: Marks::new(),
         }
+    }
+
+    /// Its cue marks (RULE-109).
+    pub(crate) fn marks(&self) -> &Marks {
+        &self.marks
+    }
+
+    /// Its cue marks, to add to or take from.
+    pub(crate) fn marks_mut(&mut self) -> &mut Marks {
+        &mut self.marks
     }
 
     /// Whether it is a pulled sound.
