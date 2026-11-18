@@ -174,8 +174,10 @@ pub struct VoiceParams {
     pub transpose: u8,
     /// The name, ten characters.
     pub name: [u8; NAME_BYTES],
-    /// The operators switched on: bit 0 is operator 1. The packed form does
-    /// not hold it; an unpacked voice has all six on.
+    /// The operators switched on, voice parameter 155: bit 5 is operator 1
+    /// and bit 0 operator 6, a 1 on (`synth7.md`, S7-30; DX7 manual, page
+    /// 31; TX7 manual, printed page 39, note *7). No stored voice holds it;
+    /// an unpacked voice has all six on.
     pub operators_on: u8,
 }
 

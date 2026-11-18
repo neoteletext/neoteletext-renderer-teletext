@@ -266,7 +266,7 @@ impl Note {
         for (index, ((envelope, &base_pitch), &sensitivity)) in operators.enumerate() {
             let level = envelope.getsample();
             let mut attenuation = LEVEL_CEILING.saturating_sub(level).max(0).cast_unsigned();
-            let on = (self.operators_on >> index) & 1 == 1;
+            let on = operator_on(self.operators_on, index);
             if algorithm.is_carrier(index) {
                 attenuation = attenuation.saturating_add(self.compensation).saturating_add(self.fade);
                 // Whether the note has ended is asked of the envelope and
@@ -293,7 +293,7 @@ impl Note {
         self.envelopes
             .iter()
             .enumerate()
-            .filter(move |&(index, _)| algorithm.is_carrier(index) && (on >> index) & 1 == 1)
+            .filter(move |&(index, _)| algorithm.is_carrier(index) && operator_on(on, index))
             .map(|(_, envelope)| envelope)
     }
 
@@ -302,6 +302,16 @@ impl Note {
         let algorithm = self.algorithm();
         self.voice.render(algorithm, self.feedback, out);
     }
+}
+
+/// Whether the operator at `index` (0 for operator 1) is on in `switch`,
+/// voice parameter 155: bit 5 is operator 1 and bit 0 operator 6, as all
+/// three of the maker's manuals draw it (`synth7.md`, S7-30; DX7 manual,
+/// page 31: "D5 … OP1 … D0 OP6"; TX7 manual, printed page 39, note *7; DX7
+/// II manual, printed page Add-8: "B5:OP1,..,B0:OP6").
+pub(crate) fn operator_on(switch: u8, index: usize) -> bool {
+    let bit = (OPERATORS - 1).checked_sub(index);
+    bit.and_then(|bit| u32::try_from(bit).ok()).is_some_and(|bit| (switch >> bit) & 1 == 1)
 }
 
 /// One doubling of attenuation is one doubling of level.

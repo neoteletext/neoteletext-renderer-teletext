@@ -155,6 +155,14 @@ fn rack_with(algorithm: u8, change: impl FnOnce(&mut VoiceParams)) -> Rack {
     rack
 }
 
+/// The bit of voice parameter 155, the operator switch, of the operator at
+/// `index` (0 for operator 1): bit 5 is operator 1 and bit 0 operator 6
+/// (`synth7.md`, S7-30; DX7 manual, page 31; TX7 manual, printed page 39,
+/// note *7).
+fn switch(index: usize) -> u8 {
+    1 << (5 - index)
+}
+
 /// A tenth of a second of middle A.
 fn render(rack: &mut Rack) -> Vec<i16> {
     rack.event(0x90, 69, 100);
@@ -174,7 +182,7 @@ fn one_operator_alone_sounds_only_if_it_is_a_carrier() {
     for (number, algorithm) in ALGORITHMS.iter().enumerate() {
         let mut carriers = 0;
         for index in 0..6 {
-            let samples = render(&mut rack_with(number as u8, |voice| voice.operators_on = 1 << index));
+            let samples = render(&mut rack_with(number as u8, |voice| voice.operators_on = switch(index)));
             let sounds = peak(&samples) > 0;
             assert_eq!(sounds, algorithm.is_carrier(index), "algorithm {}, operator {}", number + 1, index + 1);
             carriers += u32::from(sounds);
@@ -190,7 +198,7 @@ fn every_operator_is_heard() {
     for number in 0..32_u8 {
         let all = render(&mut rack_with(number, |_| ()));
         for index in 0..6 {
-            let without = render(&mut rack_with(number, |voice| voice.operators_on = 0b11_1111 ^ (1 << index)));
+            let without = render(&mut rack_with(number, |voice| voice.operators_on = 0b11_1111 ^ switch(index)));
             assert_ne!(all, without, "algorithm {}, operator {}", number + 1, index + 1);
         }
     }
@@ -204,13 +212,13 @@ fn every_operator_is_heard() {
 fn modulation_follows_the_table() {
     for (number, algorithm) in ALGORITHMS.iter().enumerate() {
         for carrier in (0..6).filter(|&index| algorithm.is_carrier(index)) {
-            let alone = render(&mut rack_with(number as u8, |voice| voice.operators_on = 1 << carrier));
+            let alone = render(&mut rack_with(number as u8, |voice| voice.operators_on = switch(carrier)));
             for other in (0..6).filter(|&index| !algorithm.is_carrier(index)) {
                 // Whether `other` reaches `carrier` with every operator
                 // between them switched off: only if it modulates it itself.
                 let direct = algorithm.modulators[carrier] & (1 << other) != 0;
                 let both =
-                    render(&mut rack_with(number as u8, |voice| voice.operators_on = (1 << carrier) | (1 << other)));
+                    render(&mut rack_with(number as u8, |voice| voice.operators_on = switch(carrier) | switch(other)));
                 assert_eq!(
                     both != alone,
                     direct,
@@ -238,7 +246,7 @@ fn feedback_follows_the_table() {
     // Algorithm 4: operator 6 hears operator 4, which hears 5, which hears
     // 6. Algorithm 6: operator 6 hears operator 5, which hears 6.
     for (number, in_loop) in [(3_u8, [3_u8, 4, 5].as_slice()), (5, [4, 5].as_slice())] {
-        let on: u8 = in_loop.iter().map(|&index| 1 << index).sum();
+        let on: u8 = in_loop.iter().map(|&index| switch(usize::from(index))).sum();
         let closed = |feedback: u8, on: u8| {
             render(&mut rack_with(number, |voice| {
                 voice.feedback = feedback;
@@ -248,7 +256,7 @@ fn feedback_follows_the_table() {
         assert_ne!(closed(7, on), closed(0, on), "algorithm {}", number + 1);
         // The loop is cut by switching off the operator the feedback goes
         // to: what is left sounds the same at any feedback.
-        let cut = on & !(1 << 5);
+        let cut = on & !switch(5);
         assert_eq!(closed(7, cut), closed(0, cut), "algorithm {}", number + 1);
     }
 }

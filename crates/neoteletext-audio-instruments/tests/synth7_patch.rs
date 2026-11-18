@@ -374,3 +374,26 @@ fn random_voices_never_panic() {
     assert!(accepted > 300, "{accepted} accepted");
     assert!(refused > 2000, "{refused} refused");
 }
+
+/// S7-30: voice parameter 155 holds operator 1 in bit 5 and operator 6 in
+/// bit 0, as the DX7 manual (page 31), the TX7 manual (printed page 39,
+/// note *7) and the DX7 II manual (printed page Add-8) draw it. The default
+/// voice sounds operator 1 alone, so it sounds with bit 5 on and is silent
+/// with bit 0 alone.
+#[test]
+fn s7_30_bit_5_of_the_operator_switch_is_operator_1() {
+    let peak_with = |switch: u8| {
+        let mut params = *Patch::DEFAULT.params();
+        params.operators_on = switch;
+        let mut bank = Bank::new();
+        bank.set(0, Patch::new(params).unwrap());
+        let mut rack = Rack::new();
+        rack.set_bank(&bank);
+        rack.event(0x90, 69, 100);
+        let mut samples = vec![0_i16; 4800];
+        rack.render(&mut samples);
+        samples.iter().map(|&sample| i32::from(sample).abs()).max().unwrap()
+    };
+    assert!(peak_with(0b10_0000) > 1000, "operator 1 alone, bit 5");
+    assert_eq!(peak_with(0b00_0001), 0, "operator 6 alone, bit 0");
+}
