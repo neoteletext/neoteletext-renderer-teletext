@@ -9,9 +9,11 @@ use super::*;
 use crate::MAX_PER_SECOND;
 use crate::caps::{CURSOR_CAP, RESUME_CAP, SELECT_CAP, TOUCH_CAP};
 use crate::control::Resumption;
-use crate::event::{self, Action, Device, MouseAction, Stamp, Touch};
+use crate::event::{self, Action, Device, Mouse, MouseAction, Stamp, Touch};
 use crate::event::{Key, KeyCode};
 use crate::keys;
+use crate::rules::{FaultCode, PageStateEvent, RuleBody, RuleEvent, RulesFault};
+use neoteletext_rules::table::Target;
 
 /// The page on screen in these tests.
 const ON: Stamp = Stamp { page: 0x100, sub: 0 };
@@ -116,17 +118,17 @@ fn a_reconnection_is_a_new_session() {
 fn the_input_count_and_its_acknowledgement() {
     let mut session = welcomed(0);
     sent_item(&mut session, &Item::Text("ab"));
-    assert_eq!(session.count(), 3, "HELLO, then two characters");
+    assert_eq!(session.count(), 2, "HELLO, then one RULE_EVENT whatever text it carries (RULE-46)");
     sent_item(&mut session, &Item::Event(Event::Paste { on: ON, text: "a long paste" }));
-    assert_eq!(session.count(), 4, "a paste counts one");
+    assert_eq!(session.count(), 3, "a paste counts one");
     sent_item(&mut session, &Item::Event(Event::FocusIn));
-    assert_eq!(session.count(), 5);
-    assert!(session.acknowledged(3));
-    assert!(!session.acknowledged(2), "an older acknowledgement changes nothing");
-    assert!(session.acknowledged(5));
-    assert_eq!(session.acked(), 5);
-    assert!(!session.acknowledged(6), "beyond what was sent: refused");
-    assert_eq!(session.acked(), 5);
+    assert_eq!(session.count(), 4);
+    assert!(session.acknowledged(2));
+    assert!(!session.acknowledged(1), "an older acknowledgement changes nothing");
+    assert!(session.acknowledged(4));
+    assert_eq!(session.acked(), 4);
+    assert!(!session.acknowledged(5), "beyond what was sent: refused");
+    assert_eq!(session.acked(), 4);
 }
 
 // REQ-INT-110.
@@ -143,31 +145,75 @@ fn the_count_wraps_and_is_compared_as_a_serial_number() {
     assert!(!session.acknowledged(u16::MAX), "65 535 is before 2");
 }
 
-// REQ-INT-126, REQ-RCH-012, REQ-RCH-054 (decision E.133): a message of no input units is
-// never acknowledged, so it adds nothing to the count or to what is waited
-// for, and a press and a release of touch count as a click's.
+// RULE-46 (REQ-6528): a RULE_EVENT counts as one message for
+// acknowledgement, whatever it carries, a move and a hover among them; the
+// session's own events and the rule table's other two messages, which are
+// no input, count nothing and are never acknowledged (REQ-INT-126).
 #[test]
-fn what_is_never_acknowledged_counts_nothing() {
-    let mut session = welcomed(TOUCH_CAP);
+fn a_rule_event_counts_one_and_what_is_no_input_counts_nothing() {
+    let mut session = welcomed(TOUCH_CAP | SELECT_CAP);
     let at = event::Point { column: 2, row: 3, pixels: None, mods: 0 };
     let mouse = |action| Item::Event(Event::Mouse(Mouse { on: ON, action, button: 0, at, device: Device::Touch }));
-    let touch = |action| Item::Event(Event::Touch(Touch { on: ON, action, id: 1, column: 2, row: 3, pixels: None }));
+    let mut count = 1;
     for item in [
         mouse(MouseAction::Move),
-        mouse(MouseAction::Gone),
-        touch(MouseAction::Move),
-        touch(MouseAction::Gone),
+        mouse(MouseAction::Press),
         Item::Event(Event::Hover { on: ON, leave: false, column: 2, row: 3 }),
         Item::Event(Event::Compose { on: ON, cursor: 0, text: "か" }),
+        Item::Text("many characters"),
     ] {
         assert!(sent_item(&mut session, &item).is_some(), "{item:?} goes");
-        assert_eq!(session.count(), 1, "{item:?} counts nothing");
+        count += 1;
+        assert_eq!(session.count(), count, "{item:?} counts one");
     }
-    assert!(!session.acknowledged(2), "nothing to acknowledge");
-    sent_item(&mut session, &mouse(MouseAction::Press)).unwrap();
-    sent_item(&mut session, &touch(MouseAction::Press)).unwrap();
-    sent_item(&mut session, &touch(MouseAction::Release)).unwrap();
-    assert_eq!(session.count(), 4, "downs and ups count one each");
+    let fired = RuleEvent { on: ON, generation: 1, rule: 63, tick: 7, target: Target::NONE, body: RuleBody::Fired };
+    assert!(sent_item(&mut session, &Item::Event(Event::RuleEvent(fired))).is_some());
+    assert_eq!(session.count(), count + 1, "a firing with no event counts one too");
+    let fault = RulesFault { on: ON, generation: 1, fault: FaultCode::TickOverrun, count: 12 };
+    let state = PageStateEvent { on: ON, body: &[0, 0, 0, 42, 0, 0, 0, 0, 0, 0] };
+    for item in [
+        Item::Event(Event::RulesFault(fault)),
+        Item::Event(Event::PageState(state)),
+        Item::Event(Event::Select(event::Select::new(0x200, 0x3F7F).unwrap(), "")),
+    ] {
+        assert!(sent_item(&mut session, &item).is_some(), "{item:?} goes");
+        assert_eq!(session.count(), count + 1, "{item:?} counts nothing");
+    }
+}
+
+// RULE-46, RULE-49 (REQ-6528): under protocol version 9 a receiver never
+// writes a viewer's input at the top level of the stream.
+#[test]
+fn a_viewers_input_is_never_sent_bare() {
+    let mut session = welcomed(TOUCH_CAP | SELECT_CAP);
+    let at = event::Point { column: 2, row: 3, pixels: None, mods: 0 };
+    let mut out = [0; crate::MAX_MESSAGE];
+    for item in [
+        Item::Text("a"),
+        key(Action::Press, KeyCode::Character('a')),
+        Item::Event(Event::Mouse(Mouse { on: ON, action: MouseAction::Move, button: 0, at, device: Device::Mouse })),
+        Item::Event(Event::Wheel(event::Wheel { on: ON, dx: 0, dy: 1, at })),
+        Item::Event(Event::Paste { on: ON, text: "p" }),
+        Item::Event(Event::Compose { on: ON, cursor: 0, text: "" }),
+        Item::Event(Event::Touch(Touch { on: ON, action: MouseAction::Press, id: 1, column: 2, row: 3, pixels: None })),
+        Item::Event(Event::FocusIn),
+        Item::Event(Event::FocusOut),
+        Item::Event(Event::Hover { on: ON, leave: true, column: 2, row: 3 }),
+        Item::Event(Event::DrawingHover { on: ON, leave: false, drawing: 4, commits: 0 }),
+        Item::Event(Event::Pick(event::Pick {
+            on: ON,
+            drawing: 0,
+            x: 0,
+            y: 0,
+            picture_x: 1,
+            picture_y: 1,
+            commits: 0,
+        })),
+    ] {
+        assert!(event::is_page_input(&item), "{item:?}");
+        assert_eq!(session.send(&item, 0, &mut out), Err(SendError::Input(InputError::Bare)), "{item:?}");
+    }
+    assert_eq!(session.count(), 1, "nothing went");
 }
 
 // REQ-INT-109, amended by decision E.133: a button's release and a contact's
@@ -214,21 +260,49 @@ fn the_rate_is_120_units_a_second_and_releases_always_go() {
     assert!(!limiter.allow(u32::MAX, false), "the 121st unit");
     assert!(limiter.allow(u32::MAX, true), "a release across the clock's wrap");
     assert!(limiter.allow(1_000 - 11, false), "a second after, past the wrap");
+    // RULE-46: the rate looks at what a RULE_EVENT carries, so a release
+    // inside one always goes, and a firing with no event is held to it.
+    let mut session = welcomed(0);
+    for _ in 0..MAX_PER_SECOND {
+        assert!(sent_item(&mut session, &key(Action::Press, KeyCode::Character('a'))).is_some());
+    }
+    assert_eq!(sent_item(&mut session, &key(Action::Press, KeyCode::Character('a'))), None, "the 121st unit");
+    assert!(sent_item(&mut session, &key(Action::Release, KeyCode::Character('a'))).is_some(), "its release");
+    let fired = RuleEvent { on: ON, generation: 1, rule: 0, tick: 0, target: Target::NONE, body: RuleBody::Fired };
+    assert_eq!(sent_item(&mut session, &Item::Event(Event::RuleEvent(fired))), None, "a firing over the rate");
 }
 
 fn key(action: Action, key: KeyCode) -> Item<'static> {
     Item::Event(Event::Key(Key { on: ON, lost: false, action, key, mods: 0, text: Some("a"), base: Some('q') }))
 }
 
-fn sent_item(session: &mut Session, item: &Item<'_>) -> Option<std::vec::Vec<u8>> {
+/// Sends `item` as a receiver under protocol version 9 does: a viewer's
+/// input as the session's capabilities carry it, inside a rule's
+/// `RULE_EVENT` (RULE-46), and anything else as it is. Gives the bytes of
+/// the input carried, or of the message for anything else, and `None`
+/// when nothing went; `message` is given the whole message.
+fn sent_as<const N: usize>(
+    session: &mut SessionOf<N>,
+    item: &Item<'_>,
+    message: &mut std::vec::Vec<u8>,
+) -> Option<std::vec::Vec<u8>> {
     let mut out = [0; crate::MAX_MESSAGE];
-    let length = session.send(item, 0, &mut out).unwrap();
-    (length > 0).then(|| out.get(..length).unwrap().to_vec())
+    let mut inner = [0; crate::MAX_MESSAGE];
+    let (length, carried) = if event::is_page_input(item) {
+        let carried = session.carried(item)?;
+        let inner_length = write(&carried, &mut inner).unwrap();
+        let body = RuleBody::Input(&inner[..inner_length]);
+        let report = RuleEvent { on: ON, generation: 1, rule: 0, tick: 0, target: Target::NONE, body };
+        (session.send(&Item::Event(Event::RuleEvent(report)), 0, &mut out).unwrap(), Some(inner_length))
+    } else {
+        (session.send(item, 0, &mut out).unwrap(), None)
+    };
+    *message = out[..length].to_vec();
+    (length > 0).then(|| carried.map_or_else(|| message.clone(), |carried| inner[..carried].to_vec()))
 }
 
-fn move_to(column: u32, pixels: (u32, u32), button: u8) -> Item<'static> {
-    let at = event::Point { column, row: 5, pixels: Some(pixels), mods: 0 };
-    Item::Event(Event::Mouse(Mouse { on: ON, action: MouseAction::Move, button, at, device: Device::Mouse }))
+fn sent_item(session: &mut Session, item: &Item<'_>) -> Option<std::vec::Vec<u8>> {
+    sent_as(session, item, &mut std::vec::Vec::new())
 }
 
 // REQ-INT-106.
@@ -300,20 +374,6 @@ fn the_mouse_and_the_wheel_always_go_with_their_dot() {
     assert!(sent_item(&mut session, &drag).is_some(), "a drag");
 }
 
-// Decision E.125, DOC-1945: a move goes only when the dot under
-// the pointer changes, and the first on another page always goes.
-#[test]
-fn a_move_to_the_same_dot_is_not_sent_again() {
-    let mut session = welcomed(SELECT_CAP);
-    assert!(sent_item(&mut session, &move_to(10, (120, 100), 0)).is_some());
-    assert_eq!(sent_item(&mut session, &move_to(10, (120, 100), 0)), None, "the same dot");
-    assert!(sent_item(&mut session, &move_to(10, (121, 100), 0)).is_some(), "the next dot, in the same cell");
-    assert!(sent_item(&mut session, &move_to(10, (121, 100), 1)).is_some(), "a button held is news");
-    let select = event::Select::new(0x200, 0x3F7F).unwrap();
-    assert!(sent_item(&mut session, &Item::Event(Event::Select(select, ""))).is_some());
-    assert!(sent_item(&mut session, &move_to(10, (121, 100), 1)).is_some(), "the first move on another page");
-}
-
 // REQ-205, DOC-1922, DOC-1753: SELECT goes only when both sides set it. A
 // receiver that did not is shown the program's answer for the channel's
 // initial page, so it has nothing to say.
@@ -337,17 +397,6 @@ fn compose_always_goes() {
     let mut session = welcomed(0);
     assert!(sent_item(&mut session, &compose).is_some());
     assert!(sent_item(&mut session, &Item::Event(Event::FocusOut)).is_some());
-}
-
-// REQ-INT-109.
-#[test]
-fn text_over_the_rate_is_cut_and_counted() {
-    let mut session = welcomed(0);
-    let long: std::string::String = core::iter::repeat_n('é', 130).collect();
-    let sent = sent_item(&mut session, &Item::Text(&long)).unwrap();
-    assert_eq!(sent.len(), 240, "120 characters of 2 bytes");
-    assert_eq!(session.count(), 121, "HELLO and 120 characters");
-    assert_eq!(sent_item(&mut session, &Item::Event(Event::FocusIn)), None, "an event over the rate");
 }
 
 // REQ-INT-124, REQ-RCH-041, REQ-RCH-042 (decision E.133): without TOUCH a channel sees
@@ -401,10 +450,11 @@ fn resumable() -> ResumableSession {
     session
 }
 
+/// Sends `text` inside a rule's `RULE_EVENT`, and gives the message.
 fn text(session: &mut ResumableSession, text: &str) -> std::vec::Vec<u8> {
-    let mut out = [0; crate::MAX_MESSAGE];
-    let length = session.send(&Item::Text(text), 0, &mut out).unwrap();
-    out[..length].to_vec()
+    let mut message = std::vec::Vec::new();
+    sent_as(session, &Item::Text(text), &mut message).unwrap();
+    message
 }
 
 fn resent(session: &mut ResumableSession) -> std::vec::Vec<std::vec::Vec<u8>> {
@@ -421,12 +471,10 @@ fn resent(session: &mut ResumableSession) -> std::vec::Vec<std::vec::Vec<u8>> {
 fn a_resumed_session_sends_again_only_what_the_channel_had_not_taken() {
     let mut session = resumable();
     text(&mut session, "a"); // 2
-    text(&mut session, "bc"); // 4
-    text(&mut session, "d"); // 5
-    let at = event::Point { column: 1, row: 1, pixels: None, mods: 0 };
-    let moved =
-        Item::Event(Event::Mouse(Mouse { on: ON, action: MouseAction::Move, button: 0, at, device: Device::Mouse }));
-    assert!(sent_any(&mut session, &moved), "a move goes, and is never kept");
+    let second = text(&mut session, "bc"); // 3
+    let third = text(&mut session, "d"); // 4
+    let select = Item::Event(Event::Select(event::Select::new(0x200, 0x3F7F).unwrap(), ""));
+    assert!(sent_any(&mut session, &select), "what counts nothing goes, and is never kept");
     assert!(session.acknowledged(2));
     session.close();
     assert!(session.resumable());
@@ -439,23 +487,23 @@ fn a_resumed_session_sends_again_only_what_the_channel_had_not_taken() {
         ]
     );
     let next = [0x77; TOKEN_BYTES];
-    let resume = Some(Resumption { token: next, taken: Some(4) });
+    let resume = Some(Resumption { token: next, taken: Some(3) });
     assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Ok(Welcomed::Resumed));
-    assert_eq!(session.send(&Item::Text("e"), 0, &mut [0; 8]), Err(SendError::ResendFirst), "the order kept");
-    assert_eq!(resent(&mut session), [b"d".to_vec()], "only what came after 4");
-    assert_eq!(session.count(), 5, "the count goes on");
-    assert_eq!(text(&mut session, "e"), b"e");
-    assert_eq!(session.count(), 6);
+    assert_eq!(session.send(&select, 0, &mut [0; 8]), Err(SendError::ResendFirst), "the order kept");
+    assert_eq!(resent(&mut session), core::slice::from_ref(&third), "only what came after 3");
+    assert_eq!(session.count(), 4, "the count goes on");
+    let fourth = text(&mut session, "e");
+    assert_eq!(session.count(), 5);
     // Taken from what was acknowledged: everything kept goes again.
     session.close();
     opening(&mut session, 200, None);
     let resume = Some(Resumption { token: next, taken: Some(2) });
     assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Ok(Welcomed::Resumed));
-    assert_eq!(resent(&mut session), [b"bc".to_vec(), b"d".to_vec(), b"e".to_vec()]);
+    assert_eq!(resent(&mut session), [second, third, fourth]);
 }
 
 fn sent_any(session: &mut ResumableSession, item: &Item<'_>) -> bool {
-    session.send(item, 0, &mut [0; crate::MAX_MESSAGE]).unwrap() > 0
+    sent_as(session, item, &mut std::vec::Vec::new()).is_some()
 }
 
 // REQ-INT-125, REQ-RCH-013, REQ-INT-106: a channel that did not hold the session, or
@@ -480,14 +528,14 @@ fn a_session_not_held_is_a_new_one_and_a_false_count_is_refused() {
     session.close();
     assert!(!session.resumable(), "no token: forgotten on close");
     let mut session = resumable();
-    text(&mut session, "ab"); // 3
+    text(&mut session, "ab"); // 2
     session.close();
     opening(&mut session, 30, None);
-    let resume = Some(Resumption { token: TOKEN, taken: Some(2) });
+    let resume = Some(Resumption { token: TOKEN, taken: Some(3) });
     assert_eq!(
         session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume),
         Err(WelcomeError::Resume),
-        "inside a message"
+        "a count no message ends at"
     );
     assert!(!session.resumable());
     let mut session = resumable();

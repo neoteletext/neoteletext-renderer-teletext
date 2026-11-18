@@ -82,10 +82,6 @@ pub enum Member {
     Push,
     /// `push.address`
     PushAddress,
-    /// `push.input`
-    PushInput,
-    /// `push.wheel`
-    PushWheel,
     /// `region`
     Region,
     /// `services`
@@ -159,12 +155,8 @@ pub struct Descriptor {
     template: TextBuf<MAX_URL_LENGTH>,
     base: Url,
     push: Option<Url>,
-    /// The channel takes the viewer's keys on its push WebSocket (area
-    /// INT, decision E.90).
-    input: bool,
-    /// The channel uses the mouse wheel over its pages (`push.wheel`,
-    /// the browser's DEC-6447): only with `input`.
-    wheel: bool,
+    /// The push address is on the descriptor's own origin (finding F-90).
+    push_same_origin: bool,
     /// The default character set region (decision E.4), 0 to 15.
     pub region: Option<u8>,
     services: [Option<LinkedService>; MAX_LINKED_SERVICES],
@@ -262,8 +254,7 @@ impl Descriptor {
             template: TextBuf::new(),
             base: *base,
             push: None,
-            input: false,
-            wheel: false,
+            push_same_origin: false,
             region: None,
             services: [None; MAX_LINKED_SERVICES],
             service_addresses: TextBuf::new(),
@@ -315,20 +306,20 @@ impl Descriptor {
         self.push.as_ref()
     }
 
-    /// Whether the channel takes the viewer's keys back on its push
-    /// WebSocket (`push.input`, area INT): never without a WebSocket.
+    /// Whether the input session's messages may go back on the push
+    /// WebSocket (area INT): HELLO, SELECT and the `RULE_EVENT`s a page's
+    /// rule table asks for go only to a push address on the descriptor's
+    /// own origin (finding F-90, DOC-1865), which a channel's always is.
+    /// Never without a WebSocket.
+    ///
+    /// The members `push.input` and `push.wheel`, which once asked for the
+    /// viewer's input for a whole channel, are withdrawn by push protocol 9
+    /// (neoteletext-common's page-rules.md RULE-49, REQ-6523): they are
+    /// read past and mean nothing, and a page's rule table is the only
+    /// thing that asks for input.
     #[must_use]
-    pub const fn input(&self) -> bool {
-        self.input
-    }
-
-    /// Whether the channel uses the mouse wheel over its pages
-    /// (`push.wheel`), so that a receiver gives it the wheel there rather
-    /// than stepping a page's sub-pages with it (the browser's DEC-6447).
-    /// Never without `input`.
-    #[must_use]
-    pub const fn wheel(&self) -> bool {
-        self.wheel
+    pub const fn push_takes_messages(&self) -> bool {
+        self.push.is_some() && self.push_same_origin
     }
 
     /// A linked service by its short name (Appendix E.2 rule 2: an unknown

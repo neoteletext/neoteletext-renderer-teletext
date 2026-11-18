@@ -12,7 +12,7 @@
 use crate::TOKEN_BYTES;
 use crate::caps::{AGENT, ALL_CAPS, RESUME_CAP};
 use crate::control::{Control, Resumption};
-use crate::event::{Event, InputError, Item, Mouse, MouseAction, Resume, write};
+use crate::event::{Event, InputError, Item, Resume, write};
 use crate::wire::WireError;
 use crate::{RESEND_BYTES, VERSION, WELCOME_TIMEOUT_MS};
 mod count;
@@ -74,7 +74,10 @@ pub enum SendError {
     /// A resumed session's messages are to be sent again first
     /// ([`SessionOf::resend`]), so the stream keeps its order.
     ResendFirst,
-    /// The item could not be encoded.
+    /// The item could not be encoded; or, with [`InputError::Bare`], it is
+    /// a viewer's input outside a `RULE_EVENT` (RULE-46), which under
+    /// protocol version 9 a receiver never writes at the top level of the
+    /// stream.
     Input(InputError),
 }
 
@@ -102,9 +105,6 @@ pub struct SessionOf<const KEPT: usize> {
     /// The last acknowledgement taken.
     acked: u16,
     limiter: Limiter,
-    /// The last move sent on the open page, as sent: a move to the same dot
-    /// tells the channel nothing (DOC-1945).
-    last_move: Option<Mouse>,
     /// The token of the channel's last WELCOME with RESUME, for the next
     /// reconnection (REQ-RCH-013).
     token: Option<[u8; TOKEN_BYTES]>,
@@ -150,7 +150,6 @@ impl<const KEPT: usize> SessionOf<KEPT> {
             sent_length: 0,
             acked: 0,
             limiter: Limiter::new(),
-            last_move: None,
             token: None,
             kept: [0; KEPT],
             kept_length: 0,
@@ -214,7 +213,6 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         self.state = State::Waiting(now_ms);
         self.asked = resume.is_some();
         self.resend_from = None;
-        self.last_move = None;
         let caps = if agent.is_some() { self.offered | AGENT } else { self.offered & !AGENT };
         let mut length = write(&Item::Event(Event::Hello { version: VERSION, caps, agent }), out)?;
         if let Some(resume) = resume {
@@ -232,7 +230,6 @@ impl<const KEPT: usize> SessionOf<KEPT> {
             self.state = State::Closed;
             self.asked = false;
             self.resend_from = None;
-            self.last_move = None;
         } else {
             self.forget();
         }
@@ -338,15 +335,15 @@ impl<const KEPT: usize> SessionOf<KEPT> {
     }
 
     /// Encodes `item` into `out` as DOC-1922 and DOC-1943 say, at `now_ms`, and
-    /// counts it: everything goes, but a move to the dot of the last one sent
-    /// on the page, an event whose
-    /// capability is not agreed (TOUCH, SELECT; a device other than the
-    /// mouse goes as the mouse), and text or an event over the rate limit, which is
-    /// cut or dropped. Returns how many bytes to write, 0 for none.
+    /// counts it: a `RULE_EVENT` and the session's own events go, but an
+    /// event whose capability is not agreed (SELECT) and an event over the
+    /// rate limit, which is dropped. Returns how many bytes to write, 0
+    /// for none.
     ///
     /// # Errors
     /// Before WELCOME, before a resumed session's messages are sent again,
-    /// or when the item cannot be encoded.
+    /// when the item cannot be encoded, or when it is a viewer's input
+    /// outside a `RULE_EVENT` ([`InputError::Bare`], RULE-46).
     pub fn send(&mut self, item: &Item<'_>, now_ms: u32, out: &mut [u8]) -> Result<usize, SendError> {
         if !self.welcomed() {
             return Err(SendError::NotWelcomed);
@@ -354,24 +351,13 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         if self.resend_from.is_some() {
             return Err(SendError::ResendFirst);
         }
-        let Some(item) = self.filter(item) else { return Ok(0) };
-        let moved = match item {
-            Item::Event(Event::Mouse(mouse)) if mouse.action == MouseAction::Move => Some(mouse),
-            _ => None,
-        };
-        if moved.is_some() && moved == self.last_move {
-            return Ok(0);
+        // RULE-46: a viewer's input travels only inside a RULE_EVENT.
+        if crate::event::is_page_input(item) {
+            return Err(SendError::Input(InputError::Bare));
         }
+        let Some(item) = self.carried(item) else { return Ok(0) };
         let Some(item) = self.within_rate(item, now_ms) else { return Ok(0) };
         let length = write(&item, out)?;
-        match item {
-            Item::Event(Event::Mouse(mouse)) if mouse.action == MouseAction::Move => self.last_move = Some(mouse),
-            // Another page, or the pointer gone: the next move goes,
-            // wherever the pointer is.
-            Item::Event(Event::Select(..)) => self.last_move = None,
-            Item::Event(Event::Mouse(mouse)) if mouse.action == MouseAction::Gone => self.last_move = None,
-            _ => {}
-        }
         self.record(&item, out.get(..length).unwrap_or(&[]));
         Ok(length)
     }

@@ -109,74 +109,42 @@ fn malformed_descriptors() {
     assert!(matches!(Descriptor::parse(b"{\"name\":", &plain), Err(DescriptorError::Json(_))));
 }
 
-/// Decision E.90: `push.input` says the channel takes keys back, and
-/// only a WebSocket can carry them.
+/// RULE-49 (REQ-6528): `push.input` and `push.wheel` are withdrawn. A
+/// descriptor that still has them reads, whatever they hold, and they
+/// mean nothing: a page's rule table is the only thing that asks for
+/// input.
 #[test]
-fn input_needs_a_websocket() {
+fn the_withdrawn_input_and_wheel_members_mean_nothing() {
     let plain = Url::parse("http://s.example/service.json").unwrap();
     let with =
         |push: &str| std::format!(r#"{{"name":"S","initial_page":"100","page_template":"/{{mpp}}","push":{push}}}"#);
-    let parse = |push: &str| Descriptor::parse(with(push).as_bytes(), &plain).map(|descriptor| descriptor.input());
-    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":true}"#), Ok(true));
-    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":false}"#), Ok(false));
-    assert_eq!(parse(r#"{"address":"ws://s.example/p"}"#), Ok(false));
-    assert_eq!(
-        parse(r#"{"address":"ws://s.example/p","input":"yes"}"#),
-        Err(DescriptorError::Invalid(Member::PushInput))
-    );
-    assert_eq!(
-        parse(r#"{"address":"ws://s.example/p","input":true,"input":true}"#),
-        Err(DescriptorError::Duplicate(Member::PushInput))
-    );
-    assert!(!Descriptor::parse(VALID.as_bytes(), &base()).unwrap().input());
+    let parse = |push: &str| Descriptor::parse(with(push).as_bytes(), &plain).map(|d| d.push_takes_messages());
+    for push in [
+        r#"{"address":"ws://s.example/p"}"#,
+        r#"{"address":"ws://s.example/p","input":true,"wheel":true}"#,
+        r#"{"address":"ws://s.example/p","input":false}"#,
+        r#"{"address":"ws://s.example/p","wheel":true}"#,
+        r#"{"address":"ws://s.example/p","input":"yes","wheel":[1,{"a":null}],"input":true}"#,
+    ] {
+        assert_eq!(parse(push), Ok(true), "{push}");
+    }
+    assert_eq!(parse(r#"{"address":"ws://s.example/p","other":true}"#), Err(DescriptorError::Unknown));
+    assert!(matches!(parse(r#"{"address":"ws://s.example/p","input":"#), Err(DescriptorError::Json(_))));
 }
 
-/// The browser's DEC-6447: `push.wheel` says the channel uses the mouse
-/// wheel over its pages, and only a channel that takes input can.
+/// Finding F-90 (DOC-1865): the input session's messages go back only to
+/// a push WebSocket on the descriptor's own origin. A service's
+/// descriptor could send them to any origin; a channel's push was already
+/// held to its own. A push on another origin is still read.
 #[test]
-fn the_wheel_is_a_kind_of_input() {
+fn messages_go_only_to_the_descriptors_own_origin() {
     let plain = Url::parse("http://s.example/service.json").unwrap();
     let with =
         |push: &str| std::format!(r#"{{"name":"S","initial_page":"100","page_template":"/{{mpp}}","push":{push}}}"#);
-    let parse = |push: &str| Descriptor::parse(with(push).as_bytes(), &plain).map(|descriptor| descriptor.wheel());
-    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":true,"wheel":true}"#), Ok(true));
-    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":true,"wheel":false}"#), Ok(false));
-    assert_eq!(parse(r#"{"address":"ws://s.example/p","input":true}"#), Ok(false));
-    assert_eq!(
-        parse(r#"{"address":"ws://s.example/p","wheel":true}"#),
-        Err(DescriptorError::Invalid(Member::PushWheel)),
-        "no wheel without input"
-    );
-    assert_eq!(
-        parse(r#"{"address":"ws://s.example/p","input":true,"wheel":1}"#),
-        Err(DescriptorError::Invalid(Member::PushWheel))
-    );
-    assert_eq!(
-        parse(r#"{"address":"ws://s.example/p","input":true,"wheel":true,"wheel":true}"#),
-        Err(DescriptorError::Duplicate(Member::PushWheel))
-    );
-    assert!(!Descriptor::parse(VALID.as_bytes(), &base()).unwrap().wheel());
-}
-
-/// Finding F-90 (DOC-1865): keys go back only to a push
-/// WebSocket on the descriptor's own origin. A service's descriptor could
-/// send them to any origin; a channel's push was already held to its own.
-#[test]
-fn input_goes_only_to_the_descriptors_own_origin() {
-    let plain = Url::parse("http://s.example/service.json").unwrap();
-    let with =
-        |push: &str| std::format!(r#"{{"name":"S","initial_page":"100","page_template":"/{{mpp}}","push":{push}}}"#);
-    let parse = |push: &str| Descriptor::parse(with(push).as_bytes(), &plain).map(|descriptor| descriptor.input());
-    assert_eq!(
-        parse(r#"{"address":"ws://keys.example/p","input":true}"#),
-        Err(DescriptorError::Invalid(Member::PushInput))
-    );
-    assert_eq!(
-        parse(r#"{"address":"ws://s.example:8080/p","input":true}"#),
-        Err(DescriptorError::Invalid(Member::PushInput)),
-        "another port is another origin"
-    );
-    assert_eq!(parse(r#"{"address":"ws://keys.example/p"}"#), Ok(false), "push alone may");
+    let parse = |push: &str| Descriptor::parse(with(push).as_bytes(), &plain).map(|d| d.push_takes_messages());
+    assert_eq!(parse(r#"{"address":"ws://s.example/p"}"#), Ok(true));
+    assert_eq!(parse(r#"{"address":"ws://keys.example/p","input":true}"#), Ok(false));
+    assert_eq!(parse(r#"{"address":"ws://s.example:8080/p"}"#), Ok(false), "another port is another origin");
 }
 
 /// REQ-420 (REQ-SEC-007): a descriptor fetched over HTTPS that names a
@@ -293,13 +261,15 @@ fn a_push_method_is_an_unknown_member() {
 #[test]
 fn a_push_object_makes_a_channel_live() {
     let base = settings_address("https");
-    let typing = Descriptor::parse_channel(br#"{"push":{"input":true}}"#, &base).unwrap();
-    assert_eq!(typing.push().unwrap().as_str(), "wss://example.org/ceefax/push");
-    assert!(typing.input());
-    let watching = Descriptor::parse_channel(br#"{"push":{}}"#, &base).unwrap();
-    assert_eq!(watching.push().unwrap().as_str(), "wss://example.org/ceefax/push");
-    assert!(!watching.input());
-    assert!(Descriptor::parse_channel(b"{}", &base).unwrap().push().is_none());
+    let old = Descriptor::parse_channel(br#"{"push":{"input":true}}"#, &base).unwrap();
+    assert_eq!(old.push().unwrap().as_str(), "wss://example.org/ceefax/push");
+    let live = Descriptor::parse_channel(br#"{"push":{}}"#, &base).unwrap();
+    assert_eq!(live.push().unwrap().as_str(), "wss://example.org/ceefax/push");
+    // RULE-49: the withdrawn `input` changes nothing; a channel's push is
+    // on its own origin, so its session's messages go.
+    assert!(old.push_takes_messages() && live.push_takes_messages());
+    let still = Descriptor::parse_channel(b"{}", &base).unwrap();
+    assert!(still.push().is_none() && !still.push_takes_messages());
 }
 
 /// REQ-WEB-024: every member optional, no template, linked channels by

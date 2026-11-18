@@ -188,15 +188,15 @@ fn a_message_holds_whole_items_and_text_runs_to_the_next_event() {
     message.extend_from_slice(&bytes(&key(Action::Press, KeyCode::Functional(code("Enter").unwrap()), 0)));
     message.extend_from_slice("ok é".as_bytes());
     let mut items = Vec::new();
-    read_message(&message, &mut |item| items.push(std::format!("{item:?}"))).unwrap();
+    read_items(&message, &mut |item| items.push(std::format!("{item:?}"))).unwrap();
     assert_eq!(items.len(), 3);
     assert!(items[0].contains("*100#") && items[2].contains("ok é"));
     assert_eq!(
-        read_message(&[0xFF, 0x01, 0x80, 0x02, 0x00, 0x04], &mut |_| {}),
+        read_items(&[0xFF, 0x01, 0x80, 0x02, 0x00, 0x04], &mut |_| {}),
         Err(InputError::Message),
         "cut by the end"
     );
-    assert_eq!(read_message(&[b'a'; MAX_MESSAGE + 1], &mut |_| {}), Err(InputError::Message), "over the bound");
+    assert_eq!(read_items(&[b'a'; MAX_MESSAGE + 1], &mut |_| {}), Err(InputError::Message), "over the bound");
 }
 
 // REQ-INT-101.
@@ -214,8 +214,8 @@ fn a_stream_split_anywhere_decodes_alike() {
             Item::Text(run) => text.push_str(run),
             Item::Event(_) => events += 1,
         };
-        decoder.push(&stream[..split], &mut take).unwrap();
-        decoder.push(&stream[split..], &mut take).unwrap();
+        decoder.push_items(&stream[..split], &mut take).unwrap();
+        decoder.push_items(&stream[split..], &mut take).unwrap();
         assert_eq!((text.as_str(), events), ("héllo", 2), "split at {split}");
     }
 }
@@ -303,7 +303,7 @@ fn touch_round_trips_and_is_checked() {
         &[0xFF, 0x44, 0x07, 0x80, 0x02, 0x00, 0x04, 0x01, 0x0A, 0x05],
         &[0xFF, 0x44, 0x08, 0x80, 0x02, 0x00, 0x00, 0x01, 0x0A, 0x05, 0x00],
     ] {
-        assert!(read_message(bad, &mut |_| {}).is_err(), "{bad:?}");
+        assert!(read_items(bad, &mut |_| {}).is_err(), "{bad:?}");
     }
     // A field cut short inside a payload is refused at once, never waited
     // for: a stream decoder would otherwise hold it until its buffer filled.
@@ -386,7 +386,7 @@ fn pick_round_trips_and_is_checked() {
         let mut out = [0_u8; 40];
         let length = write(&Item::Event(event), &mut out).unwrap();
         let mut back = Vec::new();
-        read_message(&out[..length], &mut |item| back.push(item)).unwrap();
+        read_items(&out[..length], &mut |item| back.push(item)).unwrap();
         assert_eq!(back, [Item::Event(event)]);
         assert_eq!(units(&Item::Event(event)), 0);
         assert_eq!(needs(&event), 0);
@@ -411,7 +411,7 @@ fn pick_round_trips_and_is_checked() {
         [0xFF, 0x46, 16, 0x80, 0x02, 0, 0x80, 0x80, 0x04, 40, 11, 0x9C, 0x03, 0xB4, 0x01, 0, 0, 0, 7].as_slice(),
         &[0xFF, 0x46, 15, 0x80, 0x02, 0, 12, 40, 11, 0x9C, 0x03, 0xB4, 0x01, 0, 0, 0, 7, 0],
     ] {
-        assert!(read_message(bad, &mut |_| {}).is_err(), "{bad:?}");
+        assert!(read_items(bad, &mut |_| {}).is_err(), "{bad:?}");
     }
 }
 
@@ -430,7 +430,7 @@ fn drawing_hover_round_trips_and_is_checked() {
         let mut out = [0_u8; 40];
         let length = write(&Item::Event(event), &mut out).unwrap();
         let mut back = Vec::new();
-        read_message(&out[..length], &mut |item| back.push(item)).unwrap();
+        read_items(&out[..length], &mut |item| back.push(item)).unwrap();
         assert_eq!(back, [Item::Event(event)]);
         assert_eq!(units(&Item::Event(event)), 0);
         assert_eq!(needs(&event), 0);
@@ -453,7 +453,7 @@ fn drawing_hover_round_trips_and_is_checked() {
         &[0xFF, 0x47, 8, 0x80, 0x02, 0, 0, 12, 0, 0, 0],
         &[0xFF, 0x47, 10, 0x80, 0x02, 0, 0, 12, 0, 0, 0, 7, 0],
     ] {
-        assert!(read_message(bad, &mut |_| {}).is_err(), "{bad:?}");
+        assert!(read_items(bad, &mut |_| {}).is_err(), "{bad:?}");
     }
 }
 
@@ -470,7 +470,7 @@ fn hover_round_trips_and_is_checked() {
         let mut out = [0_u8; 32];
         let length = write(&Item::Event(event), &mut out).unwrap();
         let mut back = Vec::new();
-        read_message(&out[..length], &mut |item| back.push(item)).unwrap();
+        read_items(&out[..length], &mut |item| back.push(item)).unwrap();
         assert_eq!(back, [Item::Event(event)]);
     }
     let mut written = [0_u8; 32];
@@ -481,7 +481,7 @@ fn hover_round_trips_and_is_checked() {
         &[0xFF, 0x43, 6, 0x80, 0x02, 0, 0, 40, 20],
         &[0xFF, 0x43, 7, 0x80, 0x02, 0, 0, 2, 20, 0],
     ] {
-        assert!(read_message(bad, &mut |_| {}).is_err(), "{bad:?}");
+        assert!(read_items(bad, &mut |_| {}).is_err(), "{bad:?}");
     }
 }
 
@@ -631,10 +631,10 @@ fn select_refuses_one_past_each_bound() {
         b"contents",
     ];
     for text in bad {
-        assert!(read_message(&select(text), &mut |_| {}).is_err(), "{text:?}");
+        assert!(read_items(&select(text), &mut |_| {}).is_err(), "{text:?}");
     }
-    assert!(read_message(&select(&[0x80, 0x81, 0x82]), &mut |_| {}).is_err(), "not text");
-    assert!(read_message(&[0xFF, 0x40, 5, b'3', b'0', b'2'], &mut |_| {}).is_err(), "a length past the end");
+    assert!(read_items(&select(&[0x80, 0x81, 0x82]), &mut |_| {}).is_err(), "not text");
+    assert!(read_items(&[0xFF, 0x40, 5, b'3', b'0', b'2'], &mut |_| {}).is_err(), "a length past the end");
 }
 
 // REQ-INT-140: a channel fed SELECT a byte at a time reads it once, and it
@@ -648,7 +648,7 @@ fn select_arrives_whole_and_counts_nothing() {
     let mut seen = Vec::new();
     for byte in bytes(&item) {
         decoder
-            .push(&[byte], &mut |item| {
+            .push_items(&[byte], &mut |item| {
                 if let Item::Event(Event::Select(select, _)) = item {
                     seen.push(select);
                 }
@@ -677,7 +677,7 @@ fn a_query_is_the_maps_pairs() {
 /// Every item of `bytes`, read whole, or the fault.
 fn items(bytes: &[u8]) -> Result<Vec<std::string::String>, InputError> {
     let mut read = Vec::new();
-    read_message(bytes, &mut |item| read.push(format!("{item:?}")))?;
+    read_items(bytes, &mut |item| read.push(format!("{item:?}")))?;
     Ok(read)
 }
 
@@ -686,7 +686,7 @@ fn streamed(bytes: &[u8]) -> (Result<Vec<std::string::String>, InputError>, Vec<
     let mut decoder = StreamDecoder::<MAX_STREAM_ITEM>::default();
     let mut read = Vec::new();
     for byte in bytes {
-        if let Err(error) = decoder.push(&[*byte], &mut |item| read.push(format!("{item:?}"))) {
+        if let Err(error) = decoder.push_items(&[*byte], &mut |item| read.push(format!("{item:?}"))) {
             return (Err(error), decoder.holding().to_vec());
         }
     }

@@ -63,7 +63,7 @@ fn a_push_handshake_names_its_subprotocol_and_no_origin() {
     let mut writer = Writer::new(&mut buffer);
     write_handshake_headers(&mut writer, &url, &key, b"NeoTeletext/0.1 (macOS)", Some(PUSH_SUBPROTOCOL)).unwrap();
     let text = core::str::from_utf8(writer.written()).unwrap();
-    assert!(text.ends_with("Sec-WebSocket-Protocol: neottx.8\r\n"), "{text}");
+    assert!(text.ends_with("Sec-WebSocket-Protocol: neottx.9\r\n"), "{text}");
     assert!(!text.to_ascii_lowercase().contains("origin"), "{text}");
 }
 
@@ -77,11 +77,11 @@ fn a_handshake_must_name_the_subprotocol_asked_for() {
         let head = http::parse_head(text.as_bytes()).unwrap();
         (check_handshake(&head, &key, Some(PUSH_SUBPROTOCOL)), check_handshake(&head, &key, None))
     };
-    assert_eq!(head_naming("Sec-WebSocket-Protocol: neottx.8\r\n"), (Ok(()), Err(WsError::Handshake)));
+    assert_eq!(head_naming("Sec-WebSocket-Protocol: neottx.9\r\n"), (Ok(()), Err(WsError::Handshake)));
     assert_eq!(head_naming(""), (Err(WsError::Handshake), Ok(())));
     assert_eq!(head_naming("Sec-WebSocket-Protocol: neottx.6\r\n").0, Err(WsError::Handshake));
     assert_eq!(head_naming("Sec-WebSocket-Protocol: NEOTTX.7\r\n").0, Err(WsError::Handshake));
-    let long = "Sec-WebSocket-Protocol: neottx.8 and a good deal more\r\n";
+    let long = "Sec-WebSocket-Protocol: neottx.9 and a good deal more\r\n";
     assert_eq!(head_naming(long), (Err(WsError::Handshake), Err(WsError::Handshake)));
 }
 
@@ -97,9 +97,9 @@ fn accepting_head(headers: &str) -> std::string::String {
 /// matched exactly.
 #[test]
 fn a_server_reads_what_a_client_offers() {
-    assert!(offers_subprotocol(b"neottx.8", PUSH_SUBPROTOCOL));
-    assert!(offers_subprotocol(b"chat, neottx.8 ,other", PUSH_SUBPROTOCOL));
-    for refused in [&b""[..], b"neottx.7", b"NEOTTX.8", b"neottx.80", b"neottx.8x", b"chat"] {
+    assert!(offers_subprotocol(b"neottx.9", PUSH_SUBPROTOCOL));
+    assert!(offers_subprotocol(b"chat, neottx.9 ,other", PUSH_SUBPROTOCOL));
+    for refused in [&b""[..], b"neottx.8", b"NEOTTX.9", b"neottx.90", b"neottx.9x", b"chat"] {
         assert!(!offers_subprotocol(refused, PUSH_SUBPROTOCOL), "{refused:?}");
     }
 }

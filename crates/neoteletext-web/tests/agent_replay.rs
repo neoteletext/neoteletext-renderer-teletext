@@ -1629,11 +1629,13 @@ fn push_sends(harness: &mut Harness) -> Vec<Vec<(u8, Vec<u8>)>> {
         .collect()
 }
 
-/// Decision E.90: a key record goes as one binary message on the push
-/// WebSocket of a channel that takes input, and nowhere else.
+/// Decision E.90, and page-rules.md RULE-49 (REQ-6528): a message of the
+/// input profile goes as one binary message on the push WebSocket of the
+/// descriptor's own origin, whatever the withdrawn `push.input` says, and
+/// nowhere else (finding F-90).
 #[test]
 #[cfg(feature = "push")]
-fn input_goes_on_the_push_websocket_only_when_declared() {
+fn input_goes_on_the_push_websocket_of_its_own_origin_only() {
     let record = [1u8, 1, 0, 1, 0, 0, 0, 9, 0, 0x61, 0, 0, 0, 0];
     let mut harness = input_service(true);
     assert!(has_event(&harness.open("http://tt.example/service.json"), "PushConnected"));
@@ -1643,9 +1645,20 @@ fn input_goes_on_the_push_websocket_only_when_declared() {
     // Too long for the input profile.
     harness.input(Input::Send(InputMessage::alone(&[0; neoteletext_web::consts::INPUT_MESSAGE_MAX + 1])));
     assert!(has_event(&harness.take(), "InputDropped"));
-    // A channel that does not take input sends nothing.
+    // The withdrawn `push.input` means nothing: a page's rule table is the
+    // only thing that asks for input, and the session's messages go.
     let mut harness = input_service(false);
     harness.open("http://tt.example/service.json");
+    harness.input(Input::Send(InputMessage::alone(&record)));
+    assert_eq!(push_frames(&mut harness).last(), Some(&(0x2, record.to_vec())));
+    assert!(!has_event(&harness.take(), "InputDropped"));
+    // A push on another origin is sent nothing.
+    let mut replay = Replay::new(&[("tt.example", PUBLIC), ("keys.example", PUBLIC)]);
+    let extra = r#","push":{"address":"ws://keys.example/push","input":true}"#;
+    replay.reply("tt.example:80", json_response(&descriptor(extra)));
+    replay.reply("keys.example:80", Reply::WebSocket(Vec::new()));
+    let mut harness = Harness::new(Config::default(), replay);
+    assert!(has_event(&harness.open("http://tt.example/service.json"), "PushConnected"));
     let before = push_frames(&mut harness).len();
     harness.input(Input::Send(InputMessage::alone(&record)));
     assert!(has_event(&harness.take(), "InputDropped"));

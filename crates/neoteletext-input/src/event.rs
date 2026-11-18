@@ -109,6 +109,17 @@ pub const STATE_NONE: u8 = 0x49;
 /// tabs, and asks to be challenged.
 pub const STATE_OFFER: u8 = 0x4A;
 
+/// `RULE_EVENT`'s type, an extension (RULE-46): a rule's `send` or `echo`,
+/// [`crate::rules::RuleEvent`]. Under protocol version 9 it is the only
+/// carrier of a viewer's input to a page.
+pub const RULE_EVENT: u8 = 0x4B;
+/// `PAGE_STATE`'s type, an extension (RULE-47): the answer to a state
+/// query, [`crate::rules::PageStateEvent`].
+pub const PAGE_STATE: u8 = 0x4C;
+/// `RULES_FAULT`'s type, an extension (RULE-48): a fault of a page's rule
+/// table, [`crate::rules::RulesFault`].
+pub const RULES_FAULT: u8 = 0x4D;
+
 /// KEY's flag bits (DOC-1935).
 const ACTION: u8 = 0b11;
 const FUNCTIONAL: u8 = 1 << 2;
@@ -455,6 +466,13 @@ pub enum Event<'a> {
     StateNone(crate::state::NoneReason),
     /// A key is now held for this channel: challenge me (VS-204, VS-111).
     StateOffer,
+    /// A rule's `send` or `echo` (RULE-46): the one carrier of a viewer's
+    /// input to a page under protocol version 9.
+    RuleEvent(crate::rules::RuleEvent<'a>),
+    /// A page's local state, in answer to a state query (RULE-47).
+    PageState(crate::rules::PageStateEvent<'a>),
+    /// A fault of a page's rule table (RULE-48).
+    RulesFault(crate::rules::RulesFault),
     /// The page and sub-page the connection has selected (REQ-INT-140),
     /// and the address's page parameters as written, without their `?`, or
     /// nothing (REQ-1693 item 6).
@@ -520,6 +538,9 @@ pub enum InputError {
     BadValue(&'static str),
     /// A message that ends inside an item, or is over [`MAX_MESSAGE`](crate::MAX_MESSAGE).
     Message,
+    /// A viewer's input at the top level of the stream (RULE-46): under
+    /// protocol version 9 it travels only inside a `RULE_EVENT`.
+    Bare,
 }
 
 impl From<WireError> for InputError {
@@ -539,12 +560,43 @@ fn check_text(text: &str) -> Result<(), InputError> {
     if text.chars().all(printable) { Ok(()) } else { Err(InputError::Control) }
 }
 
+/// Whether `item` is a viewer's input to a page (RULE-46): KEY, MOUSE,
+/// WHEEL, PASTE, COMPOSE, TOUCH, `FOCUS_IN`, `FOCUS_OUT`, HOVER, PICK,
+/// `DRAWING_HOVER` or raw text. Under protocol version 9 such an item
+/// appears only inside a `RULE_EVENT`: a server treats one at the top
+/// level of the stream as a protocol fault ([`read_message`] and
+/// [`StreamDecoder`] refuse it with [`InputError::Bare`]), and a receiver
+/// never writes one there ([`crate::session::SessionOf::send`] refuses
+/// it the same way). HELLO, RESIZE, SELECT, RESUME and viewer state's messages are the
+/// session, and stay at the top level.
+#[must_use]
+pub const fn is_page_input(item: &Item<'_>) -> bool {
+    match item {
+        Item::Text(_) => true,
+        Item::Event(event) => matches!(
+            event,
+            Event::Key(_)
+                | Event::Mouse(_)
+                | Event::Wheel(_)
+                | Event::Paste { .. }
+                | Event::Compose { .. }
+                | Event::Touch(_)
+                | Event::FocusIn
+                | Event::FocusOut
+                | Event::Hover { .. }
+                | Event::Pick(_)
+                | Event::DrawingHover { .. }
+        ),
+    }
+}
+
 /// How much of the input count an item is (DOC-1943): a
 /// character of text counts one, and every event counts one, but those
 /// that are never acknowledged (REQ-RCH-012, REQ-RCH-054): a move and gone,
 /// MOUSE's and TOUCH's, HOVER, PICK, `DRAWING_HOVER`, COMPOSE, RESUME and SELECT
 /// count none, and nor do viewer state's messages, which are no input
-/// (VS-204).
+/// (VS-204). A `RULE_EVENT` counts one, whatever it carries (RULE-46); a
+/// `PAGE_STATE` and a `RULES_FAULT` are no input and count none.
 #[must_use]
 pub fn units(item: &Item<'_>) -> u32 {
     match item {
@@ -567,7 +619,9 @@ fn uncounted(event: &Event<'_>) -> bool {
         | Event::Select(..)
         | Event::StateProof(_)
         | Event::StateNone(_)
-        | Event::StateOffer => true,
+        | Event::StateOffer
+        | Event::PageState(_)
+        | Event::RulesFault(_) => true,
         _ => false,
     }
 }
@@ -600,7 +654,7 @@ pub fn move_contact(event: &Event<'_>) -> Option<usize> {
 mod decode;
 mod encode;
 
-pub use decode::{MAX_STREAM_ITEM, StreamDecoder, read, read_message};
+pub use decode::{MAX_STREAM_ITEM, StreamDecoder, read, read_items, read_message};
 pub use encode::{MAX_MOVE_BYTES, write};
 
 #[cfg(test)]

@@ -40,10 +40,15 @@ version = "0.1.0"
 dependencies = [
  "neoteletext-audio",
  "neoteletext-core",
+ "neoteletext-rules",
 ]
 
 [[package]]
 name = "neoteletext-opus"
+version = "0.1.0"
+
+[[package]]
+name = "neoteletext-rules"
 version = "0.1.0"
 
 [[package]]

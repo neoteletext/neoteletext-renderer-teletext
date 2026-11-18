@@ -109,7 +109,7 @@ pub(super) fn run_web(
             }
         }
         if let Some(open) = push_state.take()
-            && agent.descriptor().is_some_and(Descriptor::input)
+            && agent.descriptor().is_some_and(Descriptor::push_takes_messages)
             && send(&Frame::Notice(Notice::Input(open))).is_err()
         {
             break;
