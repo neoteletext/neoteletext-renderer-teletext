@@ -99,7 +99,7 @@ pub mod synth7;
 pub mod synth8;
 #[cfg(feature = "synth80")]
 pub mod synth80;
-#[cfg(feature = "synthd")]
+#[cfg(feature = "interface")]
 pub mod synthd;
 
 /// Samples a second of everything this crate renders: the rate of an

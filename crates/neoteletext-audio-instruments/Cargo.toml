@@ -30,7 +30,11 @@ analog = []
 synth106 = ["analog"]
 # synthD, made from the analogue building blocks
 # (TODO-6432), codec 15. Not on by default.
-synthd = ["analog"]
+synthd = ["analog", "interface"]
+# Each family's programming interface without its synthesis: its tables,
+# patch packer and check, bank builder and reader, and restatement, which
+# the server builds alone (server.md, SRV-87, SRV-88).
+interface = []
 # synth53, synth52 and synth51, made
 # from the analogue building blocks (TODO-6433), codec 16. Not on by default.
 synth53 = ["analog"]

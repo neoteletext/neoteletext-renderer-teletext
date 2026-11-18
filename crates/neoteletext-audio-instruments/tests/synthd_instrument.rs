@@ -25,6 +25,7 @@ mod support;
 use std::time::Instant;
 
 use analog::{Random, amplitude, decibels};
+use neoteletext_audio_instruments::synthd::interface::byte;
 use neoteletext_audio_instruments::synthd::{
     ContourPatch, OscillatorPatch, PATCH_BYTES, Patch, Range, SynthD, Waveform,
 };
@@ -130,9 +131,11 @@ fn the_wheel_lets_oscillator_3_move_the_pitch_by_seven_eighths_of_an_octave() {
     patch.oscillator_3_control = false;
     patch.oscillators[2].waveform = Waveform::Square;
     patch.oscillators[2].frequency = -350;
-    let swing = |wheel: u8| {
+    // The wheel is the pair 1 and 33, 14 bits (SD-9).
+    let swing = |wheel: u16| {
         let mut synthd = instrument(&patch);
-        synthd.event(CONTROL, 1, wheel);
+        synthd.event(CONTROL, 1, (wheel >> 7) as u8);
+        synthd.event(CONTROL, 33, (wheel & 0x7f) as u8);
         synthd.event(NOTE_ON, 69, 100);
         let signal = render(&mut synthd, 6.0);
         let pitches: Vec<f64> = signal.chunks(samples(0.05)).map(pitch).filter(|&found| found > 0.0).collect();
@@ -140,12 +143,12 @@ fn the_wheel_lets_oscillator_3_move_the_pitch_by_seven_eighths_of_an_octave() {
         let low = pitches.iter().fold(f64::MAX, |low, &found| low.min(found));
         cents(low, high)
     };
-    let (none, full) = (swing(0), swing(127));
+    let (none, full) = (swing(0), swing(16_383));
     println!("wheel down: {none:.2} cents; wheel up: {full:.1} cents");
     assert!(none < 0.5);
     assert!((full - 2100.0).abs() < 15.0);
     // The wheel's law is the square of its travel.
-    assert!((swing(64) - 2100.0 * (64.0f64 / 127.0).powi(2)).abs() < 10.0);
+    assert!((swing(8_192) - 2100.0 * (8_192.0f64 / 16_383.0).powi(2)).abs() < 10.0);
 }
 
 #[test]
@@ -358,10 +361,10 @@ fn the_drift_is_seeded_bounded_and_nothing_when_off() {
 #[test]
 fn the_messages_it_takes_and_those_it_counts() {
     let mut synthd = instrument(&triangle());
-    // Aftertouch, program change, a controller it has not, a data byte
-    // that is none.
+    // Aftertouch, program change, a controller it has not (the Voyager's
+    // MOD 1, SD-17 table F), a data byte that is none.
     for (status, first, second) in
-        [(0xa0, 60, 5), (0xc0, 1, 0), (0xd0, 9, 0), (CONTROL, 74, 9), (NOTE_ON, 200, 1), (0xf8, 0, 0)]
+        [(0xa0, 60, 5), (0xc0, 1, 0), (0xd0, 9, 0), (CONTROL, 2, 9), (NOTE_ON, 200, 1), (0xf8, 0, 0)]
     {
         synthd.event(status, first, second);
     }
@@ -404,38 +407,26 @@ fn the_messages_it_takes_and_those_it_counts() {
     assert_eq!((synthd.ignored_events(), synthd.sounding(), *synthd.patch()), (0, false, triangle()));
 }
 
-/// A patch from random bytes brought inside their ranges.
+/// A patch from random values (SD-22: every 60 bytes of 0 to 127 is one).
 fn random_patch(random: &mut Random) -> Patch {
-    loop {
-        let mut bytes = [0u8; PATCH_BYTES];
-        for byte in &mut bytes {
-            *byte = random.word() as u8;
-        }
-        for at in [0, 8, 12, 19] {
-            let limit = [(0, 242), (8, 700), (12, 700), (19, 500)].iter().find(|pair| pair.0 == at).unwrap().1;
-            let value = (random.word() % (2 * limit + 1)) as i16 - limit as i16;
-            bytes[at..at + 2].copy_from_slice(&value.to_le_bytes());
-        }
-        for at in [23, 25, 28, 30] {
-            // Short times mostly, so that much happens in a short test.
-            let value =
-                if random.word().is_multiple_of(4) { random.word() % 10_001 } else { random.word() % 300 } as u16;
-            bytes[at..at + 2].copy_from_slice(&value.to_le_bytes());
-        }
-        for at in [4, 5, 6, 7, 10, 11] {
-            bytes[at] %= 6;
-        }
-        for at in [2, 3, 14, 15, 16, 17, 18, 21, 22, 27, 32, 33] {
-            bytes[at] %= 101;
-        }
-        bytes[34] &= 0x7f;
-        // One patch in a hundred is left a byte out of range: that it is
-        // refused, and not a panic, is part of the test.
-        bytes[35] &= if random.word().is_multiple_of(100) { 0xff } else { 0x3f };
-        if let Ok(patch) = Patch::from_bytes(&bytes) {
-            return patch;
+    let mut bytes = [0u8; PATCH_BYTES];
+    for byte in &mut bytes {
+        *byte = random.word() as u8 & 0x7f;
+    }
+    // Short times mostly, so that much happens in a short test: a coarse
+    // byte below 4 is under 310 ms.
+    for at in [byte::FILTER_ATTACK_TIME, byte::FILTER_DECAY_TIME, byte::LOUDNESS_ATTACK_TIME, byte::LOUDNESS_DECAY_TIME]
+    {
+        if !random.word().is_multiple_of(4) {
+            bytes[at] %= 4;
         }
     }
+    // One patch in a hundred has a byte above 127: that it is refused, and
+    // not a panic, is part of the test.
+    if random.word().is_multiple_of(100) {
+        bytes[random.word() as usize % PATCH_BYTES] |= 0x80;
+    }
+    Patch::from_bytes(&bytes).unwrap_or(Patch::DEFAULT)
 }
 
 /// Plays random patches and random messages, rendered in pieces of
