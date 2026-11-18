@@ -15,6 +15,9 @@
 //! server can never send what a receiver refuses. [`RecordReader`]
 //! reassembles a push stream's fragments and reads the records it carries.
 
+/// The most bytes of a record's body (REQ-AUD-003): the audio profile's
+/// record frame holds no more.
+pub use neoteletext_audio::MAX_FRAMED_BODY;
 use neoteletext_audio::MAX_FRAMED_RECORD;
 use neoteletext_audio::idl::{FRAGMENT_DATA, MAX_FRAGMENTS, Reassembler, fragment, packet};
 use neoteletext_audio::record::{RecordError, record_length, split, write};

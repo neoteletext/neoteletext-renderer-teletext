@@ -207,7 +207,7 @@ fn the_options_and_the_script_are_checked() {
     let (_, run) = play("sequence_bad_record", "0 show 1\n\n2 record FRAME 0100000003000001\n", &["--frames", "4"]);
     assert_eq!(run.status.code(), Some(3));
     let message = String::from_utf8_lossy(&run.stderr).into_owned();
-    assert!(message.contains("the script's line 3: the mark is 1 or 2, not 3"), "{message}");
+    assert!(message.contains("the script's line 3: the record's frame mark is outside its range"), "{message}");
     // An operation on a target that does not exist does nothing and is counted.
     let (_, run) = play("sequence_missing", "0 show 9\n0 hide control:5\n", &["--frames", "1"]);
     assert!(run.status.success());

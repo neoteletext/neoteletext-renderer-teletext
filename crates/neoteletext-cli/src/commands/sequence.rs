@@ -6,7 +6,7 @@
 //! machine and every run.
 
 use super::grid_of;
-use crate::records::{self, SUBCODE_SHOWN};
+use crate::records;
 use crate::script::{Action, RecordKind, Step};
 use neoteletext_app::session::Session;
 use neoteletext_app::{Failure, exit};
@@ -15,35 +15,27 @@ use neoteletext_core::controls::{self, Controls};
 use neoteletext_core::fsm::PageKey;
 use neoteletext_core::level1::{DisplayOptions, Grid};
 use neoteletext_core::sprites::{Animation, Applied, Operation, Placements, Sprites, Target};
+use neoteletext_core::types::{PageAddress, SubCode};
+use neoteletext_web::records::frame::{FrameChange, FrameEnd, OpenFrames};
+use neoteletext_web::records::{animate, frame, sprites};
 
 /// The most ticks a sequence plays (ANIM-18): ten minutes.
 pub const MAX_SEQUENCE_TICKS: u32 = 36_000;
-/// The most bytes an atomic frame holds before what it holds is applied
-/// (ANIM-2, ANIM-16).
-const MAX_FRAME_BYTES: usize = 262_144;
-/// The most ticks an atomic frame stays open with no end before what it
-/// holds is applied: two seconds (ANIM-2, ANIM-16).
-const MAX_FRAME_TICKS: u32 = 120;
-
-/// An atomic frame that has begun and not ended (ANIM-2): the records held
-/// for the page, unapplied and in arrival order.
-struct OpenFrame {
-    identifier: u16,
-    began: u32,
-    held: Vec<Step>,
-    bytes: usize,
-}
-
 /// The page being played: its sprites and animation state, and the frame
 /// that is open.
 struct Player {
     /// The page, as a record names it.
-    page: u16,
-    subcode: u16,
+    page: PageAddress,
+    subcode: SubCode,
     controls: Controls,
     sprites: Sprites,
     animation: Animation,
-    open: Option<OpenFrame>,
+    /// Whether the page has an atomic frame open, how much it holds and
+    /// for how long (ANIM-2): the follower a receiver of a channel uses,
+    /// with its bounds on a frame's bytes and ticks (ANIM-16).
+    frames: OpenFrames,
+    /// The records the open frame holds, unapplied and in arrival order.
+    held: Vec<Step>,
     /// Operations that were refused as out of range or as not acting on
     /// their target, which a record's reader refuses first.
     refused: u32,
@@ -56,9 +48,10 @@ fn refused(step: &Step, why: &str) -> Failure {
 
 impl Player {
     /// Whether a record for `page` and `subcode` is for the page played.
-    /// An ANIMATE record may name whichever sub-page is shown.
-    fn ours(&self, page: u16, subcode: u16, any_shown: bool) -> bool {
-        page == self.page && (subcode == self.subcode || (any_shown && subcode == SUBCODE_SHOWN))
+    /// An ANIMATE record names no sub-page when it is for whichever is
+    /// shown (ANIM-6).
+    fn ours(&self, page: PageAddress, subcode: Option<SubCode>) -> bool {
+        page == self.page && subcode.is_none_or(|subcode| subcode == self.subcode)
     }
 
     fn operate(&mut self, target: Target, operation: Operation, tick: u32) {
@@ -75,28 +68,26 @@ impl Player {
         match &step.action {
             Action::Operation { target, operation } => self.operate(*target, *operation, tick),
             Action::Record { kind: RecordKind::Frame, body } => {
-                let mark = records::frame(body).map_err(|why| refused(step, &why))?;
-                if !self.ours(mark.page, mark.subcode, false) {
+                let mark = frame::read(body).map_err(|fault| refused(step, &records::why(fault)))?;
+                if !self.ours(mark.page, Some(mark.subcode)) {
                     return Ok(());
                 }
                 // A second begin ends the frame that was open, as an end
                 // does; an end with no begin, or another's, does nothing.
-                if mark.begin || self.open.as_ref().is_some_and(|open| open.identifier == mark.identifier) {
-                    self.end_frame(tick)?;
-                }
-                if mark.begin {
-                    self.open =
-                        Some(OpenFrame { identifier: mark.identifier, began: tick, held: Vec::new(), bytes: 0 });
+                match self.frames.record(&mark) {
+                    FrameChange::Ended(_) | FrameChange::Reopened => self.end_frame(tick)?,
+                    FrameChange::Opened | FrameChange::Nothing => {}
                 }
             }
-            Action::Record { kind, body } => {
-                let Some(open) = self.open.as_mut() else { return self.record(step, *kind, body, tick) };
-                open.bytes = open.bytes.saturating_add(body.len());
-                open.held.push(step.clone());
-                if open.bytes >= MAX_FRAME_BYTES {
+            Action::Record { kind, body } => match self.frames.hold(self.page, body.len()) {
+                None => self.record(step, *kind, body, tick)?,
+                Some(None) => self.held.push(step.clone()),
+                // The frame is full: what it held is applied, then this.
+                Some(Some(_)) => {
                     self.end_frame(tick)?;
+                    self.record(step, *kind, body, tick)?;
                 }
-            }
+            },
         }
         Ok(())
     }
@@ -105,22 +96,22 @@ impl Player {
     fn record(&mut self, step: &Step, kind: RecordKind, body: &[u8], tick: u32) -> Result<(), Failure> {
         match kind {
             RecordKind::Animate => {
-                let record = records::animate(body).map_err(|why| refused(step, &why))?;
-                if self.ours(record.page, record.subcode, true) {
-                    for (target, operation) in record.operations {
+                let record = animate::read(body).map_err(|fault| refused(step, &records::why(fault)))?;
+                if self.ours(record.page, record.subcode) {
+                    for (target, operation) in records::operations(&record).map_err(|why| refused(step, &why))? {
                         self.operate(target, operation, tick);
                     }
                 }
             }
             RecordKind::Sprites => {
-                let record = records::sprites(body).map_err(|why| refused(step, &why))?;
-                if self.ours(record.page, record.subcode, false) {
+                let record = sprites::read(body).map_err(|fault| refused(step, &records::why(fault)))?;
+                if self.ours(record.page, Some(record.subcode)) {
                     if !cfg!(feature = "objects") {
                         return Err(neoteletext_app::not_in_build("teletext sprites", "objects"));
                     }
                     // ANIM-6: a SPRITES record replaces all of a sub-page's
                     // sprites and forgets the state of what it replaces.
-                    self.sprites = record.sprites;
+                    self.sprites = records::sprites_of(&record).map_err(|why| refused(step, &why))?;
                     self.animation.clear_objects();
                 }
             }
@@ -129,11 +120,10 @@ impl Player {
         Ok(())
     }
 
-    /// Ends the open frame, if any: everything it held is applied, in
-    /// order, on this tick (ANIM-2).
+    /// The frame ended: everything it held is applied, in order, on this
+    /// tick (ANIM-2).
     fn end_frame(&mut self, tick: u32) -> Result<(), Failure> {
-        let Some(open) = self.open.take() else { return Ok(()) };
-        for step in &open.held {
+        for step in &core::mem::take(&mut self.held) {
             if let Action::Record { kind, body } = &step.action {
                 self.record(step, *kind, body, tick)?;
             }
@@ -141,10 +131,12 @@ impl Player {
         Ok(())
     }
 
-    /// The start of a tick: a frame open for [`MAX_FRAME_TICKS`] with no
+    /// The start of a tick: a frame open for `MAX_FRAME_TICKS` with no
     /// end is applied (ANIM-2).
     fn begin_tick(&mut self, tick: u32) -> Result<(), Failure> {
-        if self.open.as_ref().is_some_and(|open| tick.saturating_sub(open.began) >= MAX_FRAME_TICKS) {
+        let mut late = false;
+        self.frames.tick(&mut |_, end| late |= end == FrameEnd::Late);
+        if late {
             self.end_frame(tick)?;
         }
         Ok(())
@@ -179,12 +171,13 @@ pub(super) fn play(
     // row 0, which is the receiver's and which a sprite never writes.
     let options = DisplayOptions::default();
     let mut player = Player {
-        page: key.address.mpp(),
-        subcode: page.key.subcode.value(),
+        page: key.address,
+        subcode: page.key.subcode,
         controls: controls::controls(page),
         sprites: Sprites::NONE,
         animation: Animation::NONE,
-        open: None,
+        frames: OpenFrames::new(),
+        held: Vec::new(),
         refused: 0,
     };
     let mut steps = script.iter().peekable();

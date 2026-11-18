@@ -35,8 +35,8 @@ use std::fmt::Write as _;
 /// sequence, 36,000 ticks, at a hundred bytes a tick.
 pub const MAX_SCRIPT_BYTES: usize = 4 * 1024 * 1024;
 /// The longest body of a record, in bytes: the audio profile's record
-/// frame holds no more (page-rules.md section 8, `MAX_FRAMED_BODY`).
-pub const MAX_RECORD_BODY: usize = 8_184;
+/// frame holds no more (page-rules.md section 8).
+pub const MAX_RECORD_BODY: usize = neoteletext_web::records::MAX_FRAMED_BODY;
 /// The word that names a control in place of an object.
 const CONTROL_PREFIX: &str = "control:";
 /// The word of `order` that keeps the layer.
@@ -59,9 +59,9 @@ impl RecordKind {
     #[must_use]
     pub const fn number(self) -> u8 {
         match self {
-            Self::Animate => 23,
-            Self::Sprites => 24,
-            Self::Frame => 27,
+            Self::Animate => neoteletext_web::records::TYPE_ANIMATE,
+            Self::Sprites => neoteletext_web::records::TYPE_SPRITES,
+            Self::Frame => neoteletext_web::records::TYPE_FRAME,
         }
     }
 
