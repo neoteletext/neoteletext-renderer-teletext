@@ -1489,6 +1489,48 @@ fn a_sub_pages_file_has_its_bound() {
     assert!(has_event(&records, "FetchFailed"));
 }
 
+/// PAR-8, TODO-6808: a sub-page's T42 file whose page is at its bound and
+/// whose picture's records follow it, the whole past `MAX_SUBPAGE_FILE`, is
+/// delivered whole; REQ-1904 still refuses one teletext packet more.
+#[test]
+fn a_sub_pages_file_carries_a_picture_past_its_pages_bound() {
+    use neoteletext_web::records::regis::{RegisRecord, encode};
+    use neoteletext_web::subpages::MAX_SUBPAGE_FILE;
+    let mut harness = site_harness(Config::default());
+    harness.replay().reply("site.example:80", not_found());
+    harness.replay().reply("site.example:80", not_found());
+    harness.open_channel("http://site.example/news/");
+    let page = PageAddress::from_mpp(0x100).unwrap();
+    let interval = neoteletext_web::consts::DEFAULT_FETCH_INTERVAL_US;
+    harness.replay().reply("site.example:80", ok("text/plain", b"2\tv\n0001\tv\n0002\tv\n"));
+    harness.input(Input::FetchSubPages { page, part: PartNumber::FIRST });
+    harness.advance(interval);
+    harness.take();
+    let packet = packet();
+    let mut records = Vec::new();
+    let record = RegisRecord { page, subcode: SubCode::new(1), generation: 1, offset: 0, data: &[b' '; 4_000] };
+    encode(record, 0, 0, &mut |written| records.extend_from_slice(&written.bytes)).unwrap();
+    let mut file = packet.repeat(MAX_SUBPAGE_FILE / packet.len());
+    file.extend_from_slice(&records);
+    assert!(file.len() > 2 * MAX_SUBPAGE_FILE);
+    harness.replay().reply("site.example:80", ok("application/octet-stream", &file));
+    harness.input(Input::FetchPage { page, subcode: Some(SubCode::new(1)) });
+    harness.advance(interval);
+    let delivered = harness.take();
+    assert!(
+        matches!(pages(&delivered).as_slice(), [Rec::Page { bytes, .. }] if *bytes == file),
+        "delivered whole: {delivered:?}"
+    );
+    let mut over = packet.repeat(MAX_SUBPAGE_FILE / packet.len() + 1);
+    over.extend_from_slice(&records);
+    harness.replay().reply("site.example:80", ok("application/octet-stream", &over));
+    harness.input(Input::FetchPage { page, subcode: Some(SubCode::new(2)) });
+    harness.advance(interval);
+    let refused = harness.take();
+    assert!(pages(&refused).is_empty(), "nothing of it is delivered");
+    assert!(has_event(&refused, "FetchFailed"));
+}
+
 /// REQ-1896: the file is the truth. A sub-page whose file answers with a
 /// validator other than its list's is used, and a listed sub-page whose files
 /// answer 404 is not found.

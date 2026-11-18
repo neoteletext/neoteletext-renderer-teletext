@@ -12,6 +12,7 @@
 //! its own and is not read.
 
 use super::io_failure;
+use super::picture::{MAX_PICTURED_PAGE_FILE, MAX_PICTURED_SUBPAGE_FILE};
 use super::sandbox_closed;
 use crate::ansi::{MosaicStyle, plain};
 use neoteletext_app::bounded_file::read_bounded;
@@ -22,7 +23,7 @@ use neoteletext_core::types::PageAddress;
 use neoteletext_web::channel::{self, ChannelFile};
 use neoteletext_web::consts::DEFAULT_PAGE_LIMIT;
 use neoteletext_web::contents::{MAX_BYTES, MAX_LINES, MAX_TITLE};
-use neoteletext_web::subpages::MAX_SUBPAGE_FILE;
+use neoteletext_web::subpages::{self, MAX_SUBPAGE_FILE};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -141,11 +142,25 @@ fn description(bytes: &[u8]) -> Option<String> {
     (!title.is_empty()).then_some(title)
 }
 
-/// The largest a file of a channel may be (REQ-1904).
+/// The largest a file of a channel may be (REQ-1904): a page's or a
+/// sub-page's T42 file with room for a picture's records after its
+/// teletext packets (PAR-8).
 const fn largest(file: ChannelFile) -> usize {
     match file {
-        ChannelFile::SubPage { t42: true, .. } => MAX_SUBPAGE_FILE,
+        ChannelFile::SubPage { t42: true, .. } => MAX_PICTURED_SUBPAGE_FILE,
+        ChannelFile::Page { t42: true, .. } => MAX_PICTURED_PAGE_FILE,
         _ => DEFAULT_PAGE_LIMIT,
+    }
+}
+
+/// The most bytes of teletext packets a T42 file of a channel may hold,
+/// whatever picture records follow them (REQ-1904, PAR-8); `None` for a
+/// file that is not one.
+const fn teletext_bound(file: ChannelFile) -> Option<usize> {
+    match file {
+        ChannelFile::SubPage { t42: true, .. } => Some(MAX_SUBPAGE_FILE),
+        ChannelFile::Page { t42: true, .. } => Some(DEFAULT_PAGE_LIMIT),
+        _ => None,
     }
 }
 
@@ -175,6 +190,12 @@ fn decode(options: &Options, unparsed: Unparsed) -> Option<Loaded> {
     let valid = if t42 { channel::is_t42(&bytes) } else { channel::is_tti(&bytes) };
     if !valid {
         report(if t42 { "not whole T42 packets" } else { "not a TTI page file" });
+        return None;
+    }
+    if let Some(bound) = teletext_bound(file)
+        && subpages::teletext_bytes(&bytes) > bound
+    {
+        report(&format!("its teletext packets are larger than {bound} bytes"));
         return None;
     }
     let file_options = Options { input: path.to_string_lossy().into_owned(), ..options.clone() };

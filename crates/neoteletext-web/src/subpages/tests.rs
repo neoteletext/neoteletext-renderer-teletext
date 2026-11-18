@@ -239,3 +239,36 @@ fn a_pages_version_follows_its_sub_pages() {
     assert_ne!(version, Validator::of_page([first]), "a sub-page removed");
     assert_ne!(version, Validator::of_page([second, first]), "in the page's order");
 }
+
+/// The packets of one REGIS record of `data`, as a static sub-page's file
+/// carries them after its page (PAR-8).
+fn regis_packets(data: &[u8]) -> Vec<u8> {
+    use crate::records::regis::{RegisRecord, encode};
+    let record = RegisRecord {
+        page: neoteletext_core::types::PageAddress::from_mpp(0x200).unwrap(),
+        subcode: SubCode::new(1),
+        generation: 1,
+        offset: 0,
+        data,
+    };
+    let mut bytes = Vec::new();
+    encode(record, 0, 0, &mut |packet| bytes.extend_from_slice(&packet.bytes)).unwrap();
+    bytes
+}
+
+// REQ-1904, PAR-8, TODO-6808: a sub-page's teletext packets are counted
+// apart from the picture records after them, so a full sub-page with a
+// picture is within MAX_SUBPAGE_FILE and one more teletext packet is not.
+#[test]
+fn a_sub_pages_teletext_is_counted_apart_from_its_picture() {
+    let packet = [0x15_u8; PACKET_BYTES];
+    let page = packet.repeat(MAX_SUBPAGE_FILE / PACKET_BYTES);
+    let records = regis_packets(&[b' '; 4_000]);
+    assert!(records.len() > MAX_SUBPAGE_FILE, "the picture alone passes the old bound");
+    let mut file = page.clone();
+    file.extend_from_slice(&records);
+    assert_eq!(teletext_bytes(&file), MAX_SUBPAGE_FILE);
+    file.extend_from_slice(&packet);
+    assert_eq!(teletext_bytes(&file), MAX_SUBPAGE_FILE + PACKET_BYTES);
+    assert_eq!(teletext_bytes(&records), 0);
+}

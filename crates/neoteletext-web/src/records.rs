@@ -25,6 +25,7 @@ use neoteletext_audio::MAX_FRAMED_RECORD;
 pub use neoteletext_audio::idl::FRAGMENT_DATA;
 use neoteletext_audio::idl::{MAX_FRAGMENTS, Reassembler, fragment, packet};
 use neoteletext_audio::record::{RecordError, record_length, split, write};
+use neoteletext_core::consts::PACKET_BYTES;
 use neoteletext_core::packet::Packet;
 
 pub mod animate;
@@ -100,6 +101,25 @@ pub fn is_record_packet(packet: &Packet) -> bool {
 #[must_use]
 pub const fn fragments(body: usize) -> usize {
     record_length(body).div_ceil(FRAGMENT_DATA)
+}
+
+/// The most bytes of packets 4/31 that one sub-page's picture takes in a
+/// static channel's file when its stream is `stream_bytes` long (PAR-8):
+/// the stream cut into REGIS or NAPLPS records of [`regis::MAX_DATA`]
+/// bytes each, one `NAPLPS_OBJECTS` record, the drawing links in at most
+/// [`drawing_links::MAX_PARTS`] records and one `REGIS_CURSOR`, each record
+/// at its largest. A reader of such a file bounds it by its teletext
+/// packets' bound plus this, so that it reads every picture a writer may
+/// write and nothing larger.
+#[must_use]
+pub const fn picture_records_bytes(stream_bytes: usize) -> usize {
+    // A stream's record is full but for its last: MAX_DATA bytes of the
+    // stream and its fixed fields fill the frame's largest body.
+    let stream = stream_bytes.div_ceil(regis::MAX_DATA).saturating_mul(fragments(MAX_FRAMED_BODY));
+    let objects = fragments(naplps_objects::MAX_BYTES);
+    let links = drawing_links::MAX_PARTS.saturating_mul(fragments(MAX_FRAMED_BODY));
+    let cursor = fragments(regis_cursor::BYTES);
+    stream.saturating_add(objects).saturating_add(links).saturating_add(cursor).saturating_mul(PACKET_BYTES)
 }
 
 /// Writes a record of type `kind` around `body` as packets 4/31 of audio

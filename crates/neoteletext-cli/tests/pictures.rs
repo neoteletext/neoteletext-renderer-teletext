@@ -431,3 +431,45 @@ fn write_text_writes_a_picture_into_a_channel() {
         assert_eq!(fs::read(&from_channel).unwrap(), fs::read(&from_file).unwrap(), "{language}");
     }
 }
+
+// PAR-8, TODO-6808: a picture converted into a sub-page of a page of two
+// sub-pages goes into that sub-page's own file in the page's folder, the
+// page kept whole (before, the page was cut down to the one sub-page), and
+// into the page's file, which holds the first sub-page too; its records
+// take more than MAX_SUBPAGE_FILE, and the channel reader of `neottx
+// contents` reads the sub-page's file (before, it skipped it) and it
+// renders from its `NNN/SSSS.t42` as its picture file does.
+#[test]
+fn a_picture_in_a_sub_page_folder_is_read_past_the_pages_bound() {
+    let folder = common::folder("pictures-sub-page-folder");
+    let page = folder.join("page.tti");
+    fs::write(&page, "PN,20000\nSC,0001\nOL,1,First\nPN,20000\nSC,0002\nOL,1,Second\n").unwrap();
+    // A long ReGIS stream: the same short line drawn many times.
+    let regis = folder.join("p.regis");
+    let bytes = b"S(E)W(I2)".iter().copied().chain(b"P[10,10]V[300,200]".repeat(400)).collect::<Vec<u8>>();
+    fs::write(&regis, &bytes).unwrap();
+    let channel = folder.join("channel");
+    convert_picture(&page, &channel, &["--regis", regis.to_str().unwrap()]);
+    // The page keeps both its sub-pages, so its folder, and the picture is
+    // in its first sub-page's own file there.
+    let file = channel.join("200").join("0001.t42");
+    assert!(channel.join("200").join("0002.t42").is_file(), "the page keeps its other sub-page");
+    assert_eq!(records_of(&fs::read(channel.join("200").join("0002.t42")).unwrap()).0, b"");
+    let written = fs::read(&file).unwrap();
+    assert!(written.len() > neoteletext_web::subpages::MAX_SUBPAGE_FILE, "{}", written.len());
+    assert_eq!(records_of(&written).0, bytes);
+    // The page's file holds its first sub-page too, so it carries the
+    // picture as well.
+    assert_eq!(records_of(&fs::read(channel.join("200.t42")).unwrap()).0, bytes);
+    // Without the page's file the reader reads the sub-page's own.
+    fs::remove_file(channel.join("200.t42")).unwrap();
+    let contents = neottx(&["contents", channel.to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&contents.stderr);
+    assert!(contents.status.success(), "{stderr}");
+    assert!(!stderr.contains("skipped"), "{stderr}");
+    let (from_channel, from_file) = (folder.join("channel.png"), folder.join("file.png"));
+    let rendered = neottx(&["render", file.to_str().unwrap(), "200/0001", "-o", from_channel.to_str().unwrap()]);
+    assert!(rendered.status.success(), "{}", String::from_utf8_lossy(&rendered.stderr));
+    assert!(neottx(&["render", regis.to_str().unwrap(), "100", "-o", from_file.to_str().unwrap()]).status.success());
+    assert_eq!(fs::read(&from_channel).unwrap(), fs::read(&from_file).unwrap());
+}

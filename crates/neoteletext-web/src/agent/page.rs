@@ -125,6 +125,13 @@ impl<R: RandomSource> UserAgent<'_, R> {
                         Err(Failure::MediaType(head.media))
                     }
                 }
+                // REQ-1904: a sub-page's teletext packets are within their
+                // bound, whatever picture records follow them (PAR-8).
+                PageFile::SubPage { t42: true, .. }
+                    if crate::subpages::teletext_bytes(body) > crate::subpages::MAX_SUBPAGE_FILE =>
+                {
+                    Err(Failure::Content)
+                }
                 PageFile::Channel { t42, .. } | PageFile::SubPage { t42, .. } => {
                     channel_file_media(t42, head.media, body)
                 }

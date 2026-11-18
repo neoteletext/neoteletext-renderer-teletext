@@ -27,6 +27,7 @@ use neoteletext_core::consts::{
     PACKET_ROW_25,
 };
 use neoteletext_core::limits;
+use neoteletext_core::packet::Packet;
 use neoteletext_core::types::SubCode;
 
 use crate::bytes::{Overflow, TextBuf, Writer};
@@ -62,6 +63,23 @@ const MAX_SUBPAGE_PACKETS: usize = (PACKET_ROW_25 - PACKET_HEADER + 1) as usize
 /// The largest sub-page's file as T42 (DOC-2034). A larger file is refused
 /// whole (REQ-1904).
 pub const MAX_SUBPAGE_FILE: usize = MAX_SUBPAGE_PACKETS * PACKET_BYTES;
+/// The bytes of a sub-page's file that are its teletext packets: every
+/// packet but the packets 4/31 of the picture records a static channel's
+/// sub-page may carry after them (PAR-8). [`MAX_SUBPAGE_FILE`] bounds
+/// these, so that a picture's records never make room for more page
+/// (REQ-1904); the file as a whole is bounded by its reader, which adds the
+/// most a picture's records take
+/// ([`crate::records::picture_records_bytes`]).
+#[must_use]
+pub fn teletext_bytes(t42: &[u8]) -> usize {
+    t42.as_chunks::<PACKET_BYTES>()
+        .0
+        .iter()
+        .filter(|&&bytes| !crate::records::is_record_packet(&Packet { bytes }))
+        .count()
+        .saturating_mul(PACKET_BYTES)
+}
+
 /// Digits of the number of sub-pages in a header, 8,190.
 const TOTAL_DIGITS: usize = 4;
 /// One tab between fields.

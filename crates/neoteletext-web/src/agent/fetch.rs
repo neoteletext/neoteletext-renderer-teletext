@@ -4,7 +4,7 @@
 
 use neoteletext_core::types::Instant;
 
-use super::{Event, Exchange, Failure, Link, Output, PageFile, Purpose, Sink, UserAgent, event};
+use super::{Event, Exchange, Failure, Link, Output, Purpose, Sink, UserAgent, event};
 use crate::bytes::copy_prefix;
 use crate::consts::STATUS_SUCCESS_FIRST;
 use crate::http::{self, BodyDecoder, HttpError};
@@ -175,11 +175,10 @@ impl<R: RandomSource> UserAgent<'_, R> {
             Purpose::Descriptor { .. } => self.config.descriptor_limit,
             // A front door is bounded like a page: a bundled site larger
             // than the page limit publishes page files instead.
-            // REQ-1904: a sub-page's T42 file has a bound of its own. A TTI file
-            // is text of no fixed length, so it has a page file's.
-            Purpose::Page { file: PageFile::SubPage { t42: true, .. }, .. } => {
-                self.config.page_limit.min(crate::subpages::MAX_SUBPAGE_FILE)
-            }
+            // A sub-page's T42 file is bounded as a page file is, since it may
+            // carry a picture's records after its page (PAR-8); its teletext
+            // packets keep their own bound, checked when it arrives
+            // (REQ-1904, `subpages::teletext_bytes`).
             Purpose::Page { .. } | Purpose::FrontDoor => self.config.page_limit,
             Purpose::Contents => crate::contents::MAX_BYTES,
             Purpose::SubPages { .. } => crate::subpages::MAX_BYTES,

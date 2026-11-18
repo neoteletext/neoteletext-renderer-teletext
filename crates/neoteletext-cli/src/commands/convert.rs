@@ -2,6 +2,7 @@
 //! `--to channel`, a ReGIS or NAPLPS picture carried in one sub-page's file
 //! (renderer parity PAR-8, REQ-6763 item 2).
 
+use super::picture::{MAX_PICTURED_PAGE_FILE, MAX_PICTURED_SUBPAGE_FILE};
 use super::{ConvertTarget, Selection, io_failure, parse_selection};
 use crate::args::ChannelPictureArgs;
 use crate::picture::{Language, NaplpsObjectsFile, picture_packets};
@@ -189,12 +190,57 @@ fn parse_object(item: &serde_json::Value) -> Result<naplps::Object, String> {
     })
 }
 
-/// The sub-page's file in a channel's folder: `NNN/SSSS.t42` when the page
-/// has a sub-page folder, else `NNN.t42` (DOC-1868).
-pub(super) fn sub_page_file(folder: &Path, page: PageAddress, subcode: SubCode) -> PathBuf {
+/// A sub-page's files in a channel's folder: its page's, `NNN.t42`, and
+/// its own in the page's folder, `NNN/SSSS.t42`, which exists when the
+/// page has a folder (DOC-1868).
+fn sub_page_files(folder: &Path, page: PageAddress, subcode: SubCode) -> (PathBuf, PathBuf) {
     let name = String::from_utf8_lossy(&page.ascii()).into_owned();
-    let sub_page = folder.join(&name).join(format!("{:04X}.t42", subcode.value()));
-    if sub_page.is_file() { sub_page } else { folder.join(format!("{name}.t42")) }
+    (folder.join(format!("{name}.t42")), folder.join(&name).join(format!("{:04X}.t42", subcode.value())))
+}
+
+/// Appends a picture's record packets to its sub-page's files in the
+/// channel folder `folder`, and gives the first file. The sub-page's file
+/// is `NNN/SSSS.t42` when the page has a folder, else `NNN.t42`; when the
+/// page has a folder and the sub-page is its first, `NNN.t42` holds the
+/// same sub-page (DOC-2034) and carries the records too, so that a reader
+/// of either finds the picture (PAR-8). Each file with them must stay within
+/// the bound every reader holds it to (REQ-1904): `MAX_PICTURED_PAGE_FILE`
+/// for a page's file, `MAX_PICTURED_SUBPAGE_FILE` for a sub-page's own;
+/// past it nothing is written, since every reader would skip the file.
+pub(super) fn append_picture(
+    folder: &Path,
+    page: PageAddress,
+    subcode: SubCode,
+    packets: &[u8],
+) -> Result<PathBuf, Failure> {
+    let (page_file, own_file) = sub_page_files(folder, page, subcode);
+    let mut files = Vec::new();
+    if own_file.is_file() {
+        let own = std::fs::read(&own_file).map_err(|error| io_failure(&own_file, error))?;
+        let same_size = std::fs::metadata(&page_file).is_ok_and(|metadata| metadata.len() == own.len() as u64);
+        let first = same_size && std::fs::read(&page_file).is_ok_and(|bytes| bytes == own);
+        files.push((own_file, MAX_PICTURED_SUBPAGE_FILE));
+        if first {
+            files.push((page_file, MAX_PICTURED_PAGE_FILE));
+        }
+    } else {
+        files.push((page_file, MAX_PICTURED_PAGE_FILE));
+    }
+    for (file, bound) in &files {
+        let written = std::fs::metadata(file).map_err(|error| io_failure(file, error))?.len();
+        let total = usize::try_from(written).unwrap_or(usize::MAX).saturating_add(packets.len());
+        if total > *bound {
+            return Err((
+                exit::INPUT,
+                format!("{}: with its picture it would be larger than {bound} bytes", file.display()),
+            ));
+        }
+    }
+    for (file, _) in &files {
+        let mut out = std::fs::OpenOptions::new().append(true).open(file).map_err(|error| io_failure(file, error))?;
+        out.write_all(packets).and_then(|()| out.flush()).map_err(|error| io_failure(file, error))?;
+    }
+    files.into_iter().next().map(|(file, _)| file).ok_or_else(|| (exit::INPUT, "no file for the picture".to_owned()))
 }
 
 /// `neottx convert`.
@@ -255,12 +301,18 @@ pub fn convert(
         ConvertTarget::Edittf => conversion::Target::Edittf,
         ConvertTarget::Channel => conversion::Target::Channel,
     };
-    conversion::convert(options, output, target, filter)?;
+    // The sub-page that carries a picture keeps its page whole: a page of
+    // several sub-pages keeps its folder, and the picture goes into the
+    // sub-page's own file there, `NNN/SSSS.t42` (PAR-8, DOC-1868), not into
+    // a page cut down to that one sub-page.
+    let kept = match place {
+        Some((page, _)) => Some((page, SubCode::ANY)),
+        None => filter,
+    };
+    conversion::convert(options, output, target, kept)?;
     let Some((page, subcode)) = place else { return Ok(()) };
     let (language, stream) = stream.unwrap_or((Language::Regis, Vec::new()));
     let packets = picture_packets(page, subcode, language, &stream, objects.as_ref(), &links, picture.cursor)
         .map_err(|why| (exit::INPUT, why))?;
-    let file = sub_page_file(output, page, subcode);
-    let mut out = std::fs::OpenOptions::new().append(true).open(&file).map_err(|error| io_failure(&file, error))?;
-    out.write_all(&packets).and_then(|()| out.flush()).map_err(|error| io_failure(&file, error))
+    append_picture(output, page, subcode, &packets).map(|_| ())
 }

@@ -941,6 +941,29 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing, reason = "a test panics on what it rules out")]
     use super::*;
 
+    // PAR-8, TODO-6808: the largest picture a static sub-page carries, its
+    // stream at MAX_PICTURE_STREAM_BYTES and every drawing link at the
+    // longest target, takes no more than the records' bound every reader
+    // adds to a page's, and its stream's records no more than the share
+    // the bound gives them.
+    #[test]
+    fn the_largest_picture_fits_the_records_bound() {
+        use neoteletext_formats::page::LINK_TARGET_BYTES;
+        use neoteletext_formats::picture_text::MAX_PICTURE_STREAM_BYTES;
+        use neoteletext_web::records::{drawing_links, picture_records_bytes};
+        let page = neoteletext_core::types::PageAddress::from_mpp(0x200).unwrap();
+        let subcode = neoteletext_core::types::SubCode::new(1);
+        let stream = vec![b' '; MAX_PICTURE_STREAM_BYTES];
+        let target = format!("https://{}", "a".repeat(LINK_TARGET_BYTES - "https://".len())).into_bytes();
+        let links: Vec<(u16, Vec<u8>)> = (1..=u16::try_from(drawing_links::MAX_DRAWING_LINKS).unwrap())
+            .map(|drawing| (drawing, target.clone()))
+            .collect();
+        let written = picture_packets(page, subcode, Language::Regis, &stream, None, &links, Some(1)).unwrap();
+        assert!(written.len() <= picture_records_bytes(MAX_PICTURE_STREAM_BYTES), "{}", written.len());
+        let stream_only = picture_packets(page, subcode, Language::Regis, &stream, None, &[], None).unwrap();
+        assert!(stream_only.len() <= picture_records_bytes(MAX_PICTURE_STREAM_BYTES) - picture_records_bytes(0));
+    }
+
     // PAR-7: a ReGIS file of bare commands draws on the 800 by 480 screen.
     #[test]
     fn a_regis_file_draws_on_the_vt340_screen() {

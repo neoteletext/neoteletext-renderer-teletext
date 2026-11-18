@@ -11,6 +11,8 @@ use neoteletext_app::{Failure, exit};
 use neoteletext_formats::picture_text::MAX_PICTURE_STREAM_BYTES;
 use neoteletext_image::palette::Rgba;
 use neoteletext_image::raster::Raster;
+use neoteletext_web::consts::DEFAULT_PAGE_LIMIT;
+use neoteletext_web::subpages::MAX_SUBPAGE_FILE;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
@@ -53,15 +55,25 @@ fn drawn(language: Language, bytes: &[u8], fonts: &Fonts) -> Result<(Raster, cra
     draw(language, bytes, fonts).map_err(|why| (exit::INPUT, why))
 }
 
-/// The most bytes of a `.t42` file read for the pictures it carries: a
-/// static sub-page's file holds its page and its picture's records, and a
-/// stream of `MAX_PICTURE_STREAM_BYTES` takes a packet of `PACKET_BYTES`
-/// for every `FRAGMENT_DATA` of it; twice that leaves room for the
-/// records' framing, the links, the cursor and the page (PAR-8).
-const MAX_PICTURE_PAGE_FILE_BYTES: usize = MAX_PICTURE_STREAM_BYTES
-    .div_ceil(neoteletext_web::records::FRAGMENT_DATA)
-    .saturating_mul(neoteletext_core::consts::PACKET_BYTES)
-    .saturating_mul(2);
+/// The most a picture's records take in a static channel's file: those of
+/// a stream of `MAX_PICTURE_STREAM_BYTES`, the largest a writer writes
+/// (PAR-8).
+const MAX_PICTURE_RECORDS_BYTES: usize = neoteletext_web::records::picture_records_bytes(MAX_PICTURE_STREAM_BYTES);
+/// The largest file of a sub-page in its page's folder, `NNN/SSSS.t42`:
+/// its teletext packets within `MAX_SUBPAGE_FILE` (REQ-1904) and a
+/// picture's records after them (PAR-8). Every reader of such a file in
+/// this program bounds it by this, and the writer refuses to pass it.
+pub(super) const MAX_PICTURED_SUBPAGE_FILE: usize = MAX_SUBPAGE_FILE + MAX_PICTURE_RECORDS_BYTES;
+/// The largest page file, `NNN.t42`, or `.t42` file read for the pictures
+/// it carries: its teletext packets within a page file's bound,
+/// `DEFAULT_PAGE_LIMIT`, and a picture's records after them (PAR-8).
+pub(super) const MAX_PICTURED_PAGE_FILE: usize = DEFAULT_PAGE_LIMIT + MAX_PICTURE_RECORDS_BYTES;
+// The figures the channel format states (DOC-2034, TODO-6808): 46,713
+// packets of records, 129 of a stream's at 241 packets each, 199 of the
+// objects', 64 links' at 241 and the cursor's 1.
+const _: () = assert!(MAX_PICTURE_RECORDS_BYTES == 1_961_946, "DOC-2034's picture records");
+const _: () = assert!(MAX_PICTURED_SUBPAGE_FILE == 1_965_054, "DOC-2034's largest NNN/SSSS.t42");
+const _: () = assert!(MAX_PICTURED_PAGE_FILE == 2_224_090, "DOC-2034's largest NNN.t42 with a picture");
 
 /// The picture a `.t42` file carries for `page`, `subcode` (PAR-7, PAR-8):
 /// the sub-page's own, or the page's only one; `None` when the input is no
@@ -76,7 +88,7 @@ pub fn t42_picture(
     if !is_t42 || !path.is_file() {
         return Ok(None);
     }
-    let bytes = read_bounded(path, MAX_PICTURE_PAGE_FILE_BYTES)?;
+    let bytes = read_bounded(path, MAX_PICTURED_PAGE_FILE)?;
     Ok(picture_of(crate::picture::pictures_in_t42(&bytes), page, subcode))
 }
 
@@ -320,13 +332,7 @@ pub fn write_picture(
         neoteletext_app::convert::write_channel(output, &[sub_page])?;
         let packets = crate::picture::picture_packets(page, subcode, kind, &written, None, &[], None)
             .map_err(|why| (exit::INPUT, why))?;
-        let file = super::convert::sub_page_file(output, page, subcode);
-        let mut sub_page_file =
-            std::fs::OpenOptions::new().append(true).open(&file).map_err(|error| io_failure(&file, error))?;
-        sub_page_file
-            .write_all(&packets)
-            .and_then(|()| sub_page_file.flush())
-            .map_err(|error| io_failure(&file, error))?;
+        let file = super::convert::append_picture(output, page, subcode, &packets)?;
         eprintln!("{}: {} rows, a picture of {} bytes", file.display(), rows.len(), written.len());
         return Ok(());
     }
