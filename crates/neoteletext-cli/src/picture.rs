@@ -310,12 +310,21 @@ pub const TEXT_COLUMNS: u32 = 40;
 pub const FIRST_TEXT_ROW: u32 = 1;
 /// See [`TEXT_COLUMNS`].
 pub const LAST_TEXT_ROW: u32 = 23;
-/// The ReGIS cell of PAR-10: a display cell 20 by 20 pixels and a unit
-/// cell 15 by 20, 15 being the teletext cell's 12 dots at their 16/13
-/// shape on a 20-pixel row (DEC-2049); row `r` at y = 10 + 20 (r - 1).
+/// The ReGIS cell of PAR-10: a display cell 20 by 20 pixels; row `r` at
+/// y = 10 + 20 (r - 1).
 const REGIS_CELL: u32 = 20;
 const REGIS_TOP_MARGIN: u32 = 10;
-const REGIS_SETUP: &[u8] = b"S(E)T(S[20,20])T(U[15,20])";
+/// The unit cell's width PAR-10 names: the teletext cell's 12 dots at
+/// their 16/13 shape on a 20-pixel row (DEC-2049).
+const REGIS_SHAPED_WIDTH: u32 = 15;
+/// A unit cell's width is a multiple of the 8-pixel character cell, and
+/// one between is "the next smaller size" (the VT330/VT340 manual, volume
+/// 2, chapter 7, "Unit Cell Size"): 15 would draw the glyph 8 wide.
+const REGIS_UNIT_WIDTH_STEP: u32 = 8;
+/// So the unit cell is the multiple no narrower than the shaped width, 16
+/// (DEC-6818).
+const REGIS_UNIT_WIDTH: u32 = REGIS_SHAPED_WIDTH.div_ceil(REGIS_UNIT_WIDTH_STEP) * REGIS_UNIT_WIDTH_STEP;
+const _: () = assert!(REGIS_UNIT_WIDTH <= REGIS_CELL, "the unit cell fits its display cell");
 /// The NAPLPS cell of PAR-10: 1/40 of the unit screen wide and 20 raster
 /// lines high, written at a three-byte operand's precision (eight bits of
 /// fraction); row `r` drawn from the foot of its raster lines 20 r to
@@ -398,7 +407,9 @@ pub fn wrap(
 /// The encoder's refusal of a row.
 pub fn regis_page(rows: &[Vec<neoteletext_formats::picture_text::Stretch>]) -> Result<Vec<u8>, String> {
     let mut out = b"\x1bPp".to_vec();
-    out.extend_from_slice(REGIS_SETUP);
+    out.extend_from_slice(
+        format!("S(E)T(S[{REGIS_CELL},{REGIS_CELL}])T(U[{REGIS_UNIT_WIDTH},{REGIS_CELL}])").as_bytes(),
+    );
     for (row, stretches) in (FIRST_TEXT_ROW..).zip(rows) {
         let y = REGIS_TOP_MARGIN.saturating_add(REGIS_CELL.saturating_mul(row.saturating_sub(1)));
         out.extend_from_slice(format!("P[0,{y}]").as_bytes());
@@ -1042,6 +1053,35 @@ mod tests {
         let background = raster.indices[0];
         let rows = raster.indices.chunks(raster.width).enumerate();
         rows.filter(|(_, row)| row.iter().any(|&index| index != background)).map(|(line, _)| line).collect()
+    }
+
+    // PAR-10: the ReGIS page's unit cell is one the VT340 can make. Its
+    // width is a multiple of 8, "the next smaller size" taken otherwise
+    // (the manual's chapter 7, "Unit Cell Size"), so the 15 PAR-10 names
+    // drew a provided glyph shrunk into 8 pixels, two thirds of its
+    // teletext width. Drawn, a letter is at least as wide as the teletext
+    // glyph it scales up from, and the row on lines 10 to 29.
+    #[test]
+    fn regis_text_pages_draw_glyphs_scaled_up_into_their_cell() {
+        let set = 1;
+        let glyph = rows(&GlyphSet::noto_teletext(), set, b'H');
+        let bits = glyph.iter().fold(0_u16, |all, row| all | row);
+        let teletext_width = usize::try_from(16 - bits.leading_zeros() - bits.trailing_zeros()).unwrap();
+        let page = wrap("H", Some("en")).unwrap();
+        let (raster, found) = draw(Language::Regis, &regis_page(&page).unwrap(), &Fonts::default()).unwrap();
+        assert!(!found.refused, "{found:?}");
+        let lit: Vec<(usize, usize)> = raster
+            .indices
+            .chunks(raster.width)
+            .enumerate()
+            .flat_map(|(y, row)| {
+                row.iter().enumerate().filter(|(_, index)| **index != raster.indices[0]).map(move |(x, _)| (x, y))
+            })
+            .collect();
+        let (left, right) = (lit.iter().map(|p| p.0).min().unwrap(), lit.iter().map(|p| p.0).max().unwrap());
+        assert!(right - left + 1 >= teletext_width, "drawn {left} to {right}, the glyph {teletext_width} wide");
+        assert!(right < usize::try_from(REGIS_CELL).unwrap(), "within the first cell: {right}");
+        assert!(lit.iter().all(|p| (10..30).contains(&p.1)), "{lit:?}");
     }
 
     // PAR-10, TODO-6815: a NAPLPS character field lies up and to the right
