@@ -12,6 +12,8 @@
 //! - [`common`]: the behaviours every synthesizer that plays notes shares,
 //!   one rule each (MIDI-9, MIDI-76, MIDI-84 to MIDI-92), kept per channel
 //!   by [`common::Common`].
+//! - [`restate`]: each part's state as the sender keeps it, and its
+//!   restatement (MIDI-93 to MIDI-99), for the server.
 //! - [`classic`]: the bridge from the common layer to the instruments as
 //!   they were built before it, which take three-byte channel messages.
 //! - [`Instrument`]: the one trait the receiver plays every family
@@ -24,6 +26,7 @@ pub mod block;
 pub mod classic;
 pub mod common;
 mod instrument;
+pub mod restate;
 
 pub use instrument::{Banks, Instrument, Outcome, Played, play_block};
 

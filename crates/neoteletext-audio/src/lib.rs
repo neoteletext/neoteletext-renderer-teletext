@@ -88,6 +88,11 @@ pub mod store;
 pub mod ttau;
 
 pub use codec::*;
+/// The synthesizers' MIDI layer (midi-architecture.md): the event-list
+/// reader and writer, the common behaviours, the restatement and the
+/// [`midi::Instrument`] trait, from the instruments crate, so that a
+/// publisher reaches them through this crate.
+pub use neoteletext_audio_instruments::midi;
 
 /// Copies `source` into `target` as far as both go. Unlike
 /// `copy_from_slice`, it has no panic path for lengths that differ, which
