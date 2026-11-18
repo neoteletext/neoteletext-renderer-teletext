@@ -59,8 +59,6 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-formats", features: "error-trait" },
     Build { package: "neoteletext-web", features: "" },
     Build { package: "neoteletext-web", features: "push" },
-    Build { package: "neoteletext-web", features: "cookies" },
-    Build { package: "neoteletext-web", features: "dbsc" },
     Build { package: "neoteletext-web", features: "error-trait" },
     Build { package: "neoteletext-web", features: "alloc" },
     Build { package: "neoteletext-web", features: "std" },

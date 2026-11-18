@@ -4,7 +4,6 @@
 
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 
-use crate::cookie::CookieRejected;
 use crate::descriptor::DescriptorError;
 use crate::http::{HttpError, MediaType, Method};
 use crate::port::{ConnectionId, NetInput, NetOutput, Security};
@@ -12,6 +11,7 @@ use crate::records::denied::DeniedRecord;
 use crate::records::index::IndexRecord;
 use crate::records::links::LinksRecord;
 use crate::records::redirect::RedirectRecord;
+use crate::records::state::{StateChallenge, StateEnd};
 use crate::records::subpages::SubPagesRecord;
 use crate::subpages::PartNumber;
 use crate::url::UrlError;
@@ -47,8 +47,7 @@ pub enum Input<'a> {
     /// contents view of a static channel asks for it (DEC-2377).
     FetchContents,
     /// Follow a link to a page of another service named in the current
-    /// descriptor (Appendix E). The request is a cross-service navigation
-    /// for cookies (REQ-WEB-006).
+    /// descriptor (Appendix E).
     FollowLink {
         /// The service's short name.
         service: &'a str,
@@ -83,11 +82,6 @@ pub enum Input<'a> {
     },
     /// Change the push subscription.
     Subscribe(Subscription<'a>),
-    /// Erase every cookie (REQ-SEC-013).
-    WipeCookies,
-    /// Calendar time now, in seconds since 1970, so cookie `Expires` dates
-    /// can be compared and cookies saved.
-    WallClock(u64),
     /// One message of the input profile (area INT, decision E.90), sent as
     /// a binary WebSocket message on the push connection: only while it is
     /// open and the channel's descriptor declares `push.input`, and only up
@@ -96,8 +90,7 @@ pub enum Input<'a> {
     /// what is fetched.
     Send(InputMessage<'a>),
     /// Fetch one resource outside any channel, in the role given
-    /// (REQ-2476, REQ-123): one `GET` with no cookie and no `Referer`,
-    /// whose `Set-Cookie` fields are ignored, redirected at most
+    /// (REQ-2476, REQ-123): one `GET` with no `Referer`, redirected at most
     /// [`crate::consts::MAX_REDIRECTS`] times to any origin, each address
     /// checked for the local network and a fall from `https` to `http`,
     /// and the connection closed when it ends. Answered by the role's
@@ -429,6 +422,23 @@ pub enum Event<'a> {
     /// A selection was refused, or the channel's program is not answering
     /// (DOC-1961, REQ-1481).
     Denied(DeniedRecord<'a>),
+    /// The channel's server challenges the viewer's key for this channel
+    /// (VS-202, VS-204, VS-205). The port answers exactly once, before it
+    /// sends SELECT on a new connection, with a `STATE_PROOF` or a
+    /// `STATE_NONE` written by [`neoteletext_input::event::write`] and sent
+    /// with [`Input::Send`]; it builds the bytes it signs with
+    /// [`crate::viewer_state::signed_bytes`] from its own channel, never
+    /// from anything the server sent. A port that keeps no state answers
+    /// `STATE_NONE` with [`crate::viewer_state::NoneReason::Stateless`]
+    /// (VS-501, VS-504).
+    StateChallenge(StateChallenge),
+    /// The channel's server ended the viewer's state: the port deletes its
+    /// key for this channel only when that key's identifier
+    /// ([`crate::viewer_state::key_id`]) is this one (VS-204).
+    StateEnd(StateEnd),
+    /// The channel suggests that the viewer have the browser remember them
+    /// (VS-208): only the browser's own interface may act on it.
+    StateKeepOffer,
     /// A live channel (its `channel.ttx` names a push connection,
     /// REQ-WEB-018) is opening its connection: it asks for no bundle, page
     /// file or `contents.txt`, and is connecting, never a page not found,
@@ -506,10 +516,6 @@ pub enum Event<'a> {
         /// Why.
         failure: Failure,
     },
-    /// A `Set-Cookie` header was ignored.
-    CookieRejected(CookieRejected),
-    /// Not every matching cookie fitted in a request.
-    CookiesTruncated,
     /// A pointer found by discovery ([`ResourceRole::Discovery`],
     /// REQ-2476), checked and resolved against the final address by
     /// [`crate::discovery::resolve`]; the `Link` header fields' pointers come
@@ -549,14 +555,6 @@ pub enum Event<'a> {
         /// Why.
         failure: Failure,
     },
-    /// A device-bound session changed (REQ-WEB-017, feature `dbsc`).
-    BoundSession {
-        /// The session's identifier, empty when a registration failed
-        /// before the server named one.
-        session: &'a str,
-        /// What happened.
-        change: BoundChange,
-    },
 }
 
 /// What a resource fetched outside any channel is for ([`Input::FetchResource`]).
@@ -573,23 +571,6 @@ pub enum ResourceRole {
     /// `application/octet-stream`, and at most the core's
     /// [`FONT_MAX_FILE_BYTES`](neoteletext_core::consts::FONT_MAX_FILE_BYTES).
     Font,
-}
-
-/// What happened to a device-bound session (REQ-WEB-017).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum BoundChange {
-    /// The server registered it: its cookies are kept bound to a key on
-    /// this device.
-    Registered,
-    /// Its cookies were refreshed with a proof of the key.
-    Refreshed,
-    /// It ended: the server said so, refused it, it lapsed, or its site's
-    /// data was cleared. Its key is deleted.
-    Ended,
-    /// A registration the server asked for was not made, or not accepted.
-    RegistrationFailed,
-    /// A refresh did not bring new cookies; the request it held went on.
-    RefreshFailed,
 }
 
 /// An output of the agent.

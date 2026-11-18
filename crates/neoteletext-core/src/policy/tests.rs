@@ -42,7 +42,6 @@ fn origins() {
     assert!(!same_origin(page, plain));
     assert!(!same_origin(page, other));
     assert!(is_downgrade(true, plain, "example.org"));
-    assert!(!may_send_cookie(true, false));
 }
 
 /// REQ-423: the allow-list keeps printable characters out of the strip list, and a file name byte is never a

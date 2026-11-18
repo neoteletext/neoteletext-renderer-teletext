@@ -1,8 +1,7 @@
 //! Resources fetched outside any channel ([`Input::FetchResource`](super::Input::FetchResource)):
 //! the page discovery reads for its pointers (REQ-2476) and a font the user
-//! named by its address (REQ-123). Each is one `GET` that carries no cookie
-//! and keeps none, touches nothing of a channel or a bound session, and
-//! closes its connection when it ends.
+//! named by its address (REQ-123). Each is one `GET` that touches nothing
+//! of a channel and closes its connection when it ends.
 
 use neoteletext_core::consts::FONT_MAX_FILE_BYTES;
 
@@ -45,7 +44,7 @@ impl ResourceRole {
     }
 }
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     /// Queues a resource the port asked for; it replaces one still waiting.
     pub(super) fn request_resource(&mut self, role: ResourceRole, address: &str, sink: &mut Sink<'_>) {
         match Url::parse(address) {

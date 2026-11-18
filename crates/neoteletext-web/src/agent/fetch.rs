@@ -4,18 +4,15 @@
 
 use neoteletext_core::types::Instant;
 
-use super::cookies::{cookie_store, store_response_cookies};
-use super::{
-    BOUND_INSTRUCTIONS_LIMIT, Event, Exchange, Failure, Link, Output, PageFile, Purpose, Sink, UserAgent, event,
-};
+use super::{Event, Exchange, Failure, Link, Output, PageFile, Purpose, Sink, UserAgent, event};
 use crate::bytes::copy_prefix;
 use crate::consts::STATUS_SUCCESS_FIRST;
 use crate::http::{self, BodyDecoder, HttpError};
 use crate::port::{ConnectionId, RandomSource};
-use crate::url::{IpAddress, Url};
+use crate::url::IpAddress;
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
-    pub(super) fn fetch_connected(&mut self, now: Instant, peer: IpAddress, sink: &mut Sink<'_>) {
+impl<R: RandomSource> UserAgent<'_, R> {
+    pub(super) fn fetch_connected(&mut self, peer: IpAddress, sink: &mut Sink<'_>) {
         if self.fetch.link != Link::Connecting {
             return;
         }
@@ -33,7 +30,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         } else {
             event(sink, Event::Unencrypted { connection: ConnectionId::Fetch, host: target.host.as_str() });
         }
-        self.send_request(now, sink);
+        self.send_request(sink);
     }
 
     pub(super) fn fetch_closed(&mut self, now: Instant, sink: &mut Sink<'_>) {
@@ -53,10 +50,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         }
         // A kept-alive connection the server closed before answering:
         // retry a GET once on a new connection (RFC 9112 section 9.3.1).
-        // A bound session's POST is never repeated (RFC 9110 section
-        // 9.2.2).
-        let idempotent = !matches!(exchange.purpose, Purpose::Register | Purpose::Refresh { .. });
-        if idempotent && exchange.sent && exchange.reused && !exchange.retried && !self.fetch.started {
+        if exchange.sent && exchange.reused && !exchange.retried && !self.fetch.started {
             if let Some(current) = &mut self.fetch.exchange {
                 current.retried = true;
                 current.sent = false;
@@ -93,7 +87,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                         if complete && http::is_interim(head) {
                             // RFC 9110 section 15.2: the final head follows.
                             self.fetch.head.reset();
-                        } else if complete && !self.fetch_head_complete(now, sink) {
+                        } else if complete && !self.fetch_head_complete(sink) {
                             return;
                         }
                     }
@@ -159,16 +153,13 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     }
 
     /// Parses a complete head. Returns false when the exchange ended.
-    fn fetch_head_complete(&mut self, now: Instant, sink: &mut Sink<'_>) -> bool {
+    fn fetch_head_complete(&mut self, sink: &mut Sink<'_>) -> bool {
         let Some(exchange) = self.fetch.exchange else { return false };
-        let (seconds, calendar) = self.seconds(now);
         let head_len = self.fetch.head.len();
         // A response outside the profile is never partly interpreted
         // (REQ-503): its status and framing are judged before anything in
-        // it is acted on. A response refused only when its body is seen, for
-        // its media type or its size, has passed these and keeps its cookies,
-        // as a browser's does.
-        let parsed = http::parse_head(self.buffers.fetch_head.get(..head_len).unwrap_or(&[]), &mut |_| {});
+        // it is acted on. Its `Set-Cookie` fields are ignored (VS-201).
+        let parsed = http::parse_head(self.buffers.fetch_head.get(..head_len).unwrap_or(&[]));
         let head = match parsed {
             Ok(head) => head,
             Err(error) => {
@@ -192,7 +183,6 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Purpose::Page { .. } | Purpose::FrontDoor => self.config.page_limit,
             Purpose::Contents => crate::contents::MAX_BYTES,
             Purpose::SubPages { .. } => crate::subpages::MAX_BYTES,
-            Purpose::Register | Purpose::Refresh { .. } => BOUND_INSTRUCTIONS_LIMIT,
             // Discovery reads a prefix of a body of any length and stops
             // (REQ-2476); its copy into the buffer is bounded instead.
             Purpose::Resource(role) => role.body_limit(),
@@ -209,31 +199,6 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 return false;
             }
         };
-        let Self { buffers, jar, port_cookies, channel, service_folder, .. } = self;
-        // The open channel's or service's identity (REQ-507).
-        let channel = channel.as_ref().or(service_folder.as_ref());
-        let head_bytes = buffers.fetch_head.get(..head_len).unwrap_or(&[]);
-        let host = exchange.url.host_text();
-        let path = exchange.url.path();
-        let secure = exchange.url.is_secure();
-        // A channel's cookies stay in its folder (REQ-WEB-026), and only a
-        // response from inside it, or from its upgrade to `https`, sets or
-        // clears any: a redirect elsewhere touches none (decision E.114
-        // item 2, finding F-42).
-        // A resource fetched outside any channel keeps no cookie, whatever
-        // it sets (REQ-2476, REQ-123).
-        let resource = matches!(exchange.purpose, Purpose::Resource(_));
-        let inside = !resource
-            && channel.as_ref().is_none_or(|folder| crate::channel::redirect_keeps_channel(folder, &exchange.url));
-        let scope = channel.map(Url::path);
-        if inside {
-            let store = cookie_store(jar, port_cookies);
-            // The head parsed above, so this reading of it cannot fail.
-            let _ = store_response_cookies(store, head_bytes, host, path, scope, secure, seconds, calendar, sink);
-        }
-        if !resource {
-            self.bound_head(now, &exchange, &head, sink);
-        }
         self.fetch.response = Some(head);
         self.fetch.body = Some(decoder);
         true
@@ -251,11 +216,11 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         self.fetch.response = None;
         self.fetch.body = None;
         if let Some(exchange) = self.fetch.exchange.take() {
-            self.finish_purpose(exchange.purpose, Err(failure), sink);
+            Self::finish_purpose(exchange.purpose, Err(failure), sink);
         }
     }
 
-    pub(super) fn finish_purpose(&mut self, purpose: Purpose, result: Result<(), Failure>, sink: &mut Sink<'_>) {
+    pub(super) fn finish_purpose(purpose: Purpose, result: Result<(), Failure>, sink: &mut Sink<'_>) {
         let Err(failure) = result else { return };
         match purpose {
             Purpose::Descriptor { .. } => event(sink, Event::DescriptorFailed(failure)),
@@ -263,7 +228,6 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             Purpose::Contents => event(sink, Event::ContentsFailed(failure)),
             Purpose::Page { page, subcode, .. } => event(sink, Event::FetchFailed { page, subcode, failure }),
             Purpose::SubPages { page, part } => event(sink, Event::SubPagesFailed { page, part, failure }),
-            Purpose::Register | Purpose::Refresh { .. } => self.bound_failed(purpose, sink),
             Purpose::Resource(role) => event(sink, Event::ResourceFailed { role, failure }),
         }
     }

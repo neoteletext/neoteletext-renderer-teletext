@@ -65,7 +65,7 @@ pub fn request(
             if !complete {
                 continue;
             }
-            let parsed = parse_head(head.get(..collector.len()).unwrap_or(&[]), &mut |_| {})
+            let parsed = parse_head(head.get(..collector.len()).unwrap_or(&[]))
                 .map_err(|_| Error::Protocol("a malformed HTTP head"))?;
             status = parsed.status;
             decoder = Some(

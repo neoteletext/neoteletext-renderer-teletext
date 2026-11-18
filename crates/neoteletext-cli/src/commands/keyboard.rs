@@ -8,14 +8,16 @@ use neoteletext_app::{Failure, exit};
 use neoteletext_core::consts::PACKET_BYTES;
 use neoteletext_core::packet::{Decoded, Packet, decode};
 use neoteletext_core::types::PageAddress;
-use neoteletext_input::event::{Action, Event, Item, Key, KeyCode, Stamp};
+use neoteletext_input::event::{Action, Event, Item, Key, KeyCode, Stamp, write};
 use neoteletext_input::session::{SendError, Session, State};
+use neoteletext_input::state::NoneReason;
 use neoteletext_input::{MAX_MESSAGE, MAX_ROWS, control, keys};
 use neoteletext_qrkeyboard::config::{Layout, ScreenConfig};
 use neoteletext_qrkeyboard::net::{self, Incoming, WebSocket};
 use neoteletext_qrkeyboard::qr::{Correction, Matrix};
 use neoteletext_qrkeyboard::screen::{Event as ScreenEvent, Screen};
 use neoteletext_web::consts::PUSH_SUBPROTOCOL;
+use neoteletext_web::records::{ChannelRecord, Read, RecordReader};
 use std::time::{Duration, Instant};
 
 /// What the bridge offers in HELLO: it draws no page, no cursor and no
@@ -50,6 +52,9 @@ struct Channel {
     /// nothing and sends no SELECT, so this is what its keys are for
     /// (DOC-2029).
     on: Option<Stamp>,
+    /// The channel's records, for viewer state's challenges, which the
+    /// bridge answers stateless (VS-501).
+    records: RecordReader,
 }
 
 impl Channel {
@@ -60,7 +65,13 @@ impl Channel {
     /// Sends HELLO and waits for WELCOME, then says the bridge's size and
     /// focus (DOC-1921).
     fn open(socket: WebSocket) -> Result<Self, Failure> {
-        let mut channel = Self { socket, session: Session::new(OFFERED), started: Instant::now(), on: None };
+        let mut channel = Self {
+            socket,
+            session: Session::new(OFFERED),
+            started: Instant::now(),
+            on: None,
+            records: RecordReader::new(),
+        };
         let mut out = [0_u8; MAX_MESSAGE];
         let now_ms = channel.now_ms();
         let length =
@@ -94,8 +105,10 @@ impl Channel {
             Some(Incoming::Closed(_)) => Err((exit::INPUT, "the channel closed its socket".to_owned())),
             Some(Incoming::Binary(bytes)) => {
                 let (packets, _) = bytes.as_chunks::<PACKET_BYTES>();
+                let mut challenged = false;
                 for bytes in packets {
                     let packet = Packet { bytes: *bytes };
+                    challenged |= matches!(self.records.push(&packet), Read::Record(ChannelRecord::StateChallenge(_)));
                     let mut buffer = [0; control::FRAGMENT_DATA];
                     if let Some(Ok(control)) = control::from_packet(&packet, &mut buffer) {
                         // A refused WELCOME leaves the session refused.
@@ -108,11 +121,24 @@ impl Channel {
                         self.on = Some(on);
                     }
                 }
+                if challenged {
+                    self.answer_stateless()?;
+                }
                 Ok(true)
             }
             Some(_) => Ok(true),
             None => Ok(false),
         }
+    }
+
+    /// Answers a `STATE_CHALLENGE`: the bridge keeps no key, so never signs
+    /// (VS-501). Written straight on the socket, as a proof would be, never
+    /// through the input session (VS-204).
+    fn answer_stateless(&mut self) -> Result<(), Failure> {
+        let mut out = [0_u8; MAX_MESSAGE];
+        let item = Item::Event(Event::StateNone(NoneReason::Stateless));
+        let length = write(&item, &mut out).map_err(|error| (exit::INPUT, format!("STATE_NONE: {error:?}")))?;
+        self.write(out.get(..length).unwrap_or(&[]))
     }
 
     /// Takes everything the channel has pushed, without waiting.

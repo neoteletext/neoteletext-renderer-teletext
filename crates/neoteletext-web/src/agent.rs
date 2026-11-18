@@ -1,6 +1,8 @@
 //! The user agent (ARCHITECTURE.md layer L7): one sans-IO state machine
-//! that ties the address parser, HTTP, WebSocket, the
-//! cookie store and the descriptor together.
+//! that ties the address parser, HTTP, WebSocket and the descriptor
+//! together. It keeps no cookies: a channel's viewer state is a key the
+//! port holds, proven on the push connection (the viewer-state design,
+//! VS-201), and the agent only carries its records and messages.
 //!
 //! The application calls [`UserAgent::handle`] with an [`Input`]: a user
 //! request, a network event from the transport, or a timer tick. The agent
@@ -13,7 +15,7 @@
 //! descriptor and page requests one at a time (REQ-WEB-014), and
 //! [`ConnectionId::Push`](crate::port::ConnectionId::Push) carries the push stream (REQ-WEB-005).
 //!
-//! Push and cookies are compile-time features (decision E.61). The agent's
+//! Push is a compile-time feature (decision E.61). The agent's
 //! types are the same in every build. A build without a feature answers
 //! whatever needs it with a value that says so, and every branch that would
 //! reach the missing part tests a constant, so the optimiser and the linker
@@ -24,10 +26,9 @@ use neoteletext_core::types::{Instant, PageAddress, SubCode};
 
 use crate::bytes::TextBuf;
 use crate::consts::{
-    CACHE_ENTRIES, MAX_HOST_TEXT_LENGTH, MAX_SUBSCRIBED_PAGES, MAX_VALIDATOR_LENGTH, MICROSECONDS_PER_SECOND,
-    PAGE_QUEUE, PUSH_RETRY_FIRST_US, SECURE_HOSTS,
+    CACHE_ENTRIES, MAX_HOST_TEXT_LENGTH, MAX_SUBSCRIBED_PAGES, MAX_VALIDATOR_LENGTH, PAGE_QUEUE, PUSH_RETRY_FIRST_US,
+    SECURE_HOSTS,
 };
-use crate::cookie::{CookieJar, Cookies, Site};
 use crate::descriptor::Descriptor;
 use crate::http::{BodyDecoder, HeadCollector, Method, ResponseHead};
 use crate::port::RandomSource;
@@ -36,7 +37,6 @@ use crate::url::Url;
 use crate::ws::{FrameReader, HandshakeKey};
 
 mod config;
-mod cookies;
 mod events;
 mod fetch;
 mod input;
@@ -47,12 +47,13 @@ mod push_messages;
 mod request;
 mod resource;
 mod response;
+mod secure;
 mod service;
 
 pub use config::{Buffers, Config, Storage};
 pub use events::{
-    BoundChange, Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, ResourceRole, Sink,
-    Source, Subscription,
+    Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, ResourceRole, Sink, Source,
+    Subscription,
 };
 
 /// The bytes of one T42 packet (REQ-INP-002).
@@ -118,7 +119,6 @@ const WORD_BITS: usize = 32;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Purpose {
     Descriptor {
-        via_link: bool,
         channel: bool,
     },
     FrontDoor,
@@ -133,20 +133,9 @@ enum Purpose {
         page: PageAddress,
         part: PartNumber,
     },
-    /// Registers a device-bound session (REQ-WEB-017).
-    #[cfg_attr(not(feature = "dbsc"), allow(dead_code, reason = "made only with the feature `dbsc`"))]
-    Register,
     /// One resource the port asked for outside any channel (REQ-2476,
-    /// REQ-123): no cookie goes with it or is kept from it, and nothing of
-    /// a channel or a bound session is touched by its answer.
+    /// REQ-123): nothing of a channel is touched by its answer.
     Resource(ResourceRole),
-    /// Refreshes the device-bound session in `slot`; `retried` after the
-    /// server's 403 and a fresh challenge.
-    #[cfg_attr(not(feature = "dbsc"), allow(dead_code, reason = "made only with the feature `dbsc`"))]
-    Refresh {
-        slot: u8,
-        retried: bool,
-    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -155,7 +144,6 @@ struct Exchange {
     url: Url,
     method: Method,
     redirects: u8,
-    site: Site,
     deadline: Instant,
     sent: bool,
     /// The request went out on a connection already used once.
@@ -283,37 +271,29 @@ struct PushConnection {
     log_lines: usize,
 }
 
-/// The web user agent: `SLOTS` cookies in `COOKIE_BYTES` bytes, random
-/// numbers from `R`.
+/// The web user agent, with random numbers from `R`.
 #[allow(
     clippy::struct_excessive_bools,
     reason = "each flag belongs to a different part of the agent: navigation, the fetch connection, push, the channel"
 )]
-// Not `Debug`: the derive would need `dyn Cookies` and `dyn DeviceKeys` to be
-// `Debug`, and a trait object's table then carries `core::fmt` into every
-// build, which REQ-GEN-016 keeps out of a small one (the size check found
-// its panic paths).
-pub struct UserAgent<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> {
+// Not `Debug`: REQ-GEN-016 keeps `core::fmt` out of a small build, and the
+// size check found the derive's panic paths.
+pub struct UserAgent<'m, R: RandomSource> {
     config: Config,
     /// The `User-Agent` sent on every request and upgrade, composed once
     /// (REQ-WEB-031).
     named_as: UserAgentString,
     buffers: Buffers<'m>,
     random: R,
-    jar: CookieJar<SLOTS, COOKIE_BYTES>,
-    /// The port's cookies, kept outside the agent, used instead of `jar`
-    /// when given (decision E.104).
-    port_cookies: Option<&'m mut dyn Cookies>,
-    wall_clock: Option<(Instant, u64)>,
     descriptor: Option<Descriptor>,
-    pending_descriptor: Option<(Url, bool, bool)>,
+    pending_descriptor: Option<(Url, bool)>,
     /// A resource the port asked for, waiting for the fetch connection.
     pending_resource: Option<(Url, ResourceRole)>,
     /// The open channel's folder (REQ-WEB-018), when a channel is open.
     channel: Option<Url>,
     /// The folder that holds the descriptor of a service opened by its
     /// descriptor, from the moment it is asked for (REQ-507): with its
-    /// origin, the service's identity for cookies and redirects, as a
+    /// origin, the service's identity for redirects, as a
     /// channel's folder is a channel's.
     service_folder: Option<Url>,
     /// The page file extension to try first in the channel: the one that
@@ -329,7 +309,6 @@ pub struct UserAgent<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES
     front_door: Option<Url>,
     /// The channel's contents file to fetch.
     contents: Option<Url>,
-    navigation_pending: bool,
     secure_hosts: [Option<TextBuf<MAX_HOST_TEXT_LENGTH>>; SECURE_HOSTS],
     fetch: FetchConnection,
     /// Close the fetch connection when the current response completes.
@@ -359,76 +338,20 @@ pub struct UserAgent<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES
     connecting: bool,
     subscribe_all: bool,
     subscribed: [Option<PageAddress>; MAX_SUBSCRIBED_PAGES],
-    /// The port's keys that never leave the device (REQ-WEB-017).
-    #[cfg(feature = "dbsc")]
-    device_keys: Option<&'m mut dyn crate::dbsc::DeviceKeys>,
-    /// Device-bound sessions and the exchanges they wait for.
-    #[cfg(feature = "dbsc")]
-    bound: bound::Bound,
-}
-
-#[cfg(feature = "dbsc")]
-mod bound;
-
-/// The longest session instructions a bound session's exchange reads.
-#[cfg(feature = "dbsc")]
-const BOUND_INSTRUCTIONS_LIMIT: usize = crate::dbsc::MAX_INSTRUCTIONS_BYTES;
-#[cfg(not(feature = "dbsc"))]
-const BOUND_INSTRUCTIONS_LIMIT: usize = 0;
-
-/// Without device-bound sessions (feature `dbsc`) nothing waits for one.
-#[cfg(not(feature = "dbsc"))]
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
-    #[allow(clippy::unused_self, reason = "the same call as the feature's")]
-    const fn bound_next(&self, _: &mut Sink<'_>) -> Option<(Purpose, Url, Method, Site)> {
-        None
-    }
-
-    #[allow(clippy::unused_self, reason = "the same call as the feature's")]
-    const fn bound_defer(&self, _: Instant, _: Purpose, _: &Url, _: Method, _: Site) -> bool {
-        false
-    }
-
-    #[allow(clippy::unused_self, reason = "the same call as the feature's")]
-    const fn bound_head(&self, _: Instant, _: &Exchange, _: &ResponseHead, _: &mut Sink<'_>) {}
-
-    #[allow(clippy::unused_self, reason = "the same call as the feature's")]
-    const fn bound_complete(&self, _: Instant, _: &Exchange, _: &ResponseHead, _: &mut Sink<'_>) {}
-
-    #[allow(clippy::unused_self, reason = "the same call as the feature's")]
-    const fn bound_failed(&self, _: Purpose, _: &mut Sink<'_>) {}
 }
 
 fn event(sink: &mut Sink<'_>, event: Event<'_>) {
     sink(Output::Event(event));
 }
 
-impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'m, R, SLOTS, COOKIE_BYTES> {
+impl<'m, R: RandomSource> UserAgent<'m, R> {
     /// A new agent with no service open.
     pub fn new(config: Config, buffers: Buffers<'m>, random: R) -> Self {
-        Self::with_store(config, buffers, random, None)
-    }
-
-    /// A new agent whose cookies the port keeps (decision E.104): every
-    /// cookie it would send is asked of `cookies`, and every cookie a
-    /// response sets is given to it; the agent's own jar stays empty, and
-    /// [`Self::save_cookies`] and [`Self::load_cookies`] are the port's
-    /// business, not the agent's.
-    pub fn with_cookies(config: Config, buffers: Buffers<'m>, random: R, cookies: &'m mut dyn Cookies) -> Self {
-        Self::with_store(config, buffers, random, Some(cookies))
-    }
-
-    fn with_store(config: Config, buffers: Buffers<'m>, random: R, port_cookies: Option<&'m mut dyn Cookies>) -> Self {
-        let mut jar = CookieJar::new();
-        jar.set_limits(config.cookies_per_host, config.cookies_total);
         Self {
-            port_cookies,
             named_as: UserAgentString::of(config.product.as_ref()),
             config,
             buffers,
             random,
-            jar,
-            wall_clock: None,
             descriptor: None,
             pending_descriptor: None,
             pending_resource: None,
@@ -439,7 +362,6 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
             second_try: None,
             front_door: None,
             contents: None,
-            navigation_pending: false,
             secure_hosts: [None; SECURE_HOSTS],
             fetch: FetchConnection {
                 link: Link::Closed,
@@ -483,10 +405,6 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
             connecting: false,
             subscribe_all: true,
             subscribed: [None; MAX_SUBSCRIBED_PAGES],
-            #[cfg(feature = "dbsc")]
-            device_keys: None,
-            #[cfg(feature = "dbsc")]
-            bound: bound::Bound::new(),
         }
     }
 
@@ -494,19 +412,5 @@ impl<'m, R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAge
     #[must_use]
     pub const fn descriptor(&self) -> Option<&Descriptor> {
         self.descriptor.as_ref()
-    }
-
-    /// The cookie store.
-    #[must_use]
-    pub const fn cookies(&self) -> &CookieJar<SLOTS, COOKIE_BYTES> {
-        &self.jar
-    }
-
-    /// Seconds for the cookie store, and whether they are calendar time.
-    fn seconds(&self, now: Instant) -> (u64, bool) {
-        match self.wall_clock {
-            Some((at, unix)) => (unix.saturating_add(now.since(at) / MICROSECONDS_PER_SECOND), true),
-            None => (now.0 / MICROSECONDS_PER_SECOND, false),
-        }
     }
 }

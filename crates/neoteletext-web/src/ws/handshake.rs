@@ -38,8 +38,7 @@ pub fn accept_for(key: &[u8]) -> [u8; WEBSOCKET_ACCEPT_TEXT] {
 /// Writes the opening handshake request line and headers (RFC 6455
 /// section 4.1): only the headers of the profile (REQ-WEB-014), with
 /// `user_agent` (REQ-WEB-031), and `Sec-WebSocket-Protocol` when `subprotocol`
-/// names one. The caller adds the `Cookie` header, if any, and the empty line
-/// that ends the request. A receiver never sends `Origin`, which is how a
+/// names one. The caller adds the empty line that ends the request. A receiver never sends `Origin`, which is how a
 /// server tells it from a web page's script (DEC-1759 lesson 18).
 ///
 /// # Errors

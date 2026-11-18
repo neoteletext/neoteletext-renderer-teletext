@@ -4,28 +4,24 @@
 
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 
-#[cfg(feature = "dbsc")]
-use super::bound;
-use super::cookies::{cookie_store, write_cookie_header};
 use super::page::cached_as;
 use super::{Cached, Event, Exchange, Failure, Link, Output, PageFile, Purpose, Sink, Target, UserAgent, Want, event};
 use crate::bytes::{Overflow, Writer};
 use crate::channel::{self, ChannelFile};
 use crate::consts::{ACCEPT_PAGES, CRLF, IDENTITY, header};
-use crate::cookie::Site;
 use crate::http::{self, Method};
 use crate::port::{ConnectionId, RandomSource, Security};
 use crate::subpages::PartNumber;
 use crate::url::{IpAddress, Url};
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     /// The first refusal that applies to a request to `url`, before any
     /// connection is made.
-    pub(super) fn refusal(&self, now: Instant, url: &Url) -> Option<Failure> {
+    pub(super) fn refusal(&self, url: &Url) -> Option<Failure> {
         if url.is_secure() && !self.config.tls_available {
             return Some(Failure::TlsUnavailable);
         }
-        if self.is_downgrade(now, url) {
+        if self.is_downgrade(url) {
             return Some(Failure::Downgrade);
         }
         if url.ip().is_some_and(|ip| self.blocked(ip)) {
@@ -61,20 +57,17 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     /// Starts the next request when the fetch connection is free.
     pub(super) fn dispatch(&mut self, now: Instant, sink: &mut Sink<'_>) {
         while self.fetch.exchange.is_none() {
-            let (purpose, url, method, site) = if let Some(bound) = self.bound_next(sink) {
-                bound
-            } else if let Some((url, via_link, channel)) = self.pending_descriptor.take() {
-                let site = if via_link { Site::CrossServiceNavigation } else { Site::SameService };
-                (Purpose::Descriptor { via_link, channel }, url, Method::Get, site)
+            let (purpose, url, method) = if let Some((url, channel)) = self.pending_descriptor.take() {
+                (Purpose::Descriptor { channel }, url, Method::Get)
             } else if let Some((url, role)) = self.pending_resource.take() {
-                (Purpose::Resource(role), url, Method::Get, Site::SameService)
+                (Purpose::Resource(role), url, Method::Get)
             } else if let Some(url) = self.front_door.take() {
-                (Purpose::FrontDoor, url, Method::Get, Site::SameService)
+                (Purpose::FrontDoor, url, Method::Get)
             } else if let Some((page, subcode, file)) = self.second_try.take() {
                 let Some(request) = self.second_try_request(page, subcode, file, sink) else { continue };
                 request
             } else if let Some(url) = self.contents.take() {
-                (Purpose::Contents, url, Method::Get, Site::SameService)
+                (Purpose::Contents, url, Method::Get)
             } else if !self.live && self.queue.iter().any(Option::is_some) && now >= self.next_fetch_at {
                 let Some(queued) = self.take_queued() else { return };
                 let request = match queued.want {
@@ -86,16 +79,10 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             } else {
                 return;
             };
-            // REQ-WEB-017: a request that would go without a bound
-            // session's cookie waits for the session's refresh. A resource
-            // carries no cookie at all, so waits for none (REQ-2476).
-            if !matches!(purpose, Purpose::Resource(_)) && self.bound_defer(now, purpose, &url, method, site) {
-                continue;
-            }
             self.next_fetch_at = Instant(now.0.saturating_add(self.config.fetch_interval_us));
-            if let Some(failure) = self.refusal(now, &url) {
+            if let Some(failure) = self.refusal(&url) {
                 Self::report_refusal(ConnectionId::Fetch, &url, failure, sink);
-                self.finish_purpose(purpose, Err(failure), sink);
+                Self::finish_purpose(purpose, Err(failure), sink);
                 continue;
             }
             self.fetch.exchange = Some(Exchange {
@@ -103,7 +90,6 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 url,
                 method,
                 redirects: 0,
-                site,
                 deadline: Instant(now.0.saturating_add(self.config.response_timeout_us)),
                 sent: false,
                 reused: false,
@@ -124,7 +110,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         subcode: Option<SubCode>,
         file: PageFile,
         sink: &mut Sink<'_>,
-    ) -> Option<(Purpose, Url, Method, Site)> {
+    ) -> Option<(Purpose, Url, Method)> {
         let folder = self.channel?;
         let name = match (file, subcode) {
             (PageFile::SubPage { t42, .. }, Some(subcode)) => ChannelFile::SubPage { page, subcode, t42 },
@@ -132,7 +118,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             _ => return None,
         };
         match channel::file_url(&folder, name) {
-            Ok(url) => Some((Purpose::Page { page, subcode, file }, url, Method::Get, Site::SameService)),
+            Ok(url) => Some((Purpose::Page { page, subcode, file }, url, Method::Get)),
             Err(error) => {
                 event(sink, Event::FetchFailed { page, subcode, failure: Failure::Address(error) });
                 None
@@ -148,7 +134,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         page: PageAddress,
         subcode: Option<SubCode>,
         sink: &mut Sink<'_>,
-    ) -> Option<(Purpose, Url, Method, Site)> {
+    ) -> Option<(Purpose, Url, Method)> {
         let Some(descriptor) = &self.descriptor else {
             event(sink, Event::FetchFailed { page, subcode, failure: Failure::NoService });
             return None;
@@ -191,12 +177,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 return None;
             }
         };
-        let site = if core::mem::take(&mut self.navigation_pending) {
-            Site::CrossServiceNavigation
-        } else {
-            Site::SameService
-        };
-        Some((Purpose::Page { page, subcode, file }, url, Method::Get, site))
+        Some((Purpose::Page { page, subcode, file }, url, Method::Get))
     }
 
     /// The request for a queued part of a page's list (REQ-1888). `None` when
@@ -208,7 +189,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         page: PageAddress,
         part: PartNumber,
         sink: &mut Sink<'_>,
-    ) -> Option<(Purpose, Url, Method, Site)> {
+    ) -> Option<(Purpose, Url, Method)> {
         let Some(folder) = self.channel else {
             event(sink, Event::SubPagesFailed { page, part, failure: Failure::NoService });
             return None;
@@ -219,7 +200,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             return None;
         }
         match channel::file_url(&folder, ChannelFile::SubPages { page, part }) {
-            Ok(url) => Some((Purpose::SubPages { page, part }, url, Method::Get, Site::SameService)),
+            Ok(url) => Some((Purpose::SubPages { page, part }, url, Method::Get)),
             Err(error) => {
                 event(sink, Event::SubPagesFailed { page, part, failure: Failure::Address(error) });
                 None
@@ -237,7 +218,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
             && !matches!(exchange.purpose, Purpose::Resource(_))
             && self.fetch.target.is_some_and(|target| target.matches(&exchange.url));
         if reusable {
-            self.send_request(now, sink);
+            self.send_request(sink);
             return;
         }
         if self.fetch.link != Link::Closed {
@@ -257,8 +238,7 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         });
     }
 
-    fn write_request(&mut self, now: Instant, exchange: &Exchange, sink: &mut Sink<'_>) -> Result<usize, Overflow> {
-        let (seconds, _) = self.seconds(now);
+    fn write_request(&mut self, exchange: &Exchange) -> Result<usize, Overflow> {
         let mut writer = Writer::new(self.buffers.fetch_request);
         http::write_request_line(&mut writer, exchange.method, exchange.url.target())?;
         http::write_host(&mut writer, &exchange.url)?;
@@ -297,44 +277,16 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
                 http::write_header(&mut writer, header::IF_MODIFIED_SINCE, date.as_bytes())?;
             }
         }
-        // The bound sessions' requests are posted empty (REQ-WEB-017).
-        if exchange.method == Method::Post {
-            writer.put(header::CONTENT_LENGTH)?;
-            writer.put(b": 0")?;
-            writer.put(CRLF)?;
-        }
-        // A resource fetched outside any channel carries no cookie and no
-        // bound session's header: a page discovery reads, or a font, must
-        // learn nothing of the viewer's channels (REQ-2476, REQ-123).
-        if matches!(exchange.purpose, Purpose::Resource(_)) {
-            writer.put(CRLF)?;
-            return Ok(writer.len());
-        }
-        #[cfg(feature = "dbsc")]
-        bound::write_headers(&mut self.bound, self.device_keys.as_deref_mut(), exchange, &mut writer)?;
-        let path = exchange.url.path();
-        // The open channel's or service's cookies alone, as they were
-        // stored (REQ-515, REQ-507).
-        let identity = self.channel.as_ref().or(self.service_folder.as_ref());
-        let scope = identity.map(Url::path);
-        if write_cookie_header(
-            cookie_store(&mut self.jar, &mut self.port_cookies),
-            &mut writer,
-            &exchange.url,
-            path,
-            scope,
-            exchange.site,
-            seconds,
-        )? {
-            event(sink, Event::CookiesTruncated);
-        }
+        // No `Cookie` header on any request: NeoTeletext keeps no cookies,
+        // and viewer state goes only on the push connection (VS-116,
+        // VS-201).
         writer.put(CRLF)?;
         Ok(writer.len())
     }
 
-    pub(super) fn send_request(&mut self, now: Instant, sink: &mut Sink<'_>) {
+    pub(super) fn send_request(&mut self, sink: &mut Sink<'_>) {
         let Some(exchange) = self.fetch.exchange else { return };
-        match self.write_request(now, &exchange, sink) {
+        match self.write_request(&exchange) {
             Ok(len) => {
                 if let Some(current) = &mut self.fetch.exchange {
                     current.sent = true;

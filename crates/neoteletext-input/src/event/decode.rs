@@ -8,8 +8,8 @@ use super::{
     EVENT, Event, FIRST_EXTENSION, FOCUS_IN, FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO,
     HOVER, HOVER_LEAVE, InputError, Item, KEY, KEY_RESERVED, Key, KeyCode, LAST_CORE, LAST_EXTENSION, MAX_PICK_OFFSET,
     MAX_PICK_POSITION, MOUSE, MOUSE_RESERVED, Mouse, MouseAction, NEVER_UTF8, NEVER_UTF8_FROM, PASTE, PICK, Pick,
-    Point, RESIZE, RESUME, Resume, SELECT, Select, Stamp, TOUCH, TOUCH_RESERVED, Touch, WHEEL, WHEEL_RESERVED, Wheel,
-    check_text, is_page_parameters, printable,
+    Point, RESIZE, RESUME, Resume, SELECT, STATE_NONE, STATE_OFFER, STATE_PROOF, Select, Stamp, TOUCH, TOUCH_RESERVED,
+    Touch, WHEEL, WHEEL_RESERVED, Wheel, check_text, is_page_parameters, printable,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::{AGENT, RETIRED_PAGE_BIT};
@@ -201,6 +201,12 @@ fn read_extension<'a>(kind: u8, reader: &mut Reader<'a>) -> Result<Event<'a>, In
         TOUCH => read_touch(payload).map_err(whole)?,
         RESUME => read_resume(payload).map_err(whole)?,
         SELECT => read_select(payload).map_err(whole)?,
+        STATE_PROOF => Event::StateProof(crate::state::read_proof(payload)?),
+        STATE_NONE => Event::StateNone(crate::state::read_none(payload)?),
+        STATE_OFFER => {
+            crate::state::read_offer(payload)?;
+            Event::StateOffer
+        }
         _ => Event::Extension { kind, payload },
     })
 }

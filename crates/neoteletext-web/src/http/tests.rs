@@ -14,24 +14,7 @@ use proptest::prelude::*;
 use std::vec::Vec;
 
 fn head(text: &[u8]) -> Result<ResponseHead, HttpError> {
-    parse_head(text, &mut |_| {})
-}
-
-/// Decision E.104: `Clear-Site-Data` clears cookies when it names
-/// `"cookies"` or `"*"`, quoted and exactly; anything else does not.
-#[test]
-fn clear_site_data_names_cookies() {
-    let clears = |value: &str| {
-        let text = std::format!("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nClear-Site-Data: {value}\r\n\r\n");
-        head(text.as_bytes()).unwrap().clear_cookies
-    };
-    for value in ["\"cookies\"", "\"cache\", \"cookies\"", "\"*\"", " \"storage\" ,\"cookies\" "] {
-        assert!(clears(value), "{value}");
-    }
-    for value in ["cookies", "\"Cookies\"", "\"cache\"", "\"cookies", "\"\"", "\"cookies\"x"] {
-        assert!(!clears(value), "{value}");
-    }
-    assert!(!head(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").unwrap().clear_cookies);
+    parse_head(text)
 }
 
 #[test]
@@ -150,15 +133,14 @@ fn header_count_limit() {
 
 #[test]
 fn profile_headers_are_read() {
-    let mut cookies = 0;
+    // A `Set-Cookie` is a field like any other this client does not read
+    // (VS-201): the head still parses.
     let parsed = parse_head(
         b"HTTP/1.1 301 Moved\r\nLocation: /p/101\r\nETag: \"v1\"\r\nLast-Modified: Sat, 10 Oct 2026 10:00:00 GMT\r\n\
           Cache-Control: max-age=60, no-cache\r\nRetry-After: 5\r\nContent-Type: text/x-teletext-tti; charset=utf-8\r\n\
           Set-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Length: 0\r\n\r\n",
-        &mut |_| cookies += 1,
     )
     .unwrap();
-    assert_eq!(cookies, 2);
     assert_eq!(parsed.location.unwrap().as_bytes(), b"/p/101");
     assert_eq!(parsed.etag.unwrap().as_bytes(), b"\"v1\"");
     assert!(parsed.last_modified.is_some());

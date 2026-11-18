@@ -1,7 +1,8 @@
 //! The channel's records on its push connection beside its pages
 //! (DOC-1951): the index (type 6), LOG
-//! (type 7), `SET_COOKIE` (type 8), LINKS (type 9), SUBPAGES (type 10),
-//! REDIRECT (type 11) and DENIED (type 12), in the audio profile's record frame
+//! (type 7), LINKS (type 9), SUBPAGES (type 10),
+//! REDIRECT (type 11), DENIED (type 12), and viewer state's
+//! `STATE_CHALLENGE`, `STATE_END` and `STATE_KEEP_OFFER` (types 18 to 20), in the audio profile's record frame
 //! (REQ-AUD-003) on data channel 12, packet 4/31, cut into as many
 //! fragments as a record needs (DOC-1952).
 //!
@@ -15,7 +16,6 @@ use neoteletext_audio::idl::{FRAGMENT_DATA, MAX_FRAGMENTS, Reassembler, fragment
 use neoteletext_audio::record::{RecordError, record_length, split, write};
 use neoteletext_core::packet::Packet;
 
-pub mod cookie;
 pub mod denied;
 pub mod drawing_links;
 pub mod index;
@@ -24,11 +24,12 @@ pub mod log;
 pub mod redirect;
 pub mod regis;
 pub mod regis_cursor;
+pub mod state;
 pub mod subpages;
 
 pub use neoteletext_audio::record::{
     TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_NAPLPS, TYPE_REDIRECT, TYPE_REGIS,
-    TYPE_REGIS_CURSOR, TYPE_SET_COOKIE, TYPE_SUBPAGES,
+    TYPE_REGIS_CURSOR, TYPE_SUBPAGES,
 };
 
 /// Why a record was refused: it is discarded whole, and its packets are
@@ -86,8 +87,6 @@ pub enum ChannelRecord<'a> {
     Index(index::IndexRecord<'a>),
     /// A log line for the channel's author (DOC-1956).
     Log(log::LogRecord<'a>),
-    /// A cookie's `Set-Cookie` value (DOC-1957).
-    SetCookie(&'a [u8]),
     /// A sub-page's Link Extension links (DOC-1958).
     Links(links::LinksRecord<'a>),
     /// A part of a page's list of sub-pages (DOC-1959).
@@ -106,6 +105,12 @@ pub enum ChannelRecord<'a> {
     DrawingLinks(drawing_links::DrawingLinksRecord<'a>),
     /// The numbered drawing that is a ReGIS sub-page's cursor (REQ-6371).
     RegisCursor(regis_cursor::RegisCursorRecord),
+    /// A challenge for the viewer's key (VS-204, VS-205).
+    StateChallenge(state::StateChallenge),
+    /// Delete the viewer's key with this identifier (VS-204).
+    StateEnd(state::StateEnd),
+    /// The channel suggests that the viewer have it remember them (VS-208).
+    StateKeepOffer,
 }
 
 /// What one packet gave the reader.
@@ -121,7 +126,7 @@ pub enum Read<'a> {
     Invalid(usize),
 }
 
-/// Reassembles the index, LOG, `SET_COOKIE`, LINKS, SUBPAGES, REDIRECT and DENIED records from a push stream's
+/// Reassembles the index, LOG, LINKS, SUBPAGES, REDIRECT, DENIED and viewer-state records from a push stream's
 /// packets (DOC-1952). A record is followed from its fragment 0, which
 /// names its type, so the audio profile's records and the one-fragment
 /// cursor and control records, which other readers take, are never copied
@@ -169,7 +174,6 @@ impl RecordReader {
                 kind,
                 TYPE_INDEX
                     | TYPE_LOG
-                    | TYPE_SET_COOKIE
                     | TYPE_LINKS
                     | TYPE_SUBPAGES
                     | TYPE_REDIRECT
@@ -178,6 +182,9 @@ impl RecordReader {
                     | TYPE_DRAWING_LINKS
                     | TYPE_REGIS_CURSOR
                     | TYPE_NAPLPS
+                    | state::TYPE_STATE_CHALLENGE
+                    | state::TYPE_STATE_END
+                    | state::TYPE_STATE_KEEP_OFFER
             ) {
                 return (Read::Nothing, 0);
             }
@@ -196,7 +203,7 @@ impl RecordReader {
     }
 }
 
-/// Reads one whole record of the seven types, frame and CRC included.
+/// Reads one whole record of the types this reader follows, frame and CRC included.
 ///
 /// # Errors
 /// The frame's failures, another record type, or any field of the
@@ -206,7 +213,6 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
     match kind {
         TYPE_INDEX => index::read(body).map(ChannelRecord::Index),
         TYPE_LOG => log::read(body).map(ChannelRecord::Log),
-        TYPE_SET_COOKIE => cookie::read(body).map(ChannelRecord::SetCookie),
         TYPE_LINKS => links::read(body).map(ChannelRecord::Links),
         TYPE_SUBPAGES => subpages::read(body).map(ChannelRecord::SubPages),
         TYPE_REDIRECT => redirect::read(body).map(ChannelRecord::Redirect),
@@ -216,6 +222,9 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
         TYPE_REGIS_CURSOR => regis_cursor::read(body).map(ChannelRecord::RegisCursor),
         // The body is the REGIS record's: a stream of a sub-page's bytes.
         TYPE_NAPLPS => regis::read(body).map(ChannelRecord::Naplps),
+        state::TYPE_STATE_CHALLENGE => state::read_challenge(body).map(ChannelRecord::StateChallenge),
+        state::TYPE_STATE_END => state::read_end(body).map(ChannelRecord::StateEnd),
+        state::TYPE_STATE_KEEP_OFFER => state::read_keep_offer(body).map(|()| ChannelRecord::StateKeepOffer),
         _ => Err(RecordFault::BadValue("record type")),
     }
 }

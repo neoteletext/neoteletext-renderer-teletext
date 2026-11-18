@@ -91,7 +91,9 @@ fuzz_target!(|data: &[u8]| {
     let split = data.first().map_or(0, |&byte| usize::from(byte)).min(data.len());
     let mut decoder = StreamDecoder::<MAX_STREAM_ITEM>::default();
     let mut streamed = Vec::new();
-    decoder.push(&data[..split], &mut |item| streamed.push(format!("{item:?}"))).expect("a prefix of an accepted message");
+    decoder
+        .push(&data[..split], &mut |item| streamed.push(format!("{item:?}")))
+        .expect("a prefix of an accepted message");
     decoder.push(&data[split..], &mut |item| streamed.push(format!("{item:?}"))).expect("the rest of it");
     // Text split between pieces arrives as more runs: compare it joined.
     assert_eq!(joined(&streamed), joined(&whole));

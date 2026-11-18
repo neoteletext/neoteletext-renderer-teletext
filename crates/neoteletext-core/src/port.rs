@@ -2,8 +2,8 @@
 //!
 //! A port supplies only these: a data source, a time source, key input and,
 //! optionally, a sleep function. Pixels are pulled from the row renderer
-//! into the port's own buffers (REQ-RND-017); the network transport and
-//! cookie storage belong to the web crate's half of this interface.
+//! into the port's own buffers (REQ-RND-017); the network transport
+//! belongs to the web crate's half of this interface.
 //!
 //! This is the boundary of REQ-ARCH-010: the library's pixel output ends
 //! when the row renderer has filled the port's buffer. Display drivers,

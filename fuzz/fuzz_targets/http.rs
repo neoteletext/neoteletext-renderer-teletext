@@ -12,9 +12,7 @@ const HEAD_BYTES: usize = 8192;
 
 fuzz_target!(|data: &[u8]| {
     let [selector, body @ ..] = data else { return };
-    let _ = parse_head(body, &mut |cookie| {
-        core::hint::black_box(cookie);
-    });
+    let _ = parse_head(body);
     let mut collector = HeadCollector::default();
     let mut buffer = [0u8; HEAD_BYTES];
     let mut rest = body;

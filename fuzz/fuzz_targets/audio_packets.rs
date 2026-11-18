@@ -7,7 +7,9 @@
 use libfuzzer_sys::fuzz_target;
 use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
-use neoteletext_core::consts::{ADDRESS_BYTE_0, ADDRESS_BYTE_1, IDL_AUDIO_DATA_START, IDL_CHANNEL_INDEPENDENT_AUDIO, IDL_DESIGNATION, PACKET_BYTES};
+use neoteletext_core::consts::{
+    ADDRESS_BYTE_0, ADDRESS_BYTE_1, IDL_AUDIO_DATA_START, IDL_CHANNEL_INDEPENDENT_AUDIO, IDL_DESIGNATION, PACKET_BYTES,
+};
 use neoteletext_core::ecc::hamming84_encode;
 use neoteletext_core::packet::Packet;
 

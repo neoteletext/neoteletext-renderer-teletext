@@ -72,6 +72,6 @@ pub fn read_connect_reply(
         return Ok(None);
     }
     let head = buffer.get(..collector.len()).ok_or(ProxyError::Malformed)?;
-    let parsed = parse_head(head, &mut |_| {}).map_err(|_| ProxyError::Malformed)?;
+    let parsed = parse_head(head).map_err(|_| ProxyError::Malformed)?;
     if HTTP_SUCCESS.contains(&parsed.status) { Ok(Some(used)) } else { Err(ProxyError::Refused(parsed.status)) }
 }

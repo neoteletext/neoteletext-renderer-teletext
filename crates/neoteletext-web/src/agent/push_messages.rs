@@ -19,7 +19,7 @@ use crate::descriptor::Descriptor;
 use crate::port::{ConnectionId, RandomSource};
 use crate::ws;
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     pub(super) fn subscribe(&mut self, subscription: Subscription<'_>, sink: &mut Sink<'_>) {
         self.subscribed = [None; MAX_SUBSCRIBED_PAGES];
         match subscription {

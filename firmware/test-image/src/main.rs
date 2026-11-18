@@ -222,8 +222,8 @@ mod web {
         }
     }
 
-    /// Slots and cookie bytes as a small port might choose.
-    type Agent<'m> = UserAgent<'m, Random, 4, 4096>;
+    /// The agent with the port's random source.
+    type Agent<'m> = UserAgent<'m, Random>;
 
     fn handle(agent: &mut Agent<'_>, now: Instant, input: Input<'_>) {
         agent.handle(now, input, &mut |output| {
@@ -288,14 +288,17 @@ mod opus {
 
 /// The web module's readers a port calls itself, outside the user agent: a
 /// channel's records, its contents file, its descriptor, a sub-page list,
-/// and a cookie header (REQ-GEN-019: every public entry point).
+/// and viewer state's channel identity, signed bytes and key identifier
+/// (REQ-GEN-019: every public entry point).
 #[cfg(feature = "web")]
 mod web_readers {
     use super::black_box;
-    use neoteletext_web::cookie::SetCookie;
     use neoteletext_web::descriptor::Descriptor;
-    use neoteletext_web::records::{cookie, denied, index, links, log, redirect, subpages as subpage_records};
+    use neoteletext_web::records::{denied, index, links, log, redirect, state, subpages as subpage_records};
     use neoteletext_web::url::Url;
+    use neoteletext_web::viewer_state::{
+        Algorithm, CHALLENGE_BYTES, ChannelIdentity, Lifetime, MAX_SIGNED_BYTES, PUBLIC_KEY_BYTES, key_id, signed_bytes,
+    };
     use neoteletext_web::{contents, subpages};
 
     fn records(body: &[u8]) {
@@ -305,7 +308,9 @@ mod web_readers {
         black_box(redirect::read(body).is_ok());
         black_box(subpage_records::read(body).is_ok());
         black_box(denied::read(body).is_ok());
-        black_box(cookie::read(body).is_ok());
+        black_box(state::read_challenge(body).is_ok());
+        black_box(state::read_end(body).is_ok());
+        black_box(state::read_keep_offer(body).is_ok());
     }
 
     fn files(bytes: &[u8], base: &Url) {
@@ -319,16 +324,22 @@ mod web_readers {
         black_box(Descriptor::parse_channel(bytes, base).is_ok());
     }
 
-    fn cookie_header(header: &[u8], wall_clock: bool) {
-        black_box(SetCookie::parse(header, wall_clock).is_ok());
+    /// A channel identity read, the bytes a key signs for it, and a key
+    /// identifier (DEC-6471, VS-203, VS-302).
+    fn viewer_state(text: &str, challenge: &[u8; CHALLENGE_BYTES], public_key: &[u8; PUBLIC_KEY_BYTES]) {
+        if let Ok(identity) = ChannelIdentity::read(text) {
+            let mut out = [0_u8; MAX_SIGNED_BYTES];
+            black_box(signed_bytes(Algorithm::Ed25519, Lifetime::Visit, challenge, &identity, &mut out).is_ok());
+        }
+        black_box(key_id(Algorithm::Ed25519, public_key));
     }
 
     #[used]
     static RECORDS: fn(&[u8]) = records;
     #[used]
-    static FILES: fn(&[u8], &Url) = files;
+    static VIEWER_STATE: fn(&str, &[u8; CHALLENGE_BYTES], &[u8; PUBLIC_KEY_BYTES]) = viewer_state;
     #[used]
-    static COOKIE_HEADER: fn(&[u8], bool) = cookie_header;
+    static FILES: fn(&[u8], &Url) = files;
 }
 
 /// The software data slicer (area SLC): raw lines into packets. REQ-GEN-016

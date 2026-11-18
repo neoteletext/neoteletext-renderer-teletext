@@ -190,10 +190,11 @@ fn get_accepting(port: u16, path: &str, accept: &str) -> Vec<u8> {
     answer
 }
 
-// Verifies REQ-502 (REQ-WEB-013): the session cookie the test server sets
-// comes back on neottx's next requests.
+// Verifies VS-201 (the viewer-state design, which withdrew REQ-502's
+// cookie): the session cookie the test server sets never comes back on
+// neottx's next requests, which carry no cookie at all.
 #[test]
-fn the_session_cookie_comes_back() {
+fn the_session_cookie_never_comes_back() {
     let server = server();
     let count = || {
         let answer = get_accepting(server.port, "/sessions", "text/plain");
@@ -204,7 +205,7 @@ fn the_session_cookie_comes_back() {
     let url = format!("http://127.0.0.1:{}/service.json", server.port);
     let (ok, _, errors) = neottx(&["text", &url, "100", "--allow-local", "127.0.0.1", "--duration", "15"]);
     assert!(ok, "neottx failed: {errors}");
-    assert!(count() > before, "no request brought the session cookie back");
+    assert_eq!(count(), before, "a request brought the session cookie back");
 }
 
 // Verifies REQ-501 (REQ-WEB-012) and REQ-2476: the test server shows a

@@ -2,9 +2,8 @@
 //! caller (REQ-GEN-003, REQ-SEC-020).
 
 use crate::consts::{
-    ALLOWED_LOCAL, DEFAULT_CONNECT_TIMEOUT_US, DEFAULT_COOKIES_PER_HOST, DEFAULT_COOKIES_TOTAL,
-    DEFAULT_DESCRIPTOR_LIMIT, DEFAULT_FETCH_INTERVAL_US, DEFAULT_HEADER_LIMIT, DEFAULT_PAGE_LIMIT, DEFAULT_PUSH_LIMIT,
-    DEFAULT_RESPONSE_TIMEOUT_US,
+    ALLOWED_LOCAL, DEFAULT_CONNECT_TIMEOUT_US, DEFAULT_DESCRIPTOR_LIMIT, DEFAULT_FETCH_INTERVAL_US,
+    DEFAULT_HEADER_LIMIT, DEFAULT_PAGE_LIMIT, DEFAULT_PUSH_LIMIT, DEFAULT_RESPONSE_TIMEOUT_US,
 };
 use crate::url::IpAddress;
 
@@ -36,12 +35,6 @@ pub struct Config {
     /// Local-network addresses explicitly allowed (REQ-SEC-006). None by
     /// default.
     pub allowed_local: [Option<IpAddress>; ALLOWED_LOCAL],
-    /// Cookies kept per host (REQ-WEB-006).
-    pub cookies_per_host: usize,
-    /// Cookies kept in total (REQ-WEB-006).
-    pub cookies_total: usize,
-    /// The port saves cookies between runs (REQ-SEC-013). Off by default.
-    pub persist_cookies: bool,
     /// Refuse redirects of descriptor, page, bundle and contents requests
     /// that leave the channel, reporting [`Event::RedirectToOtherChannel`](super::Event::RedirectToOtherChannel)
     /// instead, so that the viewer can confirm another channel before
@@ -74,9 +67,6 @@ impl Default for Config {
             response_timeout_us: DEFAULT_RESPONSE_TIMEOUT_US,
             tls_available: true,
             allowed_local: [None; ALLOWED_LOCAL],
-            cookies_per_host: DEFAULT_COOKIES_PER_HOST,
-            cookies_total: DEFAULT_COOKIES_TOTAL,
-            persist_cookies: false,
             redirects_within_channel: true,
             product: None,
             proxied: false,

@@ -18,11 +18,6 @@ use std::net::IpAddr;
 use std::sync::mpsc::Sender;
 use std::time::Instant as StdInstant;
 
-/// The agent keeps no cookie for a font (REQ-123): one slot of the least
-/// size the jar takes, which the font role never fills.
-const COOKIE_SLOTS: usize = 1;
-const COOKIE_BYTES: usize = 1;
-
 /// Fetches the font at `address` and sends it, or why it failed, to the
 /// decoder process.
 pub(super) fn run_font(
@@ -37,8 +32,7 @@ pub(super) fn run_font(
     for (slot, &local) in config.allowed_local.iter_mut().zip(allow_local) {
         *slot = Some(web_address(local));
     }
-    let mut agent: Box<UserAgent<'_, SystemRandom, COOKIE_SLOTS, COOKIE_BYTES>> =
-        Box::new(UserAgent::new(config, storage.buffers(), SystemRandom));
+    let mut agent: Box<UserAgent<'_, SystemRandom>> = Box::new(UserAgent::new(config, storage.buffers(), SystemRandom));
     let mut pump = Pump::new(StdTransport::new(allow_local, wake, proxy));
     let start = StdInstant::now();
     let mut buffer = vec![0_u8; SOCKET_READ];

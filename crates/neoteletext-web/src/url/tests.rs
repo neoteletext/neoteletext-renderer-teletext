@@ -178,8 +178,7 @@ fn blocked_literals() {
 }
 
 /// Finding F-96 (decision E.114 item 9): an IPv6 host is kept in RFC
-/// 5952's text form, so the memory of secure hosts, the cookie host and
-/// the table of confirmed origins do not split between two spellings.
+/// 5952's text form, so the memory of secure hosts and the table of confirmed origins do not split between two spellings.
 #[test]
 fn ipv6_hosts_are_kept_in_rfc_5952_form() {
     for (input, canonical) in [

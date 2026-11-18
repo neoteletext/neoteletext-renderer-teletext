@@ -369,16 +369,15 @@ pub fn response(status: &str, headers: &[&str], body: &[u8]) -> Vec<u8> {
 /// session's (REQ-WEB-017).
 pub fn assert_profile_headers(replay: &Replay, extra: &[&str]) {
     // REQ-503's table of request headers, exactly: no request sends
-    // Content-Type, and the agent offers no WebSocket extension.
-    const PERMITTED: [&str; 13] = [
+    // Content-Type or Cookie (VS-201), and the agent offers no WebSocket
+    // extension.
+    const PERMITTED: [&str; 11] = [
         "host",
         "user-agent",
         "accept",
         "accept-encoding",
-        "cookie",
         "if-none-match",
         "if-modified-since",
-        "content-length",
         "upgrade",
         "connection",
         "sec-websocket-key",
@@ -391,7 +390,7 @@ pub fn assert_profile_headers(replay: &Replay, extra: &[&str]) {
         let head = text.split("\r\n\r\n").next().unwrap();
         let mut lines = head.split("\r\n");
         let request_line = lines.next().unwrap();
-        assert!(request_line.starts_with("GET ") || request_line.starts_with("POST "), "{request_line}");
+        assert!(request_line.starts_with("GET "), "{request_line}");
         assert!(request_line.ends_with(" HTTP/1.1"));
         let mut names = Vec::new();
         for line in lines {

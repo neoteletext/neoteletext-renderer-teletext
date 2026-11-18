@@ -9,7 +9,9 @@ use libfuzzer_sys::fuzz_target;
 use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
 use neoteletext_audio::ttau::{End, records};
-use neoteletext_audio::{CHANNELS, MAX_BLOCK_SAMPLES, MAX_RECORD, MIN_FADE_MS, PROFILE_VERSION, RECORD_CRC, RECORD_HEADER};
+use neoteletext_audio::{
+    CHANNELS, MAX_BLOCK_SAMPLES, MAX_RECORD, MIN_FADE_MS, PROFILE_VERSION, RECORD_CRC, RECORD_HEADER,
+};
 
 /// A small store, so that sounds are evicted.
 const ARENA: usize = 8 * 1024;

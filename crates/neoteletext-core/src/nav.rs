@@ -441,7 +441,7 @@ impl<const N: usize> History<N> {
         self.position < self.entries.len()
     }
 
-    /// Erases the history (REQ-NAV-010, as REQ-SEC-013 for cookies).
+    /// Erases the history (REQ-NAV-010).
     pub fn wipe(&mut self) {
         self.entries.clear();
         self.position = 0;

@@ -1,7 +1,6 @@
-//! The channel's records on a push connection (DOC-1952, DOC-1955 to
-//! DOC-1957, DOC-1961; REQ-480, REQ-TST-040): the reader never panics, on
-//! packets or on a record's body, and every index, LOG, `SET_COOKIE` and
-//! DENIED record it accepts, written again by its encoder, reads back the
+//! The channel's records on a push connection (DOC-1952, DOC-1955,
+//! DOC-1956, DOC-1961; REQ-480, REQ-TST-040): the reader never panics, on
+//! packets or on a record's body, and every index, LOG and DENIED record it accepts, written again by its encoder, reads back the
 //! same. The LINKS, SUBPAGES and REDIRECT records have targets of their own.
 #![no_main]
 
@@ -9,9 +8,7 @@ use libfuzzer_sys::fuzz_target;
 use neoteletext_core::consts::PACKET_BYTES;
 use neoteletext_core::packet::Packet;
 use neoteletext_web::records::index::{IndexMagazine, IndexPage, Progress};
-use neoteletext_web::records::{
-    ChannelRecord, Read, RecordReader, TYPE_SET_COOKIE, cookie, denied, index, links, log, subpages, write_packets,
-};
+use neoteletext_web::records::{ChannelRecord, Read, RecordReader, denied, index, links, log, subpages};
 
 /// A service any record may be written on.
 const SERVICE: u8 = 3;
@@ -62,13 +59,6 @@ fn log_again(body: &[u8]) {
     read_back(&packets, &mut |again| assert_eq!(again, ChannelRecord::Log(record)));
 }
 
-fn cookie_again(body: &[u8]) {
-    let Ok(line) = cookie::read(body) else { return };
-    let mut packets = Vec::new();
-    write_packets(TYPE_SET_COOKIE, line, SERVICE, 0, &mut |packet| packets.push(packet)).expect("fits the frame");
-    read_back(&packets, &mut |again| assert_eq!(again, ChannelRecord::SetCookie(line)));
-}
-
 fn denied_again(body: &[u8]) {
     let Ok(record) = denied::read(body) else { return };
     let mut packets = Vec::new();
@@ -78,11 +68,10 @@ fn denied_again(body: &[u8]) {
 
 fuzz_target!(|data: &[u8]| {
     let Some((&choice, body)) = data.split_first() else { return };
-    match choice % 5 {
+    match choice % 4 {
         0 => index_again(body),
         1 => log_again(body),
-        2 => cookie_again(body),
-        3 => denied_again(body),
+        2 => denied_again(body),
         _ => {
             // Packets: the reader and every receiver's tracker of a
             // sending never panic, whatever arrives.

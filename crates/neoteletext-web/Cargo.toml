@@ -1,6 +1,6 @@
 [package]
 name = "neoteletext-web"
-description = "The neoteletext minimal web user agent: sans-IO HTTP/1.1, WebSocket, cookies and the zxnet live feed"
+description = "The neoteletext minimal web user agent: sans-IO HTTP/1.1, WebSocket, viewer state and the zxnet live feed"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,13 +12,16 @@ publish.workspace = true
 neoteletext-core.workspace = true
 embedded-io.workspace = true
 # The record frame and its data-line carriage, which the channel's index,
-# LOG and SET_COOKIE records share with sound (DOC-1951).
+# LOG and viewer-state records share with sound (DOC-1951).
 neoteletext-audio = { workspace = true, features = ["idl"] }
 # A LOG record is checked by the rules of a TTI `LG` line (REQ-INP-026),
 # and given on as the same `LogLine`; a LINKS record's targets by the TTI
 # reader's parser, and given on as its `LinkLine`, `NumberLink` and
 # `TextLink` (REQ-1494).
 neoteletext-formats = { workspace = true, features = ["tti"] }
+# Viewer state's messages from the receiver, which the signed bytes and the
+# key identifier take their fields from (DEC-6471, VS-203, VS-204).
+neoteletext-input.workspace = true
 
 [features]
 # Decision E.61: each part of the user agent that a run-time choice reaches
@@ -26,30 +29,18 @@ neoteletext-formats = { workspace = true, features = ["tti"] }
 # what they use. The zxnet live feed is not a feature: nothing in the agent
 # reaches it, so the linker already leaves it out of a port that does not
 # call it.
-default = ["push", "cookies"]
+default = ["push"]
 # Server push over WebSocket (REQ-WEB-005).
 push = []
-# The cookie store's use by the agent (REQ-WEB-006).
-cookies = []
 # REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error types,
 # which needs `core::fmt`.
 error-trait = []
-# Device Bound Session Credentials (REQ-WEB-017, decision E.110): sessions
-# bound to a key the port keeps on the device. Not default: a port without
-# protected key storage has no use for it, and the session store is memory
-# every agent would carry. A bound session refreshes a cookie the agent
-# keeps, so it needs the cookie store's use.
-dbsc = ["cookies"]
 # A program with an allocator: the small page of HTML that a server and
 # `neottx` write for a web browser (neoteletext-common's REQ-1725, REQ-1728).
 alloc = []
 # A port with the standard library: the blocking proxy handshake over any
 # `std::io` stream (REQ-WEB-032).
 std = []
-
-[[test]]
-name = "dbsc"
-required-features = ["dbsc"]
 
 [dev-dependencies]
 proptest = "1.7.0"

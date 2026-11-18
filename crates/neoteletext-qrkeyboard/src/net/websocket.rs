@@ -90,7 +90,7 @@ impl WebSocket {
                 break input.get(used..).unwrap_or(&[]).to_vec();
             }
         };
-        let parsed = parse_head(head.get(..collector.len()).unwrap_or(&[]), &mut |_| {})
+        let parsed = parse_head(head.get(..collector.len()).unwrap_or(&[]))
             .map_err(|_| Error::Protocol("a malformed handshake"))?;
         if parsed.status != neoteletext_web::consts::STATUS_SWITCHING_PROTOCOLS {
             return Err(Error::Status(parsed.status));

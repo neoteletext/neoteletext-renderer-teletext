@@ -40,7 +40,7 @@ viewer = ["neoteletext-core/viewer"]
 # The format readers through detection; formats-all adds every reader.
 formats = []
 formats-all = ["formats", "neoteletext-formats/default"]
-# The web user agent; web-all adds push and cookies.
+# The web user agent; web-all adds push.
 web = []
 web-all = ["web", "neoteletext-web/default"]
 # The Opus decoder of the audio profile (decision E.123).

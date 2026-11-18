@@ -25,10 +25,10 @@ Dependencies point **downward only**. A layer may use the layers below it and th
  │ L9  Applications & ports      neottx CLI · WASM host · ports              │  std / platform
  ├───────────────────────────────────────────────────────────────────────────┤
  │ L8  Platform interface        traits: DataSource · Transport · Clock ·      │  the port boundary
- │                               Keys · CookieStorage · DeviceKey              │
+ │                               Keys                                          │
  ├───────────────┬───────────────────────────────────────────────────────────┤
  │ L7  Web user  │ URL parser · origin · HTTP/1.1 · WebSocket ·                │  sans-IO, no_std
- │     agent     │ cookies · cache · descriptor · channels                     │
+ │     agent     │ viewer state · cache · descriptor · channels                │
  ├───────────────┴───────────────────────────────────────────────────────────┤
  │ L6  Interaction               viewer FSM · navigation · history · input ·   │  no_std
  │                               status area                                   │
@@ -197,7 +197,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
   - the minimal user agent profile;
   - HTTP/1.1;
   - WebSocket;
-  - the cookie store;
+  - viewer state (`viewer_state`, DEC-6471): the canonical channel identity, the bytes a viewer key signs and the key identifier, used by the browser and the server alike; the engine holds no key, signs nothing and keeps no cookie;
   - validators and caching;
   - the service descriptor;
   - channels: which addresses name a channel's folder and files, and the checks a channel's file must pass (`channel`, decision E.70);
@@ -205,16 +205,15 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
   - a font library's index, `fonts.txt` (`font_library`, REQ-124, DEC-2428): its bounded reader of `f` and `c` lines, which checks a `c` line's set names with a function the port passes (the names are the core's glyph layer's, which this crate may not use), the address a listed font is fetched from, and the check of a font's bytes against the SHA-256 its library names (REQ-123);
   - a page's list of sub-pages in parts, `NNN/P.sub` (`subpages`, REQ-1888): its bounded reader and its writer, the validator of a file and a page's version, and, with the feature `std`, the layout of a channel's pages as files (`NNN.t42`, and in the page's folder `NNN/SSSS.t42` and the parts `NNN/P.sub`, with an `index.t42` of first sub-pages); the agent asks for a part of a page's list when the port asks, and then for a sub-page's own file only when that sub-page is asked for (REQ-WEB-019);
   - discovery's link-pointer reader (`discovery`, REQ-2476, DEC-2475): the pointers an ordinary web page gives to its channel, read from its `Link` header fields and from the `<link>` elements in the first 8,192 bytes of its body by two bounded byte loops that allocate nothing, and each target checked and resolved against the address that answered; the browser's discovery uses it, and nothing in the engine calls it;
-  - resources fetched outside any channel (`Input::FetchResource`, `agent::resource`): discovery's page (REQ-2476) and a font named by its address (REQ-123), each one `GET` on a connection of its own, with no cookie sent or kept, no bound session's header, and redirects to any origin within the local-network and downgrade checks;
+  - resources fetched outside any channel (`Input::FetchResource`, `agent::resource`): discovery's page (REQ-2476) and a font named by its address (REQ-123), each one `GET` on a connection of its own, and redirects to any origin within the local-network and downgrade checks;
   - push subscriptions;
-  - the channel's records on the push connection (`records`, DOC-1951): the index, LOG, `SET_COOKIE`, LINKS, SUBPAGES, REDIRECT and DENIED records' encoders and readers, the reassembly of a record from its fragments (`RecordReader`), and the one reassembly of each kind of sending that spans records, which every receiver uses in place of its own: `index::Progress`, `links::Sending`, held to a sub-page's totals of links over its parts (DOC-1958), and `subpages::Sending`, held to a page's list's count and order over its parts (DOC-1959); a sending that breaks its totals is refused and its packets counted invalid (REQ-1462);
+  - the channel's records on the push connection (`records`, DOC-1951): the index, LOG, LINKS, SUBPAGES, REDIRECT, DENIED and viewer state's `STATE_CHALLENGE`, `STATE_END` and `STATE_KEEP_OFFER` (types 18 to 20) records' encoders and readers, the last three given to the port as events, the reassembly of a record from its fragments (`RecordReader`), and the one reassembly of each kind of sending that spans records, which every receiver uses in place of its own: `index::Progress`, `links::Sending`, held to a sub-page's totals of links over its parts (DOC-1958), and `subpages::Sending`, held to a page's list's count and order over its parts (DOC-1959); a sending that breaks its totals is refused and its packets counted invalid (REQ-1462);
   - the return channel on the push WebSocket (REQ-WEB-035, decision E.133): the frames of one input written together as one send, a contact's move held in its slot while the port reports the socket's unsent bytes at or over `PUSH_UNSENT_BOUND`, and the round trip by ping and pong (`Input::MeasureRoundTrip`, `Event::RoundTrip`);
-  - Device Bound Session Credentials (`dbsc`, and the agent's `agent::bound`, feature `dbsc`, REQ-WEB-017): the registration and challenge headers, the session instructions, the proofs and the session store; the keys are the port's;
   - the zxnet live feed.
 
   It is fed received bytes, the time and requests. It produces bytes to send, timers, TTI or T42 bytes for Ingress, and events.
 - **Must not know about:** teletext decoding. Pages leave it only as bytes.
-- **Key types:** `Url`, `Origin`, `UserAgent`, `CookieJar<const N: usize>`, `Input`, `Output::{Send, Timer, PageBytes, Event}`.
+- **Key types:** `Url`, `Origin`, `UserAgent`, `ChannelIdentity`, `Input`, `Output::{Send, Timer, PageBytes, Event}`.
 - **Requirements:** WEB, INP-022, SEC-006 to SEC-008, SEC-010 to SEC-013.
 
 ### L8 Platform interface — traits in `neoteletext-core::port` and `neoteletext-web::port`
@@ -224,8 +223,6 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
   - `Transport`, following the `embedded-io` traits, with `unsent`, the bytes a connection has not yet sent (decision E.133);
   - `Clock`;
   - `Keys`;
-  - `CookieStorage`;
-  - `DeviceKeys` (`neoteletext-web::dbsc`, feature `dbsc`, Phase 2): P-256 keys that never leave the device, made, used to sign and deleted by the port.
 - **Must not know about:** any implementation.
 
 ### L9 Applications and ports — `neoteletext-app`, `neoteletext-cli`, the WebAssembly host, `neoteletext-ffi`, users' ports
@@ -432,7 +429,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | Boundary | What crosses it | Protection |
 |---|---|---|
 | Untrusted bytes into L0 readers | Files, streams, samples, page files | Strict streaming parsers, size limits, fuzzing (REQ-SEC-003, REQ-TST-040) |
-| Untrusted bytes into L7 | HTTP, WebSocket, descriptors, cookies, a channel's records on its push connection (index, LOG, SET_COOKIE, LINKS, SUBPAGES, REDIRECT, DENIED; DOC-1951) | The user agent profile, the strict address parser, policy checks, fuzzing (REQ-WEB-014 to REQ-WEB-016, SEC-006 to SEC-011) |
+| Untrusted bytes into L7 | HTTP, WebSocket, descriptors, a channel's records on its push connection (index, LOG, LINKS, SUBPAGES, REDIRECT, DENIED, `STATE_CHALLENGE`, `STATE_END`, `STATE_KEEP_OFFER`; DOC-1951) | The user agent profile, the strict address parser, policy checks, fuzzing (REQ-WEB-014 to REQ-WEB-016, SEC-006 to SEC-011) |
 | L7 to L0 across processes | TTI or T42 bytes and framed control messages | Both sides validate; the decoder process has no rights (REQ-SEC-018) |
 | L5 to the terminal | Text and escape sequences | Allow-list sanitising (REQ-SEC-010) |
 | Fonts from a file | BDF files and library indexes | Read by strict, bounded, fuzzed readers; the decoder checks the glyph table's shape before drawing with it (REQ-FNT-002, REQ-FNT-003, REQ-FNT-008) |
@@ -514,13 +511,11 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `http/`: the response head parser, the head as the profile reads it, and the body's framing.
 - `url/`: the strict address parser's lexical pass, host grammar and path grammar.
 - `proxy/`: the HTTP `CONNECT` and SOCKS5 handshakes, and the blocking tunnel over `std::io` (feature `std`).
-- `cookie/`: the cookie store's `Set-Cookie` algorithm, the `Cookie` header, the date algorithm and the persistence format.
-- `dbsc/`: Device Bound Session Credentials: structured fields, the two headers, the session instructions, the proof, the session store and its saved form, which a port keeps beside its cookies across runs (`Sessions::export` and `import`, the agent's `export_bound_sessions` and `import_bound_sessions`).
 - `descriptor/`: the descriptor's member grammar, its page address template and its links to other sites.
 - `subpages/`: a channel's pages laid out as files (feature `std`).
-- `records/`: a channel's records on its push connection (DOC-1951), one file a record type, each with its encoder and its bounded reader: `index`, `log`, `cookie` (SET_COOKIE), `links`, `subpages`, `redirect` and `denied`, and for the index, LINKS and SUBPAGES records the progress of a sending; `RecordReader` reassembles a push stream's fragments and reads the records they carry.
+- `records/`: a channel's records on its push connection (DOC-1951), one file a record type, each with its encoder and its bounded reader: `index`, `log`, `links`, `subpages`, `state` (viewer state's three records), `redirect` and `denied`, and for the index, LINKS and SUBPAGES records the progress of a sending; `RecordReader` reassembles a push stream's fragments and reads the records they carry.
 - `zxnet/`: the live feed's channel, vocabulary, messages, page walk and connection.
-- `agent/`: the user agent's parts: configuration, vocabulary, entry point, service opening, requests, responses, pages, cookies, the fetch and push connections, and the agent's side of `dbsc`.
+- `agent/`: the user agent's parts: configuration, vocabulary, entry point, service opening, requests, responses, pages, the memory of hosts reached securely (`secure`), and the fetch and push connections.
 
 **`neoteletext-audio`, `neoteletext-audio-mix`**
 - `idl/`: record reassembly from fragments.
@@ -593,14 +588,14 @@ Decision E.61 makes each crate's optional areas Cargo features, all on by defaul
 - **A request a build cannot serve is answered, never ignored or panicked on:**
   - a configured level that is not compiled in falls back (`PresentationLevel::available`);
   - a format that is not compiled in gives `FormatNotCompiled`;
-  - push and cookies give their `NotCompiledIn` values;
+  - push gives its `NotCompiledIn` value;
   - a `neottx` command whose area is left out says so and exits with the usage status.
 
 | Crate | Features |
 |---|---|
 | `neoteletext-core` | Default (decision E.105): `level15`, `level25`, `nonspacing-attributes`, `level25-32colors`, `level35-32colors`, `render`, `viewer`, `extended-sets` (neoteletext's own character sets, the joining pass and the part of the compiled font only they use, decision E.78, REQ-FNT-001). Not default: the capabilities `objects` and `additional-flash-functions` (decision E.71), and the profile `modern-classic` |
 | `neoteletext-formats` | `transport`, `sliced`, `pages`, `tti`, `ep1`, `edittf`, `dump`, `check`, `bdf` (the font reader of REQ-FNT-002), and, not default, `std` and `write-text` (the text writer and its `unicode-bidi` dependency) |
-| `neoteletext-web` | `push`, `cookies`; not default: `dbsc` (REQ-WEB-017, decision E.110), `error-trait` and `std` |
+| `neoteletext-web` | `push`; not default: `error-trait`, `alloc` and `std` |
 | `neoteletext-app` | `live`, `slice`, `write-text` (`neoteletext-formats`' text writer, for `neottx write-text`) |
 | `neoteletext-audio` | `idl`, `ima`, `pcm16`, `opus`, and `encode` (not default). The desktop builds name `idl` and `opus` alone: PCM16 and IMA ADPCM are compiled out of them and kept for microcontrollers (decision E.131) |
 | `neoteletext-opus` | None: the profile is the whole decoder |
@@ -620,7 +615,7 @@ If `neoteletext-core` grows unwieldy, the natural split is `core` (Foundation to
 1. **Downward dependencies only.** Between crates this is enforced by the crate graph. Within `neoteletext-core`, `cargo xtask check-layers` reads each module's paths, however a `use` is written, and compares them with the allowed-dependency table in section 9; it does the same for each library crate's use of the core against the table of crates there. The push gate fails on any violation (REQ-ARCH-011). This check and those of `check-constants` and `check-io` read production code only: a file whose module is declared for tests is skipped whole, and a test-only item anywhere else is skipped where it stands (`xtask/src/test_code.rs`).
 2. **One narrow type per boundary** (section 5). Types from two or more layers down shall not appear in a layer's public interface. No check sees the types of a public signature, so this rule is held by the review of each change to a public interface (DEC-2408).
 3. **No input or output below L9.** Layers 0 to 7 are sans-IO and pure (REQ-SEC-016), enforced by `cargo xtask check-io`, which finds a forbidden item however it is written.
-4. **Security decisions in one place.** Only `policy` decides: whether a column is the receiver's, whether an address may be contacted, whether two origins are the same, whether a move is a downgrade, whether a cookie may be sent, and whether a character or a file name's byte may be written. Other layers call it, which the tables of section 9 allow everywhere. A function elsewhere that decided the same again cannot be told from ordinary code by a check of paths, so that is for review (DEC-2408).
+4. **Security decisions in one place.** Only `policy` decides: whether a column is the receiver's, whether an address may be contacted, whether two origins are the same, whether a move is a downgrade, and whether a character or a file name's byte may be written. Other layers call it, which the tables of section 9 allow everywhere. A function elsewhere that decided the same again cannot be told from ordinary code by a check of paths, so that is for review (DEC-2408).
 5. **Pure presentation.** L3 and L4 are pure functions of their inputs (REQ-ARCH-006). They can be recomputed or cached at will without touching acquisition.
 6. **Data, not code, for what changes.** Glyphs, character tables and profiles are data (REQ-RND-020): the bundled font is a generated table, and every other font is a file loaded at run time (area FNT, decision E.72). The Noto-derived fonts are such files, kept in `third_party/noto/` and checked by `xtask check-noto` (decision E.77), as is the X11 misc-fixed 6x10 font, kept in `third_party/misc-fixed/` and checked by `xtask check-misc-fixed` (REQ-2223). neoteletext's own character tables are generated from reviewed data files, as the standard's are.
 7. **Every state machine lives in the layer that owns its state:**

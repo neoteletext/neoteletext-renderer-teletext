@@ -74,7 +74,7 @@ const BUILDS: &[Build] = &[
     // no optional area underneath.
     Build { name: "t42", features: "formats", budget: None, float_allowed: false },
     Build { name: "formats", features: "formats-all", budget: None, float_allowed: false },
-    // The web user agent without push and cookies, then with them.
+    // The web user agent without push, then with it.
     Build { name: "web", features: "web", budget: None, float_allowed: false },
     Build { name: "web-all", features: "web-all", budget: None, float_allowed: false },
     // The Opus decoder of the audio profile alone (decision E.123), over the core with no

@@ -5,7 +5,8 @@ use super::{
     Action, COMPOSE, DEVICE_SHIFT, DRAWING_HOVER, DRAWING_HOVER_LEAVE, Device, EVENT, Event, FIRST_EXTENSION, FOCUS_IN,
     FOCUS_OUT, FUNCTIONAL, HAS_BASE, HAS_MODS, HAS_PIXELS, HAS_TEXT, HELLO, HOVER, HOVER_LEAVE, InputError, Item, KEY,
     Key, KeyCode, LAST_EXTENSION, LOST, MAX_PICK_OFFSET, MAX_PICK_POSITION, MOUSE, MouseAction, PASTE, PICK, Point,
-    RESIZE, RESUME, SELECT, STAMP_BYTES, Select, Stamp, TOUCH, Touch, WHEEL, check_text, is_page_parameters,
+    RESIZE, RESUME, SELECT, STAMP_BYTES, STATE_NONE, STATE_OFFER, STATE_PROOF, Select, Stamp, TOUCH, Touch, WHEEL,
+    check_text, is_page_parameters,
 };
 use super::{PAGE_DIGITS, QUERY_MARK, SELECT_PLACE, SUB_DIGITS, SUB_MARK, SUBCODE_ANY};
 use crate::caps::AGENT;
@@ -245,6 +246,24 @@ fn write_drawing_hover(
     })
 }
 
+/// Viewer state's messages (VS-204): each a fixed payload.
+fn write_state(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputError> {
+    match event {
+        Event::StateProof(proof) => {
+            write_extension::<{ crate::state::STATE_PROOF_BYTES }>(STATE_PROOF, writer, |inner| {
+                Ok(inner.bytes(&crate::state::proof_payload(proof))?)
+            })
+        }
+        Event::StateNone(reason) => {
+            write_extension::<{ crate::state::STATE_NONE_BYTES }>(STATE_NONE, writer, |inner| {
+                Ok(inner.byte(reason.code())?)
+            })
+        }
+        Event::StateOffer => write_extension::<{ crate::state::STATE_OFFER_BYTES }>(STATE_OFFER, writer, |_| Ok(())),
+        _ => Err(InputError::BadValue("not a state message")),
+    }
+}
+
 fn write_event(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputError> {
     match event {
         Event::Key(key) => write_key(key, writer)?,
@@ -330,6 +349,7 @@ fn write_event(event: &Event<'_>, writer: &mut Writer<'_>) -> Result<(), InputEr
             Ok(())
         })?,
         Event::Select(select, parameters) => write_select(*select, parameters, writer)?,
+        Event::StateProof(_) | Event::StateNone(_) | Event::StateOffer => write_state(event, writer)?,
         Event::Extension { kind, payload } => {
             if !(FIRST_EXTENSION..=LAST_EXTENSION).contains(kind) {
                 return Err(InputError::Type(*kind));

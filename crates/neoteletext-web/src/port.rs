@@ -8,8 +8,6 @@
 //!   (REQ-SEC-006).
 //! - [`RandomSource`]: random bytes for WebSocket keys and masks. The
 //!   library has no randomness of its own.
-//! - [`CookieStorage`]: optional saving of cookies between runs, only when
-//!   the port enables it (REQ-SEC-013).
 //!
 //! The push connection (REQ-RCH-014, REQ-RCH-015) is a connection of its
 //! own, HTTP/1.1, never multiplexed with fetches. A port with TLS resumes
@@ -136,29 +134,6 @@ pub trait Transport: embedded_io::ErrorType {
 pub trait RandomSource {
     /// Fills `bytes` with random values.
     fn fill(&mut self, bytes: &mut [u8]);
-}
-
-/// Saving the cookie store between runs (REQ-SEC-013). A port enables this
-/// only deliberately, and should store the data as a secret.
-pub trait CookieStorage {
-    /// The storage's error type.
-    type Error;
-
-    /// Replaces the saved data.
-    ///
-    /// # Errors
-    /// The storage's own error when the data cannot be written; the port
-    /// should then leave the earlier saved data in place, not part of the
-    /// new.
-    fn save(&mut self, data: &[u8]) -> Result<(), Self::Error>;
-
-    /// Reads the saved data into `buffer`, returning its length (0 when
-    /// nothing is saved).
-    ///
-    /// # Errors
-    /// The storage's own error when the saved data cannot be read, or does
-    /// not fit in `buffer`. Nothing saved is not an error.
-    fn load(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error>;
 }
 
 /// A connection-level input for a protocol machine.

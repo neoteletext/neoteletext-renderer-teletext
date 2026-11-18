@@ -3,7 +3,6 @@
 
 use neoteletext_core::types::Instant;
 
-use super::cookies::{cookie_store, store_response_cookies, write_cookie_header};
 use super::{Event, Failure, Output, PushPhase, PushProblem, PushStop, Sink, UserAgent, event};
 use crate::bytes::{Overflow, Writer};
 use crate::consts::{
@@ -11,10 +10,9 @@ use crate::consts::{
     PUSH_SUBPROTOCOL, ROUND_TRIP_EVERY_US, STATUS_CLIENT_ERROR_FIRST, STATUS_SERVER_ERROR_FIRST,
     STATUS_SWITCHING_PROTOCOLS, STATUS_TOO_MANY_REQUESTS,
 };
-use crate::cookie::Site;
 use crate::http::{self, ResponseHead};
 use crate::port::{ConnectionId, RandomSource, Security};
-use crate::url::{IpAddress, Url};
+use crate::url::IpAddress;
 use crate::ws::{self, FrameReader};
 
 /// Why a handshake's answer means no attempt will ever do better (DOC-1920),
@@ -34,13 +32,13 @@ fn handshake_stop(head: &ResponseHead) -> Option<PushStop> {
     }
 }
 
-impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'_, R, SLOTS, COOKIE_BYTES> {
+impl<R: RandomSource> UserAgent<'_, R> {
     pub(super) fn push_connect(&mut self, now: Instant, sink: &mut Sink<'_>) {
         let Some(url) = self.push.url else {
             self.push.phase = PushPhase::Idle;
             return;
         };
-        if let Some(failure) = self.refusal(now, &url) {
+        if let Some(failure) = self.refusal(&url) {
             Self::report_refusal(ConnectionId::Push, &url, failure, sink);
             self.push_lost(now, Some(PushProblem::Failure(failure)), false, sink);
             return;
@@ -68,36 +66,17 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
         } else {
             event(sink, Event::Unencrypted { connection: ConnectionId::Push, host: url.host_text() });
         }
-        let (seconds, _) = self.seconds(now);
         self.push.head.reset();
         self.push.frames = FrameReader::new();
-        // A channel's push connection may be anywhere on its origin, and
-        // carries the channel's cookies, whose paths are its folder
-        // (REQ-WEB-026).
-        let folder = self.identity().copied();
         let mut writer = Writer::new(self.buffers.push_request);
         self.push.key = ws::new_key(&mut self.random);
-        let written = (|| -> Result<bool, Overflow> {
+        // No `Cookie` header: viewer state is proven on the connection
+        // itself, never in a header (VS-201, VS-116).
+        let written = (|| -> Result<(), Overflow> {
             let subprotocol = Some(PUSH_SUBPROTOCOL);
             ws::write_handshake_headers(&mut writer, &url, &self.push.key, self.named_as.as_bytes(), subprotocol)?;
-            // Cookies go with the upgrade too (REQ-WEB-006).
-            let scope = folder.as_ref().map(Url::path);
-            let path = scope.unwrap_or(url.path());
-            let truncated = write_cookie_header(
-                cookie_store(&mut self.jar, &mut self.port_cookies),
-                &mut writer,
-                &url,
-                path,
-                scope,
-                Site::SameService,
-                seconds,
-            )?;
-            writer.put(CRLF)?;
-            Ok(truncated)
+            writer.put(CRLF)
         })();
-        if written == Ok(true) {
-            event(sink, Event::CookiesTruncated);
-        }
         if written.is_err() {
             self.push_lost(now, Some(PushProblem::Failure(Failure::RequestTooLarge)), true, sink);
             return;
@@ -193,29 +172,11 @@ impl<R: RandomSource, const SLOTS: usize, const COOKIE_BYTES: usize> UserAgent<'
     }
 
     fn push_head_complete(&mut self, now: Instant, sink: &mut Sink<'_>) -> bool {
-        let Some(url) = self.push.url else { return false };
-        let (seconds, calendar) = self.seconds(now);
         let head_len = self.push.head.len();
-        let Self { buffers, jar, port_cookies, channel, service_folder, .. } = self;
-        // The open channel's or service's identity (REQ-507).
-        let channel = channel.as_ref().or(service_folder.as_ref());
-        let head_bytes = buffers.push_head.get(..head_len).unwrap_or(&[]);
-        // A channel's cookies stay in its folder, those its push handshake
-        // sets as much as a page's (REQ-WEB-026, finding F-15).
-        let scope = channel.map(Url::path);
-        let store = cookie_store(jar, port_cookies);
-        let parsed = store_response_cookies(
-            store,
-            head_bytes,
-            url.host_text(),
-            url.path(),
-            scope,
-            url.is_secure(),
-            seconds,
-            calendar,
-            sink,
-        );
-        let head = match parsed {
+        let head_bytes = self.buffers.push_head.get(..head_len).unwrap_or(&[]);
+        // A `Set-Cookie` on the 101 is ignored with every other field this
+        // client does not read (VS-201).
+        let head = match http::parse_head(head_bytes) {
             Ok(head) => head,
             Err(error) => {
                 self.push_lost(now, Some(PushProblem::Failure(Failure::Http(error))), true, sink);
