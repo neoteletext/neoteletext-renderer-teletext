@@ -298,6 +298,79 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.instruments.meter(channel, part)
     }
 
+    /// Watches audio channel `channel`, 0 to 3, or stops (page-rules.md,
+    /// RULE-30): while a channel is watched, each synthesizer sound played
+    /// on it from blocks keeps the state a page's rules read, which
+    /// [`Receiver::tracked`] answers from. A port asks when the open page's
+    /// rule table reads such a value of the channel, and stops when it no
+    /// longer does; a channel that is not watched costs nothing, in memory
+    /// that is used or in work. A playing already under way is caught up to
+    /// the position rendered (a stored sound) or followed from here on (a
+    /// live one, approximately). A channel past the last is ignored.
+    #[cfg(all(
+        feature = "watch",
+        any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        )
+    ))]
+    pub fn watch(&mut self, channel: u8, on: bool) {
+        self.instruments.watch(&self.store, channel, on);
+    }
+
+    /// Whether audio channel `channel` is watched ([`Receiver::watch`]).
+    #[cfg(all(
+        feature = "watch",
+        any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        )
+    ))]
+    #[must_use]
+    pub fn is_watched(&self, channel: u8) -> bool {
+        self.instruments.is_watched(channel)
+    }
+
+    /// A tracked value of the synthesizer sound that audio channel
+    /// `channel` plays from blocks (page-rules.md, RULE-28 and RULE-30:
+    /// "the tracker of the instrument the decoder renders it with, at the
+    /// position rendered", which is ahead of what is heard by the stream's
+    /// buffer): `class` is one of the classes a tracker holds, 0 program, 1
+    /// notes, 2 note, 3 velocity, 4 patch field, 8 controller and 9 bend
+    /// ([`crate::midi::class`]), `part` the MIDI channel less one and
+    /// `index` the key, the field's number or the controller. Whatever of a
+    /// watched sound cannot be read is 0, as RULE-28 says. `None` where the
+    /// channel is not watched ([`Receiver::watch`]) or plays no such sound:
+    /// a local sound's values are tracked where its messages are given, by
+    /// the port's own [`neoteletext_audio_instruments::watch::Watched`].
+    /// Classes 5 to 7 are [`Receiver::meter`]'s.
+    #[cfg(all(
+        feature = "watch",
+        any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        )
+    ))]
+    #[must_use]
+    pub fn tracked(&self, channel: u8, class: u8, part: u8, index: u16) -> Option<i32> {
+        self.instruments.tracked(&self.store, channel, class, part, index)
+    }
+
     /// What the receiver has met.
     #[must_use]
     pub fn statistics(&self) -> Statistics {

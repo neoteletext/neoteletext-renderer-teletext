@@ -28,6 +28,13 @@
 //! [`RENDER_BUDGET_BLOCKS`] blocks of all the lanes together and asks to be
 //! called again at once while more are owed ([`super::Receiver::next_tick_ms`];
 //! MIDI-106, INT-35).
+//!
+//! With the feature `watch`, a lane whose audio channel a port has asked to
+//! watch ([`super::Receiver::watch`]) also keeps what a page's rules read of
+//! the sound it renders (page-rules.md RULE-30): the family's tracker and
+//! the performance state, fed every event of every block the lane renders,
+//! so that a value is read at the position rendered. A lane that is not
+//! watched keeps none and does no such work.
 
 use neoteletext_audio_instruments::midi::{Banks, Instrument, Meter, Outcome, Played, play_block};
 #[cfg(feature = "synth7")]
@@ -44,6 +51,8 @@ use neoteletext_audio_instruments::synth106;
 use neoteletext_audio_instruments::synth6581;
 #[cfg(feature = "synthd")]
 use neoteletext_audio_instruments::synthd;
+#[cfg(feature = "watch")]
+use neoteletext_audio_instruments::watch::Watched;
 
 use super::Statistics;
 use crate::Codec;
@@ -251,6 +260,24 @@ struct Lane {
     stream: Option<Stream>,
     /// The synthesizer.
     synthesizer: Synthesizer,
+    /// What a page's rules read of the playing (RULE-30), while its audio
+    /// channel is watched; `None` otherwise, when nothing is tracked.
+    #[cfg(feature = "watch")]
+    watched: Option<Watched>,
+}
+
+/// The state a page's rules read of `entry`'s sound, new at its start with
+/// its banks (RULE-30); `None` for a codec that is no family's.
+#[cfg(feature = "watch")]
+fn watched_of<const OBJECTS: usize>(store: &Store<'_, OBJECTS>, entry: &Entry) -> Option<Watched> {
+    let variant = match entry.codec {
+        // The chip is the variant (RULE-28): 0 synth6581, 1 synth8580.
+        Codec::Synth6581 => u8::from(entry.setting & crate::record::SYNTH6581_CHIP_8580 != 0),
+        // `record::TAG_VARIANT` is the setting of the families with one.
+        codec if codec.variants() > 1 => entry.setting,
+        _ => 0,
+    };
+    Watched::new(entry.codec.code(), variant, &banks(store, entry))
 }
 
 /// What [`Lanes::begin`] did.
@@ -268,17 +295,33 @@ pub(super) enum Begun {
 /// The receiver's synthesizers.
 pub(super) struct Lanes {
     lanes: [Lane; crate::INSTRUMENT_LANES],
+    /// The audio channels a port asked to watch: bit `n` for channel `n`.
+    #[cfg(feature = "watch")]
+    watching: u8,
 }
+
+// Every audio channel has its bit.
+#[cfg(feature = "watch")]
+const _: () = assert!(crate::CHANNELS as u32 <= u8::BITS);
 
 impl Lanes {
     pub(super) fn new() -> Self {
-        Self { lanes: core::array::from_fn(|_| Lane { stream: None, synthesizer: Synthesizer::None }) }
+        Self {
+            lanes: core::array::from_fn(|_| Lane {
+                stream: None,
+                synthesizer: Synthesizer::None,
+                #[cfg(feature = "watch")]
+                watched: None,
+            }),
+            #[cfg(feature = "watch")]
+            watching: 0,
+        }
     }
 
     /// Frees every lane: the sink has dropped every sound.
     pub(super) fn clear(&mut self) {
         for lane in &mut self.lanes {
-            lane.stream = None;
+            lane.free();
         }
     }
 
@@ -287,9 +330,74 @@ impl Lanes {
     pub(super) fn release(&mut self, sound: SoundId) {
         for lane in &mut self.lanes {
             if lane.stream.is_some_and(|stream| stream.sound == sound) {
-                lane.stream = None;
+                lane.free();
             }
         }
+    }
+
+    /// Whether audio channel `channel` is watched.
+    #[cfg(feature = "watch")]
+    pub(super) fn is_watched(&self, channel: u8) -> bool {
+        1_u8.checked_shl(u32::from(channel)).is_some_and(|bit| self.watching & bit != 0)
+    }
+
+    /// Watches audio channel `channel`, or stops (RULE-30): while it is
+    /// watched, each playing on it keeps what a page's rules read of its
+    /// sound. A playing already under way is caught up: a stored sound's
+    /// blocks rendered so far are read again, events only, from its start,
+    /// so its values are those at the position rendered; a live sound's are
+    /// followed from here on, since its earlier blocks are gone.
+    #[cfg(feature = "watch")]
+    pub(super) fn watch<const OBJECTS: usize>(&mut self, store: &Store<'_, OBJECTS>, channel: u8, on: bool) {
+        let Some(bit) = 1_u8.checked_shl(u32::from(channel)).filter(|_| channel < crate::CHANNELS) else { return };
+        self.watching = if on { self.watching | bit } else { self.watching & !bit };
+        for lane in &mut self.lanes {
+            let Some(stream) = lane.stream.filter(|stream| stream.channel == channel) else { continue };
+            if !on {
+                lane.watched = None;
+            } else if lane.watched.is_none() {
+                let entry = store.entries().find(|entry| entry.sound == stream.sound);
+                lane.watched = entry.and_then(|entry| {
+                    let mut watched = watched_of(store, entry)?;
+                    if !stream.live {
+                        let banks = banks(store, entry);
+                        for index in 0..stream.next {
+                            match store.block(entry.sound, index) {
+                                Some(block) => watched.take_block(block, &banks),
+                                // It was played through as lost (MIDI-102).
+                                None => watched.release_all(),
+                            }
+                        }
+                    }
+                    Some(watched)
+                });
+            }
+        }
+    }
+
+    /// The value of `class` for part `part` and `index` of the synthesizer
+    /// sound whose playing is heard on audio channel `channel`, at the
+    /// position rendered (RULE-28, RULE-30): the classes a sound's tracker
+    /// holds, 0 to 4, 8 and 9. `None` where the channel is not watched or
+    /// no synthesizer's playing is heard there. A playing that is fading
+    /// out of a stop gives way to the one that replaced it, as for
+    /// [`Lanes::meter`].
+    #[cfg(feature = "watch")]
+    pub(super) fn tracked<const OBJECTS: usize>(
+        &self,
+        store: &Store<'_, OBJECTS>,
+        channel: u8,
+        class: u8,
+        part: u8,
+        index: u16,
+    ) -> Option<i32> {
+        let playing = |lane: &&Lane| lane.stream.is_some_and(|stream| stream.channel == channel);
+        let lanes = self.lanes.iter().filter(playing);
+        let lane = lanes.min_by_key(|lane| lane.stream.is_some_and(|stream| stream.until_ms.is_some()))?;
+        let watched = lane.watched.as_ref()?;
+        let sound = lane.stream?.sound;
+        let entry = store.entries().find(|entry| entry.sound == sound)?;
+        Some(watched.read(class, part, index, &banks(store, entry)))
     }
 
     /// The envelope position of part `part` and the voice count of the
@@ -326,7 +434,7 @@ impl Lanes {
                 stream.again = None;
             } else {
                 sink.end_stream(channel, stream.sound);
-                lane.stream = None;
+                lane.free();
             }
         }
     }
@@ -365,16 +473,23 @@ impl Lanes {
                 return Begun::Continued;
             }
             sink.end_stream(channel, entry.sound);
-            lane.stream = None;
+            lane.free();
         }
         let free = self.lanes.iter().position(|lane| lane.stream.is_none());
         // A stream fading out of a stop gives way: the sink ramps what it
         // holds of it.
         let fading = || self.lanes.iter().position(|lane| lane.stream.is_some_and(|stream| stream.until_ms.is_some()));
         let Some(index) = free.or_else(fading) else { return Begun::NoLane };
+        #[cfg(feature = "watch")]
+        let watched = self.is_watched(channel);
         let Some(lane) = self.lanes.get_mut(index) else { return Begun::NoLane };
         if let Some(old) = lane.stream.take() {
             sink.end_stream(old.channel, old.sound);
+        }
+        // A playing on a watched channel is tracked from its first block.
+        #[cfg(feature = "watch")]
+        {
+            lane.watched = if watched { watched_of(store, entry) } else { None };
         }
         lane.start(store, entry, statistics);
         lane.stream = Some(Stream {
@@ -410,7 +525,7 @@ impl Lanes {
             let over = stream.until_ms.is_some_and(|until| now_ms >= until);
             let Some(entry) = entry.filter(|_| !over) else {
                 sink.end_stream(stream.channel, stream.sound);
-                lane.stream = None;
+                lane.free();
                 continue;
             };
             if stream.live {
@@ -457,10 +572,24 @@ fn live_owed<const OBJECTS: usize>(store: &Store<'_, OBJECTS>, entry: &Entry, st
 }
 
 impl Lane {
+    /// Frees the lane: its playing is over, and what was read of it with it.
+    fn free(&mut self) {
+        self.stream = None;
+        #[cfg(feature = "watch")]
+        {
+            self.watched = None;
+        }
+    }
+
     /// Makes the lane's synthesizer new for `entry`'s sound and starts it
-    /// with its banks (MIDI-3, MIDI-61).
+    /// with its banks (MIDI-3, MIDI-61). What a page's rules read of the
+    /// sound, if the lane keeps it, is new with the instance.
     fn start<const OBJECTS: usize>(&mut self, store: &Store<'_, OBJECTS>, entry: &Entry, statistics: &mut Statistics) {
         self.synthesizer = Synthesizer::of(entry);
+        #[cfg(feature = "watch")]
+        if self.watched.is_some() {
+            self.watched = watched_of(store, entry);
+        }
         let banks = banks(store, entry);
         let outcome = with_instrument!(&mut self.synthesizer, instrument => instrument.start(&banks), Outcome::Applied);
         if outcome == Outcome::PatchRefused {
@@ -498,7 +627,7 @@ impl Lane {
                     continue;
                 }
                 sink.end_stream(stream.channel, stream.sound);
-                self.stream = None;
+                self.free();
                 return;
             }
             match store.block(entry.sound, stream.next) {
@@ -563,6 +692,11 @@ impl Lane {
                 Played::default()
             }
         );
+        // RULE-30: what a rule reads is the state at the position rendered.
+        #[cfg(feature = "watch")]
+        if let Some(watched) = self.watched.as_mut() {
+            watched.take_block(block, banks);
+        }
         statistics.events_passed_over = statistics.events_passed_over.saturating_add(played.passed_over);
         statistics.patches_refused = statistics.patches_refused.saturating_add(played.patches_refused);
         if played.malformed {
@@ -574,6 +708,11 @@ impl Lane {
     /// synthesizer is told input was lost first, since the lost block may
     /// have held a note off.
     fn conceal(&mut self, pcm: &mut [i16; BLOCK]) {
+        // No key is down after input was lost, for the rules as for the ear.
+        #[cfg(feature = "watch")]
+        if let Some(watched) = self.watched.as_mut() {
+            watched.release_all();
+        }
         with_instrument!(
             &mut self.synthesizer,
             instrument => {

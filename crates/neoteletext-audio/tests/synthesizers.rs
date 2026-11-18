@@ -1239,3 +1239,164 @@ fn a_streamed_sounds_meter_is_read_from_the_receivers_instrument() {
         assert_eq!(receiver.meter(1, 0), None, "{:?}: the stream has ended", family.codec);
     }
 }
+
+/// The state a page's rules read of a sound of `family` with `image` as
+/// its one bank, after `blocks` in order: what a receiver that tracked it
+/// from its start holds.
+#[cfg(feature = "watch")]
+fn tracked_after(family: &Family, image: &[u8], blocks: &[Vec<u8>]) -> neoteletext_audio_instruments::watch::Watched {
+    use neoteletext_audio_instruments::midi::Banks;
+    let mut banks = Banks::none();
+    banks.push(image);
+    let mut watched = neoteletext_audio_instruments::watch::Watched::new(family.codec.code(), 0, &banks).unwrap();
+    for block in blocks {
+        watched.take_block(block, &banks);
+    }
+    watched
+}
+
+/// A stored sound of 40 blocks: in block 0 a change to program 1, the
+/// modulation wheel to 64 and a note on of key 57 at velocity 100; in
+/// block 30, later than the lead a playing is rendered ahead by (INT-34),
+/// its note off.
+#[cfg(feature = "watch")]
+fn tracked_tune(codec: Codec) -> (Sound, Vec<Vec<u8>>) {
+    let mut blocks = vec![Vec::new(); 40];
+    blocks[0] = note_block(&[0, 0xC0, 1, 0, 0xB0, 1, 64]);
+    blocks[30] = vec![0, 0x80, 57, 0];
+    let mut sound = Sound::events(SOUND, 1, codec, &blocks).unwrap();
+    sound.banks = vec![BANK];
+    (sound, blocks)
+}
+
+// Verifies RULE-30 (REQ-6527): the tracked values of a sound played from
+// blocks, classes 0 to 4, 8 and 9, are read from the receiver at the
+// position rendered, for each family, while its audio channel is watched;
+// a channel that is not watched, and one that plays nothing, has none.
+#[cfg(feature = "watch")]
+#[test]
+fn a_streamed_sounds_tracked_values_are_read_at_the_position_rendered() {
+    use neoteletext_audio::midi::class;
+    use neoteletext_audio_instruments::midi::Banks;
+    for family in families() {
+        let image = (family.image)(&[&family.plain, &family.dull]);
+        let mut banks = Banks::none();
+        banks.push(&image);
+        let mut arena = vec![0_u8; 128 * 1024];
+        let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+        let mut sink = Recorder::default();
+        push(&mut receiver, &bank(BANK, family.codec, &image), &mut sink);
+        let (sound, blocks) = tracked_tune(family.codec);
+        push(&mut receiver, &sound, &mut sink);
+        receiver.watch(1, true);
+        assert!(receiver.is_watched(1) && !receiver.is_watched(0));
+        assert_eq!(receiver.tracked(1, class::NOTES, 0, 0), None, "{:?}: nothing plays yet", family.codec);
+        receiver.push_record(&play(1, 1, &sound), &mut sink);
+        // The lead is rendered: block 0, and not yet block 30.
+        let read = |receiver: &Receiver<'_, 8, 2>, class: u8, index: u16| receiver.tracked(1, class, 0, index);
+        let held = [
+            (class::PROGRAM, 0, 1),
+            (class::NOTES, 0, 1),
+            (class::NOTE, 57, 1),
+            (class::NOTE, 58, 0),
+            (class::VELOCITY, 57, 100),
+            (class::CONTROLLER, 1, 64),
+            (class::BEND, 0, 8_192),
+        ];
+        for (class, index, value) in held {
+            assert_eq!(read(&receiver, class, index), Some(value), "{:?}: class {class} of {index}", family.codec);
+        }
+        // Every patch field is the field of the patch program 1 chose.
+        let chosen = tracked_after(&family, &image, &blocks[..1]);
+        let untouched = tracked_after(&family, &image, &[]);
+        let fields = u16::try_from(chosen.fields().len()).unwrap();
+        assert!(fields > 0, "{:?}", family.codec);
+        for number in 0..fields {
+            let expected = chosen.read(class::FIELD, 0, number, &banks);
+            assert_eq!(read(&receiver, class::FIELD, number), Some(expected), "{:?}: field {number}", family.codec);
+        }
+        assert!(
+            (0..fields).any(|number| {
+                chosen.read(class::FIELD, 0, number, &banks) != untouched.read(class::FIELD, 0, number, &banks)
+            }),
+            "{:?}: the two patches differ in a field a rule can read",
+            family.codec
+        );
+        assert_eq!(read(&receiver, class::FIELD, fields), Some(0), "a field past the table reads 0 (RULE-28)");
+        assert_eq!(receiver.tracked(0, class::NOTES, 0, 0), None, "channel 0 is not watched and plays nothing");
+
+        // Past block 30 the key is up: the value follows what is rendered.
+        run(&mut receiver, &mut sink, 0, 32 * BLOCK_MS);
+        assert_eq!(read(&receiver, class::NOTE, 57), Some(0), "{:?}: the note off was rendered", family.codec);
+        assert_eq!(read(&receiver, class::NOTES, 0), Some(0), "{:?}", family.codec);
+        assert_eq!(read(&receiver, class::PROGRAM, 0), Some(1), "{:?}", family.codec);
+        // Not watched, nothing is kept; watched again, it is caught up.
+        receiver.watch(1, false);
+        assert_eq!(read(&receiver, class::PROGRAM, 0), None, "{:?}: the channel is watched no longer", family.codec);
+        receiver.watch(1, true);
+        assert_eq!(read(&receiver, class::PROGRAM, 0), Some(1), "{:?}", family.codec);
+        run(&mut receiver, &mut sink, 32 * BLOCK_MS, FOREVER_MS);
+        assert_eq!(read(&receiver, class::NOTES, 0), None, "{:?}: the stream has ended", family.codec);
+    }
+}
+
+// Verifies RULE-30 (REQ-6527): a watch asked for while a stored sound
+// already plays is caught up to the position rendered, so its values are
+// those of a watch asked for before the play.
+#[cfg(feature = "watch")]
+#[test]
+fn a_watch_asked_for_during_a_playing_is_caught_up() {
+    use neoteletext_audio::midi::class;
+    for family in families() {
+        let image = (family.image)(&[&family.plain, &family.dull]);
+        let mut arena = vec![0_u8; 128 * 1024];
+        let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+        let mut sink = Recorder::default();
+        push(&mut receiver, &bank(BANK, family.codec, &image), &mut sink);
+        let (sound, _) = tracked_tune(family.codec);
+        push(&mut receiver, &sound, &mut sink);
+        receiver.push_record(&play(2, 1, &sound), &mut sink);
+        assert_eq!(receiver.tracked(2, class::NOTE, 0, 57), None, "{:?}: not watched", family.codec);
+        receiver.watch(2, true);
+        let read = |receiver: &Receiver<'_, 8, 2>, class: u8, index: u16| receiver.tracked(2, class, 0, index);
+        assert_eq!(read(&receiver, class::NOTE, 57), Some(1), "{:?}", family.codec);
+        assert_eq!(read(&receiver, class::VELOCITY, 57), Some(100), "{:?}", family.codec);
+        assert_eq!(read(&receiver, class::PROGRAM, 0), Some(1), "{:?}", family.codec);
+        assert_eq!(read(&receiver, class::CONTROLLER, 1), Some(64), "{:?}", family.codec);
+        run(&mut receiver, &mut sink, 0, 32 * BLOCK_MS);
+        assert_eq!(read(&receiver, class::NOTE, 57), Some(0), "{:?}", family.codec);
+    }
+}
+
+// Verifies RULE-30 with MIDI-102 (REQ-6527): a live sound's values are
+// followed as its blocks are rendered, and a block played through as lost
+// leaves no key down for the rules, as it leaves none sounding.
+#[cfg(feature = "watch")]
+#[test]
+fn a_live_sounds_tracked_notes_end_at_a_lost_block() {
+    use neoteletext_audio::midi::class;
+    for family in families() {
+        let mut arena = vec![0_u8; 128 * 1024];
+        let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+        let mut sink = Recorder::default();
+        push(&mut receiver, &bank(BANK, family.codec, &(family.image)(&[&family.plain])), &mut sink);
+        let mut sound = Sound::live_events(SOUND, 1, family.codec).unwrap();
+        sound.banks = vec![BANK];
+        receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+        receiver.watch(0, true);
+        for index in (0..=20_u16).filter(|index| *index != 5) {
+            let block = if index == 0 { note_block(&[]) } else { Vec::new() };
+            for record in sound.live_event_records(index, &[block]).unwrap() {
+                receiver.push_record(&record, &mut sink);
+            }
+            if index == 0 {
+                receiver.push_record(&play(0, 1, &sound), &mut sink);
+            }
+            if index == 4 {
+                assert_eq!(receiver.tracked(0, class::NOTE, 0, 57), Some(1), "{:?}: the key is down", family.codec);
+            }
+        }
+        assert_eq!(sink.concealed, vec![5], "{:?}", family.codec);
+        assert_eq!(receiver.tracked(0, class::NOTES, 0, 0), Some(0), "{:?}: released at the gap", family.codec);
+    }
+}

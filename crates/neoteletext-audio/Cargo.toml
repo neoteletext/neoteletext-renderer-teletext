@@ -71,6 +71,14 @@ synth53 = ["analog", "neoteletext-audio-instruments/synth53"]
 synth8 = ["analog", "neoteletext-audio-instruments/synth8"]
 # synth80 (codec 18).
 synth80 = ["analog", "neoteletext-audio-instruments/synth80"]
+# What a page's rules read of a synthesizer sound played from blocks
+# (neoteletext-common page-rules.md RULE-30): `Receiver::watch` and
+# `Receiver::tracked`. Each of the receiver's four lanes then has room for
+# one sound's tracked state, used only while its audio channel is watched.
+# Not a default, and no family names it: a port whose pages' rules read
+# such values names it beside the families it builds, and a build without
+# it holds nothing of this.
+watch = ["midi", "neoteletext-audio-instruments/interface"]
 # Writing sounds: the IMA ADPCM encoder, records and broadcast packets, for
 # publishing tools (REQ-AUD-020). It allocates, so it is not a default.
 encode = ["ima", "idl", "midi"]
