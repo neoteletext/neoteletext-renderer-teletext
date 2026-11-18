@@ -93,6 +93,11 @@ pub const MOST_BEND_RANGE_CENTS: u16 = 1_200;
 pub const MOST_BEND_SEMITONES: u8 = 12;
 const _: () = assert!(MOST_BEND_SEMITONES as u16 * CENTS_PER_SEMITONE == MOST_BEND_RANGE_CENTS);
 
+/// The most cents registered parameter 0's data entry fine sets: a value
+/// of 100 to 127 is taken as 99 (S106-26).
+const MOST_CENTS: u8 = 99;
+const _: () = assert!(MOST_CENTS as u16 + 1 == CENTS_PER_SEMITONE);
+
 /// What the family is to the common layer (MIDI-64, MIDI-74, MIDI-90): no
 /// bank select, no non-registered parameters, a bend range of two
 /// semitones up to twelve.
@@ -997,7 +1002,15 @@ impl Tracker {
     fn channel(&mut self, message: ChannelMessage, banks: &Banks<'_>) -> (Outcome, Effect) {
         // Every channel is the one part (S106-2): each message is taken on
         // channel 0, so that a score spread over all sixteen is one.
-        let message = ChannelMessage { status: message.status & KIND_MASK, ..message };
+        let mut message = ChannelMessage { status: message.status & KIND_MASK, ..message };
+        // Registered parameter 0's cents are 0 to 99: 100 to 127 is taken
+        // as 99 (S106-26).
+        if message.kind() == status::CONTROL_CHANGE
+            && message.data1 == controller::DATA_ENTRY_FINE
+            && self.common.channel(0).selected == Selected::Registered(RPN_PITCH_BEND_SENSITIVITY)
+        {
+            message.data2 = message.data2.min(MOST_CENTS);
+        }
         let taken = self.common.take(message);
         let applied = |effect| (Outcome::Applied, effect);
         match taken.action {
