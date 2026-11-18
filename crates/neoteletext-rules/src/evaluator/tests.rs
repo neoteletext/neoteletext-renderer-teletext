@@ -1151,3 +1151,5 @@ fn a_table_the_decoder_refuses_is_not_evaluated() {
     let table = table_of(&[when(rule(Trigger::Becomes, &[SEND]), &[Node::Not])]);
     assert_eq!(Evaluator::new(&table, 1, 0).err(), Some(Fault::Tree));
 }
+
+mod arrival;

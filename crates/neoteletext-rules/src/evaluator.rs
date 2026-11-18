@@ -1,12 +1,21 @@
 //! The evaluator (RULE-4 to RULE-8, RULE-11, RULE-14 to RULE-17): a
 //! page's rule state and its tick, in the fixed order of RULE-5.
 //!
-//! The receiver gives it the viewer's input events ([`Evaluator::push`]),
-//! the metered values ([`Evaluator::set_metered`]) and, each tick, a
-//! [`World`]: what the evaluator reads of the page beyond its own state,
-//! and where its outputs go. Nothing an action does is seen in the tick
-//! that runs it (RULE-6): the world is read once, when a tick begins, and
-//! every output is kept until the tick ends.
+//! The receiver gives it the viewer's input events ([`Evaluator::push`] or
+//! [`Evaluator::push_now`]), the metered values
+//! ([`Evaluator::set_metered`]) and, each tick, a [`World`]: what the
+//! evaluator reads of the page beyond its own state, and where its outputs
+//! go. Nothing an action does is seen in the tick that runs it (RULE-6):
+//! the world is read once for a tick, when its snapshot is taken, and every
+//! output is kept until the tick ends, with one exception.
+//!
+//! The exception is evaluation on arrival (RULE-96, DEC-6580): an input
+//! event given by [`Evaluator::push_now`] is handled at once as an event of
+//! the next tick, and the sound operations of the rules it fires are given
+//! to the world at once, so that a key's note does not wait for the tick.
+//! The snapshot, the order, the caps and every other output are the
+//! tick's, so both ways of giving an event have the same firings, reports,
+//! counts and state at every tick.
 
 mod input;
 
@@ -228,11 +237,14 @@ pub struct Report {
 /// What the evaluator reads of the page, and where its outputs go
 /// (RULE-56).
 ///
-/// The reading methods are called when a tick begins and while its input
-/// events are followed; the output methods only when it ends, in the
-/// order the actions ran (RULE-5 step 7). An output method answers
-/// whether the operation did anything: `false` counts it as skipped
-/// (RULE-20).
+/// The reading methods are called when a tick's snapshot is taken (as the
+/// tick begins, or when the first event of its interval is given by
+/// [`Evaluator::push_now`], RULE-96) and while its input events are
+/// followed; the output methods only when the tick ends, in the order the
+/// actions ran (RULE-5 step 7), but for `sound_operation`, which
+/// [`Evaluator::push_now`] also calls on an event's arrival. An output
+/// method answers whether the operation did anything: `false` counts it as
+/// skipped (RULE-20).
 pub trait World {
     /// The picture's width and height in pixels (RULE-13): 480 by 500 for
     /// a teletext page, 800 by 480 for ReGIS, 640 by 480 for NAPLPS.
@@ -340,8 +352,20 @@ pub struct Evaluator {
     /// The page tick of the next evaluation.
     tick: u32,
     closed: bool,
-    /// The rules switched off for the sub-page shown (RULE-17).
+    /// The rules switched off for the sub-page shown (RULE-17), as the
+    /// snapshot of the tick being evaluated took them.
     off: u64,
+    /// The same for the sub-page shown now, which the next snapshot takes
+    /// (RULE-7): a change of sub-page after a snapshot is seen by the
+    /// next tick, like every other change to the world.
+    off_shown: u64,
+    /// Whether the snapshot of tick `tick` is taken (RULE-96): by the
+    /// first event of its interval given with [`Evaluator::push_now`].
+    opened: bool,
+    /// The input events of tick `tick` already handled on arrival
+    /// (RULE-96), which count against `MAX_EVENTS_PER_TICK` and, until
+    /// their tick ends, against `MAX_QUEUED_EVENTS`.
+    handled: usize,
     snapshot: RuleState,
     working: RuleState,
     /// Each `becomes` rule's result at its previous evaluation (RULE-11).
@@ -415,6 +439,9 @@ impl Evaluator {
             tick: 0,
             closed: false,
             off: table.off_for(sub),
+            off_shown: table.off_for(sub),
+            opened: false,
+            handled: 0,
             snapshot: state,
             working: state,
             becomes: 0,
@@ -470,15 +497,20 @@ impl Evaluator {
     /// The sub-page shown changed (RULE-17): the rules its list switches
     /// off are off from the next tick, and nothing else changes.
     pub fn set_subpage(&mut self, sub: u16) {
-        self.off = self.table.off_for(sub);
+        self.off_shown = self.table.off_for(sub);
     }
 
-    /// Gives the evaluator an input event (RULE-5 step 2). It waits in a
-    /// queue of at most `MAX_QUEUED_EVENTS`; false when the queue is full
-    /// and the event was dropped, which is counted.
+    /// Gives the evaluator an input event (RULE-5 step 2), to be handled
+    /// at a tick. It waits in a queue of at most `MAX_QUEUED_EVENTS`;
+    /// false when the queue is full and the event was dropped, which is
+    /// counted.
     pub fn push(&mut self, event: InputEvent) -> bool {
         let place = self.queue_head.saturating_add(self.queue_length).checked_rem(MAX_QUEUED_EVENTS).unwrap_or(0);
-        let slot = if self.queue_length < MAX_QUEUED_EVENTS { self.queue.get_mut(place) } else { None };
+        // RULE-96: an event handled on arrival still waits for its tick,
+        // so it holds its place among the `MAX_QUEUED_EVENTS` until then,
+        // and the same events are dropped whichever way they are given.
+        let waiting = self.queue_length.saturating_add(self.handled);
+        let slot = if waiting < MAX_QUEUED_EVENTS { self.queue.get_mut(place) } else { None };
         let Some(slot) = slot else {
             self.counters.events_dropped = self.counters.events_dropped.saturating_add(1);
             return false;
@@ -505,14 +537,107 @@ impl Evaluator {
         self.query = Some(identifier);
     }
 
+    /// Gives the evaluator an input event the moment it arrives, without
+    /// waiting for the tick (RULE-96, DEC-6580 item 1), and gives the
+    /// world at once the sound operations (`midi`, `play`, `stop`, `gain`)
+    /// of the rules it fires. False when the event was dropped from a
+    /// full queue, which is counted, as [`Evaluator::push`] answers.
+    ///
+    /// The event is an event of the next tick to be evaluated, tick `t`,
+    /// and is handled exactly as step 2 of RULE-5 handles it, only
+    /// earlier:
+    ///
+    /// - RULE-7 as revised: its rules' conditions read the snapshot of
+    ///   tick `t`. That snapshot is the state the last completed tick left
+    ///   (the variables, the timers, the rules enabled), with the world as
+    ///   it is when the first event of the interval arrives (the targets,
+    ///   the sounds, the tracked values, the newest metered report, the
+    ///   sub-page shown). It is taken once: every later event of the
+    ///   interval and steps 3 to 6 of tick `t` read the same one, and what
+    ///   changes in the world after it is seen by tick `t + 1`.
+    /// - RULE-8: the keys and the pointer are as every event that arrived
+    ///   before this one left them, this one included, in arrival order.
+    /// - RULE-5 step 2: events are handled in arrival order. One given
+    ///   earlier by [`Evaluator::push`] and still waiting is handled
+    ///   first; once `MAX_EVENTS_PER_TICK` events of tick `t` are handled,
+    ///   this one waits in the queue for a later tick, where its sound
+    ///   operations leave with the tick's other outputs.
+    /// - RULE-6: a firing counts against tick `t`'s `MAX_ACTIONS_PER_TICK`
+    ///   and is dropped whole beyond it, sound operations and all.
+    /// - RULE-5 step 7: what the fired rules write, their animation
+    ///   operations and their reports are held, in order, and are applied
+    ///   and leave when tick `t` ends. Tick `t` does not evaluate the
+    ///   event again.
+    ///
+    /// So a recording of each event with its tick and its place within the
+    /// tick replays to the same result through either method: only the
+    /// moment the world is given a sound operation differs. After
+    /// [`Evaluator::close`] the event waits unhandled, as with `push`.
+    pub fn push_now(&mut self, event: InputEvent, world: &mut dyn World) -> bool {
+        if self.closed {
+            return self.push(event);
+        }
+        self.open(world);
+        let first_output = self.output_count;
+        // Earlier arrivals first (RULE-5 step 2).
+        while let Some(waiting) = self.next_event() {
+            self.handle(&waiting, world);
+        }
+        let taken = if self.handled < MAX_EVENTS_PER_TICK
+            && self.queue_length.saturating_add(self.handled) < MAX_QUEUED_EVENTS
+        {
+            self.handled = self.handled.saturating_add(1);
+            self.handle(&event, world);
+            true
+        } else {
+            self.push(event)
+        };
+        self.deliver_sounds(first_output, world);
+        taken
+    }
+
+    /// Gives the world the sound operations among the outputs kept from
+    /// `first` on, in order, and keeps the others for the tick's end
+    /// (RULE-96). Only step 2's outputs can be there, and step 2 is the
+    /// first to make any, so no sound operation overtakes an earlier one.
+    fn deliver_sounds(&mut self, first: usize, world: &mut dyn World) {
+        let mut kept = first;
+        for place in first..self.output_count {
+            let Some(output) = self.outputs.get(place).copied() else { continue };
+            if let Output::Sound(operation) = output {
+                if !world.sound_operation(operation) {
+                    self.skip();
+                }
+            } else {
+                if let Some(slot) = self.outputs.get_mut(kept) {
+                    *slot = output;
+                }
+                kept = kept.saturating_add(1);
+            }
+        }
+        self.output_count = kept;
+    }
+
+    /// Takes the snapshot of the tick to be evaluated, unless an event
+    /// given on arrival already made it be taken (RULE-96).
+    fn open(&mut self, world: &dyn World) {
+        if !self.opened {
+            self.take_snapshot(world);
+            self.opened = true;
+        }
+    }
+
     /// Evaluates one tick (RULE-5), in its fixed order: the snapshot, the
     /// input events, the timers, `open` on page tick 0, `becomes`,
-    /// animation, and apply. After [`Evaluator::close`] it does nothing.
+    /// animation, and apply. The events [`Evaluator::push_now`] handled
+    /// since the last tick are this tick's first events and are not
+    /// evaluated again (RULE-96). After [`Evaluator::close`] it does
+    /// nothing.
     pub fn tick(&mut self, world: &mut dyn World) {
         if self.closed {
             return;
         }
-        self.take_snapshot(world);
+        self.open(world);
         self.run_events(world);
         self.run_timers();
         if self.tick == 0 {
@@ -521,6 +646,8 @@ impl Evaluator {
         self.run_becomes();
         world.advance_cycles(self.tick);
         self.apply(world);
+        self.opened = false;
+        self.handled = 0;
         self.counters.ticks = self.counters.ticks.saturating_add(1);
         self.tick = self.tick.saturating_add(1);
     }
@@ -528,10 +655,16 @@ impl Evaluator {
     /// Evaluates the final tick, when the page stops being shown (RULE-5):
     /// the snapshot, each enabled `close` rule whose condition holds, and
     /// apply. The receiver first gives a release for every key and button
-    /// still down and runs a tick for them (RULE-8).
+    /// still down and runs a tick for them (RULE-8). When events were
+    /// handled on arrival and their tick has not run, it is run first:
+    /// their sound operations have left, so their other effects must too
+    /// (RULE-96).
     pub fn close(&mut self, world: &mut dyn World) {
         if self.closed {
             return;
+        }
+        if self.opened {
+            self.tick(world);
         }
         self.take_snapshot(world);
         self.run_simple(&Trigger::Close);
@@ -561,6 +694,7 @@ impl Evaluator {
 
     /// Step 1 (RULE-5, RULE-7): the world as the last tick left it.
     fn take_snapshot(&mut self, world: &dyn World) {
+        self.off = self.off_shown;
         self.output_count = 0;
         self.actions_run = 0;
         self.working = self.snapshot;
@@ -745,18 +879,33 @@ impl Evaluator {
     }
 
     /// Step 2 (RULE-5): the input events that arrived, in arrival order,
-    /// at most `MAX_EVENTS_PER_TICK`.
+    /// at most `MAX_EVENTS_PER_TICK`, those handled on arrival among them
+    /// (RULE-96).
     fn run_events(&mut self, world: &dyn World) {
-        for _ in 0..MAX_EVENTS_PER_TICK {
-            if self.queue_length == 0 {
-                break;
-            }
-            let Some(event) = self.queue.get(self.queue_head).copied() else { break };
-            self.queue_head = self.queue_head.saturating_add(1).checked_rem(MAX_QUEUED_EVENTS).unwrap_or(0);
-            self.queue_length = self.queue_length.saturating_sub(1);
-            let transition = self.follow(&event.input, world);
-            self.match_event(&event, &transition);
+        while let Some(event) = self.next_event() {
+            self.handle(&event, world);
         }
+    }
+
+    /// Takes the event that has waited longest, when the tick being
+    /// evaluated has handled fewer than `MAX_EVENTS_PER_TICK` (RULE-5
+    /// step 2).
+    fn next_event(&mut self) -> Option<InputEvent> {
+        if self.handled >= MAX_EVENTS_PER_TICK || self.queue_length == 0 {
+            return None;
+        }
+        let event = self.queue.get(self.queue_head).copied()?;
+        self.queue_head = self.queue_head.saturating_add(1).checked_rem(MAX_QUEUED_EVENTS).unwrap_or(0);
+        self.queue_length = self.queue_length.saturating_sub(1);
+        self.handled = self.handled.saturating_add(1);
+        Some(event)
+    }
+
+    /// Handles one event (RULE-5 step 2): the input state first (RULE-8),
+    /// then the rules.
+    fn handle(&mut self, event: &InputEvent, world: &dyn World) {
+        let transition = self.follow(&event.input, world);
+        self.match_event(event, &transition);
     }
 
     /// Updates the input state for one event (RULE-8), before the rules
