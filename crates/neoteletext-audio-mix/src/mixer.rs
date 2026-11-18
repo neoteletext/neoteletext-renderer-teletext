@@ -239,12 +239,13 @@ impl Mixer {
     pub fn render_pulling(&mut self, out: &mut [i16], source: &mut dyn Pull) {
         self.trim_streams();
         let pulling = self.sounds.iter().any(Sound::is_pulled);
-        for sample in out.iter_mut() {
+        let length = out.len();
+        for (done, sample) in out.iter_mut().enumerate() {
             self.update_ducks();
             let mut sum: i32 = 0;
             for index in 0..VOICES {
                 if pulling {
-                    self.feed(index, source);
+                    self.feed(index, length.saturating_sub(done), source);
                 }
                 let value = self.voice_sample(index);
                 self.note_peak(index, value);
