@@ -130,7 +130,11 @@ fn written(said: &str, id: u8) -> [u8; neoteletext_core::consts::PACKET_BYTES] {
     };
     match words.next().unwrap() {
         "welcome" => {
-            out(packet_of(&Control::Welcome { version: VERSION, caps: 4_325_376, resume: None }, 0, id).unwrap());
+            // The capabilities the row says: the bits of the `hello` row,
+            // or with renderer parity's picture languages (PAR-1, PAR-44).
+            words.next().unwrap();
+            let caps = words.next().unwrap().strip_prefix("caps=").unwrap().parse().unwrap();
+            out(packet_of(&Control::Welcome { version: VERSION, caps, resume: None }, 0, id).unwrap());
         }
         "cursor" => out(Cursor { page: 0x100, acked: 1, place: None, flags: 0 }.packet(0, id).unwrap()),
         "denied" => {
@@ -228,6 +232,9 @@ fn rules_image(vector: &Vector<'_>) {
 /// writes back the same bytes.
 fn command_body(vector: &Vector<'_>) {
     use neoteletext_rules::command::{self, MAX_BODY_BYTES};
+    if picture_command(vector) {
+        return;
+    }
     let names = [
         ("local_midi", command::TYPE_LOCAL_MIDI),
         ("variable", command::TYPE_VARIABLE),
@@ -244,6 +251,77 @@ fn command_body(vector: &Vector<'_>) {
     let mut out = [0_u8; MAX_BODY_BYTES];
     let length = command::encode(&read, page, sub, &mut out).unwrap();
     assert_eq!(out[..length], body[..], "{} writes back", vector.name);
+}
+
+/// The page of the vectors as the records name it.
+fn vectors_place() -> (neoteletext_core::types::PageAddress, neoteletext_core::types::SubCode) {
+    (neoteletext_core::types::PageAddress::from_mpp(PAGE.0).unwrap(), neoteletext_core::types::SubCode::new(PAGE.1))
+}
+
+/// The body of the one record `packets` (whole packets 4/31) carry.
+fn body_of(packets: &[Packet]) -> Vec<u8> {
+    let mut record = Vec::new();
+    for packet in packets {
+        let fragment = neoteletext_audio::idl::fragment(packet).unwrap().unwrap();
+        record.extend_from_slice(&fragment.data);
+    }
+    let length = neoteletext_audio::record::framed_length(&record).unwrap();
+    neoteletext_audio::record::split(&record[..length]).unwrap().1.to_vec()
+}
+
+/// Renderer parity PAR-20 (RULE-119): a group's `regis_links`,
+/// `naplps_links`, `regis_cursor` or `naplps_cursor` is the body of the
+/// `DRAWING_LINKS` or `REGIS_CURSOR` record its name begins with: the
+/// record's reader takes it for the vectors' page, a group may hold that
+/// type, and the record's writer gives the same body for what it read.
+/// Whether the row was one; the others are left to the caller.
+fn picture_command(vector: &Vector<'_>) -> bool {
+    use neoteletext_rules::command::{TYPE_DRAWING_LINKS, TYPE_REGIS_CURSOR, is_allowed};
+    use neoteletext_web::records::{drawing_links, regis_cursor};
+    let body = bytes(vector.value);
+    let (page, subcode) = vectors_place();
+    let mut packets = Vec::new();
+    if vector.name.starts_with("drawing_links") {
+        let read = drawing_links::read(&body).unwrap_or_else(|fault| panic!("{}: {fault:?}", vector.name));
+        assert_eq!((read.page, read.subcode, read.part, read.parts), (page, subcode, 0, 1), "{}", vector.name);
+        let links: Vec<_> = read.links().collect();
+        drawing_links::encode(page, subcode, &links, 0, 0, &mut |packet| packets.push(packet)).unwrap();
+        assert!(is_allowed(TYPE_DRAWING_LINKS));
+    } else if vector.name.starts_with("regis_cursor") {
+        let read = regis_cursor::read(&body).unwrap_or_else(|fault| panic!("{}: {fault:?}", vector.name));
+        assert_eq!((read.page, read.subcode), (page, subcode), "{}", vector.name);
+        regis_cursor::encode(read, 0, 0, &mut |packet| packets.push(packet)).unwrap();
+        assert!(is_allowed(TYPE_REGIS_CURSOR));
+    } else {
+        return false;
+    }
+    assert_eq!(body_of(&packets), body, "{} writes back", vector.name);
+    true
+}
+
+/// Renderer parity PAR-3 to PAR-5: a text part's bytes are what the
+/// engine's picture text encoder writes for the part the meaning gives, in
+/// the language the name begins with.
+fn picture_text(vector: &Vector<'_>) {
+    use neoteletext_formats::picture_text::{naplps, regis, stretches};
+    let (part, language) = vector.meaning.rsplit_once(" as ").unwrap();
+    let field = |name: &str| {
+        let start = part.find(&format!("\"{name}\":")).unwrap() + name.len() + 3;
+        let rest = &part[start..];
+        rest.strip_prefix('"').map_or_else(
+            || rest.split([',', '}']).next().unwrap().to_owned(),
+            |quoted| quoted.split('"').next().unwrap().to_owned(),
+        )
+    };
+    let outside = field("outside") == "true";
+    let stretches = stretches(&field("text"), Some(&field("language")), outside).unwrap();
+    let mut out = Vec::new();
+    match (language, vector.name.split('_').next().unwrap()) {
+        ("ReGIS", "regis") => regis(&stretches, &mut out).unwrap(),
+        ("NAPLPS", "naplps") => naplps(&stretches, &mut out).unwrap(),
+        other => panic!("{}: {other:?}", vector.name),
+    }
+    assert_eq!(out, bytes(vector.value), "{}", vector.name);
 }
 
 /// The packets of one record of the page rule table or of animation
@@ -273,6 +351,10 @@ fn animation_record(vector: &Vector<'_>) {
             ChannelRecord::NaplpsObjects(_) => "naplps_objects",
             ChannelRecord::Sheet(_) => "sheet",
             ChannelRecord::Frame(_) => "frame",
+            // Renderer parity PAR-2: the same bytes for a NAPLPS sub-page
+            // as for a ReGIS one.
+            ChannelRecord::DrawingLinks(_) => "drawing_links",
+            ChannelRecord::RegisCursor(_) => "regis_cursor",
             other => panic!("{other:?}"),
         };
         assert!(vector.name.starts_with(kind), "{} is a {kind} record", vector.name);
@@ -322,6 +404,7 @@ fn every_row_of_the_wire_vectors_holds() {
             "rules_fault" => rules_message(&vector, RULES_FAULT),
             "records" => animation_record(&vector),
             "object" => local_object(&vector),
+            "picture_text" => picture_text(&vector),
             other => panic!("{other}"),
         }
     }
@@ -333,6 +416,7 @@ fn every_row_of_the_wire_vectors_holds() {
             "input",
             "object",
             "page_state",
+            "picture_text",
             "record",
             "records",
             "refused",

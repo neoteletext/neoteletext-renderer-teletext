@@ -35,8 +35,9 @@
 //!   families' tables (REQ-6527; page-rules.md, RULE-29).
 //! - `check-appendix-a`: check that the document's appendix A is that.
 //! - `wire-vectors`: print the rows of neoteletext-common's
-//!   `wire-vectors.tsv` that the page rule table and animation added, from
-//!   the engine's encoders (REQ-6528; page-rules.md, RULE-85).
+//!   `wire-vectors.tsv` that the page rule table, animation and renderer
+//!   parity added, from the engine's encoders (REQ-6528; page-rules.md,
+//!   RULE-85; renderer-parity.md, PAR-44).
 
 mod appendix_a;
 mod checks;

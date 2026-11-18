@@ -1,9 +1,11 @@
 //! `wire-vectors`: the rows of neoteletext-common's `wire-vectors.tsv` that
 //! the page rule table and animation added, at push protocol 10
-//! (page-rules.md RULE-85, animation.md ANIM-23), written from the
-//! engine's own encoders so that their bytes are never typed by hand. The
-//! rows are printed in the table's form, and a test holds that the copy of
-//! the table the engine keeps has exactly these rows of these kinds.
+//! (page-rules.md RULE-85, animation.md ANIM-23), and those renderer parity
+//! added (renderer-parity.md PAR-44), written from the engine's own
+//! encoders so that their bytes are never typed by hand. The rows are
+//! printed in the table's form, and a test holds that the copy of the table
+//! the engine keeps has exactly these rows of these kinds, and of the kinds
+//! `input` and `record` these rows where it names them.
 
 use std::fmt::Write as _;
 
@@ -21,9 +23,18 @@ use neoteletext_rules::state::{PageState, SequenceState, TableState, TimerState}
 use neoteletext_rules::table::{SOUND_LEVEL, Table, Target, Value, default_send_all};
 use neoteletext_web::records::{animate, body_check, commands, frame, naplps_objects, rules, sheet, sprites};
 
-/// The kinds of row this command writes, in the order the table has them.
+mod parity;
+
+/// The kinds of row this command writes every row of, in the order the
+/// table has them.
 #[cfg(test)]
-const KINDS: [&str; 7] = ["rules", "command", "rule_event", "page_state", "rules_fault", "records", "object"];
+const KINDS: [&str; 8] =
+    ["rules", "command", "rule_event", "page_state", "rules_fault", "records", "object", "picture_text"];
+/// The kinds of row this command writes some rows of: renderer parity's
+/// HELLO and WELCOME (PAR-44) among rows written before the engine wrote
+/// any, which its wire-vector test holds to the engine's reader and writer.
+#[cfg(test)]
+const SOME_OF_KINDS: [&str; 2] = ["input", "record"];
 
 /// The page every vector is for, an example value: 101.
 const PAGE: u16 = 0x101;
@@ -463,12 +474,18 @@ fn object(rows: &mut Vec<Row>) -> Result<(), String> {
 /// A vector the engine's own encoder refuses.
 pub fn rows() -> Result<Vec<Row>, String> {
     let mut rows = Vec::new();
+    parity::hello(&mut rows)?;
+    parity::welcome(&mut rows)?;
     images(&mut rows)?;
+    parity::group_table(&mut rows)?;
     command_bodies(&mut rows)?;
+    parity::commands(&mut rows)?;
     messages(&mut rows)?;
     rule_records(&mut rows)?;
     records(&mut rows)?;
+    parity::records(&mut rows)?;
     object(&mut rows)?;
+    parity::text_parts(&mut rows)?;
     Ok(rows)
 }
 
@@ -548,7 +565,10 @@ mod tests {
         let written = rows().expect("they encode");
         let held: Vec<Row> = vectors()
             .filter_map(|vector| {
-                let kind = KINDS.into_iter().find(|kind| *kind == vector.kind)?;
+                let some = SOME_OF_KINDS.into_iter().find(|kind| {
+                    *kind == vector.kind && written.iter().any(|row| row.kind == *kind && row.name == vector.name)
+                });
+                let kind = KINDS.into_iter().find(|kind| *kind == vector.kind).or(some)?;
                 if kind == "rules" && SERVER_WRITTEN_RULES.contains(&vector.name) {
                     assert!(decodes_and_encodes_back(vector.value), "{}", vector.name);
                     return None;

@@ -12,7 +12,8 @@ pub struct Vector<'a> {
     /// What sort of fact it is: `version`, `close`, `input`, `refused` or
     /// `record`, and those of the page rule table and animation
     /// (page-rules.md RULE-85): `rules`, `rule_event`, `page_state`,
-    /// `rules_fault`, `records` and `object`.
+    /// `rules_fault`, `records` and `object`; and renderer parity's
+    /// `picture_text` (renderer-parity.md PAR-44).
     pub kind: &'a str,
     /// Its name.
     pub name: &'a str,

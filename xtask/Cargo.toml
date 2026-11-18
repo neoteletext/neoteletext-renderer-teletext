@@ -12,8 +12,10 @@ neoteletext-core = { workspace = true, features = ["render", "extended-sets"] }
 # The Noto Teletext files are checked by SHA-256 (REQ-FNT-012).
 neoteletext-web = { workspace = true }
 # The authored test stream of REQ-TST-024 is built by the formats crate, and
-# its reader of loaded fonts reads the Noto Teletext files.
-neoteletext-formats = { workspace = true, features = ["std", "tti", "bdf"] }
+# its reader of loaded fonts reads the Noto Teletext files; the wire vectors
+# of a picture's text parts are its picture text encoder's bytes (renderer
+# parity PAR-4, PAR-5, PAR-44).
+neoteletext-formats = { workspace = true, features = ["std", "tti", "bdf", "picture-text"] }
 # The generated protocol document's byte examples use the input encoder.
 neoteletext-input = { workspace = true }
 # The wire vectors of the page rule table are written by its encoder
