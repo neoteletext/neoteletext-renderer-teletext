@@ -31,10 +31,6 @@ const PERMITTED: &[(&str, &[&str])] = &[
             // The RULES and ANIMATE records are read with the rule table's
             // own decoder (page-rules.md RULE-41, animation.md ANIM-6).
             "neoteletext-rules",
-            // Through the audio profile's `midi` feature, its MIDI layer
-            // alone: a `cue` trigger's highest number is a block's highest
-            // data byte, asserted where both are linked (RULE-109).
-            "neoteletext-audio-instruments",
         ],
     ),
     ("neoteletext-image", &["neoteletext-core"]),

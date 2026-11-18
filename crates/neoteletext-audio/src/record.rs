@@ -242,6 +242,11 @@ pub const SYNTH8_KEYS_DUAL: u8 = 1;
 pub const SYNTH8_KEYS_SPLIT: u8 = 2;
 /// The largest value of a MIDI data byte (MIDI 1.0: seven bits).
 pub const MIDI_DATA_MAX: u8 = 0x7F;
+// The record module states the MIDI layer's highest data byte for builds
+// without that layer (a cue number's bound, page-rules.md RULE-109); where
+// the layer is built the two are one figure.
+#[cfg(feature = "midi")]
+const _: () = assert!(MIDI_DATA_MAX == crate::midi::DATA_MAX);
 /// [`TAG_SYNTH6581_CHIP`]'s bit for synth8580.
 pub const SYNTH6581_CHIP_8580: u8 = 1;
 /// [`TAG_SYNTH6581_CHIP`]'s bit for the NTSC clock.

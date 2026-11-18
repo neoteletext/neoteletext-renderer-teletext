@@ -47,7 +47,7 @@ const _: () = assert!(
 // RULE-109: a cue's number is the one data byte of a Cue Point event in a
 // block, so the highest a `cue` trigger names is the highest MIDI data
 // byte the block reader takes.
-const _: () = assert!(neoteletext_rules::limits::MAX_CUE == neoteletext_audio::midi::DATA_MAX);
+const _: () = assert!(neoteletext_rules::limits::MAX_CUE == neoteletext_audio::record::MIDI_DATA_MAX);
 
 // RULE-56: the rule table's crate has no dependency, so it states the
 // `CONTROL` record's type and length itself; here both are linked, and
