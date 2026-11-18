@@ -19,13 +19,14 @@ impl<'s> Walker<'_, 's> {
     /// are no side panels (DEC-1636); row 0, columns 0 to 7, are the
     /// receiver's (decision E.10, DEC-529 rule (j)).
     fn placeable(&mut self, frame: &Frame<'s>) -> Option<(usize, usize)> {
-        let (row, column) = frame.position();
-        let receiver = crate::policy::is_receiver_column(row, column);
-        if row >= ROWS || column >= COLUMNS || receiver {
+        // ANIM-8: a sprite's source has a cell only inside the sprite.
+        let cell = frame
+            .cell()
+            .filter(|&(row, column)| row < ROWS && column < COLUMNS && !crate::policy::is_receiver_column(row, column));
+        if cell.is_none() {
             self.report.faults.discarded_writes = self.report.faults.discarded_writes.saturating_add(1);
-            return None;
         }
-        Some((row, column))
+        cell
     }
 
     /// A column triplet: its column, then its character or attribute.
@@ -43,8 +44,11 @@ impl<'s> Walker<'_, 's> {
         // REQ-338: an Adaptive object's range runs to the rightmost
         // cell any of its triplets addresses, whether or not the triplet
         // then writes anything there; a cell past the page is no cell.
-        let (row, addressed) = frame.position();
-        if frame.plane == Plane::Adaptive && row < ROWS && addressed < COLUMNS {
+        if frame.plane == Plane::Adaptive
+            && let Some((row, addressed)) = frame.cell()
+            && row < ROWS
+            && addressed < COLUMNS
+        {
             out.touch(row, addressed, frame.slot);
         }
         let mut change = AttrChange::default();

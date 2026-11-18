@@ -153,6 +153,12 @@ name = "objects"
 required-features = ["level25", "objects"]
 
 [[test]]
+name = "sprites"
+# Sprites are placements of objects, drawn through the renderer
+# (animation.md ANIM-8).
+required-features = ["nonspacing-attributes", "level15", "level25", "objects", "render"]
+
+[[test]]
 name = "hostile_pages"
 # Whole pages that attack the receiver's own cells, by every route of
 # Levels 1.5 to 3.5, objects among them (REQ-SEC-005, REQ-SEC-024).
@@ -165,6 +171,10 @@ required-features = ["level25", "render"]
 [[test]]
 name = "flash_cost"
 required-features = ["level25", "render"]
+
+[[test]]
+name = "damage_cost"
+required-features = ["level25", "objects", "render"]
 
 [[test]]
 name = "reordering"

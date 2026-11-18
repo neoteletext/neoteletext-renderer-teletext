@@ -549,5 +549,50 @@ pub const fn data_sub_code(stream: u8, continuity: u8, last_packet: u8) -> u16 {
     sub_code(last_packet >> DATA_LAST_PACKET_S4_SHIFT, stream, last_packet, continuity)
 }
 
+// ---------------------------------------------------------------------------
+// Animation (animation.md ANIM-6, ANIM-7, ANIM-14 and ANIM-16; REQ-6529)
+// ---------------------------------------------------------------------------
+
+/// The layers of a page (ANIM-12): 0 the page's own picture, 1 the scene,
+/// 2 sprites, 3 the overlay.
+pub const LAYERS: u8 = 4;
+/// The highest layer.
+pub const LAST_LAYER: u8 = LAYERS - 1;
+/// The lowest layer a SPRITES record gives a sprite: layer 0 is the page
+/// itself (ANIM-7).
+pub const FIRST_SPRITE_LAYER: u8 = 1;
+/// The sprites of a teletext sub-page (ANIM-7, ANIM-16).
+pub const MAX_SPRITES: usize = 32;
+/// The sprites and controls of a sub-page that hold animation state at
+/// once (ANIM-6, ANIM-16).
+pub const MAX_ANIMATED_OBJECTS: usize = 32;
+/// The objects of a page whose frames cycle at once (ANIM-14, ANIM-16).
+pub const MAX_CYCLING_OBJECTS: usize = 16;
+/// The frames of an object (ANIM-14, ANIM-16).
+pub const MAX_OBJECT_FRAMES: usize = 16;
+/// The highest frame number an operation names (ANIM-6).
+pub const LAST_FRAME: u8 = MAX_OBJECT_FRAMES as u8 - 1;
+/// The longest period of a cycle, in ticks: one minute (ANIM-6).
+pub const MAX_CYCLE_PERIOD: u16 = 3_600;
+/// The dots repainted for animation in one tick (ANIM-16): half a page of
+/// 480 by 500 dots. The receiver holds a page to it; over it, painting
+/// waits for the next tick and nothing else is delayed.
+pub const MAX_ANIMATION_PIXELS_PER_TICK: u32 = 120_000;
+/// The furthest left or right of column 0 a sprite's origin lies in a
+/// SPRITES record: −39 to 39 (ANIM-7).
+pub const SPRITE_COLUMN_REACH: i8 = 39;
+/// The furthest above or below row 0 its origin lies: −24 to 24 (ANIM-7).
+pub const SPRITE_ROW_REACH: i8 = 24;
+/// The widest sprite, in cells (ANIM-7).
+pub const MAX_SPRITE_WIDTH: u8 = 40;
+/// The tallest sprite, in cells (ANIM-7).
+pub const MAX_SPRITE_HEIGHT: u8 = 25;
+/// The first row a sprite writes: row 0 is the header (ANIM-8).
+pub const FIRST_SPRITE_ROW: u8 = 1;
+/// The last row a sprite writes: row 24 is the Fastext row (ANIM-8).
+pub const LAST_SPRITE_ROW: u8 = 23;
+/// The `order` operation's layer byte that keeps the layer (ANIM-6).
+pub const KEEP_LAYER: u8 = 255;
+
 #[cfg(test)]
 mod tests;

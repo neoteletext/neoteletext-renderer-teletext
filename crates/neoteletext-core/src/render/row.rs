@@ -24,7 +24,12 @@ fn fill_cell(target: &mut [u8; CELL_WIDTH], raster: CellLine) {
 }
 
 /// Writes one cell line at cell slot `slot` of a pixel row.
-fn write_cell(out: &mut [u8], slot: usize, raster: CellLine, format: IndexFormat) -> Result<(), RenderError> {
+pub(super) fn write_cell(
+    out: &mut [u8],
+    slot: usize,
+    raster: CellLine,
+    format: IndexFormat,
+) -> Result<(), RenderError> {
     match format {
         IndexFormat::Bits8 => {
             let start = slot.saturating_mul(CELL_WIDTH);
@@ -89,7 +94,7 @@ fn write_line(
 }
 
 /// Refuses the palette mode for a row that needs the resolved mode.
-fn check_mode(grid: &Grid, row: usize, options: RenderOptions) -> Result<(), RenderError> {
+pub(super) fn check_mode(grid: &Grid, row: usize, options: RenderOptions) -> Result<(), RenderError> {
     if options.colour == ColourMode::Palette && !palette_row_allowed(grid, row) {
         return Err(RenderError::NeedsResolvedMode);
     }

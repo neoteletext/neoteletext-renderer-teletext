@@ -127,7 +127,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
 - **Sub-pages through the store:** `PageStore` lists, counts and steps a page's sub-pages (`subcodes`, `subpage_count`, `first_subpage`, `next_subpage`, `previous_subpage`, `last_subpage`, `subpage_place`), each a bounded pass over the caller's slots, holding no list, so a page may have every one of its 8,190 sub-pages and a port's stack does not grow with the maximum (REQ-NAV-005, REQ-NUM-030). Only a display page's sub-pages are listed: a page its Magazine Inventory Page marks as keeping its latest version (code 79) or as a data page, or whose page function is not a basic page, is not (`StoredPage::numbering`, REQ-NUM-021 to REQ-NUM-028). The MIP is kept in the enhancement store and read through `Decoder::inventory_code` and `Decoder::inventory_sub_pages` (REQ-NUM-026). A reserved page number (mFD, mFE, mFF, 1BE, 1F0) never reaches the page store (REQ-NUM-010).
 - **Requirements:** ACQ, SVC, FSM-003, FSM-004.
 
-### L3 Presentation model — `neoteletext-core::{charset, level1, level15, colour, objects, enhance, joining}`
+### L3 Presentation model — `neoteletext-core::{charset, level1, level15, colour, objects, sprites, enhance, joining}`
 
 - **Owns:** one pure function, from a stored page, the magazine data and the viewer state to a `Grid` of 25 by 40 cells at every level (REQ-1644). Along the way it performs:
   - character set resolution;
@@ -142,6 +142,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
   - `colour`: the Colour Map of 32 entries, the colour index type, and the re-mapping table. Its default values are the Table 30 constants of `consts`.
   - `objects`: finds objects. It reads the links of X/27/4, X/27/5 and the Magazine Organization Table, the pointer tables of object pages and the local definitions, and checks each definition (area OBJ).
   - `joining` (feature `extended-sets`): gives each letter of a group 1001 set its joined form from its neighbours in the row, after X/26 has been applied (decision E.79). It reads and writes only the grid's cells.
+  - `sprites`: teletext sprites and the receiver's animation state (animation.md ANIM-6 to ANIM-8, ANIM-13, ANIM-14; REQ-6529). `Sprites` checks what a SPRITES record gives; `Animation` folds `Operation`s into the state of sprites and controls and advances frame cycles by the caller's tick; `Placements` is the shown sprites in drawing order, each with its window of cells and its bounding rectangle in dots. `compose::compose_sprites` draws them over the page's own grid, which the caller keeps apart, by invoking each sprite's object after the page's own enhancement data (`enhance`), and puts the page's own cells back everywhere outside the sprites.
   - `enhance`: the enhancement processor. It runs after the Level 1 grid is built, walks the local enhancement data, objects and default objects (REQ-FSM-011), resolves each row (REQ-FSM-012), and builds the page's Colour Map and screen and row colours (area L25).
 - **Must not know about:** where the page came from, pixels, buffering. Stored bytes are decoded only through the decoders of L1, and enhancement pages are reached only through the read-only lookup of L2.
 - **Key types:** `Grid`, `Cell`, `CharRef`, `RowState`, `ColourMap`, `ColourIndex`, `ObjectRef`.
@@ -645,14 +646,15 @@ A module may use the modules listed for it, and nothing else. The cross-cutting 
 | `level15` | L3 | Foundation, `charset`, `level1` (grid types), `packet` (triplet types) |
 | `colour` | L3 | Foundation |
 | `objects` | L3 | Foundation, `packet` (triplet, link and table types), `acq` (read-only stored page types and enhancement lookup) |
+| `sprites` | L3 | Foundation, `packet` (the object source, type and number of a sprite's frame; animation.md ANIM-7) |
 | `joining` | L3 | Foundation, `charset`, `level1` (grid types) |
-| `enhance` | L3 | Foundation, `charset`, `level1` (grid types and the Level 1 row machine), `packet` (triplet and X/28 field types), `acq` (read-only stored page types and enhancement lookup), `colour`, `objects` |
-| `compose` | L3 | Foundation, `acq` (read-only stored page types), `level1`, `level15`, `enhance`, `joining` (the grid of a page at its level, then joined; REQ-CHR-015) |
+| `enhance` | L3 | Foundation, `charset`, `level1` (grid types and the Level 1 row machine), `packet` (triplet and X/28 field types), `acq` (read-only stored page types and enhancement lookup), `colour`, `objects`, `sprites` (the placements it invokes after the page's own data; ANIM-8) |
+| `compose` | L3 | Foundation, `acq` (read-only stored page types), `level1`, `level15`, `enhance`, `joining` (the grid of a page at its level, then joined; REQ-CHR-015), `sprites` (the placements composed over the page's own grid; ANIM-8) |
 | `glyphs` | L4 | Foundation, `charset` (character references) |
 | `render` | L4 | Foundation, `glyphs`, `level1` (grid types), `colour` (Colour Map) |
 | `viewer` | L6 | Foundation, `acq`, `level1`, `compose` (the grid of the page on screen), `colour`, `render` (change tracking), `service`, `nav`, `charset` (the receiver's own text) |
 | `nav` | L6 | Foundation, `acq` (the stored pages it steps through), `packet` (the editorial link type whose meaning `link_target` gives, DEC-2344) |
-| `controls` | L6 | Foundation, `acq` (read-only stored page types), `objects` (the local enhancement data's triplets and row addresses), `packet` (triplet functions), `level1` (grid types, for the looks; decision E.127) |
+| `controls` | L6 | Foundation, `acq` (read-only stored page types), `objects` (the local enhancement data's triplets and row addresses), `packet` (triplet functions), `level1` (grid types, for the looks; decision E.127), `sprites` (the animation state of a control: hidden, or a forced look; ANIM-6) |
 | `port` | L8 | Foundation |
 
 What each library crate may use of `neoteletext-core`, which `cargo xtask check-layers` reads from this table (DEC-2118). Words in brackets say why; what is not named is forbidden.

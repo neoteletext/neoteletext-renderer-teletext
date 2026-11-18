@@ -4,6 +4,7 @@ mod address;
 mod fixed_vec;
 mod font_glyph;
 mod presentation_fields;
+mod rect;
 
 pub use address::{ControlBits, Magazine, PageAddress, PageNumber, SubCode, hex_digit};
 pub use fixed_vec::FixedVec;
@@ -11,6 +12,7 @@ pub use font_glyph::FontGlyph;
 pub use presentation_fields::{
     ColourWords, DefaultColourFields, Designations, FallbackFields, PresentationFields, Rgb12, SidePanelFields,
 };
+pub use rect::{CellRect, DotRect};
 
 /// A point in time in microseconds, from a monotonic clock supplied by the
 /// caller (REQ-GEN-005).

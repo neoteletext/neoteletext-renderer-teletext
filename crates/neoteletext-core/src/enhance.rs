@@ -36,7 +36,8 @@ use crate::consts::{COLUMNS, LOCAL_TRIPLETS, OBJECT_BODY_TRIPLETS, OBJECT_INVOCA
 use crate::level1::{Cell, DisplayOptions};
 use crate::objects::{Body, EnhancementLinks};
 use crate::packet::DisplayAttributes;
-use crate::types::FixedVec;
+use crate::sprites::Placement;
+use crate::types::{CellRect, FixedVec};
 
 #[cfg(feature = "additional-flash-functions")]
 mod additional_flash;
@@ -57,6 +58,7 @@ use row::Resolved;
 pub use machine::{
     Ended, WalkAction, WalkEvent, WalkState, walk_action_name, walk_event_name, walk_state_name, walk_transition,
 };
+pub(crate) use page::apply_sprites;
 pub use page::{apply, apply_traced};
 
 /// The runs of the walk for one grid: the page-level run, then one for each
@@ -69,7 +71,9 @@ const MAX_RUN_STEPS: u32 =
     LOCAL_TRIPLETS as u32 + OBJECT_TYPES as u32 * OBJECT_INVOCATIONS_PER_TYPE as u32 * 2 * OBJECT_BODY_TRIPLETS as u32;
 
 /// The bound on the triplets read to build one grid (REQ-OBJ-020,
-/// REQ-SEC-012, REQ-TST-019).
+/// REQ-SEC-012, REQ-TST-019). It holds with sprites too: a sprite's object
+/// and the objects it invokes count toward the same 127 invocations of
+/// each type as the page's own (ANIM-8).
 pub const MAX_WALK_STEPS: u32 = WALK_RUNS * MAX_RUN_STEPS;
 
 /// The attributes a cell is drawn with (REQ-L25-006), each attribute type
@@ -134,7 +138,21 @@ struct Frame<'s> {
     /// The position this source last wrote, for the option that ignores a
     /// write before it (REQ-PRF-004): each source has its own walk.
     last_write: Option<(usize, usize)>,
+    /// For a sprite's object and the objects it invokes, the cells the
+    /// sprite may write (animation.md ANIM-8); `None` for the page's own
+    /// sources. Such a source's origin and position are held
+    /// [`SPRITE_BIAS`] rows and columns down and right of where they are,
+    /// so that an origin above or left of the page is still a position.
+    sprite: Option<CellRect>,
 }
+
+/// How far a sprite's source holds its positions from where they are, as
+/// `(rows, columns)`: the furthest above and left of the page a sprite's
+/// origin lies while any of its cells is on the page (ANIM-7).
+const SPRITE_BIAS: (usize, usize) = (
+    crate::limits::SPRITE_ROW_REACH.unsigned_abs() as usize,
+    crate::limits::SPRITE_COLUMN_REACH.unsigned_abs() as usize,
+);
 
 /// An Adaptive object's extent on the row being resolved (REQ-OBJ-010).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -200,6 +218,9 @@ struct Inputs<'a, 's> {
     /// Whether a write to a position before the last one written by the
     /// same source is ignored (REQ-PRF-004; DEC-570, Annex A.4).
     ignore_out_of_order: bool,
+    /// The shown sprites, in drawing order, each invoked after the page's
+    /// own enhancement data (ANIM-8); empty for the page's own rendering.
+    sprites: &'a [Placement],
 }
 
 /// One run of the walk of REQ-FSM-011.

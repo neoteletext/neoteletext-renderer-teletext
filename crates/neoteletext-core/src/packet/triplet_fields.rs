@@ -55,7 +55,9 @@ pub enum ObjectSource {
 }
 
 impl ObjectSource {
-    pub(super) const fn from_bits(bits: u8) -> Self {
+    /// The source from bits S1 S0.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Self {
         match bits & OBJECT_SOURCE_MASK {
             0b00 => Self::Illegal,
             0b01 => Self::Local,
@@ -64,7 +66,9 @@ impl ObjectSource {
         }
     }
 
-    pub(super) const fn bits(self) -> u8 {
+    /// Bits S1 S0.
+    #[must_use]
+    pub const fn bits(self) -> u8 {
         match self {
             Self::Illegal => 0b00,
             Self::Local => 0b01,

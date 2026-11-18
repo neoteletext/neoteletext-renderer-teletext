@@ -1,0 +1,14 @@
+format 1
+the page's own 3ab698056571717f
+passive over text d78467ea5addf4f0
+passive over mosaics 27d64957fbcb3e9e
+active over text 196966c17f2d59f4
+active over mosaics 17891532b3c3597a
+adaptive over text e1b2f3b5125b1938
+adaptive over mosaics 59e8b74b72bf81e6
+clipped at the top 64c6f06dc3c51f38
+clipped at the bottom 172ff33c7200d0cb
+clipped at the left 06db37d5da1cf51f
+clipped at the right 6a8bf7018de36fb1
+two overlapping, the second on top dcd10b183910fd84
+two overlapping, the first on top 5a299543bbb0fc58

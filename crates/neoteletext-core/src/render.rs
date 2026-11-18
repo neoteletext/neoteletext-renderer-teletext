@@ -17,6 +17,11 @@
 //!
 //! A row is 40 columns wide at every level (REQ-1644).
 //!
+//! A port draws again either the rows [`ChangeTracker`] reports or the
+//! rectangle [`DamageTracker`] reports ([`render_rect`]; animation.md
+//! ANIM-4), which is what makes a moved sprite or one flashing cell cost
+//! its own cells and not the page.
+//!
 //! Renderers start from the cell grid and never decode packets
 //! (REQ-RND-001). The raster uses integer arithmetic only, so the same grid
 //! and settings give the same pixels on every platform (REQ-RND-015).
@@ -25,6 +30,7 @@ use crate::consts::{CELL_FIELD_LINES, ROWS};
 
 mod changes;
 mod colours;
+mod damage;
 mod flash;
 mod options;
 mod raster;
@@ -34,6 +40,7 @@ pub use changes::ChangeTracker;
 pub use colours::{
     background_index, border_index, fill_palette, foreground_index, palette_colour, palette_mode_allowed,
 };
+pub use damage::{DamageTracker, render_rect};
 pub use flash::{FlashPhase, FlashRates, flash_on, flash_unit, flash_visible, next_flash_tick};
 pub use options::{ColourMode, RenderOptions};
 use raster::CELL_LAST_HALF_DOT;

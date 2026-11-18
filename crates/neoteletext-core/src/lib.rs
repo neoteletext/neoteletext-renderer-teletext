@@ -14,7 +14,7 @@
 //! - L1 packet decoding: [`packet`];
 //! - L2 acquisition: [`fsm`], [`acq`], [`service`];
 //! - L3 presentation model: [`charset`], [`level1`], [`compose`], [`level15`], and for
-//!   Levels 2.5 and 3.5 [`colour`], [`objects`] and [`enhance`];
+//!   Levels 2.5 and 3.5 [`colour`], [`objects`], [`sprites`] and [`enhance`];
 //! - L4 rendering: [`glyphs`], [`render`];
 //! - L6 interaction: [`viewer`], [`nav`], [`controls`];
 //! - L8 platform interface: [`port`];
@@ -84,6 +84,7 @@ pub mod level1;
 #[cfg(feature = "level15")]
 pub mod level15;
 pub mod objects;
+pub mod sprites;
 
 #[cfg(feature = "render")]
 pub mod glyphs;

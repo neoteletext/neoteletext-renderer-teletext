@@ -52,7 +52,7 @@ impl core::hash::Hasher for Fnv {
 /// True when a flashing cell looks different in phases `old` and `new`
 /// (REQ-RND-032): its rate changes phase, it can show dots, and the dots'
 /// colour differs between the two phases.
-fn flash_changes(
+pub(super) fn flash_changes(
     cell: &Cell,
     grid: &Grid,
     row: usize,

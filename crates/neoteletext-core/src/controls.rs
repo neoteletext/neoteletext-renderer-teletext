@@ -23,10 +23,11 @@ use crate::consts::{
     ADJACENT_CLUT_FLIP, COLUMNS, CONTROL_JOINED, CONTROL_WIDTH_MASK, LOCAL_TRIPLETS, MODE_CONTROL, PACKET_FIRST_ROW,
     PACKET_LAST_TEXT_ROW, ROW_ADDRESS_LAST,
 };
-use crate::level1::Grid;
+use crate::level1::{Cell, Grid};
 use crate::objects::{Body, Fetch, row_of};
 use crate::packet::TripletFunction;
-use crate::types::FixedVec;
+use crate::sprites::{Animation, ForcedLook, SpriteCells, Target};
+use crate::types::{CellRect, DotRect, FixedVec};
 
 /// The most controls a page has: a control triplet beyond them is dropped
 /// (REQ-INT-118). A page's 208 local triplets could declare more, one a
@@ -71,6 +72,20 @@ impl Control {
             && column < self.column.saturating_add(self.width)
     }
 
+    /// Its cells.
+    #[must_use]
+    pub const fn cells(self) -> CellRect {
+        CellRect { row: self.row, column: self.column, rows: self.height, columns: self.width }
+    }
+
+    /// Its cells in dots, 12 by 20 a cell: a control's rectangle for the
+    /// rule table's collision and region tests (page-rules.md RULE-19;
+    /// animation.md ANIM-13).
+    #[must_use]
+    pub const fn bounds(self) -> DotRect {
+        self.cells().dots()
+    }
+
     /// Whether any of its cells is on `row` between `column` and `end`,
     /// exclusive.
     const fn overlaps(self, row: u8, column: u8, end: u8) -> bool {
@@ -101,6 +116,30 @@ impl Controls {
     #[must_use]
     pub fn at(&self, row: u8, column: u8) -> Option<usize> {
         self.list.as_slice().iter().position(|control| control.contains(row, column))
+    }
+
+    /// The control numbered `number`: controls are numbered from 1 in the
+    /// order the page declares them (page-rules.md RULE-14).
+    #[must_use]
+    pub fn numbered(&self, number: u16) -> Option<Control> {
+        self.list.as_slice().get(usize::from(number).checked_sub(1)?).copied()
+    }
+
+    /// The number of the shown control holding the cell at `row`,
+    /// `column`: a control the animation state hides takes no pointer
+    /// event (animation.md ANIM-6).
+    #[must_use]
+    pub fn shown_at(&self, row: u8, column: u8, animation: &Animation) -> Option<u16> {
+        let number = u16::try_from(self.at(row, column)?.saturating_add(1)).ok()?;
+        animation.control_shown(number).then_some(number)
+    }
+
+    /// The rectangle, in dots, of the control numbered `number` as the
+    /// animation state has it (ANIM-13): `None` while it does not exist or
+    /// is hidden.
+    #[must_use]
+    pub fn bounds(&self, number: u16, animation: &Animation) -> Option<DotRect> {
+        self.numbered(number).filter(|_| animation.control_shown(number)).map(Control::bounds)
     }
 
     /// Takes one control triplet of `data` on `row`: a new run, or the run
@@ -176,12 +215,66 @@ pub enum Look {
 /// Gives the cells of `area` on `grid` the look, before the grid is
 /// rendered.
 pub fn apply_look(grid: &mut Grid, area: Control, look: Look) {
-    for row in grid.cells.iter_mut().skip(usize::from(area.row)).take(usize::from(area.height)) {
-        for cell in row.iter_mut().skip(usize::from(area.column)).take(usize::from(area.width)) {
+    apply_look_under(grid, area, look, &SpriteCells::NONE);
+}
+
+/// As [`apply_look`], leaving alone the cells `sprites` names: a sprite
+/// lies over the page's controls and links (animation.md ANIM-12), so a
+/// look given to what is beneath does not recolour it.
+pub fn apply_look_under(grid: &mut Grid, area: Control, look: Look, sprites: &SpriteCells) {
+    let rows = grid.cells.iter_mut().enumerate().skip(usize::from(area.row)).take(usize::from(area.height));
+    for (row, cells) in rows {
+        let cells = cells.iter_mut().enumerate().skip(usize::from(area.column)).take(usize::from(area.width));
+        for (column, cell) in cells {
+            if sprites.contains(row, column) {
+                continue;
+            }
             cell.foreground ^= ADJACENT_CLUT_FLIP;
             cell.background ^= ADJACENT_CLUT_FLIP;
             if look == Look::Pressed {
                 cell.attributes = cell.attributes.with_invert(!cell.attributes.invert());
+            }
+        }
+    }
+}
+
+/// Draws the controls as the animation state has them (animation.md
+/// ANIM-6), on a grid already composed with its sprites, whose changed
+/// cells `sprites` names and which are left alone:
+///
+/// - a hidden control is drawn as spaces on its row's background, the
+///   row's full row colour;
+/// - a control with a forced look is drawn with the hover look for look 1
+///   and the pressed look for looks 2 and 3, a teletext control having two
+///   looks (decision E.127).
+///
+/// The caller gives the pointer's own look ([`apply_look_under`]) only to
+/// a control or a link with no forced look (`Animation::forced_look`).
+pub fn apply_animation(grid: &mut Grid, controls: &Controls, animation: &Animation, sprites: &SpriteCells) {
+    for (index, &control) in controls.list.as_slice().iter().enumerate() {
+        let Ok(number) = u16::try_from(index.saturating_add(1)) else { continue };
+        if !animation.control_shown(number) {
+            hide(grid, control, sprites);
+            continue;
+        }
+        match animation.forced_look(Target::Control(number)) {
+            ForcedLook::None => {}
+            ForcedLook::Hover => apply_look_under(grid, control, Look::Hover, sprites),
+            ForcedLook::Pressed | ForcedLook::Alternative => apply_look_under(grid, control, Look::Pressed, sprites),
+        }
+    }
+}
+
+/// Draws a hidden control: spaces on its row's background (ANIM-6).
+fn hide(grid: &mut Grid, area: Control, sprites: &SpriteCells) {
+    let row_colours = grid.row_colours;
+    let rows = grid.cells.iter_mut().enumerate().skip(usize::from(area.row)).take(usize::from(area.height));
+    for (row, cells) in rows {
+        let background = row_colours.get(row).copied().unwrap_or(Cell::BLANK.background);
+        let cells = cells.iter_mut().enumerate().skip(usize::from(area.column)).take(usize::from(area.width));
+        for (column, cell) in cells {
+            if !sprites.contains(row, column) {
+                *cell = Cell { background, boxed: cell.boxed, ..Cell::BLANK };
             }
         }
     }

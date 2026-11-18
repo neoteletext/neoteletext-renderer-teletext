@@ -1,7 +1,7 @@
 //! Object invocation (clauses 13.3 to 13.5, 13.8): default objects, the
 //! limits of Annex A.8, and accepting an object for the walk.
 
-use super::super::{Frame, Walker};
+use super::super::{Frame, SPRITE_BIAS, Walker};
 
 use super::super::Attrs;
 use super::super::planes::{Plane, scan_index, type_index};
@@ -10,6 +10,8 @@ use crate::consts::{
 };
 use crate::objects::{self, ObjectRef};
 use crate::packet::{ObjectKind, ObjectNumber, ObjectSource};
+use crate::sprites::Placement;
+use crate::types::CellRect;
 
 impl<'s> Walker<'_, 's> {
     /// A default object of REQ-OBJ-040, found and accepted, with origin and
@@ -32,7 +34,7 @@ impl<'s> Walker<'_, 's> {
             self.report.faults.absent_objects = self.report.faults.absent_objects.saturating_add(1);
             return None;
         };
-        self.accept(object, (0, 0), (0, 0))
+        self.accept(object, (0, 0), (0, 0), None)
     }
 
     /// An Object Invocation (REQ-OBJ-001 to REQ-OBJ-008). The origin is the
@@ -83,7 +85,51 @@ impl<'s> Walker<'_, 's> {
             invocation.0.saturating_add(usize::from(row_offset)),
             invocation.1.saturating_add(usize::from(column_offset)),
         );
-        self.accept(object, origin, invocation)
+        self.accept(object, origin, invocation, frame.sprite)
+    }
+
+    /// A shown sprite (ANIM-8), found and accepted: the object of its
+    /// frame in force, invoked as an Object Invocation triplet whose
+    /// active position is the sprite's origin would invoke it, from the
+    /// page's own data, so any type and any source is permitted
+    /// (REQ-OBJ-008). `None`, drawing nothing, when no cell of the sprite
+    /// is on the page, the object is absent, or the limits of Annex A.8
+    /// are reached: sprites count toward the 127 invocations of each type
+    /// with the page's own objects, so the work of a grid stays bounded as
+    /// it is without them (REQ-OBJ-020).
+    pub(super) fn sprite(&mut self, placement: &Placement) -> Option<Frame<'s>> {
+        let window = placement.window()?;
+        let biased = |position: i16, bias: usize| {
+            usize::try_from(i32::from(position).saturating_add(i32::try_from(bias).ok()?)).ok()
+        };
+        let origin = (biased(placement.row, SPRITE_BIAS.0)?, biased(placement.column, SPRITE_BIAS.1)?);
+        // Each sprite is an invocation of its own from the page: no object
+        // is open at it, and what earlier sprites wrote or did not write
+        // does not count against it (Annex A.8 items 2 and 3).
+        self.open.clear();
+        self.successive = 0;
+        let frame = placement.frame;
+        if !self.within_limits(frame.kind, origin) {
+            return None;
+        }
+        let inputs = self.inputs;
+        let found = match frame.source {
+            ObjectSource::Illegal => Err(objects::Absent::BadNumber),
+            ObjectSource::Local => objects::find_local(inputs.page, frame.kind, frame.number, inputs.level),
+            ObjectSource::Public | ObjectSource::Global => objects::find_public(
+                inputs.lookup,
+                inputs.links.object_page(frame.source),
+                inputs.page,
+                frame.kind,
+                frame.number,
+                inputs.level,
+            ),
+        };
+        let Ok(object) = found else {
+            self.report.faults.absent_objects = self.report.faults.absent_objects.saturating_add(1);
+            return None;
+        };
+        self.accept(object, origin, origin, Some(window))
     }
 
     /// The limits of Annex A.8 (REQ-OBJ-020), checked before an object is
@@ -114,6 +160,7 @@ impl<'s> Walker<'_, 's> {
         object: ObjectRef<'s>,
         origin: (usize, usize),
         invocation: (usize, usize),
+        sprite: Option<CellRect>,
     ) -> Option<Frame<'s>> {
         let scanned = objects::prescan(&object, self.inputs.page);
         let Ok(extent) = scanned else {
@@ -144,6 +191,7 @@ impl<'s> Walker<'_, 's> {
             designation: None,
             passive: Attrs::PASSIVE,
             last_write: None,
+            sprite,
         })
     }
 }

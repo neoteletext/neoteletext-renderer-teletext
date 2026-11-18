@@ -2,7 +2,7 @@
 //! objects it invokes and the default objects, collecting the events that
 //! fall on the rows asked for.
 
-use super::{Collector, Frame, Inputs, Range, Slot, Walker};
+use super::{Collector, Frame, Inputs, Range, SPRITE_BIAS, Slot, Walker};
 
 use super::Attrs;
 use super::machine::{
@@ -38,12 +38,24 @@ impl Frame<'_> {
             designation: None,
             passive: Attrs::PASSIVE,
             last_write: None,
+            sprite: None,
         }
     }
 
-    /// The absolute active position.
+    /// The absolute active position, as the source holds it: for a
+    /// sprite's source, [`SPRITE_BIAS`] away from where it is.
     fn position(&self) -> (usize, usize) {
         (self.origin.0.saturating_add(usize::from(self.row)), self.origin.1.saturating_add(usize::from(self.column)))
+    }
+
+    /// The cell of the active position. For a sprite's source it is `None`
+    /// outside the cells the sprite may write: outside its width and height
+    /// from its origin, columns 0 to 39 or rows 1 to 23 (ANIM-8).
+    fn cell(&self) -> Option<(usize, usize)> {
+        let (row, column) = self.position();
+        let Some(window) = self.sprite else { return Some((row, column)) };
+        let cell = (row.checked_sub(SPRITE_BIAS.0)?, column.checked_sub(SPRITE_BIAS.1)?);
+        window.contains(cell.0, cell.1).then_some(cell)
     }
 
     /// True when the source's origin is on the page: an object placed
@@ -146,6 +158,11 @@ impl<'a, 's> Walker<'a, 's> {
         let mut defaults =
             self.inputs.links.default_objects.into_iter().flatten().filter(|_| cfg!(feature = "objects"));
         let mut found: Option<Frame<'s>> = None;
+        // ANIM-8: the shown sprites follow the page's own enhancement data,
+        // each invoked as an Object Invocation triplet at its origin would
+        // be. Without objects compiled in, none is drawn (decision E.71).
+        let mut sprites = self.inputs.sprites.iter().filter(|_| cfg!(feature = "objects"));
+        let mut drawing_sprites = false;
         let mut state = WalkState::Start;
         loop {
             // The faults before the step, to name one it meets.
@@ -161,11 +178,21 @@ impl<'a, 's> Walker<'a, 's> {
                     };
                     WalkEvent::Returned(ended)
                 }
+                // A sprite's object ends as a default object does, and no
+                // default object is placed after the sprites begin.
+                WalkState::PlacingDefaults if drawing_sprites => WalkEvent::DefaultObject { found: false },
                 WalkState::PlacingDefaults => {
                     found = defaults.find_map(|default| self.default_object(default));
                     WalkEvent::DefaultObject { found: found.is_some() }
                 }
-                WalkState::Finished => return,
+                WalkState::Finished => {
+                    let Some(frame) = sprites.find_map(|placement| self.sprite(placement)) else { return };
+                    drawing_sprites = true;
+                    stack.clear();
+                    let _ = stack.push(frame);
+                    state = WalkState::Walking;
+                    continue;
+                }
             };
             let (next, action) = walk_transition(state, event);
             self.act(action, &mut stack, &mut found, out);
@@ -267,16 +294,20 @@ impl<'a, 's> Walker<'a, 's> {
         // Display Row 0 act only in local data and Active objects, and the
         // colours only from the page.
         let restricted = !frame.plane.sets_colours();
+        // ANIM-8: a sprite writes only the cells of its width and height,
+        // so its objects set no screen or row colour; a row triplet still
+        // moves the active position.
+        let colours = frame.sprite.is_none() && frame.on_the_page();
         match action {
             WalkAction::ScreenColour(colour) => {
-                if !restricted && frame.on_the_page() && colour.is_defined() && out.row.is_none() {
+                if !restricted && colours && colour.is_defined() && out.row.is_none() {
                     out.screen = Some(colour.index);
                 }
             }
             WalkAction::RowColour { row, colour } if !restricted => {
                 (frame.row, frame.column) = (row, 0);
                 let (row, _) = frame.position();
-                if frame.on_the_page() && row < ROWS {
+                if colours && row < ROWS {
                     out.row_colour(row, colour);
                 }
             }

@@ -12,6 +12,7 @@ use crate::consts::{
 };
 use crate::level1::{Cell, DisplayOptions, Grid, PageRows, Size, resolve_designation};
 use crate::objects::{self, EnhancementLinks};
+use crate::sprites::Placement;
 use crate::trace::{Machine, TraceSink};
 
 /// The state named in a trace of row resolution, which runs after the walk
@@ -55,7 +56,26 @@ pub fn apply(
     config: &Config,
     options: &DisplayOptions,
 ) -> EnhancementReport {
-    process(grid, page, magazine, lookup, config, options, None)
+    process(grid, page, magazine, lookup, config, options, None, &[])
+}
+
+/// As [`apply`], with the shown sprites `sprites`, in drawing order, each
+/// invoked after the page's own enhancement data as an Object Invocation
+/// triplet at its origin would be (animation.md ANIM-8). `grid` holds the
+/// page's grid as [`apply`] left it, or its Level 1 grid. Cells outside
+/// the sprites may differ from the page's own where an Active object's
+/// attributes run on along a row: `compose::compose_sprites`, the caller of
+/// this, puts the page's own cells back there.
+pub(crate) fn apply_sprites(
+    grid: &mut Grid,
+    page: &StoredPage,
+    magazine: &MagazineData,
+    lookup: &EnhancementLookup<'_>,
+    config: &Config,
+    options: &DisplayOptions,
+    sprites: &[Placement],
+) -> EnhancementReport {
+    process(grid, page, magazine, lookup, config, options, None, sprites)
 }
 
 /// As [`apply`], and when `Config::trace` is on, reports every transition
@@ -71,13 +91,17 @@ pub fn apply_traced(
     options: &DisplayOptions,
     trace: &mut TraceSink<'_>,
 ) -> EnhancementReport {
-    process(grid, page, magazine, lookup, config, options, config.trace.then_some(trace))
+    process(grid, page, magazine, lookup, config, options, config.trace.then_some(trace), &[])
 }
 
 /// [`apply`], with `trace` `None` when tracing is off. It acts only at
 /// Levels 2.5 and 3.5, where EN 300 706 Table 1 gives X/26 its
 /// non-spacing attributes and objects (clause 10.2), in place of the Level
 /// 1.5 pass (DEC-564).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the arguments of `apply`, with the trace and the sprites its two variants add"
+)]
 fn process(
     grid: &mut Grid,
     page: &StoredPage,
@@ -86,6 +110,7 @@ fn process(
     config: &Config,
     options: &DisplayOptions,
     trace: Option<&mut TraceSink<'_>>,
+    sprites: &[Placement],
 ) -> EnhancementReport {
     let build = PageBuild::of(page, config.level);
     if !config.level.is_enhanced() {
@@ -117,6 +142,7 @@ fn process(
         default_sets,
         row_sets: config.row_set_triplets,
         ignore_out_of_order: config.ignore_out_of_order_triplets,
+        sprites,
     };
     let shown = PageRows::of(page, &config, options);
     let row_24_shown = crate::level1::row_24_shown(page, &config) && options.row24.is_none();
