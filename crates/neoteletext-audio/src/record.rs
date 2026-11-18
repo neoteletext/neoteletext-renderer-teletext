@@ -36,8 +36,10 @@ pub const TYPE_INDEX: u8 = 6;
 /// Record type: a log line for the channel's author (DOC-1956,
 /// REQ-INP-026), read by the web agent; this receiver leaves it alone.
 pub const TYPE_LOG: u8 = 7;
-/// Record type: a cookie set while the connection is open (DOC-1957),
-/// read by the web agent; this receiver leaves it alone.
+/// Record type 8, `SET_COOKIE`, retired by viewer state (DEC-6471, VS-204)
+/// and never reused: no longer a channel record, so the audio receiver
+/// counts one as refused. Named here only while `neoteletext-web` on this
+/// branch still writes it; it goes when the viewer-state branch is merged.
 pub const TYPE_SET_COOKIE: u8 = 8;
 
 /// Record type: a sub-page's TTI Link Extension links (DOC-1958,
@@ -78,6 +80,19 @@ pub const TYPE_REGIS_CURSOR: u8 = 16;
 /// leaves it alone.
 pub const TYPE_NAPLPS: u8 = 17;
 
+/// Record type: a viewer-state challenge (DEC-6471, VS-204), read by the
+/// web agent's record reader (`neoteletext_web::records::state`); this
+/// receiver leaves it alone.
+pub const TYPE_STATE_CHALLENGE: u8 = 18;
+
+/// Record type: the end of a remembered viewer state (DEC-6471, VS-204),
+/// read by the web agent; this receiver leaves it alone.
+pub const TYPE_STATE_END: u8 = 19;
+
+/// Record type: an offer to keep viewer state (DEC-6471, VS-204), read by
+/// the web agent; this receiver leaves it alone.
+pub const TYPE_STATE_KEEP_OFFER: u8 = 20;
+
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
 #[must_use]
@@ -86,15 +101,14 @@ pub const fn is_input_type(kind: u8) -> bool {
 }
 
 /// Whether a record type is one of the channel's records beside sound
-/// (DOC-1951): the input profile's, the index, LOG and
-/// `SET_COOKIE`. The audio receiver leaves every one alone, and counts none
-/// as refused.
+/// (DOC-1951): the input profile's, the index, LOG, links, sub-pages,
+/// redirect, denied, ReGIS, NAPLPS and the three of viewer state. The audio
+/// receiver leaves every one alone, and counts none as refused.
 #[must_use]
 pub const fn is_channel_type(kind: u8) -> bool {
     is_input_type(kind)
         || kind == TYPE_INDEX
         || kind == TYPE_LOG
-        || kind == TYPE_SET_COOKIE
         || kind == TYPE_LINKS
         || kind == TYPE_SUBPAGES
         || kind == TYPE_REDIRECT
@@ -103,6 +117,9 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_DRAWING_LINKS
         || kind == TYPE_REGIS_CURSOR
         || kind == TYPE_NAPLPS
+        || kind == TYPE_STATE_CHALLENGE
+        || kind == TYPE_STATE_END
+        || kind == TYPE_STATE_KEEP_OFFER
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,
