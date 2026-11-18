@@ -217,13 +217,18 @@ fn row_value(json: Option<&Json>, path: &str) -> Read<i32> {
 }
 
 /// A key set: `"any"` or a list of keys; with `by_row`, one key a row of
-/// the rule's rows (RULE-105), which only a rule with rows may have.
+/// the rule's rows (RULE-105), which only a rule with rows may have, and
+/// never `"any"`, which names no key for any row (RULE-10; the server
+/// refuses it alike, TODO-6692).
 fn keys(fields: &Map<String, Json>, rows: bool, path: &str) -> Read<KeyMatch> {
     let by_row = boolean(fields.get("by_row"), false, &format!("{path}.by_row"))?;
     if by_row && !rows {
         return Err(format!("{path}: by_row in a rule without rows (invalid_rules)"));
     }
     let mut matched = match fields.get("keys") {
+        Some(Json::String(any)) if any == "any" && by_row => {
+            return Err(format!("{path}: a by_row key set names one key a row, not \"any\" (invalid_rules)"));
+        }
         Some(Json::String(any)) if any == "any" => KeyMatch::any(),
         given => {
             let given = list(given, path)?;
@@ -859,6 +864,16 @@ impl Names<'_> {
                         Operand::Variable {
                             constant,
                             variable: designator(&names::VARIABLE_NAMES, Some(variable), path)?,
+                        }
+                    } else if let Some(row) = given.get("row") {
+                        // RULE-116: the row's parameter is the firing's `p`,
+                        // one value, so `{"row":"p"}` is the operand
+                        // `{"fired":"p"}` is (the server's DEC-6654 item 4,
+                        // TODO-6692).
+                        parameter(Some(row), &format!("{path}.value.row"))?;
+                        Operand::Fired {
+                            constant,
+                            property: u8::try_from(neoteletext_rules::table::FIRED_P).unwrap_or(0),
                         }
                     } else {
                         let property =

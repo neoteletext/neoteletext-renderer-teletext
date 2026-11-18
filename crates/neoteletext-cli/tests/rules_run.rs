@@ -342,3 +342,57 @@ fn a_faulty_rules_message_is_refused() {
         assert!(stderr.contains(why), "{name}: {stderr}");
     }
 }
+
+/// A table of one rule with rows `keys` (60 and 62) on the keys `a` and
+/// `s` by row, whose group sets v0 to `value` and reports it.
+fn row_valued(value: &str) -> String {
+    format!(
+        r#"{{"type":"rules","connections":"all","page":"121","sub":"0001","table":{{"rows":{{"keys":[60,62]}},"groups":[{{"name":"g","commands":[{{"type":"variable","op":"set","variable":"v0","value":{value}}},{{"type":"report","value":{{"of":"variable","variable":"v0"}}}}]}}],"rules":[{{"name":"down","rows":"keys","on":{{"event":"key","by_row":true,"keys":[{{"char":"a"}},{{"char":"s"}}]}},"run":"g"}}]}}}}"#
+    )
+}
+
+/// RULE-116, RULE-99 (TODO-6692, the server's DEC-6654 item 4): a
+/// variable command's value `{"plus":k,"row":"p"}` is the row's
+/// parameter, the same value as `{"plus":k,"fired":"p"}`, as the server
+/// reads it: the key of the second row sets v0 to 62 plus 1 either way,
+/// and the two tables run alike.
+#[test]
+fn a_variable_set_to_the_rows_parameter_is_the_firings_p() {
+    let inputs = "1 key down char s\n";
+    let mut reports = Vec::new();
+    for (name, value) in [("row", r#"{"plus":1,"row":"p"}"#), ("fired", r#"{"plus":1,"fired":"p"}"#)] {
+        let output = run_json(&format!("rules_run_json_value_{name}"), &row_valued(value), inputs);
+        assert!(output.status.success(), "{name}: {}", String::from_utf8_lossy(&output.stderr));
+        let text = String::from_utf8(output.stdout).unwrap();
+        let values: Vec<String> = text
+            .lines()
+            .filter(|line| line.contains(" report "))
+            .filter_map(|line| line.rsplit(' ').next())
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(values, ["63"], "{name}: {text}");
+        reports.push(text.lines().skip(1).map(str::to_owned).collect::<Vec<_>>());
+    }
+    assert_eq!(reports[0], reports[1], "the same run");
+    let not_p = row_valued(r#"{"plus":1,"row":"q"}"#);
+    let output = run_json("rules_run_json_value_row_q", &not_p, "");
+    assert!(!output.status.success(), "a row has one parameter, p");
+}
+
+/// RULE-10 (TODO-6692): a `by_row` key set names one key a row, so
+/// `"any"` is refused there with `invalid_rules`, as the server refuses
+/// it; `"any"` without `by_row` is taken.
+#[test]
+fn a_by_row_key_set_of_any_is_refused() {
+    let table = |by_row: bool| {
+        format!(
+            r#"{{"type":"rules","connections":"all","page":"122","sub":"0001","table":{{"rows":{{"keys":[60,62]}},"groups":[{{"name":"g","commands":[{{"type":"report"}}]}}],"rules":[{{"name":"down","rows":"keys","on":{{"event":"key","by_row":{by_row},"keys":"any"}},"run":"g"}}]}}}}"#
+        )
+    };
+    let output = run_json("rules_run_json_by_row_any", &table(true), "");
+    assert!(!output.status.success(), "by_row with any");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid_rules") && stderr.contains("by_row"), "{stderr}");
+    let output = run_json("rules_run_json_any", &table(false), "");
+    assert!(output.status.success(), "any alone: {}", String::from_utf8_lossy(&output.stderr));
+}
