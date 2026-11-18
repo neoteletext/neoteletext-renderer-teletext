@@ -240,7 +240,7 @@ pub fn run(
     let mut state = ViewState::new(session, start, opening);
     state.remote_keys = remote_keys;
     state.releases_reported = enhanced;
-    session.keep(neoteletext_input::is_input_packet);
+    session.keep(typing::is_channel_packet);
     // The viewer waits for the terminal and the source together: a key,
     // and a page the source has for it, are taken at once; the tick is
     // only the longest wait, for flash and the ticker (REQ-INT-008).

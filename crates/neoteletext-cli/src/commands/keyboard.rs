@@ -1,9 +1,14 @@
 //! `neottx qr` and `neottx keyboard` (REQ-CLI-012, REQ-CLI-013, decision
 //! E.94): a QR code as a page's mosaics, and a phone as the keyboard of a
-//! channel that takes input, through qrkeyboard's relay.
+//! channel that takes input, through qrkeyboard's relay. The bridge is a
+//! receiver, so under push protocol 9 it holds the rule table of the page
+//! the channel last sent, evaluates it, and sends a phone's keys only
+//! inside the `RULE_EVENT`s its rules report (page-rules.md RULE-46); a
+//! page with no table is sent nothing (RULE-50).
 
 use super::qr::qr;
 use crate::clock::now_ms;
+use crate::page_rules::PageRules;
 use neoteletext_app::{Failure, exit};
 use neoteletext_core::consts::PACKET_BYTES;
 use neoteletext_core::packet::{Decoded, Packet, decode};
@@ -53,13 +58,21 @@ struct Channel {
     /// (DOC-2029).
     on: Option<Stamp>,
     /// The channel's records, for viewer state's challenges, which the
-    /// bridge answers stateless (VS-501).
+    /// bridge answers stateless (VS-501), and its pages' rule tables.
     records: RecordReader,
+    /// The rule tables, and the evaluator of the page the keys are for.
+    rules: PageRules,
 }
 
 impl Channel {
     fn now_ms(&self) -> u32 {
         now_ms(self.started)
+    }
+
+    /// Microseconds since the bridge opened its session: the time its
+    /// pages' tables are evaluated by (RULE-4).
+    fn now_us(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX)
     }
 
     /// Sends HELLO and waits for WELCOME, then says the bridge's size and
@@ -71,6 +84,7 @@ impl Channel {
             started: Instant::now(),
             on: None,
             records: RecordReader::new(),
+            rules: PageRules::new(),
         };
         let mut out = [0_u8; MAX_MESSAGE];
         let now_ms = channel.now_ms();
@@ -89,7 +103,7 @@ impl Channel {
         // The bridge draws nothing: a teletext page's cells, pixels unknown.
         let columns = u32::try_from(neoteletext_core::consts::COLUMNS).unwrap_or(0);
         channel.send(&Item::Event(Event::Resize { columns, rows: MAX_ROWS, width: 0, height: 0 }))?;
-        channel.send(&Item::Event(Event::FocusIn))?;
+        // The focus is told to each page as its table opens (`pump`).
         Ok(channel)
     }
 
@@ -106,9 +120,14 @@ impl Channel {
             Some(Incoming::Binary(bytes)) => {
                 let (packets, _) = bytes.as_chunks::<PACKET_BYTES>();
                 let mut challenged = false;
+                let now_us = self.now_us();
                 for bytes in packets {
                     let packet = Packet { bytes: *bytes };
-                    challenged |= matches!(self.records.push(&packet), Read::Record(ChannelRecord::StateChallenge(_)));
+                    match self.records.push(&packet) {
+                        Read::Record(ChannelRecord::StateChallenge(_)) => challenged = true,
+                        Read::Record(record) => self.rules.record(&record, now_us),
+                        Read::Nothing | Read::Invalid(_) => {}
+                    }
                     let mut buffer = [0; control::FRAGMENT_DATA];
                     if let Some(Ok(control)) = control::from_packet(&packet, &mut buffer) {
                         // A refused WELCOME leaves the session refused.
@@ -147,7 +166,41 @@ impl Channel {
         Ok(())
     }
 
+    /// Evaluates the ticks due of the table of the page the keys are for,
+    /// and sends what its rules report (RULE-4, RULE-46). A page whose
+    /// table opens is told it has the keyboard, which the bridge always
+    /// gives it.
+    fn pump(&mut self) -> Result<(), Failure> {
+        let now_us = self.now_us();
+        if self.rules.show(self.on, now_us) {
+            self.rules.input(&Item::Event(Event::FocusIn));
+        }
+        let mut reports = Vec::new();
+        self.rules.tick(now_us, &mut reports);
+        for report in &reports {
+            report.with_item(|item| self.send(item))?;
+        }
+        Ok(())
+    }
+
+    /// How long the bridge may wait before the page's table has a tick to
+    /// evaluate: `None` when it has none until a key or a record comes.
+    fn wait(&self) -> Option<Duration> {
+        self.rules.wait(self.now_us()).map(Duration::from_micros)
+    }
+
+    /// Sends `item`, or, when it is the phone's input to the page, gives
+    /// it to the page's table: only a rule's report of it reaches the
+    /// channel (RULE-46).
     fn send(&mut self, item: &Item<'_>) -> Result<(), Failure> {
+        if neoteletext_input::event::is_page_input(item) {
+            crate::nfc::with_nfc(item, |item| {
+                if let Some(carried) = self.session.carried(item) {
+                    self.rules.input(&carried);
+                }
+            });
+            return Ok(());
+        }
         let mut out = [0_u8; MAX_MESSAGE];
         let now_ms = self.now_ms();
         match crate::nfc::with_nfc(item, |item| self.session.send(item, now_ms, &mut out)) {
@@ -259,7 +312,9 @@ pub fn keyboard(options: &KeyboardOptions) -> Result<(), Failure> {
     let mut channel = Channel::open(socket)?;
     loop {
         channel.drain()?;
-        for event in screen.wait(None).map_err(|error| (exit::INPUT, error.to_string()))? {
+        channel.pump()?;
+        // A key given to the page's table is evaluated at its next tick.
+        for event in screen.wait(channel.wait()).map_err(|error| (exit::INPUT, error.to_string()))? {
             match event {
                 ScreenEvent::Connected => println!("Phone connected."),
                 ScreenEvent::Disconnected(_) => println!("Phone gone; it may scan again."),

@@ -1,5 +1,9 @@
 //! Typing into a channel that takes input (area INT): a terminal key as the
-//! input stream has it, and the one input session with the channel.
+//! input stream has it, and the one input session with the channel. Under
+//! push protocol 9 a key goes to the channel only inside a `RULE_EVENT` of
+//! a rule of the page's table that asked for it (page-rules.md RULE-46,
+//! REQ-6523), so the keys are given to the table's evaluator
+//! ([`PageRules`]) and what it reports is sent.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use neoteletext_app::source::Source;
@@ -7,10 +11,22 @@ use neoteletext_core::consts::COLUMNS;
 use neoteletext_core::packet::Packet;
 use neoteletext_input::event::Stamp;
 use neoteletext_input::held::{Held, MAX_HELD_KEYS, Released, lost_key};
+use neoteletext_web::records::{Read, RecordReader};
+use std::time::Duration;
+
+use crate::page_rules::PageRules;
 
 /// What `neottx view` offers in HELLO (DOC-1922): it shows
 /// pages and says which with SELECT; it draws no cursor and no echo.
 const OFFERED: u32 = neoteletext_input::caps::SELECT_CAP;
+
+/// Whether the viewer keeps `packet` of the channel's stream for
+/// [`Typing::records`]: every fragment of the carriage its records come
+/// on, since a page's rule table is a record of many fragments (RULE-41)
+/// and only its first says what it is.
+pub(super) fn is_channel_packet(packet: &Packet) -> bool {
+    neoteletext_web::records::is_record_packet(packet)
+}
 
 /// A terminal key as the input stream has it (DOC-1930 and DOC-1935):
 /// every key as KEY, stamped with the page on screen, a
@@ -101,6 +117,13 @@ pub(super) struct Typing {
     /// The page and sub-code the channel's REDIRECT record named, to open
     /// (DOC-1960, REQ-INT-113), and the query it kept.
     redirect: Option<(u16, u16, Option<String>)>,
+    /// The channel's records, for its pages' rule tables (RULE-41).
+    records: RecordReader,
+    /// The rule tables, and the evaluator of the page on screen.
+    rules: PageRules,
+    /// The time of the last [`Typing::tick`], in microseconds since the
+    /// viewer started: when a record taken since is said to have come.
+    now_us: u64,
 }
 
 impl Typing {
@@ -119,6 +142,9 @@ impl Typing {
             held: Held::new(),
             releases: false,
             redirect: None,
+            records: RecordReader::new(),
+            rules: PageRules::new(),
+            now_us: 0,
         }
     }
 
@@ -218,6 +244,9 @@ impl Typing {
         self.drawn = None;
         self.held = Held::new();
         self.focus_told = None;
+        // A new connection's server sends the tables again (RULE-40).
+        self.records.clear();
+        self.rules = PageRules::new();
         if open {
             let mut out = [0_u8; neoteletext_input::MAX_MESSAGE];
             if let Ok(length) = self.input.open(clock_ms, None, &mut out)
@@ -249,6 +278,8 @@ impl Typing {
                 // A cursor record never moves a viewer, whatever page it
                 // names (DOC-1954).
                 self.input.acknowledged(cursor.acked);
+            } else if let Read::Record(record) = self.records.push(&packet) {
+                self.rules.record(&record, self.now_us);
             }
         }
         self.input.tick(clock_ms);
@@ -286,7 +317,45 @@ impl Typing {
         self.write(source, item, clock_ms);
     }
 
+    /// Evaluates the ticks of the page's table due at `now_us`,
+    /// microseconds since the viewer started, and sends what its rules
+    /// report (RULE-4, RULE-46). The table evaluated is that of the page
+    /// on screen, once the channel welcomed the session; a page opened
+    /// afresh is told the focus, since it has gained or lacks the keyboard.
+    pub(super) fn tick(&mut self, source: &mut dyn Source, now_us: u64, clock_ms: u32) {
+        self.now_us = now_us;
+        let shown = self.drawn.filter(|_| self.started);
+        if self.rules.show(shown, now_us) {
+            self.focus_told = None;
+            self.tell_focus(source, clock_ms);
+        }
+        let mut reports = Vec::new();
+        self.rules.tick(now_us, &mut reports);
+        for report in &reports {
+            report.with_item(|item| self.write(source, item, clock_ms));
+        }
+    }
+
+    /// How long the viewer may wait at `now_us` before the page's table
+    /// has a tick to evaluate: `None` when it has none until a key or a
+    /// record comes.
+    pub(super) fn wait(&self, now_us: u64) -> Option<Duration> {
+        self.rules.wait(now_us).map(Duration::from_micros)
+    }
+
+    /// Writes `item` to the channel, or, when it is the viewer's input to
+    /// the page, gives it to the page's table: only a rule's report of it
+    /// reaches the channel (RULE-46), and with no table nothing does
+    /// (RULE-50).
     fn write(&mut self, source: &mut dyn Source, item: &neoteletext_input::event::Item<'_>, clock_ms: u32) {
+        if neoteletext_input::event::is_page_input(item) {
+            crate::nfc::with_nfc(item, |item| {
+                if let Some(carried) = self.input.carried(item) {
+                    self.rules.input(&carried);
+                }
+            });
+            return;
+        }
         let mut out = [0_u8; neoteletext_input::MAX_MESSAGE];
         let sent = crate::nfc::with_nfc(item, |item| self.input.send(item, clock_ms, &mut out));
         if let Ok(length @ 1..) = sent

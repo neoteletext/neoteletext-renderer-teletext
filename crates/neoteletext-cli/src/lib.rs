@@ -30,6 +30,8 @@ mod image;
 mod nfc;
 mod operations;
 mod options;
+#[cfg(any(feature = "view", feature = "keyboard"))]
+mod page_rules;
 mod records;
 mod run;
 mod script;

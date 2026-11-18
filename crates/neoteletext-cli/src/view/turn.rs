@@ -72,6 +72,9 @@ impl ViewState {
             let page = self.page_shown(session, requested, subcode);
             self.mark_security(page.and_then(|page| source.came_unencrypted(page.key.address)));
             self.typing.set_drawn(page.and_then(|page| Stamp::new(page.key.address.mpp(), page.key.subcode.value())));
+            // The page's rule table is evaluated at each tick due, and what
+            // its rules report of the keys is sent (page-rules.md RULE-46).
+            self.typing.tick(source, now.0, now_ms(self.start));
             let page_extras = page.and_then(|page| source.extras(page.key.address, page.key.subcode)).cloned();
             let shown = Shown { page, extras: page_extras.as_ref(), config: &config, now };
             if let Some(forward) = self.pending_step.take() {
@@ -86,7 +89,10 @@ impl ViewState {
                 paint(&self.grid, frame, core::mem::take(&mut self.repaint_whole))?;
                 self.last_drawn = Some(state);
             }
-            let woke = next_event(wakes, TICK);
+            // A key given to the page's table is evaluated at its next tick,
+            // a sixtieth of a second away at most, not at the next flash.
+            let elapsed = Instant(self.start.elapsed().as_micros().try_into().unwrap_or(u64::MAX));
+            let woke = next_event(wakes, self.typing.wait(elapsed.0).map_or(TICK, |wait| wait.min(TICK)));
             // A resized terminal may have cleared or moved what was drawn.
             if matches!(woke, Some(Event::Resize(..))) {
                 self.last_drawn = None;

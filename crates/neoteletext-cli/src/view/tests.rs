@@ -166,8 +166,10 @@ fn an_acknowledgement_is_taken_in_the_answers_frame_and_alone() {
     use neoteletext_core::types::Magazine;
     use neoteletext_input::cursor::{Cursor, from_packet};
     use neoteletext_input::event::{Event, Item};
+    use neoteletext_input::rules::{RuleBody, RuleEvent};
+    use neoteletext_rules::table::Target;
     let mut session = neoteletext_app::session::Session::new(neoteletext_core::config::Config::default(), 8);
-    session.keep(neoteletext_input::is_input_packet);
+    session.keep(super::typing::is_channel_packet);
     let cursor = |acked| Cursor { page: 0x100, acked, place: None, flags: 0 }.packet(3, 1).unwrap();
     let magazine = Magazine::new(1).unwrap();
     // The answer: the page's header and a row, and the acknowledgement in
@@ -181,8 +183,11 @@ fn an_acknowledgement_is_taken_in_the_answers_frame_and_alone() {
     let mut out = [0_u8; neoteletext_input::MAX_MESSAGE];
     input.open(0, None, &mut out).unwrap();
     input.welcome(neoteletext_input::VERSION, 0, None).unwrap();
-    input.send(&Item::Event(Event::FocusIn), 0, &mut out).unwrap();
-    input.send(&Item::Event(Event::FocusOut), 0, &mut out).unwrap();
+    // Two rules' reports, which count as a viewer's input does (RULE-46).
+    for rule in [0, 1] {
+        let fired = RuleEvent { on: ON, generation: 1, rule, tick: 0, target: Target::NONE, body: RuleBody::Fired };
+        input.send(&Item::Event(Event::RuleEvent(fired)), 0, &mut out).unwrap();
+    }
     let mut taken = Vec::new();
     for packet in session.take_kept() {
         let acked = from_packet(&packet).unwrap().unwrap().acked;
@@ -222,6 +227,52 @@ fn welcomed(source: &mut Recorded) -> Typing {
     typing
 }
 
+/// A session the channel welcomed, with the default table of a channel
+/// that sends every input (page-rules.md RULE-53) arrived for page 100 as
+/// its RULES record's packets, page 100 drawn, and its table's page tick 0
+/// evaluated; what the channel was sent so far forgotten.
+fn welcomed_with_table(source: &mut Recorded) -> Typing {
+    let mut typing = welcomed(source);
+    let mut table = Box::new(neoteletext_rules::Table::new());
+    neoteletext_rules::default_send_all(false, &mut table);
+    let mut body = vec![0_u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
+    let length = neoteletext_rules::encode(ON.page, 1, Some(&table), &mut body).unwrap();
+    let mut packets = Vec::new();
+    neoteletext_web::records::rules::encode(&body[..length], 1, 2, &mut |packet| packets.push(packet)).unwrap();
+    assert!(packets.len() > 1, "a table is a record of several fragments");
+    assert!(packets.iter().all(super::typing::is_channel_packet), "the viewer keeps each of them");
+    typing.records(source, packets.into_iter(), 0);
+    typing.set_drawn(Some(ON));
+    typing.tick(source, 0, 0);
+    source.0.clear();
+    typing
+}
+
+/// The time of the `turn`th turn after the first, in microseconds: a
+/// little more than one tick of the presentation clock apart.
+fn turn_us(turn: u64) -> u64 {
+    turn.saturating_mul(17_000)
+}
+
+/// The `RULE_EVENT`s among `messages`: each one's stamp, rule and the
+/// input it carries as the input stream's bytes.
+fn rule_events(messages: &[Vec<u8>]) -> Vec<(Stamp, u8, Vec<u8>)> {
+    use neoteletext_input::event::{Event, Item, read_message};
+    use neoteletext_input::rules::RuleBody;
+    let mut found = Vec::new();
+    for message in messages {
+        read_message(message, &mut |item| {
+            if let Item::Event(Event::RuleEvent(event)) = item
+                && let RuleBody::Input(bytes) = event.body
+            {
+                found.push((event.on, event.rule, bytes.to_vec()));
+            }
+        })
+        .unwrap();
+    }
+    found
+}
+
 /// `character` as a press stamped with what is drawn.
 fn press(typing: &mut Typing, source: &mut Recorded, character: char, kind: KeyEventKind) {
     let on = typing.stamp().unwrap();
@@ -249,18 +300,78 @@ fn opening_a_page_sends_select_and_never_page() {
 }
 
 /// REQ-1555, REQ-1554: a key is stamped with the page drawn, whatever was
-/// selected since, and no key goes while nothing is drawn.
+/// selected since, and no key goes while nothing is drawn. REQ-6528,
+/// page-rules.md RULE-46: it goes inside the `RULE_EVENT` of the rule of
+/// the page's table that asked for it, `keys`, at the table's next tick.
 #[test]
 fn a_key_is_stamped_with_the_page_drawn() {
     let mut source = Recorded::default();
     let mut typing = welcomed(&mut source);
     typing.tell_selection(&mut source, 0x100, 0x3F7F, 0);
     assert_eq!(typing.stamp(), None, "nothing drawn yet");
-    typing.set_drawn(Some(ON));
+    let mut typing = welcomed_with_table(&mut source);
     typing.tell_selection(&mut source, 0x200, 0x3F7F, 0);
     source.0.clear();
     press(&mut typing, &mut source, 'a', KeyEventKind::Press);
-    assert_eq!(source.0[0][2..5], [0x80, 0x02, 0x00], "page 100 is still on screen");
+    assert_eq!(source.0, [] as [Vec<u8>; 0], "a key waits for the tick that evaluates it");
+    typing.tick(&mut source, turn_us(1), 17);
+    assert_eq!(source.0.len(), 1);
+    assert_eq!(source.0[0][..2], [0xFF, neoteletext_input::event::RULE_EVENT]);
+    assert_eq!(source.0[0][3..6], [0x80, 0x02, 0x00], "page 100 is still on screen");
+    let key = vec![0xFF, 0x01, 0x80, 0x02, 0x00, 0x10, b'a', 1, b'a'];
+    assert_eq!(rule_events(&source.0), [(ON, 0, key)], "rule 0, `keys`, carries the key as it was typed");
+}
+
+/// REQ-6523, page-rules.md RULE-50 and RULE-53: a page with no rule table
+/// is sent nothing the viewer types, and neither is a page whose record
+/// says it has no table; the selection still goes.
+#[test]
+fn a_page_with_no_table_is_sent_no_key() {
+    let mut source = Recorded::default();
+    let mut typing = welcomed(&mut source);
+    typing.set_drawn(Some(ON));
+    typing.tick(&mut source, 0, 0);
+    typing.tell_selection(&mut source, 0x100, 0x3F7F, 0);
+    assert_eq!(source.0, [[&[0xFF, 0x40, 3][..], b"100"].concat()], "SELECT, and no focus");
+    source.0.clear();
+    press(&mut typing, &mut source, 'a', KeyEventKind::Press);
+    press(&mut typing, &mut source, 'a', KeyEventKind::Release);
+    typing.focus_changed(true, &mut source, 0);
+    for turn in 1..4 {
+        typing.tick(&mut source, turn_us(turn), 0);
+    }
+    assert_eq!(source.0, [] as [Vec<u8>; 0]);
+
+    let mut body = [0_u8; neoteletext_rules::table::HEADER_BYTES];
+    let length = neoteletext_rules::encode(ON.page, 1, None, &mut body).unwrap();
+    let mut packets = Vec::new();
+    neoteletext_web::records::rules::encode(&body[..length], 1, 2, &mut |packet| packets.push(packet)).unwrap();
+    typing.records(&mut source, packets.into_iter(), 0);
+    typing.focus_changed(false, &mut source, 0);
+    press(&mut typing, &mut source, 'b', KeyEventKind::Press);
+    typing.tick(&mut source, turn_us(4), 0);
+    assert_eq!(source.0, [] as [Vec<u8>; 0]);
+}
+
+/// Page-rules.md RULE-46, RULE-53: a page whose table opens is told the
+/// focus, by the table's `focus` rule.
+#[test]
+fn a_page_whose_table_opens_is_told_the_focus() {
+    let mut source = Recorded::default();
+    let mut typing = welcomed(&mut source);
+    let mut table = Box::new(neoteletext_rules::Table::new());
+    neoteletext_rules::default_send_all(false, &mut table);
+    let mut body = vec![0_u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
+    let length = neoteletext_rules::encode(ON.page, 1, Some(&table), &mut body).unwrap();
+    let mut packets = Vec::new();
+    neoteletext_web::records::rules::encode(&body[..length], 1, 2, &mut |packet| packets.push(packet)).unwrap();
+    typing.records(&mut source, packets.into_iter(), 0);
+    typing.tick(&mut source, 0, 0);
+    assert_eq!(source.0, [] as [Vec<u8>; 0], "nothing is drawn, so no table is open");
+    typing.set_drawn(Some(ON));
+    typing.tick(&mut source, turn_us(1), 0);
+    // Rule 10 of the default table is `focus`.
+    assert_eq!(rule_events(&source.0), [(ON, 10, vec![0xFF, 0x05])]);
 }
 
 /// An ordinary terminal's `Control-]` is the byte 0x1D, which reaches the
@@ -282,19 +393,23 @@ fn control_right_bracket_leaves_as_any_terminal_reports_it() {
 #[test]
 fn after_leaving_keys_stop_and_focus_goes() {
     let mut source = Recorded::default();
-    let mut typing = welcomed(&mut source);
-    typing.set_drawn(Some(ON));
+    let mut typing = welcomed_with_table(&mut source);
     typing.tell_selection(&mut source, 0x100, 0x3F7F, 0);
     press(&mut typing, &mut source, 'a', KeyEventKind::Press);
     press(&mut typing, &mut source, 'a', KeyEventKind::Release);
     press(&mut typing, &mut source, 'b', KeyEventKind::Press);
+    typing.tick(&mut source, turn_us(1), 17);
     source.0.clear();
     assert!(typing.leave_or_return(&mut source, 0));
+    typing.tick(&mut source, turn_us(2), 34);
+    // Rule 1 of the default table is `keys_up` and rule 11 `blur`
+    // (page-rules.md RULE-53): each carries the event as it was made.
     assert_eq!(
-        source.0,
-        [vec![0xFF, 0x01, 0x80, 0x02, 0x00, 0x42, b'b'], vec![0xFF, 0x06]],
-        "the held key released as lost, then FOCUS_OUT, and no SELECT"
+        rule_events(&source.0),
+        [(ON, 1, vec![0xFF, 0x01, 0x80, 0x02, 0x00, 0x42, b'b']), (ON, 11, vec![0xFF, 0x06])],
+        "the held key released as lost, then FOCUS_OUT"
     );
+    assert_eq!(source.0.len(), 2, "and no SELECT");
     assert_eq!(typing.stamp(), None, "no key goes");
 }
 

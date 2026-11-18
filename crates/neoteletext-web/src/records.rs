@@ -97,6 +97,15 @@ impl From<RecordError> for RecordFault {
     }
 }
 
+/// Whether `packet` is one of the carriage the channel's records come on:
+/// a fragment on the audio profile's data channel (DOC-1951), of whatever
+/// record. A program that is handed a stream's packets one by one keeps
+/// these for its [`RecordReader`].
+#[must_use]
+pub fn is_record_packet(packet: &Packet) -> bool {
+    fragment(packet).is_some()
+}
+
 /// The fragments a record of `body` bytes takes (DOC-1952).
 #[must_use]
 pub const fn fragments(body: usize) -> usize {
