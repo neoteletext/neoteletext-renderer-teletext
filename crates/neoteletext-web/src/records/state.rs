@@ -25,13 +25,10 @@ use super::{RecordFault, write_packets};
 
 pub use neoteletext_input::state::CHALLENGE_BYTES;
 
-/// Record type: `STATE_CHALLENGE` (VS-204), read by the web agent.
-pub const TYPE_STATE_CHALLENGE: u8 = 18;
-/// Record type: `STATE_END` (VS-204), read by the web agent.
-pub const TYPE_STATE_END: u8 = 19;
-/// Record type: `STATE_KEEP_OFFER` (VS-204, VS-208), read by the web
-/// agent.
-pub const TYPE_STATE_KEEP_OFFER: u8 = 20;
+// The three types are defined once, in the record table every profile
+// shares (DOC-1951), so that the audio receiver leaves them alone by the
+// same numbers the web agent reads.
+pub use neoteletext_audio::record::{TYPE_STATE_CHALLENGE, TYPE_STATE_END, TYPE_STATE_KEEP_OFFER};
 
 /// The CHANNEL record's type, kept for it (REQ-3581).
 const KEPT_FOR_CHANNEL: u8 = 13;

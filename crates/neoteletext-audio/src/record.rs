@@ -36,11 +36,9 @@ pub const TYPE_INDEX: u8 = 6;
 /// Record type: a log line for the channel's author (DOC-1956,
 /// REQ-INP-026), read by the web agent; this receiver leaves it alone.
 pub const TYPE_LOG: u8 = 7;
-/// Record type 8, `SET_COOKIE`, retired by viewer state (DEC-6471, VS-204)
-/// and never reused: no longer a channel record, so the audio receiver
-/// counts one as refused. Named here only while `neoteletext-web` on this
-/// branch still writes it; it goes when the viewer-state branch is merged.
-pub const TYPE_SET_COOKIE: u8 = 8;
+// Record type 8, `SET_COOKIE`, is retired by viewer state (DEC-6471,
+// VS-204) and never reused: no longer a channel record, so the audio
+// receiver counts one as refused.
 
 /// Record type: a sub-page's TTI Link Extension links (DOC-1958,
 /// REQ-1494), read by the web agent; this receiver leaves it alone.
