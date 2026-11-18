@@ -60,5 +60,8 @@ mod mixer;
 mod ramp;
 mod sound;
 
-pub use mixer::{Mixer, Start, VOICES};
+pub use mixer::{
+    LOCAL_BLOCK_SAMPLES, Mixer, PEAK_FULL_SCALE, PEAK_PER_LEVEL, PULLED_LOOKAHEAD_SAMPLES, PULLED_RATE_HZ, Pull, Start,
+    VOICES, meter_level,
+};
 pub use sound::{STREAM_RING_MS, STREAM_TARGET_MS, STREAM_TRIM_PPM, SoundKey};

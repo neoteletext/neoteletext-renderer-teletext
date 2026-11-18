@@ -31,18 +31,51 @@ pub(crate) struct Sound {
     /// sample ever given it.
     stream: bool,
     written: i64,
+    /// A pulled sound (RULE-62): `samples` is a ring, as a live sound's
+    /// is, filled by the mixer as it mixes and never ahead.
+    pulled: bool,
+}
+
+/// What a voice starting a sound needs of it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Source {
+    /// A stored sound at this rate.
+    Stored(u32),
+    /// A live sound at this rate, with the samples written so far.
+    Live(u32, i64),
+    /// A pulled sound, with the samples pulled so far.
+    Pulled(i64),
 }
 
 impl Sound {
     /// A sound at `rate_hz` holding `samples`, the buffer as given.
     pub(crate) fn new(key: SoundKey, rate_hz: u32, samples: Vec<i16>) -> Self {
-        Self { key, rate_hz, samples, forgotten: false, stream: false, written: 0 }
+        Self { key, rate_hz, samples, forgotten: false, stream: false, written: 0, pulled: false }
     }
 
     /// A live sound at `rate_hz` whose ring is `ring`, the buffer as given:
     /// what it holds before samples are written is never played.
     pub(crate) fn live(key: SoundKey, rate_hz: u32, ring: Vec<i16>) -> Self {
-        Self { key, rate_hz, samples: ring, forgotten: false, stream: true, written: 0 }
+        Self { key, rate_hz, samples: ring, forgotten: false, stream: true, written: 0, pulled: false }
+    }
+
+    /// A pulled sound (RULE-62) whose ring is `ring`, the buffer as given,
+    /// at the one rate a pulled voice is rendered at.
+    pub(crate) fn pulled(key: SoundKey, ring: Vec<i16>) -> Self {
+        Self {
+            key,
+            rate_hz: crate::PULLED_RATE_HZ,
+            samples: ring,
+            forgotten: false,
+            stream: true,
+            written: 0,
+            pulled: true,
+        }
+    }
+
+    /// Whether it is a pulled sound.
+    pub(crate) fn is_pulled(&self) -> bool {
+        self.pulled
     }
 
     /// Whether its samples are the buffer starting at `place`.
@@ -58,7 +91,7 @@ impl Sound {
 
     /// Whether it is a live sound.
     pub(crate) fn is_live(&self) -> bool {
-        self.stream
+        self.stream && !self.pulled
     }
 
     /// Whether the receiver forgot it.
@@ -76,15 +109,21 @@ impl Sound {
         i64::try_from(self.samples.len()).unwrap_or(i64::MAX)
     }
 
-    /// Every sample ever given a live sound.
+    /// Every sample ever given a live or a pulled sound.
     pub(crate) fn written(&self) -> i64 {
         self.written
     }
 
-    /// What a voice starting it needs: its rate and, for a live sound, the
-    /// samples written so far.
-    pub(crate) fn source(&self) -> (u32, Option<i64>) {
-        (self.rate_hz, self.stream.then_some(self.written))
+    /// What a voice starting it needs: its rate and, for a live or a pulled
+    /// sound, the samples written so far.
+    pub(crate) fn source(&self) -> Source {
+        if self.pulled {
+            Source::Pulled(self.written)
+        } else if self.stream {
+            Source::Live(self.rate_hz, self.written)
+        } else {
+            Source::Stored(self.rate_hz)
+        }
     }
 
     /// Copies samples in from sample `first`; samples beyond its end are
@@ -96,7 +135,7 @@ impl Sound {
         }
     }
 
-    /// Writes a live sound's next samples into its ring.
+    /// Writes a live or a pulled sound's next samples into its ring.
     pub(crate) fn write_live(&mut self, pcm: &[i16]) {
         let length = i64::try_from(self.samples.len()).unwrap_or(i64::MAX);
         for &value in pcm {
