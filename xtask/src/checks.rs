@@ -70,6 +70,10 @@ const APPLICATION_CRATES: &[(&str, &[&str])] = &[
             "neoteletext-slicer",
             "neoteletext-web",
             "neoteletext-image",
+            // `neottx rules-run` evaluates a page rule table, and an
+            // ANIMATE record's operations are read by the rules crate
+            // (animation.md ANIM-6, ANIM-18).
+            "neoteletext-rules",
         ],
     ),
 ];
