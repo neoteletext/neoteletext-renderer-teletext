@@ -28,7 +28,10 @@ use neoteletext_core::types::{PageAddress, SubCode};
 use neoteletext_rules::BodyFacts;
 use neoteletext_rules::command::{self, Command, MAX_BODY_BYTES};
 
-use super::{RecordFault, TYPE_NAPLPS_OBJECTS, TYPE_SPRITES, naplps_objects, sprites, take_place, write_packets};
+use super::{
+    RecordFault, TYPE_DRAWING_LINKS, TYPE_NAPLPS_OBJECTS, TYPE_REGIS_CURSOR, TYPE_SPRITES, drawing_links,
+    naplps_objects, regis_cursor, sprites, take_place, write_packets,
+};
 
 pub use neoteletext_audio::record::{TYPE_LOCAL_MIDI, TYPE_REPORT, TYPE_RUN, TYPE_SEQUENCE, TYPE_TIMER, TYPE_VARIABLE};
 
@@ -59,6 +62,8 @@ const _: () = assert!(
         && command::TYPE_SPRITES == TYPE_SPRITES
         && command::TYPE_NAPLPS_OBJECTS == TYPE_NAPLPS_OBJECTS
         && command::TYPE_ANIMATE == super::TYPE_ANIMATE
+        && command::TYPE_DRAWING_LINKS == TYPE_DRAWING_LINKS
+        && command::TYPE_REGIS_CURSOR == TYPE_REGIS_CURSOR
         && neoteletext_rules::limits::MAX_GAIN == neoteletext_audio::MAX_GAIN
         && neoteletext_rules::limits::MAX_FADE_MS == neoteletext_audio::MAX_FADE_MS
         && neoteletext_rules::limits::AUDIO_CHANNELS == neoteletext_audio::CHANNELS as usize
@@ -130,7 +135,8 @@ pub fn encode(
 }
 
 /// The body check of a rule table's groups (RULE-56, RULE-45): reads the
-/// body of a `CONTROL`, a `SPRITES` or a `NAPLPS_OBJECTS` record with the
+/// body of a `CONTROL`, a `SPRITES`, a `NAPLPS_OBJECTS`, a `DRAWING_LINKS`
+/// or a `REGIS_CURSOR` record (PAR-20) with the
 /// reader that reads that record when the server sends it, and gives what
 /// `neoteletext-rules` needs of it, or `None` when that reader refuses
 /// the body or the type is another.
@@ -161,6 +167,17 @@ pub fn body_check(kind: u8, body: &[u8]) -> Option<BodyFacts> {
         }
         TYPE_NAPLPS_OBJECTS => {
             let record = naplps_objects::read(body).ok()?;
+            Some(placed(record.page, record.subcode))
+        }
+        // Renderer parity PAR-20: a group's links are one whole sending,
+        // part 0 of 1, which replaces the links the receiver held; a
+        // sending of several parts is the server's to send directly.
+        TYPE_DRAWING_LINKS => {
+            let record = drawing_links::read(body).ok()?;
+            (record.part == 0 && record.parts == 1).then(|| placed(record.page, record.subcode))
+        }
+        TYPE_REGIS_CURSOR => {
+            let record = regis_cursor::read(body).ok()?;
             Some(placed(record.page, record.subcode))
         }
         _ => None,

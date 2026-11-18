@@ -148,6 +148,16 @@ fn the_body_check_is_the_records_own_readers() {
     for kind in [0, 1, 2, 23, 28, 33] {
         assert_eq!(body_check(kind, &body), None, "type {kind} is not the body check's");
     }
+    // Renderer parity PAR-20: a whole sending of drawing links, and a
+    // cursor, read by their records' own readers.
+    let links = [0x01, 0x01, 0x00, 0x01, 0, 1, 1, 0x00, 0x07, 0x00, 0x03, b'3', b'0', b'0'];
+    assert_eq!(body_check(TYPE_DRAWING_LINKS, &links), placed, "one link to page 300");
+    assert_eq!(body_check(TYPE_DRAWING_LINKS, &[0x01, 0x01, 0x00, 0x01, 0, 1, 0]), placed, "no links");
+    assert_eq!(body_check(TYPE_DRAWING_LINKS, &[0x01, 0x01, 0x00, 0x01, 0, 2, 0]), None, "part of a longer sending");
+    assert_eq!(body_check(TYPE_DRAWING_LINKS, &links[..links.len() - 1]), None, "a target cut short");
+    assert_eq!(body_check(TYPE_REGIS_CURSOR, &[0x01, 0x01, 0x00, 0x01, 0x00, 0x07]), placed);
+    assert_eq!(body_check(TYPE_REGIS_CURSOR, &[0x01, 0x01, 0x00, 0x01, 0x00]), None, "cut short");
+    assert_eq!(body_check(TYPE_REGIS_CURSOR, &[0x01, 0x01, 0x3F, 0x7F, 0x00, 0x07]), None, "sub-code 3F7F");
 }
 
 /// RULE-106 (REQ-6612): the places the rule table's crate fills a
@@ -182,4 +192,36 @@ fn a_bound_control_is_read_with_its_amounts() {
     let mut table = Box::new(Table::new(PAGE, SUB));
     table.push_group(&[Framed { kind: TYPE_CONTROL, body: &other, bindings: &[] }]).unwrap();
     assert_eq!(table.check(body_check), Err(neoteletext_rules::Fault::Command("names another page")));
+}
+
+/// Renderer parity PAR-20 (TODO-6794): a group may hold `DRAWING_LINKS`
+/// and `REGIS_CURSOR`, so that a rule table can give a picture's links and
+/// cursor (`naplps_links`, `naplps_cursor`, `regis_links`, `regis_cursor`
+/// as group commands); one naming another page is refused, as every
+/// command is, and neither takes a binding.
+#[test]
+fn a_group_may_hold_drawing_links_and_a_cursor_for_its_own_page() {
+    let links: &[u8] = &[0x01, 0x01, 0x00, 0x01, 0, 1, 1, 0x00, 0x07, 0x00, 0x03, b'3', b'0', b'0'];
+    let cursor: &[u8] = &[0x01, 0x01, 0x00, 0x01, 0x00, 0x07];
+    let mut table = Box::new(Table::new(PAGE, SUB));
+    table
+        .push_group(&[
+            Framed { kind: TYPE_DRAWING_LINKS, body: links, bindings: &[] },
+            Framed { kind: TYPE_REGIS_CURSOR, body: cursor, bindings: &[] },
+        ])
+        .unwrap();
+    table.rules.push(Rule::new(Trigger::Open, 0)).unwrap();
+    assert_eq!(table.check(body_check), Ok(()));
+    for (kind, body) in [
+        (TYPE_DRAWING_LINKS, [&[0x01, 0x02], &links[2..]].concat()),
+        (TYPE_REGIS_CURSOR, [&[0x01, 0x01, 0x00, 0x02], &cursor[4..]].concat()),
+    ] {
+        let mut table = Box::new(Table::new(PAGE, SUB));
+        table.push_group(&[Framed { kind, body: &body, bindings: &[] }]).unwrap();
+        assert_eq!(table.check(body_check), Err(neoteletext_rules::Fault::Command("names another page")), "{kind}");
+    }
+    let bound = [Binding::of(field::CONTROL_GAIN, Source::Parameter)];
+    let mut table = Box::new(Table::new(PAGE, SUB));
+    table.push_group(&[Framed { kind: TYPE_REGIS_CURSOR, body: cursor, bindings: &bound }]).unwrap();
+    assert!(table.check(body_check).is_err(), "a cursor takes no binding");
 }

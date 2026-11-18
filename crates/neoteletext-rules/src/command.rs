@@ -26,6 +26,12 @@ use crate::wire::{Reader, Writer};
 /// audio crate's `TYPE_CONTROL` is asserted equal to where both are
 /// linked.
 pub const TYPE_CONTROL: u8 = 3;
+/// Record type `DRAWING_LINKS`: the drawings or objects of a sub-page's
+/// picture that are links (REQ-6370, renderer parity PAR-2, PAR-20).
+pub const TYPE_DRAWING_LINKS: u8 = 15;
+/// Record type `REGIS_CURSOR`: the drawing or object that is a sub-page's
+/// cursor (REQ-6371, renderer parity PAR-2, PAR-20).
+pub const TYPE_REGIS_CURSOR: u8 = 16;
 /// Record type `ANIMATE` (ANIM-6).
 pub const TYPE_ANIMATE: u8 = 23;
 /// Record type `SPRITES` (ANIM-7).
@@ -133,10 +139,21 @@ pub const fn is_sound(kind: u8) -> bool {
     kind == TYPE_CONTROL || kind == TYPE_LOCAL_MIDI
 }
 
-/// Whether a group may hold a record of type `kind` (RULE-119).
+/// Whether a group may hold a record of type `kind` (RULE-119; renderer
+/// parity PAR-20 adds `DRAWING_LINKS` and `REGIS_CURSOR`, so a group may
+/// hold `regis_links`, `regis_cursor`, `naplps_links` and `naplps_cursor`).
 #[must_use]
 pub const fn is_allowed(kind: u8) -> bool {
-    matches!(kind, TYPE_CONTROL | TYPE_ANIMATE | TYPE_SPRITES | TYPE_NAPLPS_OBJECTS | TYPE_LOCAL_MIDI..=TYPE_SEQUENCE)
+    matches!(
+        kind,
+        TYPE_CONTROL
+            | TYPE_DRAWING_LINKS
+            | TYPE_REGIS_CURSOR
+            | TYPE_ANIMATE
+            | TYPE_SPRITES
+            | TYPE_NAPLPS_OBJECTS
+            | TYPE_LOCAL_MIDI..=TYPE_SEQUENCE
+    )
 }
 
 /// What the reader of a `CONTROL`, `SPRITES` or `NAPLPS_OBJECTS` record
@@ -1026,7 +1043,7 @@ pub fn check(
     let length = fill(kind, body, bindings, &Fill::Least, &mut neutral).length;
     let neutral = neutral.get(..length).unwrap_or(&[]);
     let (page, sub) = match kind {
-        TYPE_CONTROL | TYPE_SPRITES | TYPE_NAPLPS_OBJECTS => {
+        TYPE_CONTROL | TYPE_SPRITES | TYPE_NAPLPS_OBJECTS | TYPE_DRAWING_LINKS | TYPE_REGIS_CURSOR => {
             let facts = body_check(kind, neutral).ok_or(Fault::Command("body its record's reader refuses"))?;
             if kind == TYPE_CONTROL && (facts.sequence != 0 || facts.after_current) {
                 // RULE-119: a group's `CONTROL` has no sequence and never

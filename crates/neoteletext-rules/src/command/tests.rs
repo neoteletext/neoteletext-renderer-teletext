@@ -210,6 +210,9 @@ fn a_group_holds_only_the_allowed_records() {
         animated(&[Operation { target: Target::object(1), kind: OperationKind::Reset }]),
         crate::testing::Built { kind: TYPE_SPRITES, body: [1, 1, 0, 1, 1, 0].to_vec(), bindings: Vec::new() },
         crate::testing::Built { kind: TYPE_NAPLPS_OBJECTS, body: [1, 1, 0, 1, 1, 0].to_vec(), bindings: Vec::new() },
+        // Renderer parity PAR-20: a picture's links and cursor.
+        crate::testing::Built { kind: TYPE_DRAWING_LINKS, body: [1, 1, 0, 1, 1, 0].to_vec(), bindings: Vec::new() },
+        crate::testing::Built { kind: TYPE_REGIS_CURSOR, body: [1, 1, 0, 1, 1, 0].to_vec(), bindings: Vec::new() },
         midi.clone(),
         built(Command::Variable { operation: VariableOperation::Inc, variable: 0, operand: Operand::None }),
         built(Command::Timer { start: true, timer: 0 }),
@@ -223,10 +226,9 @@ fn a_group_holds_only_the_allowed_records() {
     }
     assert_eq!(allowed.iter().filter(|command| is_sound(command.kind)).count(), 2);
     // OBJECT, DATA, CURSOR, INPUT_CONTROL, INDEX, LOG, LINKS, SUBPAGES,
-    // REDIRECT, DENIED, REGIS, DRAWING_LINKS, REGIS_CURSOR, NAPLPS, the
-    // three of viewer state, RULES, RULES_QUERY, SHEET, FRAME, and types
-    // not defined.
-    for kind in [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 0, 8, 13, 34, 255] {
+    // REDIRECT, DENIED, REGIS, NAPLPS, the three of viewer state, RULES,
+    // RULES_QUERY, SHEET, FRAME, and types not defined.
+    for kind in [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 17, 18, 19, 20, 21, 22, 26, 27, 0, 8, 13, 34, 255] {
         let command = crate::testing::Built { kind, ..midi.clone() };
         assert_eq!(check_built(&command), Err(Fault::Command("record type a group may not hold")), "type {kind}");
     }
