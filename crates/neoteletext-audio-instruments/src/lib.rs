@@ -116,6 +116,15 @@ pub mod synth6581 {
     #[path = "interface.rs"]
     pub mod interface;
 }
+#[cfg(any(
+    feature = "synth7",
+    feature = "synth106",
+    feature = "synthd",
+    feature = "synth53",
+    feature = "synth8",
+    feature = "synth80"
+))]
+pub mod local;
 #[cfg(any(feature = "synth7", feature = "interface"))]
 pub mod synth7;
 #[cfg(any(feature = "synth8", feature = "interface"))]
@@ -124,6 +133,8 @@ pub mod synth8;
 pub mod synth80;
 #[cfg(feature = "interface")]
 pub mod synthd;
+#[cfg(feature = "interface")]
+pub mod watch;
 
 /// Samples a second of everything this crate renders: the rate of an
 /// instrument block of the audio profile (REQ-6411 item 1).

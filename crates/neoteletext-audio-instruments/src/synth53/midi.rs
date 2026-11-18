@@ -107,4 +107,9 @@ impl Instrument for Midi {
     fn render(&mut self, out: &mut [i16]) {
         self.synth.render(out);
     }
+
+    /// Every channel is the one part (S53-2).
+    fn meter(&self, _part: u8) -> crate::midi::Meter {
+        self.synth.meter()
+    }
 }

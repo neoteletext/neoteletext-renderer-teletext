@@ -601,6 +601,12 @@ impl Voice {
         self.blocker.reset();
     }
 
+    /// The amplifier envelope's position, as a page's rules read it
+    /// (page-rules.md, RULE-31).
+    pub fn meter(&self) -> (crate::midi::MeterStage, u8) {
+        self.amplifier_envelope.meter()
+    }
+
     /// Whether the voice makes no sound: its key up and its amplifier
     /// closed.
     pub fn silent(&self) -> bool {

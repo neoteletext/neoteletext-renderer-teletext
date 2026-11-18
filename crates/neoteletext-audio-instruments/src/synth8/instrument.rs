@@ -169,6 +169,21 @@ pub enum KeyMode {
     Split,
 }
 
+impl KeyMode {
+    /// The key mode a sound's OBJECT or a local sound's start names
+    /// ([`interface::KEY_MODE_WHOLE`], `KEY_MODE_DUAL` or
+    /// `KEY_MODE_SPLIT`); `None` for another number.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            interface::KEY_MODE_WHOLE => Some(Self::Whole),
+            interface::KEY_MODE_DUAL => Some(Self::Dual),
+            interface::KEY_MODE_SPLIT => Some(Self::Split),
+            _ => None,
+        }
+    }
+}
+
 /// Which keys the portamento glides.
 ///
 /// Source: owner's manual, printed page 14: "polyphonic portamento that
@@ -706,6 +721,25 @@ impl Synth8 {
     #[must_use]
     pub fn sounding_voices(&self) -> usize {
         self.voices.iter().filter(|voice| voice.active()).count()
+    }
+
+    /// The position of the amplifier's envelope in the newest sounding
+    /// voice of a half, 0 the upper patch's and 1 the lower's, and the
+    /// count of voices sounding in both (page-rules.md, RULE-31; S8-18).
+    /// Another half has no voice and is idle.
+    #[must_use]
+    pub fn meter(&self, half: usize) -> crate::midi::Meter {
+        // A voice given a key sounds from the instrument's next sample:
+        // until then its slot's gate alone says so.
+        let voices = (0..VOICES).filter_map(|index| {
+            let (of, place) = self.place(index);
+            let voice = self.voices.get(index)?;
+            let slot = self.assigners.get(of)?.slots().get(place)?;
+            (voice.active() || slot.gate).then_some((of, slot, voice))
+        });
+        let newest = voices.clone().filter(|&(of, ..)| of == half).max_by_key(|&(_, slot, _)| slot.started());
+        let position = newest.map(|(_, slot, voice)| crate::midi::Meter::keyed(voice.meter(), slot.gate));
+        crate::midi::Meter::of(position, voices.count())
     }
 
     /// Takes one MIDI 1.0 channel message, as `synth8.md` says, and

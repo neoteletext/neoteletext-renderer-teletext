@@ -24,8 +24,10 @@ pub mod block;
 pub mod common;
 mod instrument;
 pub mod restate;
+pub mod state;
 
-pub use instrument::{Banks, Instrument, Outcome, Played, play_block};
+pub use instrument::{Banks, Instrument, METER_FULL, Meter, MeterStage, Outcome, Played, meter_level, play_block};
+pub use state::{PatchField, Performance, class, family, rule_message};
 
 /// Ticks in a block: a block is 20 ms and a tick 0.1 ms (MIDI-25,
 /// decision A3).

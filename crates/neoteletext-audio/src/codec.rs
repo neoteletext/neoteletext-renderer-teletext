@@ -286,6 +286,28 @@ const _: () = {
     assert!(INSTRUMENT_RATE == neoteletext_audio_instruments::SAMPLE_RATE);
     assert!(INSTRUMENT_BLOCK_SAMPLES as usize == neoteletext_audio_instruments::BLOCK_SAMPLES);
 };
+// A page's rules name a family by its codec's code (page-rules.md, RULE-28),
+// which the instruments crate's tables and local sounds are found by.
+#[cfg(feature = "midi")]
+const _: () = {
+    use neoteletext_audio_instruments::midi::family;
+    assert!(Codec::Synth6581.code() == family::SYNTH6581);
+    assert!(Codec::Synth7.code() == family::SYNTH7);
+    assert!(Codec::Synth106.code() == family::SYNTH106);
+    assert!(Codec::SynthD.code() == family::SYNTHD);
+    assert!(Codec::Synth53.code() == family::SYNTH53);
+    assert!(Codec::Synth8.code() == family::SYNTH8);
+    assert!(Codec::Synth80.code() == family::SYNTH80);
+};
+// A local sound's option byte is synth8's key mode as tag 7 carries it
+// (RULE-60), which the instruments crate reads.
+#[cfg(feature = "synth8")]
+const _: () = {
+    use neoteletext_audio_instruments::synth8::interface::{KEY_MODE_DUAL, KEY_MODE_SPLIT, KEY_MODE_WHOLE};
+    assert!(crate::record::SYNTH8_KEYS_WHOLE == KEY_MODE_WHOLE);
+    assert!(crate::record::SYNTH8_KEYS_DUAL == KEY_MODE_DUAL);
+    assert!(crate::record::SYNTH8_KEYS_SPLIT == KEY_MODE_SPLIT);
+};
 // An instrument's block fits the buffer every block is decoded into.
 const _: () = assert!(INSTRUMENT_BLOCK_SAMPLES as usize <= MAX_BLOCK_SAMPLES);
 // The carriage's figures are the decoder's (decision E.124).

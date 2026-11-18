@@ -1202,3 +1202,30 @@ fn a_sink_that_plays_no_local_sound_ignores_its_object() {
     assert_eq!(receiver.statistics().unsupported, 1);
     assert!(receiver.store().entry(SOUND).is_none());
 }
+
+// Verifies RULE-30 and RULE-31 (REQ-6527): the envelope position and the
+// voice count of a sound played from blocks are read from the receiver's
+// instrument at the position rendered, and there is none to read on a
+// channel that plays no such sound.
+#[test]
+fn a_streamed_sounds_meter_is_read_from_the_receivers_instrument() {
+    use neoteletext_audio::midi::MeterStage;
+    for family in families() {
+        let mut arena = vec![0_u8; 128 * 1024];
+        let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+        let mut sink = Recorder::default();
+        push(&mut receiver, &bank(BANK, family.codec, &(family.image)(&[&family.plain])), &mut sink);
+        // A note held from the first block to the end of the fortieth:
+        // longer than the lead a playing is rendered ahead by (INT-34).
+        let sound = sound(family.codec, note_block(&[]), 40, &[BANK]);
+        push(&mut receiver, &sound, &mut sink);
+        assert_eq!(receiver.meter(1, 0), None, "{:?}: nothing plays yet", family.codec);
+        receiver.push_record(&play(1, 1, &sound), &mut sink);
+        let meter = receiver.meter(1, 0).unwrap();
+        assert_eq!(meter.voices, 1, "{:?}", family.codec);
+        assert_ne!(meter.stage, MeterStage::Idle, "{:?}: the note's envelope", family.codec);
+        assert_eq!(receiver.meter(0, 0), None, "another channel plays nothing");
+        run(&mut receiver, &mut sink, 0, FOREVER_MS);
+        assert_eq!(receiver.meter(1, 0), None, "{:?}: the stream has ended", family.codec);
+    }
+}

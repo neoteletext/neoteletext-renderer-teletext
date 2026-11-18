@@ -82,4 +82,9 @@ impl Instrument for Midi {
     fn render(&mut self, out: &mut [i16]) {
         self.synth.render(out);
     }
+
+    /// Part 0 is the upper patch and part 1 the lower (S8-18).
+    fn meter(&self, part: u8) -> crate::midi::Meter {
+        self.synth.meter(usize::from(part))
+    }
 }

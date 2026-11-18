@@ -18,6 +18,100 @@ pub enum Outcome {
     PatchRefused,
 }
 
+/// Where an amplitude envelope stands, as a page's rules read it
+/// (`neoteletext-common/docs/page-rules.md`, RULE-28 class 5, RULE-31).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MeterStage {
+    /// No voice sounds.
+    #[default]
+    Idle,
+    /// Rising from the key.
+    Attack,
+    /// Falling to the level it holds.
+    Decay,
+    /// Holding while the key is down.
+    Sustain,
+    /// Dying away after the key.
+    Release,
+}
+
+impl MeterStage {
+    /// The stage's number in a rule's value: 0 idle, 1 attack, 2 decay,
+    /// 3 sustain, 4 release (RULE-28).
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Idle => 0,
+            Self::Attack => 1,
+            Self::Decay => 2,
+            Self::Sustain => 3,
+            Self::Release => 4,
+        }
+    }
+}
+
+/// The largest level a [`Meter`] gives: the envelope at its full scale
+/// (RULE-31: "scaled linearly to 0 to 255").
+pub const METER_FULL: u8 = u8::MAX;
+
+/// An envelope's value of 0 to `full` scaled linearly to 0 to
+/// [`METER_FULL`] (RULE-31); a value outside is held to the nearer end.
+#[must_use]
+pub fn meter_level(value: i32, full: i32) -> u8 {
+    let scaled = i64::from(value.clamp(0, full.max(0)))
+        .saturating_mul(i64::from(METER_FULL))
+        .checked_div(i64::from(full))
+        .unwrap_or(0);
+    u8::try_from(scaled).unwrap_or(METER_FULL)
+}
+
+/// The envelope position of a part and the instrument's voice count, as a
+/// page's rules read them (RULE-28 classes 5 to 7, RULE-31).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Meter {
+    /// The stage of the amplitude envelope of the part's most recently
+    /// started voice that is not idle; [`MeterStage::Idle`] where none is.
+    pub stage: MeterStage,
+    /// That envelope's present value, scaled linearly to 0 to
+    /// [`METER_FULL`] of its full scale; 0 where the stage is idle.
+    pub level: u8,
+    /// How many of the instrument's voices are not idle, on every part.
+    pub voices: u8,
+}
+
+impl Meter {
+    /// No voice sounds.
+    pub const IDLE: Self = Self { stage: MeterStage::Idle, level: 0, voices: 0 };
+
+    /// The position of a voice whose envelope stands at `position` and
+    /// whose key is down or not. An instrument moves its envelopes at its
+    /// next sample, so between a key and that sample the envelope has not
+    /// heard of it: a voice given a key whose envelope is still at rest is
+    /// at the foot of its attack, and one let go whose envelope has not
+    /// yet turned is at the head of its release.
+    #[must_use]
+    pub fn keyed(position: (MeterStage, u8), key_down: bool) -> (MeterStage, u8) {
+        match position {
+            (MeterStage::Idle, _) if key_down => (MeterStage::Attack, 0),
+            (MeterStage::Attack | MeterStage::Decay | MeterStage::Sustain, level) if !key_down => {
+                (MeterStage::Release, level)
+            }
+            position => position,
+        }
+    }
+
+    /// The meter of an instrument `voices` of whose voices are not idle,
+    /// the envelope asked for standing at `position`, or at none.
+    #[must_use]
+    pub fn of(position: Option<(MeterStage, u8)>, voices: usize) -> Self {
+        let voices = u8::try_from(voices).unwrap_or(u8::MAX);
+        match position {
+            Some((stage, level)) if stage != MeterStage::Idle => Self { stage, level, voices },
+            _ => Self { stage: MeterStage::Idle, level: 0, voices },
+        }
+    }
+}
+
 /// The bank images of a sound, in the order its OBJECT names them: index 0
 /// first (MIDI-57). Each is complete (MIDI-52) and at most
 /// [`super::MOST_BANK_BYTES`] bytes (MIDI-55); its form is the family
@@ -123,6 +217,22 @@ pub trait Instrument {
 
     /// Renders the next `out.len()` samples, 48,000 a second, mono.
     fn render(&mut self, out: &mut [i16]);
+
+    /// The envelope position of part `part`, its MIDI channel less one, 0
+    /// to 15, and the count of the instrument's voices that are not idle
+    /// (RULE-31): of the part's most recently started voice that is not
+    /// idle, the stage and the present value of its amplitude envelope.
+    /// An instrument that is one part, whatever the channel (synth106,
+    /// synth60, synthD, the synth53 family and synth80), answers the same
+    /// for every part; synth8 answers its upper patch's voices for part 0
+    /// and its lower patch's for part 1; the synth6581 family takes the
+    /// voice, 0 to 2, as the part. A part the instrument does not have is
+    /// idle. It reads and changes nothing, and the provided answer is idle
+    /// with no voice.
+    fn meter(&self, part: u8) -> Meter {
+        let _ = part;
+        Meter::IDLE
+    }
 }
 
 /// What playing one block found, for the receiver's counters (MIDI-123).

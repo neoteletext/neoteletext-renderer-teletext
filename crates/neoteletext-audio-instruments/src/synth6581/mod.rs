@@ -321,6 +321,16 @@ impl Synth6581 {
         }
     }
 
+    /// The envelope generator's position of voice `voice`, 0 to 2, and the
+    /// count of voices whose generator is not idle (page-rules.md,
+    /// RULE-31). A voice the chip does not have is idle.
+    #[must_use]
+    pub fn meter(&self, voice: usize) -> crate::midi::Meter {
+        let sounding =
+            self.voices.iter().filter(|voice| voice.envelope.meter().0 != crate::midi::MeterStage::Idle).count();
+        crate::midi::Meter::of(self.voices.get(voice).map(|voice| voice.envelope.meter()), sounding)
+    }
+
     /// Reads the register at `address`: [`OSCILLATOR_3`] and [`ENVELOPE_3`]
     /// as of the cycle last run. Every other address reads zero here; the
     /// potentiometer registers are not modelled, and what the chip returns

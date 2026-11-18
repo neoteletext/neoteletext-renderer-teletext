@@ -276,6 +276,28 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         [stall, self.next_due_ms(), rendering].into_iter().flatten().min()
     }
 
+    /// The envelope position of part `part`, its MIDI channel less one, and
+    /// the voice count of the synthesizer sound that audio channel
+    /// `channel` plays from blocks (page-rules.md, RULE-30: "of a
+    /// server-timed sound they are read from the decoder's instrument at
+    /// the position rendered", which is ahead of what is heard by the
+    /// stream's buffer). `None` where the channel plays no such sound: a
+    /// local sound's is metered where its instrument is, in the sink
+    /// (RULE-33).
+    #[cfg(any(
+        feature = "synth6581",
+        feature = "synth7",
+        feature = "synth106",
+        feature = "synthd",
+        feature = "synth53",
+        feature = "synth8",
+        feature = "synth80"
+    ))]
+    #[must_use]
+    pub fn meter(&self, channel: u8, part: u8) -> Option<crate::midi::Meter> {
+        self.instruments.meter(channel, part)
+    }
+
     /// What the receiver has met.
     #[must_use]
     pub fn statistics(&self) -> Statistics {

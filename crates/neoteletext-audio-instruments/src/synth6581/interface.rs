@@ -598,6 +598,13 @@ impl Tracker {
     }
 }
 
+// Named by its path so that it is found both where this module is a file
+// of its own and where the feature `interface` alone reads it through a
+// path from the crate root (lib.rs).
+#[path = "interface/parameters.rs"]
+mod parameters;
+pub use parameters::{PARAMETERS, read_parameter};
+
 // Named by its path so that it is found both where the module is a file of
 // its own and where the feature `interface` alone reads it through a path
 // from the crate root (lib.rs), whose `mod tests` would otherwise be looked

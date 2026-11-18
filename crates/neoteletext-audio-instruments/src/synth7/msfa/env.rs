@@ -127,6 +127,10 @@ pub const LEVEL_LUT: [u8; 20] = [0, 5, 9, 13, 17, 20, 23, 25, 27, 29, 31, 33, 35
 /// `28 + outlevel`.
 const LEVEL_LINEAR_OFFSET: i32 = 28;
 
+/// The level of an envelope at nominal full scale, in Q24 a doubling: 15
+/// doublings ([`Env::getsample`]). Added for synth7, not in the original.
+pub const FULL_SCALE: i32 = 15 << 24;
+
 /// Where an envelope is on its way: what [`Env::getsample_for`] changes,
 /// and nothing else. Added for synth7, not in the original: synth7 puts an
 /// envelope back where it stood when a control step began, to bring it to
@@ -308,6 +312,12 @@ impl Env {
     #[must_use]
     pub const fn level(&self) -> i32 {
         self.level
+    }
+
+    /// Whether the key is down. Added for synth7, not in the original.
+    #[must_use]
+    pub const fn down(&self) -> bool {
+        self.down
     }
 
     /// The stage the envelope is in: 0 to 3, or [`STAGE_FINISHED`] once the

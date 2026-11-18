@@ -708,6 +708,16 @@ impl Synth80 {
         self.allocator.sounding()
     }
 
+    /// The position of channel I's amplifier envelope in the newest voice
+    /// that is not at rest, and the count of voices not at rest
+    /// (page-rules.md, RULE-31).
+    #[must_use]
+    pub fn meter(&self) -> crate::midi::Meter {
+        let newest = self.allocator.newest().and_then(|(index, gate)| Some((self.voices.get(index)?, gate)));
+        let position = newest.map(|(voice, gate)| crate::midi::Meter::keyed(voice.meter(), gate));
+        crate::midi::Meter::of(position, self.allocator.sounding())
+    }
+
     /// The common layer's state: the pitch bend and its range, the pedal,
     /// the parameter selected, the bank select value (MIDI-84 to MIDI-92).
     #[must_use]

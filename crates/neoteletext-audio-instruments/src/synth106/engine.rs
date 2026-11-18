@@ -673,6 +673,15 @@ impl Synth106 {
         self.allocator.sounding()
     }
 
+    /// The envelope position of the newest voice that is not at rest and
+    /// the count of voices not at rest (page-rules.md, RULE-31).
+    #[must_use]
+    pub fn meter(&self) -> crate::midi::Meter {
+        let newest = self.allocator.newest().and_then(|(index, gate)| Some((self.voices.get(index)?, gate)));
+        let position = newest.map(|(voice, gate)| crate::midi::Meter::keyed(voice.meter(), gate));
+        crate::midi::Meter::of(position, self.allocator.sounding())
+    }
+
     /// Takes one MIDI 1.0 channel message straight, without the common
     /// layer: for the tests and examples that play the engine by itself.
     /// The receiver plays it through [`super::midi::Midi`], which reads

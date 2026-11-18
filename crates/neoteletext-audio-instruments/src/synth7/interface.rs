@@ -400,6 +400,13 @@ impl Tracker {
         self.parts.get(usize::from(channel & CHANNEL_MASK)).map(|part| (&part.voice, part.edited))
     }
 
+    /// Part `channel`'s operator switch, voice parameter 155, as the last
+    /// parameter change of it left it: bit 5 is operator 1 (S7-28).
+    #[must_use]
+    pub fn operator_switch(&self, channel: u8) -> Option<u8> {
+        self.parts.get(usize::from(channel & CHANNEL_MASK)).map(|part| part.operators_on)
+    }
+
     /// Part `channel`'s function parameters.
     #[must_use]
     pub fn functions(&self, channel: u8) -> Option<&Functions> {
@@ -474,3 +481,10 @@ impl Tracker {
         }
     }
 }
+
+// Named by its path so that it is found both where this module is a file
+// of its own and where the feature `interface` alone reads it through a
+// path from the crate root (lib.rs).
+#[path = "interface/parameters.rs"]
+mod parameters;
+pub use parameters::{PARAMETER_COUNT, PARAMETERS, parameter_of, read_parameter};
