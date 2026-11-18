@@ -2,6 +2,7 @@
 //! made from the fuzzer's bytes (RULE-83): the same bytes give the same
 //! answers, so two runs can be compared.
 
+use neoteletext_rules::Evaluator;
 use neoteletext_rules::animate::Operation;
 use neoteletext_rules::evaluator::{
     Bounds, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, SoundOperation, SoundState, TargetState,
@@ -26,11 +27,15 @@ pub enum Given {
 pub struct FuzzWorld<'a> {
     seed: &'a [u8],
     pub given: Vec<Given>,
+    /// The sound operations given so far.
+    sounds: usize,
+    /// The animation operations given so far.
+    animations: usize,
 }
 
 impl<'a> FuzzWorld<'a> {
     pub fn new(seed: &'a [u8]) -> Self {
-        Self { seed, given: Vec::new() }
+        Self { seed, given: Vec::new(), sounds: 0, animations: 0 }
     }
 
     /// A byte of the seed for a question.
@@ -95,14 +100,20 @@ impl World for FuzzWorld<'_> {
         i32::from_be_bytes([self.byte(at), self.byte(at + 1), self.byte(at + 2), self.byte(at + 3)])
     }
 
+    // An answer is a function of how many operations of its own kind
+    // came before, not of everything given: a sound operation given on an
+    // event's arrival (RULE-96) is given before the tick's animation
+    // operations and reports, and must be answered the same.
     fn sound_operation(&mut self, operation: SoundOperation) -> bool {
         self.given.push(Given::Sound(operation));
-        self.byte(self.given.len()) & 1 != 0
+        self.sounds += 1;
+        self.byte(self.sounds) & 1 != 0
     }
 
     fn animate(&mut self, operation: Operation, tick: u32) -> bool {
         self.given.push(Given::Animate(operation, tick));
-        self.byte(self.given.len()) & 2 != 0
+        self.animations += 1;
+        self.byte(self.animations) & 2 != 0
     }
 
     fn report(&mut self, report: Report) {
@@ -118,7 +129,48 @@ impl World for FuzzWorld<'_> {
     }
 }
 
+/// How a script's events are given to the evaluator.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Way {
+    /// By `Evaluator::push`, to be handled at the tick.
+    AtTheTick,
+    /// By `Evaluator::push_now`, handled on arrival (RULE-96).
+    OnArrival,
+}
+
+impl Way {
+    /// Gives `event` this way.
+    pub fn give(self, evaluator: &mut Evaluator, event: InputEvent, world: &mut dyn World) -> bool {
+        match self {
+            Self::AtTheTick => evaluator.push(event),
+            Self::OnArrival => evaluator.push_now(event, world),
+        }
+    }
+}
+
+/// The script with each interval's metered reports and sub-page changes
+/// before its events, in their order. A tick's snapshot is taken at the
+/// interval's first arrival (RULE-7), so only a script in this form has
+/// the same result whichever way its events are given.
+pub fn settled(steps: &[Step]) -> Vec<Step> {
+    let mut out = Vec::with_capacity(steps.len());
+    let mut events = Vec::new();
+    for step in steps {
+        match step {
+            Step::Event(_) => events.push(*step),
+            Step::Metered(_) | Step::Subpage(_) => out.push(*step),
+            Step::Tick => {
+                out.append(&mut events);
+                out.push(Step::Tick);
+            }
+        }
+    }
+    out.append(&mut events);
+    out
+}
+
 /// One step of a script.
+#[derive(Clone, Copy)]
 pub enum Step {
     /// An input event to give the evaluator.
     Event(InputEvent),

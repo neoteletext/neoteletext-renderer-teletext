@@ -2,7 +2,8 @@
 //! any table and events, every report of an input event is of an event
 //! that was given, that is of the kind its rule's trigger takes, and whose
 //! rule holds `send` or `echo` and was enabled in the tick that reported
-//! it. A table with no rule that sends reports nothing at all.
+//! it. A table with no rule that sends reports nothing at all. It holds
+//! whether the events are handled at the tick or on arrival (RULE-96).
 #![no_main]
 
 #[path = "rules_world.rs"]
@@ -11,7 +12,7 @@ mod rules_world;
 use libfuzzer_sys::fuzz_target;
 use neoteletext_rules::evaluator::{Evaluator, Input, PointerAction, Reported};
 use neoteletext_rules::table::{Action, Rule, Table, Trigger, decode};
-use rules_world::{FuzzWorld, Given, Step, script, split};
+use rules_world::{FuzzWorld, Given, Step, Way, script, settled, split};
 
 /// The most ticks one input runs, so that a run stays short.
 const MAX_TICKS: usize = 200;
@@ -37,26 +38,20 @@ fn takes(trigger: &Trigger, input: &Input) -> bool {
     }
 }
 
-fuzz_target!(|data: &[u8]| {
-    let Some((body, rest)) = split(data) else { return };
-    let mut table = Box::new(Table::new());
-    let Ok(header) = decode(body, &mut table) else { return };
-    if !header.has_table {
-        return;
-    }
-    let steps = script(rest);
-    let mut evaluator = Box::new(Evaluator::new(&table, header.generation, 1).expect("a decoded table is evaluated"));
+/// Runs the script with its events given `way`, and holds the property.
+fn check(table: &Table, generation: u16, rest: &[u8], steps: &[Step], way: Way) {
+    let mut evaluator = Box::new(Evaluator::new(table, generation, 1).expect("a decoded table is evaluated"));
     let mut world = FuzzWorld::new(rest);
     let mut events: Vec<Input> = Vec::new();
     let mut sub = 1_u16;
     let mut ticks = 0_usize;
-    for step in &steps {
+    for step in steps {
         match step {
             Step::Event(event) => {
                 // Sequence numbers count from 1 in order, so an event's
                 // place is its number less one.
                 events.push(event.input);
-                evaluator.push(*event);
+                way.give(&mut evaluator, *event, &mut world);
             }
             Step::Metered(values) => evaluator.set_metered(values),
             Step::Subpage(shown) => {
@@ -97,4 +92,19 @@ fuzz_target!(|data: &[u8]| {
     {
         assert!(!world.given.iter().any(|given| matches!(given, Given::Report(_))), "nothing asked, nothing sent");
     }
+}
+
+fuzz_target!(|data: &[u8]| {
+    let Some((body, rest)) = split(data) else { return };
+    let mut table = Box::new(Table::new());
+    let Ok(header) = decode(body, &mut table) else { return };
+    if !header.has_table {
+        return;
+    }
+    let steps = script(rest);
+    check(&table, header.generation, rest, &steps, Way::AtTheTick);
+    // On arrival a tick's snapshot, the sub-page shown with it, is taken
+    // at the interval's first event (RULE-7), so the sub-page a tick's
+    // rules were enabled for is the one shown before the events.
+    check(&table, header.generation, rest, &settled(&steps), Way::OnArrival);
 });
