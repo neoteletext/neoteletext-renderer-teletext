@@ -45,7 +45,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx view INPUT` | Browses pages interactively. |
 | `neottx probe CHANNEL` | Opens a channel as a receiver does and reports what it found, for a channel's developer. |
 | `neottx text INPUT PAGE` | Writes one page, or `all`, as UTF-8 text on standard output. |
-| `neottx render INPUT PAGE -o FILE` | Writes one page as a PNG or PPM image; with `all`, `-o` names a directory. |
+| `neottx render INPUT PAGE -o FILE` | Writes one page as a PNG or PPM image; with `all`, `-o` names a directory. With `--frames TICKS` it plays the page into a sequence of images. See "Image sequences" below. |
 | `neottx convert INPUT --to t42\|tti\|edittf\|channel -o FILE` | Converts a recording or page files to T42 packets, TTI pages, edit.tf page addresses (one page a line, each `https://edit.tf/#` and the page, which the editor opens), or a static channel's folder. With `--to channel`, `-o` names the folder, which is created: each page as `NNN.t42`, a page of several sub-pages also as a folder `NNN/` holding each sub-page as `NNN/SSSS.t42` and the page's list of sub-pages in parts `NNN/P.sub`, and the bundle `index.t42` (DEC-2413); a file already in the folder is never written over. `--page 100` keeps one page, `--page 100/0001` one sub-page. |
 | `neottx slice RAW -o OUT.t42` | Slices raw sampled video into T42 packets and prints quality statistics. `--preset bt8x8\|cx88\|saa7131\|tbc\|tbc-vbi` names a capture device's geometry (bt8x8 by default); `--sample-rate HZ`, `--samples-per-line N`, `--sample-size 8\|16`, `--lines-per-field N`, `--used-lines FIRST-LAST` (counted from 0) and `--first-lines A,B` (the television line number of each field's first line) replace parts of it. A geometry the reader cannot use exits with status 2. |
 | `neottx services INPUT` | Lists the teletext streams, languages and subtitle pages of a transport stream. |
@@ -132,6 +132,25 @@ A live input runs in two processes (REQ-SEC-018). A fetcher process does the net
 ### Images
 
 `render` writes PNG (the default, with alpha for transparent cells) or PPM with `--image ppm`. The picture is 480 by 500 pixels at scale 1, or 480 by 250 in the 12-by-10 cell mode of the `saa5246a` profile. The palette is the page's 32-entry Colour Map.
+
+### Image sequences
+
+`neottx render INPUT PAGE -o FILE --frames TICKS` plays one page on the presentation clock, sixty ticks a second, for 1 to 36,000 ticks from tick 0, and writes an image of the page as it is shown at each tick: flash in the phase of that tick (57 ticks shown and 19 hidden for the Level 1 Flash attribute), sprites where the animation has put them, controls with the looks forced on them. Each image is named with `-NNNNN`, the tick in five digits, before the extension, so `-o out/page.png` writes `out/page-00000.png`, `out/page-00001.png` and so on. `--frame-step K` writes an image every `K` ticks, and always the last. No clock is read, so a run gives the same images on every machine and every time; they are for tests and golden files (animation.md ANIM-18).
+
+`--script FILE` (`-` for standard input) is a text file of timed operations, one a line, `<tick> <operation>`, in ascending tick. An empty line, and a line beginning with `#`, is skipped.
+
+| Operation | What it does |
+|---|---|
+| `move <n> <x> <y> [relative]` | Puts sprite `n` at column `x`, row `y`, or moves it by that much |
+| `show <n>`, `hide <n>` | Shows or hides it |
+| `look <n> <0-3>` | Forces a look: 0 none, 1 hover, 2 pressed, 3 alternative |
+| `order <n> <layer\|keep> <order>` | Sets its layer, 0 to 3, or keeps it, and its order within the layer |
+| `frame <n> <f>` | Shows frame `f`, 0 to 15, and stops a cycle |
+| `cycle <n> <first> <last> <period> [once]` | Cycles its frames, one every `period` ticks |
+| `stop_cycle <n>`, `reset <n>` | Stops a cycle; forgets everything the script did to it |
+| `record <type> <hexadecimal body>` | Applies a record at that tick: `ANIMATE`, `SPRITES` or `FRAME` |
+
+`<n>` is a sprite's number; `control:<n>` names the page's `n`th control, for `show`, `hide`, `look` and `reset`. Sprites are placements of the page's objects, so they are drawn at Level 2.5 and above by a `neottx` built with the `objects` feature; a build without it says so when a script gives a page sprites.
 
 ### Text
 

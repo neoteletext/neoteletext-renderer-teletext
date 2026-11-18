@@ -198,6 +198,28 @@ pub struct RasterArgs {
     pub font_sha256: Option<String>,
 }
 
+/// The image sequence of `render`: a page played on the presentation
+/// clock, sixty ticks a second, and written as numbered images.
+#[derive(Args, Debug, Clone)]
+pub struct SequenceArgs {
+    /// Play the page for this many ticks of a sixtieth of a second, 1 to
+    /// 36000, from tick 0, and write a sequence of images: each is named
+    /// with -NNNNN, its tick in five digits, before the output's extension.
+    #[arg(long, value_name = "TICKS", value_parser = clap::value_parser!(u32).range(1..=i64::from(crate::commands::MAX_SEQUENCE_TICKS)))]
+    pub frames: Option<u32>,
+    /// Write an image every this many ticks, and always the last.
+    #[arg(long, value_name = "K", default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..), requires = "frames")]
+    pub frame_step: u32,
+    /// A text file of timed operations, one a line, `<tick> <operation>`
+    /// in ascending tick: `move`, `show`, `hide`, `look`, `order`, `frame`,
+    /// `cycle`, `stop_cycle` and `reset` on a sprite's number (or
+    /// `control:<n>`), and
+    /// `record <ANIMATE|SPRITES|FRAME> <hexadecimal body>`. `-` reads
+    /// standard input.
+    #[arg(long, value_name = "FILE", requires = "frames")]
+    pub script: Option<PathBuf>,
+}
+
 #[derive(Subcommand, Debug)]
 pub(crate) enum Command {
     /// List the pages and sub-pages found, with counts and error statistics.
@@ -271,6 +293,8 @@ pub(crate) enum Command {
         /// Image format.
         #[arg(long, value_enum, default_value = "png")]
         image: crate::commands::ImageFormat,
+        #[command(flatten)]
+        sequence: SequenceArgs,
     },
     /// Write one page, or all, as UTF-8 text.
     Text {

@@ -29,7 +29,9 @@ mod image;
 #[cfg(any(feature = "view", feature = "keyboard"))]
 mod nfc;
 mod options;
+mod records;
 mod run;
+mod script;
 mod terminal;
 #[cfg(feature = "view")]
 mod view;

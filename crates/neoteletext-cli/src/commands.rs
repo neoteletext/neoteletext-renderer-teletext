@@ -29,6 +29,7 @@ mod probe;
 #[cfg(feature = "keyboard")]
 mod qr;
 mod render;
+mod sequence;
 mod service_info;
 mod services;
 mod show;
@@ -51,6 +52,7 @@ pub use probe::probe;
 #[cfg(feature = "keyboard")]
 pub use qr::qr;
 pub use render::render;
+pub use sequence::MAX_SEQUENCE_TICKS;
 pub use service_info::service_info;
 pub use services::services;
 pub use show::show;

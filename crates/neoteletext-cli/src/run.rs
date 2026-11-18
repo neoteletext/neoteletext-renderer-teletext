@@ -30,8 +30,8 @@ pub fn run() -> ExitCode {
             commands::view(&common.options(), &raster, graphics, (legacy_mosaics, colours8), (back_key, forward_key))
         }
         Command::Probe { common, selections } => commands::probe(&common.options(), &selections),
-        Command::Render { common, page, output, raster, image } => {
-            commands::render(&common.options(), &page, &output, &raster, image)
+        Command::Render { common, page, output, raster, image, sequence } => {
+            commands::render(&common.options(), &page, &output, &raster, image, &sequence)
         }
         Command::Text { common, page, reveal, legacy_mosaics } => {
             commands::text(&common.options(), &page, reveal, legacy_mosaics)
