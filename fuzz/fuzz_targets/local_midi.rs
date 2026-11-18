@@ -3,16 +3,24 @@
 //! first three bytes choose the family, its variant and its option, the
 //! next two the length of a bank image and the two after the length of a
 //! setup block, both taken from the input, and the rest is read as steps of
-//! four bytes: a status and two data bytes given as a rule's `midi` action,
-//! and a count of samples to render after it. Whatever the bank, the setup
-//! and the messages hold, nothing panics, every render gives its samples,
-//! the meter stays within its ranges and every field reads within the
-//! range its table states.
+//! four bytes: a status and two data bytes given as a `LOCAL_MIDI`
+//! command's message, and a count of samples to render after it. A step
+//! whose status is `0xFF` is instead a block with a cue event (RULE-109;
+//! REQ-6614): the Cue Point meta event at the tick and with the number its
+//! two data bytes give, played into the instrument with a note beside it.
+//! Whatever the bank, the setup, the messages and the blocks hold, nothing
+//! panics, every render gives its samples, a cue is reported with its
+//! number at its sample only where it is one a block carries and changes
+//! nothing the instrument plays, the meter stays within its ranges and
+//! every field reads within the range its table states.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use neoteletext_audio_instruments::local::Local;
-use neoteletext_audio_instruments::midi::{Banks, Instrument, MOST_BANK_BYTES, MOST_BLOCK_BYTES, class, family};
+use neoteletext_audio_instruments::midi::{
+    Banks, DATA_MAX, Instrument, LAST_TICK, MOST_BANK_BYTES, MOST_BLOCK_BYTES, PlayedCue, class, family, meta,
+    play_block, sample_of_tick, status,
+};
 use neoteletext_audio_instruments::watch::Watched;
 
 /// The families that play notes, which alone have a local sound (RULE-60).
@@ -49,6 +57,26 @@ fn read_all(local: &Local, watched: &Watched, banks: &Banks<'_>) {
     }
 }
 
+/// Plays a block of one cue event, at tick `time` with number `number`,
+/// and a note on after it, into the sound, rendering `pcm`: the cue is
+/// reported at its sample where its time and number are a block's, and
+/// the block is malformed or the cue passed over where they are not.
+fn play_cue(local: &mut Local, banks: &Banks<'_>, time: u8, number: u8, pcm: &mut [i16]) {
+    let block = [time, status::META, meta::CUE_POINT, 1, number, 0, status::NOTE_ON, 60, 100];
+    let played = play_block(local, &block, banks, pcm);
+    let cues = played.cues.as_slice();
+    if time > DATA_MAX {
+        // A delta time of one byte has its top bit clear (MIDI-24).
+        assert!(played.malformed && cues.is_empty());
+    } else if number > DATA_MAX {
+        assert!(cues.is_empty() && played.passed_over >= 1);
+    } else {
+        assert!(time <= LAST_TICK);
+        assert_eq!(cues, [PlayedCue { number, sample: sample_of_tick(time) as u16 }]);
+        assert_eq!(played.events, 1, "the note after the cue is given to the instrument");
+    }
+}
+
 fuzz_target!(|data: &[u8]| {
     let [chosen, variant, option, bank_high, bank_low, setup_high, setup_low, rest @ ..] = data else { return };
     let code = FAMILIES[usize::from(*chosen) % FAMILIES.len()];
@@ -71,9 +99,17 @@ fuzz_target!(|data: &[u8]| {
     watched.take_block(setup, &banks);
     read_all(&local, &watched, &banks);
     let mut pcm = [0_i16; u8::MAX as usize];
-    for &[status, data1, data2, samples] in steps.as_chunks::<STEP_BYTES>().0 {
-        let _ = local.channel_message(status, data1, data2, &banks);
-        watched.channel_message(status, data1, data2, &banks);
+    for &[first, data1, data2, samples] in steps.as_chunks::<STEP_BYTES>().0 {
+        if first == status::META {
+            play_cue(&mut local, &banks, data1, data2, &mut pcm[..usize::from(samples)]);
+            // The tracker follows the note the block held, where it was read.
+            if data1 <= DATA_MAX {
+                watched.channel_message(status::NOTE_ON, 60, 100, &banks);
+            }
+            continue;
+        }
+        let _ = local.channel_message(first, data1, data2, &banks);
+        watched.channel_message(first, data1, data2, &banks);
         local.render(&mut pcm[..usize::from(samples)]);
         if samples & 1 == 0 {
             read_all(&local, &watched, &banks);
