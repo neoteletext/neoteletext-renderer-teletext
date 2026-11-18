@@ -504,6 +504,61 @@ fn a_resumed_session_sends_again_only_what_the_channel_had_not_taken() {
     assert_eq!(resent(&mut session), [second, third, fourth]);
 }
 
+// RULE-46, RULE-111 case 2 (TODO-6681 item 5, the browser's DEC-6659 item
+// 3): when the connection ends, every RULE_EVENT not acknowledged is
+// discarded and never sent again, and the session is kept: the next
+// connection resumes it with its token. What the channel had taken stays
+// taken; a RULE_EVENT after it is dropped; the session's own messages
+// after it (RESIZE) are sent again, counted from the count taken, so the
+// receiver's count is the channel's and its acknowledgements are taken.
+#[test]
+fn a_resumed_session_sends_no_rule_event_unacknowledged_at_the_break() {
+    let mut session = resumable();
+    text(&mut session, "a"); // 2
+    text(&mut session, "b"); // 3, taken by the channel but not acknowledged
+    text(&mut session, "c"); // 4
+    let resize = Item::Event(Event::Resize { columns: 40, rows: 25, width: 480, height: 250 });
+    let mut resized = std::vec::Vec::new();
+    assert!(sent_as(&mut session, &resize, &mut resized).is_some()); // 5
+    text(&mut session, "d"); // 6
+    assert!(session.acknowledged(2));
+    session.close();
+    session.discard_rule_events();
+    assert!(session.resumable(), "the session is kept");
+    let first = opening(&mut session, 100, None);
+    assert_eq!(first[1], Event::Resume(Resume { token: TOKEN, acked: 2 }), "and asked for");
+    let resume = Some(Resumption { token: TOKEN, taken: Some(3) });
+    assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Ok(Welcomed::Resumed));
+    assert_eq!(resent(&mut session), [resized], "no RULE_EVENT after 3, the RESIZE alone");
+    assert_eq!(session.count(), 4, "counted again from the 3 taken: the RESIZE is 4");
+    assert!(session.acknowledged(4), "the channel's count after the RESIZE is taken");
+    let after = text(&mut session, "e");
+    assert_eq!(session.count(), 5);
+    // A report sent after the resumption is kept and sent again as before.
+    session.close();
+    opening(&mut session, 200, None);
+    let resume = Some(Resumption { token: TOKEN, taken: Some(4) });
+    assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Ok(Welcomed::Resumed));
+    assert_eq!(resent(&mut session), [after], "not marked: sent again");
+    // Without the call a resumption sends every report again (REQ-RCH-013).
+    let mut session = resumable();
+    let kept = text(&mut session, "a");
+    session.close();
+    opening(&mut session, 300, None);
+    let resume = Some(Resumption { token: TOKEN, taken: Some(1) });
+    assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Ok(Welcomed::Resumed));
+    assert_eq!(resent(&mut session), [kept]);
+    // A channel that did not hold the session begins a new one anyway.
+    let mut session = resumable();
+    text(&mut session, "a");
+    session.close();
+    session.discard_rule_events();
+    opening(&mut session, 400, None);
+    let resume = Some(Resumption { token: TOKEN, taken: None });
+    assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Ok(Welcomed::New));
+    assert_eq!((session.count(), resent(&mut session).len()), (1, 0));
+}
+
 fn sent_any(session: &mut ResumableSession, item: &Item<'_>) -> bool {
     sent_as(session, item, &mut std::vec::Vec::new()).is_some()
 }

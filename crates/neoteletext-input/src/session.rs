@@ -97,9 +97,10 @@ pub struct SessionOf<const KEPT: usize> {
     /// it.
     count: u16,
     /// For each unacknowledged message of input units, oldest first from
-    /// `sent_first`, a ring: the count after it and its bytes in `kept`
-    /// (0 when nothing is kept). The oldest goes when it is full.
-    sent: [(u16, u16); REMEMBERED],
+    /// `sent_first`, a ring: the count after it, its bytes in `kept` (0
+    /// when nothing is kept) and whether it is a `RULE_EVENT`. The oldest
+    /// goes when it is full.
+    sent: [Sent; REMEMBERED],
     sent_first: usize,
     sent_length: usize,
     /// The last acknowledgement taken.
@@ -122,7 +123,27 @@ pub struct SessionOf<const KEPT: usize> {
     /// After a resumed WELCOME, the count after which every message is to
     /// be sent again before anything else.
     resend_from: Option<u16>,
+    /// Set by [`SessionOf::discard_rule_events`]: every `RULE_EVENT` that
+    /// ends at or before this count and that the channel had not taken
+    /// when the session is resumed is dropped, never sent again (RULE-46,
+    /// RULE-111 case 2).
+    discard_through: Option<u16>,
 }
+
+/// One unacknowledged message of input units, as the ring keeps it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Sent {
+    /// The input count after it.
+    after: u16,
+    /// Its bytes in `kept`: 0 when nothing is kept.
+    length: u16,
+    /// Whether it is a `RULE_EVENT`, which a connection's end discards
+    /// (RULE-111 case 2).
+    rule_event: bool,
+}
+
+/// An empty place of the ring.
+const UNSENT: Sent = Sent { after: 0, length: 0, rule_event: false };
 
 /// A session that keeps nothing to send again: a reconnection is always a
 /// new session.
@@ -145,7 +166,7 @@ impl<const KEPT: usize> SessionOf<KEPT> {
             state: State::Closed,
             offered,
             count: 0,
-            sent: [(0, 0); REMEMBERED],
+            sent: [UNSENT; REMEMBERED],
             sent_first: 0,
             sent_length: 0,
             acked: 0,
@@ -157,6 +178,7 @@ impl<const KEPT: usize> SessionOf<KEPT> {
             kept_from: 0,
             asked: false,
             resend_from: None,
+            discard_through: None,
         }
     }
 
@@ -235,6 +257,31 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         }
     }
 
+    /// The push connection ended (RULE-111 case 2): every `RULE_EVENT` not
+    /// acknowledged now is discarded and never sent again (RULE-46), and
+    /// the session itself is kept, so that the next connection may still
+    /// resume it. Call it with [`SessionOf::close`], before the next
+    /// [`SessionOf::open`]; it changes nothing of a session that is not
+    /// resumed.
+    ///
+    /// Which reports to drop cannot be settled here: the channel may have
+    /// taken some of them before the break without acknowledging them, and
+    /// those count in the channel's input count. So they are marked, and
+    /// dropped when a resumed WELCOME says what the channel had taken:
+    /// what it had taken stays (it is never sent again anyway), every
+    /// marked `RULE_EVENT` after it is dropped, and the messages that are
+    /// left after it, the session's own (RESIZE), are counted again from
+    /// the count taken, as the channel will count them when they are sent
+    /// again. The receiver's count and the channel's then agree, every
+    /// acknowledgement the channel gives after the resumption names a
+    /// count the receiver sent up to, and the session's token, its
+    /// identity, is kept. A WELCOME that begins a new session forgets
+    /// everything anyway, and a receiver selects its page afresh either
+    /// way (RULE-111).
+    pub fn discard_rule_events(&mut self) {
+        self.discard_through = Some(self.count);
+    }
+
     /// Forgets the session whole, as when the viewer leaves the channel:
     /// the next connection is a new session.
     pub fn forget(&mut self) {
@@ -263,6 +310,7 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         }
         let welcomed = match resume.and_then(|resume| resume.taken) {
             Some(taken) if self.asked && self.ends_a_message(taken) => {
+                self.drop_discarded(taken);
                 self.resend_from = (taken != self.count).then_some(taken);
                 Welcomed::Resumed
             }
@@ -305,7 +353,7 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         let Some(from) = self.resend_from.take() else { return };
         let mut offset = 0_usize;
         for index in 0..self.sent_length {
-            let Some(&(after, length)) = self.sent.get(self.ring(index)) else { break };
+            let Some(&Sent { after, length, .. }) = self.sent.get(self.ring(index)) else { break };
             let end = offset.saturating_add(usize::from(length));
             if count::serial_after(after, from)
                 && let Some(message) = self.kept.get(offset..end)
@@ -385,7 +433,7 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         taken == self.count
             || taken == self.kept_from
             || (0..self.sent_length)
-                .any(|index| self.sent.get(self.ring(index)).is_some_and(|&(after, _)| after == taken))
+                .any(|index| self.sent.get(self.ring(index)).is_some_and(|sent| sent.after == taken))
     }
 }
 
