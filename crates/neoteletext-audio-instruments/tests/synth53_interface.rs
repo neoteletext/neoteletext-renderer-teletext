@@ -157,6 +157,33 @@ fn s53_12_brightness_is_steps_of_the_cutoff() {
     assert_eq!(at(40, &[cc(74, 30), cc(121, 0)]), at(70, &[]));
 }
 
+// Verifies S53-15: controllers 123 to 127 each release every key held,
+// the pedal still holding, and change neither unison nor the channels.
+#[test]
+fn s53_15_all_notes_off_and_the_mode_messages() {
+    for number in 123..=127 {
+        for pedal in [false, true] {
+            let mut midi = started(Model::Synth53, &plain());
+            if pedal {
+                take(&mut midi, &cc(64, 127));
+            }
+            for key in [60, 64, 67] {
+                take(&mut midi, &channel(status::NOTE_ON, key, 100));
+            }
+            render(&mut midi, 0.1);
+            take(&mut midi, &cc(number, 0));
+            render(&mut midi, 1.0);
+            let sounding = midi.family().sounding_voices();
+            assert_eq!(sounding, if pedal { 3 } else { 0 }, "controller {number}, pedal {pedal}");
+            assert_eq!(midi.part().program(), &plain());
+            // Every channel is still heard.
+            take(&mut midi, &Message::Channel(ChannelMessage::new(status::NOTE_ON, 9, 72, 100)));
+            render(&mut midi, 0.1);
+            assert_eq!(midi.family().sounding_voices(), sounding + 1);
+        }
+    }
+}
+
 // Verifies S53-38 and S53-39: FILTER REV SELECT, Vintage and velocity's
 // switches are carried and not heard.
 #[test]
