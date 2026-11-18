@@ -214,6 +214,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "local_midi"
+path = "fuzz_targets/local_midi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "opus_packets"
 path = "fuzz_targets/opus_packets.rs"
 test = false
