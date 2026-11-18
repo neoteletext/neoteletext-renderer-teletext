@@ -27,7 +27,12 @@
 //! - [`rack`]: the parts, the notes and the MIDI messages.
 //! - [`midi`]: synth7 as the receiver plays it, through the common layer.
 //!
+//! The example plays the rack, which the feature `interface` alone leaves
+//! out, so it is built only with the feature `synth7`:
+//!
 //! ```
+//! # #[cfg(feature = "synth7")]
+//! # {
 //! use neoteletext_audio_instruments::synth7::Rack;
 //!
 //! let mut rack = Rack::new();
@@ -35,6 +40,7 @@
 //! let mut samples = [0_i16; 960];
 //! rack.render(&mut samples);
 //! assert!(samples.iter().any(|&sample| sample != 0));
+//! # }
 //! ```
 
 #[cfg(feature = "synth7")]
