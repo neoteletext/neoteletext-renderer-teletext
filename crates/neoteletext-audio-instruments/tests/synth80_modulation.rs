@@ -16,6 +16,7 @@
 
 mod synth80_support;
 
+use neoteletext_audio_instruments::synth80::patch::ON;
 use neoteletext_audio_instruments::synth80::{Control, Function, Global, Patch};
 use synth80_support::{
     CHANNEL_PRESSURE, CONTROL, KEY_PRESSURE, NOTE_ON, SINE, component, decibels, envelope, instrument, panel, pitch,
@@ -143,7 +144,7 @@ fn the_pulse_widths_oscillator_is_150_ms_at_five_volts_and_5_ms_at_its_fastest()
     let patch = |speed: u8| {
         panel(&[
             (Control::Sawtooth, 0),
-            (Control::Square, 1),
+            (Control::Square, ON),
             (Control::PulseWidth, 64),
             (Control::Pwm, 127),
             (Control::PwmSpeed, speed),
@@ -189,7 +190,7 @@ fn the_pulse_width_moves_between_the_ticks_and_not_in_their_steps() {
     // for this G).
     let patch = panel(&[
         (Control::Sawtooth, 0),
-        (Control::Square, 1),
+        (Control::Square, ON),
         (Control::PulseWidth, 64),
         (Control::Pwm, 127),
         (Control::PwmSpeed, 127),
@@ -519,7 +520,7 @@ fn the_effect_is_the_comb_the_drawings_make() {
     // with the effect on and off, shows what it does to each frequency.
     let noise = |effect: u8| {
         let mut patch = panel(&[(Control::Sawtooth, 0), (Control::Noise, 127)]);
-        patch.set(Global::Effect, effect);
+        patch.set(Global::Effect, effect * ON);
         play(&patch, 60, 100, 5.0, 0.0)[48_000..].to_vec()
     };
     let (on, off) = (noise(1), noise(0));
@@ -570,7 +571,7 @@ fn the_effect_is_the_comb_the_drawings_make() {
     assert!((decibels(measured[0]) - decibels(comb(25.0, delay))).abs() < 0.3 && decibels(measured[0]) > -1.5);
     let top = |effect: u8| {
         let mut patch = panel(&SINE);
-        patch.set(Global::Effect, effect);
+        patch.set(Global::Effect, effect * ON);
         let signal = play(&patch, 120, 100, 1.5, 0.0);
         component(&signal[24_000..], 8_372.0)
     };
@@ -613,9 +614,9 @@ fn both_of_the_effects_oscillators_run_under_either_tab() {
     // TREMOLO has their outputs through 150 kΩ, 333 / 483 of the depth.
     let run = |tremolo: u8, chorus: u8, speed: u8, depth: u8, seconds: f64| {
         let mut patch = panel(&SINE);
-        patch.set(Global::Effect, 1);
-        patch.set(Global::Tremolo, tremolo);
-        patch.set(Global::Chorus, chorus);
+        patch.set(Global::Effect, ON);
+        patch.set(Global::Tremolo, tremolo * ON);
+        patch.set(Global::Chorus, chorus * ON);
         patch.set(Global::EffectSpeed, speed);
         patch.set(Global::EffectDepth, depth);
         play(&patch, 81, 100, seconds, 0.0)[48_000..].to_vec()
@@ -657,7 +658,7 @@ fn the_effect_switched_on_in_silence_lets_nothing_out() {
     // in the middle of a note they kept their 2.56 ms of it, and gave it
     // back whenever the effect was next switched on.
     let mut on = panel(&SINE);
-    on.set(Global::Effect, 1);
+    on.set(Global::Effect, ON);
     let off = panel(&SINE);
     let mut synth80 = instrument(&on);
     synth80.event(NOTE_ON, 72, 127);
@@ -681,7 +682,7 @@ fn the_effects_switch_does_not_click_on_a_note() {
     let step = |signal: &[f64]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0f64, f64::max);
     let off = panel(&SINE);
     let mut on = off;
-    on.set(Global::Effect, 1);
+    on.set(Global::Effect, ON);
     for key in [45u8, 60] {
         let mut synth80 = instrument(&off);
         synth80.event(NOTE_ON, key, 100);
@@ -779,9 +780,9 @@ fn the_effect_on_a_held_string_chord_lifts_the_bottom_and_takes_the_top() {
     let chord = |effect: u8, tremolo: u8, chorus: u8| {
         let mut patch = Patch::with_tones(PRESETS[0].1, PRESETS[0].1);
         patch.set(Global::Mix, 64);
-        patch.set(Global::Effect, effect);
-        patch.set(Global::Tremolo, tremolo);
-        patch.set(Global::Chorus, chorus);
+        patch.set(Global::Effect, effect * ON);
+        patch.set(Global::Tremolo, tremolo * ON);
+        patch.set(Global::Chorus, chorus * ON);
         patch.set(Global::EffectSpeed, 127);
         patch.set(Global::EffectDepth, 127);
         let mut synth80 = instrument(&patch);

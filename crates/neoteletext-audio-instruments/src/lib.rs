@@ -104,7 +104,7 @@ pub mod synth6581 {
 pub mod synth7;
 #[cfg(feature = "synth8")]
 pub mod synth8;
-#[cfg(feature = "synth80")]
+#[cfg(any(feature = "synth80", feature = "interface"))]
 pub mod synth80;
 #[cfg(feature = "synthd")]
 pub mod synthd;

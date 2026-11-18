@@ -76,9 +76,10 @@ fn the_stops_are_whole_shares_of_eight_feet() {
         patch.set(Global::FeetOne, feet);
         pitch_of(&patch, 57)
     };
-    let eight = at(1);
+    // S80-15: each stop by its canonical value.
+    let eight = at(22);
     for (feet, ratio, name) in
-        [(0u8, 0.5, "16'"), (2, 1.5, "5 1/3'"), (3, 2.0, "4'"), (4, 3.0, "2 2/3'"), (5, 4.0, "2'")]
+        [(0u8, 0.5, "16'"), (43, 1.5, "5 1/3'"), (64, 2.0, "4'"), (85, 3.0, "2 2/3'"), (106, 4.0, "2'")]
     {
         let found = at(feet) / eight;
         println!("{name}: {found:.5} of 8'");
@@ -110,7 +111,7 @@ fn the_detune_lever_moves_channel_two_alone() {
 }
 
 #[test]
-fn the_ribbon_multiplies_the_frequency() {
+fn s80_7_pitch_bend_is_linear_in_pitch_over_three_semitones() {
     let bent = |bend: u16| {
         let mut synth80 = instrument(&panel(&SINE));
         synth80.event(PITCH_BEND, (bend & 0x7f) as u8, (bend >> 7) as u8);
@@ -118,18 +119,14 @@ fn the_ribbon_multiplies_the_frequency() {
         pitch(&render(&mut synth80, 1.0)[4_800..])
     };
     let rest = bent(0x2000);
-    // 1 + b: full up is an octave, half down an octave, and the ends of
-    // a straight line in frequency between.
-    for (bend, factor) in
-        [(0x3fffu16, 2.0 - 1.0 / 8192.0), (0x3000, 1.5), (0x1000, 0.5), (0x0800, 0.25), (0x0080, 1.0 / 64.0)]
+    // S80-7's figures: the default range of 3 semitones either way.
+    for (bend, semitones) in
+        [(0u16, -3.0), (4_096, -1.5), (8_193, 3.0 / 8_192.0), (12_288, 1.5), (16_383, 3.0 * 8_191.0 / 8_192.0)]
     {
-        let found = bent(bend) / rest;
-        println!("pitch bend {bend:#06x}: {found:.5} times the frequency");
-        assert!((found / factor - 1.0).abs() < 2.0e-4, "{bend:#x}: {found}");
+        let found = cents(rest, bent(bend));
+        println!("pitch bend {bend}: {found:.3} cents");
+        assert!((found - semitones * 100.0).abs() < 0.1, "{bend}: {found}");
     }
-    // Full down is held eight octaves below.
-    let floor = bent(0) / rest;
-    assert!((floor * 256.0 - 1.0).abs() < 0.01, "{floor}");
 }
 
 /// The lengths of a tone's cycles, each from one rising crossing to the
@@ -151,7 +148,7 @@ fn the_glide_takes_two_seconds_an_octave_at_its_longest_and_steps_in_semitones()
     let glide = |time: u8, glissando: u8| {
         let mut patch = panel(&SINE);
         patch.set(Global::GlideTime, time);
-        patch.set(Global::Glissando, glissando);
+        patch.set(Global::GlideMode, glissando);
         let mut synth80 = instrument(&patch);
         // Eight keys, one for each voice in turn, the first long enough
         // to arrive; the ninth key is then the first voice's again.
@@ -179,7 +176,7 @@ fn the_glide_takes_two_seconds_an_octave_at_its_longest_and_steps_in_semitones()
     let short = glide(0, 0);
     assert!(short.iter().all(|&(time, hertz)| time < 0.01 || (hertz / 440.0 - 1.0).abs() < 0.002));
     // A glissando dwells on each semitone.
-    let stepped = glide(127, 1);
+    let stepped = glide(127, 85);
     let mut steps = Vec::new();
     let mut between = 0usize;
     for &(_, hertz) in &stepped {

@@ -15,13 +15,8 @@ use crate::analog::envelope::ENVELOPE_ONE;
 use crate::analog::octave::ONE_Q30;
 pub use crate::analog::octave::{OCTAVE, OCTAVE_BITS, SEMITONES, cents, keys, octaves};
 
-/// The largest position of a lever in a patch.
-///
-/// Source: own choice: the largest value of a MIDI data byte. The
-/// instrument's levers are continuous.
-pub const LEVER_MAX: u8 = 127;
-/// The middle of a lever that rests at its centre.
-pub const LEVER_CENTRE: u8 = 64;
+// A lever's positions are a control change's values (S80-13).
+pub use super::patch::{LEVER_CENTRE, LEVER_MAX};
 
 /// Bits of the table's index: thirty-seconds of an octave.
 const TABLE_BITS: u32 = 5;

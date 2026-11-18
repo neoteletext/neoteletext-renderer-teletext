@@ -20,6 +20,7 @@ mod synth80_support;
 use std::time::Instant;
 
 use analog::Random;
+use neoteletext_audio_instruments::synth80::patch::ON;
 use neoteletext_audio_instruments::synth80::presets::PRESETS;
 use neoteletext_audio_instruments::synth80::{Control, Global, PATCH_BYTES, Patch, Synth80, VOICES};
 use neoteletext_audio_instruments::{BLOCK_SAMPLES, SAMPLE_RATE};
@@ -206,14 +207,16 @@ fn the_controllers_do_what_the_instrument_says_of_them() {
     render(&mut synth80, 0.01);
     let quarter = level(&mut synth80) / full;
     assert!((quarter - (64.0f64 / 127.0).powi(2)).abs() < 0.02, "{quarter}");
-    // The foot switch does not hold a note: it lengthens its release by
-    // the SUSTAIN lever, which is at its foot here.
+    // The sustain pedal holds a released note until it goes up (S80-26).
     synth80.event(CONTROL, 64, 127);
     synth80.event(NOTE_OFF, 60, 0);
     render(&mut synth80, 0.1);
+    assert_eq!(synth80.sounding_voices(), 1);
+    synth80.event(CONTROL, 64, 0);
+    render(&mut synth80, 0.1);
     assert_eq!(synth80.sounding_voices(), 0);
     // All notes off lets go of every key; reset all controllers puts the
-    // ribbon, the wheel and the pressure back, and leaves the volume.
+    // bend, the wheel and the pressure back, and leaves the volume.
     synth80.event(CONTROL, 7, 127);
     synth80.event(NOTE_ON, 60, 100);
     synth80.event(PITCH_BEND, 0, 0x30);
@@ -290,7 +293,7 @@ fn everything() -> Patch {
     let mut patch = Patch::DEFAULT;
     for tone in &mut patch.tones {
         for (control, value) in [
-            (Control::Square, 1),
+            (Control::Square, ON),
             (Control::Noise, 30),
             (Control::Sine, 60),
             (Control::PulseWidth, 60),
@@ -320,8 +323,8 @@ fn everything() -> Patch {
         (Global::SubVca, 30),
         (Global::RingModulation, 40),
         (Global::RingSpeed, 90),
-        (Global::Effect, 1),
-        (Global::Tremolo, 1),
+        (Global::Effect, ON),
+        (Global::Tremolo, ON),
         (Global::EffectSpeed, 100),
         (Global::EffectDepth, 127),
     ] {

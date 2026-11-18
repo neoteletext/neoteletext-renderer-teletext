@@ -18,6 +18,7 @@ mod synth80_support;
 
 use std::f64::consts::PI;
 
+use neoteletext_audio_instruments::synth80::patch::ON;
 use neoteletext_audio_instruments::synth80::presets::PRESETS;
 use neoteletext_audio_instruments::synth80::{Control, Global, Patch, RATE};
 use synth80_support::{component, decibels, panel, pitch, play, samples};
@@ -199,7 +200,7 @@ fn the_square_is_eight_tenths_of_the_sine_and_the_levels_are_straight() {
     // Adjustment procedure, page 15, steps 1 and 2: 1.00 V of sine, 0.8 V
     // of square, peak to peak. A square's fundamental is 4 / π of its
     // peak.
-    let square = panel(&[(Control::Sawtooth, 0), (Control::Square, 1)]);
+    let square = panel(&[(Control::Sawtooth, 0), (Control::Square, ON)]);
     let signal = play(&square, 57, 100, 1.5, 0.0);
     let hertz = pitch(&signal[24_000..]);
     let found = component(&signal[24_000..], hertz);
