@@ -40,6 +40,10 @@ synth8 = ["analog"]
 # synth80, made from the analogue building blocks (TODO-6434), codec 18. Not
 # on by default.
 synth80 = ["analog"]
+# What the server needs of each family, with no synthesis code: which
+# messages it takes, its patch's packer and check, its bank's builder and
+# check, and its restatement's tracker (server.md, SRV-87, SRV-88).
+interface = []
 
 # Each example plays or builds one instrument, so it is built only with it.
 [[example]]

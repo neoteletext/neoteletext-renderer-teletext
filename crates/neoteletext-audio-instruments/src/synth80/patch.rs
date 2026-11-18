@@ -1,13 +1,16 @@
-//! A patch: the panel of the instrument as a fixed record of 85 bytes.
+//! A patch: the panel of the instrument as 85 control-change values in a
+//! fixed order (`neoteletext-common/docs/audio/synth80.md`, cited here as
+//! "S80-n": S80-33).
 //!
-//! synth80 has no digital patch: its four memories are small copies of
-//! the panel's levers, and its presets are resistors. The byte layout
-//! here is therefore this crate's own. It follows the instrument: a
-//! [`Tone`] is one row of the panel, the 26 controls that a tone selector
-//! button recalls and that a memory holds, in the order the memory panel
-//! has them from left to right; a [`Patch`] is the tone of channel I, the
-//! tone of channel II and the 33 controls that belong to neither and
-//! that no memory or preset holds ([`Global`]).
+//! Neither the instrument modelled nor the adopted interface (Deckard's
+//! Dream's MIDI implementation, DD manual revision 1.3.0, PDF pages 71 to
+//! 74) has a patch format, so a patch is the list of its control changes'
+//! values (decision A4). A [`Tone`] is one row of the panel, the 26
+//! controls that a tone selector button recalls and that a memory holds,
+//! in the order the memory panel has them from left to right, which is
+//! also the adopted table's order for each layer; a [`Patch`] is the tone
+//! of channel I, the tone of channel II and the 33 master controls
+//! ([`Global`]).
 //!
 //! | Bytes | What |
 //! |---|---|
@@ -15,16 +18,68 @@
 //! | 26 to 51 | Channel II's tone, the same |
 //! | 52 to 84 | One byte for each [`Global`] in order |
 //!
-//! A lever is 0 to 127 from the end the panel marks low, slow, short or 0
-//! to the other; a switch is 0 or 1; a selector is its position from 0.
-//! Any other value is refused ([`PatchError`]).
+//! Byte k is always the value of the controller [`controller_of`] gives
+//! for it, and every value 0 to 127 is valid in every byte (S80-16): a
+//! lever is its position, value 0 its end of least effect (S80-13); a
+//! switch is off at 0 to 64 and on at 65 to 127 (S80-14); a selector of
+//! six takes the bands 0-21/22-42/43-63/64-84/85-105/106-127 (S80-15);
+//! GLIDE MODE the bands 0-42/43-84/85-127 (S80-27). Only a byte above 127
+//! is refused ([`PatchError`]).
 //!
-//! Source: owner's manual, the photograph inside the cover and its list
-//! of controls, items 1 to 46, and page 36, the memory panel, whose legend
-//! under the second memory gives the order of a tone's controls; service
-//! manual, page 1, Specifications, which lists the same controls.
+//! Source: S80-10, S80-11, S80-13 to S80-18, S80-20, S80-27 and S80-33;
+//! owner's manual, the photograph inside the cover and its list of
+//! controls, items 1 to 46, and page 36, the memory panel, whose legend
+//! under the second memory gives the order of a tone's controls.
 
-use super::law::LEVER_MAX;
+/// The largest value of a byte: a control change's seven bits (S80-33).
+pub const LEVER_MAX: u8 = 127;
+/// The middle of a lever that rests at its centre ("0-64-127", S80-13).
+pub const LEVER_CENTRE: u8 = 64;
+/// The lowest value at which a switch is on: the adopted table's band
+/// "0-64/65-127" (S80-14).
+pub const SWITCH_ON_FROM: u8 = 65;
+/// A switch's canonical value off (S80-14).
+pub const OFF: u8 = 0;
+/// A switch's canonical value on (S80-14).
+pub const ON: u8 = LEVER_MAX;
+/// The lowest value of each band of a six-position selector, which is
+/// also each position's canonical value: the adopted table's
+/// "0-21/22-42/43-63/64-84/85-105/106-127" (S80-15).
+pub const SELECTOR_BANDS: [u8; 6] = [0, 22, 43, 64, 85, 106];
+/// The lowest value of each band of GLIDE MODE, and each position's
+/// canonical value: the adopted table's "0-42/43-84/85-126", value 127
+/// given to the last band (S80-27).
+pub const GLIDE_BANDS: [u8; 3] = [0, 43, 85];
+
+/// The position, 0 upwards, of the band of `bands` (each band's lowest
+/// value, rising from 0) that holds `value`.
+const fn band(value: u8, bands: &[u8]) -> usize {
+    let mut position = 0;
+    let mut rest = bands;
+    let mut index: usize = 0;
+    while let [lowest, others @ ..] = rest {
+        if value >= *lowest {
+            position = index;
+        }
+        rest = others;
+        index = index.saturating_add(1);
+    }
+    position
+}
+
+/// What kind of control a byte is: how its value is read, and whether it
+/// passes every place between two (S80-37).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    /// A lever, 0 to 127 (S80-13).
+    Lever,
+    /// A switch of two positions (S80-14).
+    Switch,
+    /// A selector of six positions (S80-15).
+    Selector,
+    /// GLIDE MODE, of three positions (S80-27).
+    Glide,
+}
 
 /// Bytes of a tone.
 pub const TONE_BYTES: usize = 26;
@@ -92,24 +147,15 @@ pub enum Control {
 }
 
 impl Control {
-    /// The largest value of the control's byte.
+    /// What kind of control it is.
     #[must_use]
-    pub const fn max(self) -> u8 {
+    pub const fn kind(self) -> Kind {
         match self {
-            Self::Square | Self::Sawtooth => 1,
-            _ => LEVER_MAX,
+            Self::Square | Self::Sawtooth => Kind::Switch,
+            _ => Kind::Lever,
         }
     }
 }
-
-/// The largest value of each byte of a tone.
-#[allow(clippy::indexing_slicing, reason = "worked out by the compiler: a fault here stops the build, and no program")]
-pub(super) const TONE_MAXIMA: [u8; TONE_BYTES] = {
-    let mut maxima = [LEVER_MAX; TONE_BYTES];
-    maxima[Control::Square as usize] = Control::Square.max();
-    maxima[Control::Sawtooth as usize] = Control::Sawtooth.max();
-    maxima
-};
 
 /// One row of the panel: what a tone selector button recalls.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -132,7 +178,7 @@ impl Tone {
     )]
     pub const DEFAULT: Self = {
         let mut values = [0; TONE_BYTES];
-        values[Control::Sawtooth as usize] = 1;
+        values[Control::Sawtooth as usize] = ON;
         values[Control::Lpf as usize] = LEVER_MAX;
         values[Control::VcfLevel as usize] = LEVER_MAX;
         values[Control::Sustain as usize] = LEVER_MAX;
@@ -140,15 +186,15 @@ impl Tone {
         Self { values }
     };
 
-    /// A tone from its 26 values, each held to its control's largest.
+    /// A tone from its 26 values, each held to 127.
     #[must_use]
-    #[allow(clippy::indexing_slicing, reason = "the index is below the length of both arrays, by the loop's bound")]
+    #[allow(clippy::indexing_slicing, reason = "the index is below the array's length, by the loop's bound")]
     pub const fn from_levers(levers: [u8; TONE_BYTES]) -> Self {
         let mut values = levers;
         let mut index = 0;
         while index < TONE_BYTES {
-            if values[index] > TONE_MAXIMA[index] {
-                values[index] = TONE_MAXIMA[index];
+            if values[index] > LEVER_MAX {
+                values[index] = LEVER_MAX;
             }
             index = index.saturating_add(1);
         }
@@ -161,27 +207,27 @@ impl Tone {
         self.values.get(control as usize).copied().unwrap_or(0)
     }
 
-    /// Sets a control, held to its largest value.
+    /// Sets a control to a value, held to 127: the value its controller
+    /// carries (S80-10).
     pub fn set(&mut self, control: Control, value: u8) {
         if let Some(slot) = self.values.get_mut(control as usize) {
-            *slot = value.min(control.max());
+            *slot = value.min(LEVER_MAX);
         }
     }
 
-    /// Whether a switch is on.
+    /// Whether a switch is on: at 65 to 127 (S80-14).
     #[must_use]
     pub fn on(&self, control: Control) -> bool {
-        self.get(control) != 0
+        self.get(control) >= SWITCH_ON_FROM
     }
 
     /// Reads a tone from its 26 bytes.
     ///
     /// # Errors
     ///
-    /// [`PatchError::Value`] with the first byte that is above its
-    /// control's largest value.
+    /// [`PatchError::Value`] with the first byte that is above 127.
     pub fn from_bytes(bytes: &[u8; TONE_BYTES]) -> Result<Self, PatchError> {
-        check(bytes, &TONE_MAXIMA, 0)?;
+        check(bytes, 0)?;
         Ok(Self { values: *bytes })
     }
 
@@ -250,19 +296,19 @@ pub enum Global {
     RingSpeed = 22,
     /// RING MODULATOR MODULATION: none to all of the sound.
     RingModulation = 23,
-    /// SUSTAIN I or II: 0 or 1.
+    /// SUSTAIN I-II: a switch, on for SUSTAIN II.
     SustainMode = 24,
     /// SUSTAIN, short to long.
     Sustain = 25,
-    /// PORTAMENTO or GLISSANDO: 0 or 1.
-    Glissando = 26,
+    /// The PORTAMENTO/GLISSANDO selector: a [`GlideMode`].
+    GlideMode = 26,
     /// PORTAMENTO/GLISSANDO, short to long.
     GlideTime = 27,
-    /// TREMOLO/CHORUS ON: 0 or 1.
+    /// TREMOLO/CHORUS ON/OFF: a switch.
     Effect = 28,
-    /// The CHORUS switch: 0 or 1.
+    /// The CHORUS switch, on when down.
     Chorus = 29,
-    /// The TREMOLO switch: 0 or 1.
+    /// The TREMOLO switch, on when down.
     Tremolo = 30,
     /// TREMOLO/CHORUS SPEED.
     EffectSpeed = 31,
@@ -270,38 +316,49 @@ pub enum Global {
     EffectDepth = 32,
 }
 
-/// The largest position of a selector of six.
-const SELECTOR_MAX: u8 = 5;
-
 impl Global {
-    /// The largest value of the control's byte.
+    /// What kind of control it is.
     #[must_use]
-    pub const fn max(self) -> u8 {
+    pub const fn kind(self) -> Kind {
         match self {
-            Self::FeetOne | Self::FeetTwo | Self::SubFunction => SELECTOR_MAX,
-            Self::SustainMode | Self::Glissando | Self::Effect | Self::Chorus | Self::Tremolo => 1,
-            _ => LEVER_MAX,
+            Self::FeetOne | Self::FeetTwo | Self::SubFunction => Kind::Selector,
+            Self::SustainMode | Self::Effect | Self::Chorus | Self::Tremolo => Kind::Switch,
+            Self::GlideMode => Kind::Glide,
+            _ => Kind::Lever,
         }
     }
 }
 
-/// The largest value of each byte outside the tones.
+/// The kind of each byte of a patch, in its order.
 #[allow(clippy::indexing_slicing, reason = "worked out by the compiler: a fault here stops the build, and no program")]
-pub(super) const GLOBAL_MAXIMA: [u8; GLOBAL_BYTES] = {
-    let mut maxima = [LEVER_MAX; GLOBAL_BYTES];
-    maxima[Global::FeetOne as usize] = SELECTOR_MAX;
-    maxima[Global::FeetTwo as usize] = SELECTOR_MAX;
-    maxima[Global::SubFunction as usize] = SELECTOR_MAX;
-    maxima[Global::SustainMode as usize] = 1;
-    maxima[Global::Glissando as usize] = 1;
-    maxima[Global::Effect as usize] = 1;
-    maxima[Global::Chorus as usize] = 1;
-    maxima[Global::Tremolo as usize] = 1;
-    maxima
+pub const KINDS: [Kind; PATCH_BYTES] = {
+    let mut kinds = [Kind::Lever; PATCH_BYTES];
+    let mut channel = 0;
+    while channel < 2 {
+        kinds[channel * TONE_BYTES + Control::Square as usize] = Control::Square.kind();
+        kinds[channel * TONE_BYTES + Control::Sawtooth as usize] = Control::Sawtooth.kind();
+        channel += 1;
+    }
+    let globals = [
+        Global::FeetOne,
+        Global::FeetTwo,
+        Global::SubFunction,
+        Global::SustainMode,
+        Global::GlideMode,
+        Global::Effect,
+        Global::Chorus,
+        Global::Tremolo,
+    ];
+    let mut index = 0;
+    while index < globals.len() {
+        kinds[2 * TONE_BYTES + globals[index] as usize] = globals[index].kind();
+        index += 1;
+    }
+    kinds
 };
 
 /// A channel's pitch against the keyboard's, as an organ's stops are
-/// named.
+/// named. Each is named by its canonical value (S80-15).
 ///
 /// Source: owner's manual, page 8, item 5: "If 8' is considered normal
 /// pitch, then 16' is one octave below, 5-1/3' is a perfect fifth up, 4'
@@ -311,61 +368,64 @@ pub(super) const GLOBAL_MAXIMA: [u8; GLOBAL_BYTES] = {
 #[repr(u8)]
 pub enum Feet {
     /// 16'.
-    Sixteen = 0,
+    Sixteen = SELECTOR_BANDS[0],
     /// 8'.
-    Eight = 1,
+    Eight = SELECTOR_BANDS[1],
     /// 5 1/3'.
-    FiveAndThird = 2,
+    FiveAndThird = SELECTOR_BANDS[2],
     /// 4'.
-    Four = 3,
+    Four = SELECTOR_BANDS[3],
     /// 2 2/3'.
-    TwoAndTwoThirds = 4,
+    TwoAndTwoThirds = SELECTOR_BANDS[4],
     /// 2'.
-    Two = 5,
+    Two = SELECTOR_BANDS[5],
 }
 
 impl Feet {
-    /// The stop of a selector's position; 8' for one there is not.
+    /// The stop a value selects, by the bands of S80-15, from the top of
+    /// the panel: "At the top (16'), the pitch will be lowest. At the
+    /// bottom (2'), the pitch will be highest" (DD manual, PDF page 35).
     #[must_use]
-    pub const fn from_position(position: u8) -> Self {
-        match position {
+    pub const fn from_value(value: u8) -> Self {
+        match band(value, &SELECTOR_BANDS) {
             0 => Self::Sixteen,
+            1 => Self::Eight,
             2 => Self::FiveAndThird,
             3 => Self::Four,
             4 => Self::TwoAndTwoThirds,
-            5 => Self::Two,
-            _ => Self::Eight,
+            _ => Self::Two,
         }
     }
 }
 
-/// The sub oscillator's waveform.
+/// The sub oscillator's waveform, named by its canonical value (S80-15).
 ///
 /// Source: owner's manual, page 9, item 11 A.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Function {
     /// A sine wave.
-    Sine = 0,
+    Sine = SELECTOR_BANDS[0],
     /// "A sawtooth wave with rapid beginning and slow decay".
-    Sawtooth = 1,
+    Sawtooth = SELECTOR_BANDS[1],
     /// "An inverted sawtooth wave with slow beginning and rapid decay".
-    InvertedSawtooth = 2,
+    InvertedSawtooth = SELECTOR_BANDS[2],
     /// A square wave.
-    Square = 3,
+    Square = SELECTOR_BANDS[3],
     /// White noise.
-    Noise = 4,
+    Noise = SELECTOR_BANDS[4],
     /// The external input: with nothing connected, as here, "an 'off'
     /// mode for the whole sub oscillator section".
-    External = 5,
+    External = SELECTOR_BANDS[5],
 }
 
 impl Function {
-    /// The waveform of a selector's position; the external input for one
-    /// there is not.
+    /// The waveform a value selects, by the bands of S80-15, in the order
+    /// the manuals give them from the top of the panel (DD manual, PDF
+    /// page 36).
     #[must_use]
-    pub const fn from_position(position: u8) -> Self {
-        match position {
+    pub const fn from_value(value: u8) -> Self {
+        match band(value, &SELECTOR_BANDS) {
             0 => Self::Sine,
             1 => Self::Sawtooth,
             2 => Self::InvertedSawtooth,
@@ -376,17 +436,47 @@ impl Function {
     }
 }
 
-/// Why bytes are not a patch.
+/// The PORTAMENTO/GLISSANDO selector, named by its canonical value
+/// (S80-27).
+///
+/// Source: DD manual, PDF pages 41 and 42, the "3-setting switch", left
+/// to right: "P or PORTAMENTO", centre with no glide, "G or GLISSANDO".
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PatchError {
-    /// The byte at this place is above the largest value of its control.
-    Value(usize),
+#[repr(u8)]
+pub enum GlideMode {
+    /// A continuous glide.
+    Portamento = GLIDE_BANDS[0],
+    /// No glide: the pitch goes to the new key at once.
+    Off = GLIDE_BANDS[1],
+    /// A glide in semitone steps.
+    Glissando = GLIDE_BANDS[2],
 }
 
-/// Whether every byte is within its largest value; `offset` is the place
-/// of the first in the whole record.
-fn check(bytes: &[u8], maxima: &[u8], offset: usize) -> Result<(), PatchError> {
-    match bytes.iter().zip(maxima).position(|(value, max)| value > max) {
+impl GlideMode {
+    /// The position a value selects, by the bands of S80-27.
+    #[must_use]
+    pub const fn from_value(value: u8) -> Self {
+        match band(value, &GLIDE_BANDS) {
+            0 => Self::Portamento,
+            1 => Self::Off,
+            _ => Self::Glissando,
+        }
+    }
+}
+
+/// Why bytes are not a patch (S80-33).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PatchError {
+    /// The byte at this place is above 127.
+    Value(usize),
+    /// The bytes are not 85: their number.
+    Length(usize),
+}
+
+/// Whether every byte is a data byte; `offset` is the place of the first
+/// in the whole record.
+fn check(bytes: &[u8], offset: usize) -> Result<(), PatchError> {
+    match bytes.iter().position(|&value| value > LEVER_MAX) {
         Some(place) => Err(PatchError::Value(offset.saturating_add(place))),
         None => Ok(()),
     }
@@ -423,13 +513,15 @@ impl Patch {
         let mut globals = [0; GLOBAL_BYTES];
         globals[Global::FeetOne as usize] = Feet::Eight as u8;
         globals[Global::FeetTwo as usize] = Feet::Eight as u8;
-        globals[Global::Detune as usize] = super::law::LEVER_CENTRE;
-        globals[Global::Brilliance as usize] = super::law::LEVER_CENTRE;
-        globals[Global::KeyboardBrillianceLow as usize] = super::law::LEVER_CENTRE;
-        globals[Global::KeyboardBrillianceHigh as usize] = super::law::LEVER_CENTRE;
-        globals[Global::KeyboardLevelLow as usize] = super::law::LEVER_CENTRE;
-        globals[Global::KeyboardLevelHigh as usize] = super::law::LEVER_CENTRE;
+        globals[Global::Detune as usize] = LEVER_CENTRE;
+        globals[Global::Brilliance as usize] = LEVER_CENTRE;
+        globals[Global::KeyboardBrillianceLow as usize] = LEVER_CENTRE;
+        globals[Global::KeyboardBrillianceHigh as usize] = LEVER_CENTRE;
+        globals[Global::KeyboardLevelLow as usize] = LEVER_CENTRE;
+        globals[Global::KeyboardLevelHigh as usize] = LEVER_CENTRE;
         globals[Global::SubFunction as usize] = Function::Sine as u8;
+        // S80-45: the glide at the selector's new off position.
+        globals[Global::GlideMode as usize] = GlideMode::Off as u8;
         Self { tones: [Tone::DEFAULT; 2], globals }
     };
 
@@ -440,7 +532,7 @@ impl Patch {
         let mut patch = Self::DEFAULT;
         patch.tones = [one, two];
         if one != two {
-            patch.set(Global::Mix, super::law::LEVER_CENTRE);
+            patch.set(Global::Mix, LEVER_CENTRE);
         }
         patch
     }
@@ -451,17 +543,60 @@ impl Patch {
         self.globals.get(global as usize).copied().unwrap_or(0)
     }
 
-    /// Sets a control, held to its largest value.
+    /// Sets a control to a value, held to 127: the value its controller
+    /// carries (S80-11).
     pub fn set(&mut self, global: Global, value: u8) {
         if let Some(slot) = self.globals.get_mut(global as usize) {
-            *slot = value.min(global.max());
+            *slot = value.min(LEVER_MAX);
         }
     }
 
-    /// Whether a switch is on.
+    /// Whether a switch is on: at 65 to 127 (S80-14, S80-18).
     #[must_use]
     pub fn on(&self, global: Global) -> bool {
-        self.get(global) != 0
+        self.get(global) >= SWITCH_ON_FROM
+    }
+
+    /// The value of byte `place`, 0 to 84; 0 past the end.
+    #[must_use]
+    pub fn byte(&self, place: usize) -> u8 {
+        let [one, two] = &self.tones;
+        match place.checked_sub(TONE_BYTES) {
+            None => one.values.get(place),
+            Some(second) => match second.checked_sub(TONE_BYTES) {
+                None => two.values.get(second),
+                Some(global) => self.globals.get(global),
+            },
+        }
+        .copied()
+        .unwrap_or(0)
+    }
+
+    /// Sets byte `place`, 0 to 84, to `value`, held to 127; past the end
+    /// it does nothing.
+    pub fn set_byte(&mut self, place: usize, value: u8) {
+        let [one, two] = &mut self.tones;
+        let slot = match place.checked_sub(TONE_BYTES) {
+            None => one.values.get_mut(place),
+            Some(second) => match second.checked_sub(TONE_BYTES) {
+                None => two.values.get_mut(second),
+                Some(global) => self.globals.get_mut(global),
+            },
+        };
+        if let Some(slot) = slot {
+            *slot = value.min(LEVER_MAX);
+        }
+    }
+
+    /// Reads a patch from bytes of any length: it must be 85 (S80-33).
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError::Length`] for another length, [`PatchError::Value`]
+    /// for a byte above 127.
+    pub fn read(bytes: &[u8]) -> Result<Self, PatchError> {
+        let bytes: &[u8; PATCH_BYTES] = bytes.try_into().map_err(|_| PatchError::Length(bytes.len()))?;
+        Self::from_bytes(bytes)
     }
 
     /// Reads a patch from its 85 bytes.
@@ -469,13 +604,11 @@ impl Patch {
     /// # Errors
     ///
     /// [`PatchError::Value`] with the place of the first byte that is
-    /// above its control's largest value.
+    /// above 127.
     pub fn from_bytes(bytes: &[u8; PATCH_BYTES]) -> Result<Self, PatchError> {
+        check(bytes, 0)?;
         let (one, rest) = bytes.split_at(TONE_BYTES);
         let (two, rest) = rest.split_at(TONE_BYTES);
-        check(one, &TONE_MAXIMA, 0)?;
-        check(two, &TONE_MAXIMA, TONE_BYTES)?;
-        check(rest, &GLOBAL_MAXIMA, TONE_BYTES.saturating_mul(2))?;
         let mut patch = Self::DEFAULT;
         for (tone, source) in patch.tones.iter_mut().zip([one, two]) {
             tone.values.iter_mut().zip(source).for_each(|(value, &byte)| *value = byte);
@@ -494,3 +627,84 @@ impl Patch {
         bytes
     }
 }
+
+/// The controller of each byte of a patch, in the patch's order: channel
+/// I's tone (S80-10: 40 to 63, 65 and 66, leaving out 64, the sustain
+/// pedal), channel II's (S80-10: 67 to 73, 119 and 75 to 92, leaving out
+/// 74, which MPE controllers send), and the master controls (S80-11, the
+/// adopted table's; S80-18, NeoTeletext's own 20 to 31; S80-20, GLIDE MODE
+/// on 3 in place of the adopted table's 120).
+///
+/// Source: DD manual, PDF pages 71 to 74, read with the corrections of
+/// S80-17; S80-33's table.
+pub const CONTROLLERS: [u8; PATCH_BYTES] = [
+    // Channel I.
+    40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 65, 66,
+    // Channel II.
+    67, 68, 69, 70, 71, 72, 73, 119, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92,
+    // FEET I and II, DETUNE CH II, MIX I-II, BRILLIANCE, RESONANCE.
+    102, 103, 95, 8, 109, 110, // The four KEYBOARD CONTROL levers.
+    115, 116, 117, 118, // The sub oscillator: FUNCTION, SPEED, VCO, VCF, VCA.
+    104, 105, 106, 107, 108, // The touch response: PITCHBEND, SPEED, VCO, VCF.
+    111, 112, 113, 114,
+    // NeoTeletext's own: the ring modulator's five, the SUSTAIN I-II switch
+    // and the SUSTAIN lever (S80-18).
+    20, 21, 22, 23, 24, 25, 26, // GLIDE MODE on 3 (S80-20) and GLIDE TIME on 5 (S80-11).
+    3, 5, // NeoTeletext's own: the tremolo/chorus's five (S80-18).
+    27, 28, 29, 30, 31,
+];
+
+/// A controller that moves no byte of the patch, in [`PLACES`].
+const NO_PLACE: u8 = u8::MAX;
+
+/// The byte each controller moves, or [`NO_PLACE`]: [`CONTROLLERS`]
+/// turned about.
+#[allow(
+    clippy::indexing_slicing,
+    clippy::cast_possible_truncation,
+    reason = "worked out by the compiler: a fault here stops the build, and no program; a place is below 85"
+)]
+const PLACES: [u8; 128] = {
+    let mut places = [NO_PLACE; 128];
+    let mut place = 0;
+    while place < PATCH_BYTES {
+        let controller = CONTROLLERS[place] as usize;
+        // S80-10's verification: no controller appears twice.
+        assert!(places[controller] == NO_PLACE, "a controller moves two bytes");
+        places[controller] = place as u8;
+        place += 1;
+    }
+    places
+};
+
+/// The byte of the patch a controller moves, or `None` for one that moves
+/// none (S80-10, S80-11, S80-18, S80-20).
+#[must_use]
+pub fn place_of(controller: u8) -> Option<usize> {
+    PLACES.get(usize::from(controller)).copied().filter(|&place| place != NO_PLACE).map(usize::from)
+}
+
+/// The controller that moves byte `place` of the patch (S80-33), or
+/// `None` past its end.
+#[must_use]
+pub fn controller_of(place: usize) -> Option<u8> {
+    CONTROLLERS.get(place).copied()
+}
+
+// MIDI 1.0's channel mode messages, its parameter numbers and data entry,
+// bank select, the wheel, volume and the pedal move no byte (S80-20,
+// S80-21, section 6.2 rule 2).
+#[allow(clippy::indexing_slicing, reason = "worked out by the compiler: a fault here stops the build, and no program")]
+const _: () = {
+    let reserved = [0u8, 1, 6, 7, 32, 38, 64, 74, 93, 94, 96, 97, 98, 99, 100, 101];
+    let mut index = 0;
+    while index < reserved.len() {
+        assert!(PLACES[reserved[index] as usize] == NO_PLACE);
+        index += 1;
+    }
+    let mut mode = 120;
+    while mode < 128 {
+        assert!(PLACES[mode] == NO_PLACE);
+        mode += 1;
+    }
+};

@@ -1,66 +1,46 @@
-//! synth80's front end to the receiver (MIDI-10, [`crate::midi::Instrument`]):
-//! the common layer ([`crate::midi::common`]) before the instrument's own
-//! message reader, and its patches read from bank index 0 as fixed patches
-//! of its own byte layout.
-//!
-//! This is the interim front end the new carriage was built with. The
-//! family's adopted interface (its family document's messages, control map,
-//! patch form, banks, mapping of program changes and restatement) is to be
-//! built here, replacing [`crate::midi::classic`]'s bridge.
+//! synth80 as the receiver plays it ([`crate::midi::Instrument`]): its
+//! family document's messages, control map, patches, banks and program
+//! changes (`neoteletext-common/docs/audio/synth80.md`), on the common
+//! layer of [`crate::midi::common`], which [`Synth80`] keeps.
 
-use crate::midi::classic::{Classic, ClassicFamily, Fronted};
-use crate::midi::common::Config;
+use crate::midi::{Banks, Instrument, Message, Outcome};
 
 use super::Synth80;
 
-/// synth80 as the receiver plays it.
-pub type Midi = Fronted<Synth80>;
+/// synth80 behind the receiver's one trait.
+#[derive(Clone, Debug)]
+pub struct Midi {
+    synth80: Synth80,
+}
 
-/// How far the ribbon bends up at its top, in cents: an octave (the
-/// instrument's module documentation).
-const BEND_CENTS: u16 = 1_200;
-
-impl ClassicFamily for Synth80 {
-    type Patch = super::Patch;
-    const CONFIG: Config = Config {
-        bend_range_cents: BEND_CENTS,
-        most_bend_range_cents: BEND_CENTS,
-        bank_select: false,
-        non_registered: false,
-    };
-    const CLASSIC: Classic = Classic {
-        controllers: &[crate::midi::controller::MODULATION],
-        voice_bend_range_cents: BEND_CENTS,
-        reset_pedals: &[],
-        expression: false,
-        channel_pressure: true,
-        key_pressure: true,
-    };
-    const PATCH_BYTES: usize = super::PATCH_BYTES;
-    const PROGRAM_CHANNELS: u8 = crate::midi::CHANNEL_MASK + 1;
-
-    fn default_patch(&self) -> Self::Patch {
-        super::Patch::DEFAULT
+impl Midi {
+    /// `synth80`, as the receiver plays it.
+    #[must_use]
+    pub const fn new(synth80: Synth80) -> Self {
+        Self { synth80 }
     }
 
-    fn read_patch(bytes: &[u8]) -> Option<Self::Patch> {
-        super::Patch::from_bytes(bytes.try_into().ok()?).ok()
+    /// The instrument.
+    #[must_use]
+    pub const fn synth80(&self) -> &Synth80 {
+        &self.synth80
+    }
+}
+
+impl Instrument for Midi {
+    fn start(&mut self, banks: &Banks<'_>) -> Outcome {
+        self.synth80.start(banks)
     }
 
-    fn set_patch(&mut self, channel: u8, patch: &Self::Patch) {
-        let _ = channel;
-        self.set_patch(patch);
+    fn midi(&mut self, message: &Message<'_>, banks: &Banks<'_>) -> Outcome {
+        self.synth80.midi(message, banks)
     }
 
-    fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        Synth80::event(self, status, data1, data2);
-    }
-
-    fn release_all(&mut self) {
-        Synth80::release_all(self);
+    fn lost(&mut self) {
+        self.synth80.lost();
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        Synth80::render(self, out);
+        self.synth80.render(out);
     }
 }

@@ -17,6 +17,7 @@
 
 mod synth80_support;
 
+use neoteletext_audio_instruments::synth80::patch::ON;
 use neoteletext_audio_instruments::synth80::{Control, Global, Patch};
 use synth80_support::{CONTROL, NOTE_OFF, NOTE_ON, SINE, envelope, instrument, panel, reaches, render, samples};
 
@@ -216,32 +217,47 @@ fn the_envelope_moves_the_high_pass_filter_by_39_hundredths_of_a_volt() {
 }
 
 #[test]
-fn the_foot_switch_gives_the_release_the_sustain_levers_time() {
+fn s80_26_the_sustain_lever_lengthens_every_release_and_the_pedal_holds_notes() {
     // Owner's manual, page 11: the SUSTAIN lever is "from SHORT (no
-    // sustain) to LONG (about 10 seconds)", and acts while the foot
-    // switch is down.
-    let tail = |pedal: u8, sustain: u8, release: u8| {
+    // sustain) to LONG (about 10 seconds)"; with the SUSTAIN FOOT SWITCH
+    // assigner off it acts on every release, as it does here (S80-26).
+    let tail = |sustain: u8, release: u8| {
         let mut patch = shaped(0, 0, 127, release);
         patch.set(Global::Sustain, sustain);
         let mut synth80 = instrument(&patch);
-        synth80.event(CONTROL, 64, pedal);
         synth80.event(NOTE_ON, KEY, 127);
         render(&mut synth80, 0.05);
         synth80.event(NOTE_OFF, KEY, 0);
         reaches(&envelope(&render(&mut synth80, 3.0), WINDOW), WINDOW, 0.1 * FULL, false)
     };
-    let (up, down) = (tail(0, 100, 0), tail(127, 100, 0));
-    println!("SUSTAIN at 100 of 127: {:.0} ms with the switch up, {:.0} ms with it down", up * 1e3, down * 1e3);
-    assert!((up - 0.010).abs() < 0.002 && (down / time(0.010, 100) - 1.0).abs() < 0.03);
+    let (short, long) = (tail(0, 0), tail(100, 0));
+    println!("SUSTAIN at 0 and at 100 of 127: {:.0} ms and {:.0} ms", short * 1e3, long * 1e3);
+    assert!((short - 0.010).abs() < 0.002 && (long / time(0.010, 100) - 1.0).abs() < 0.03);
     // It never shortens a release.
-    assert!((tail(127, 0, 64) / time(0.010, 64) - 1.0).abs() < 0.03);
+    assert!((tail(0, 64) / time(0.010, 64) - 1.0).abs() < 0.03);
+
+    // MIDI's sustain pedal (MIDI-87): down at 64 to 127, a released key
+    // goes on at its full sustained level; up, it falls at its release.
+    let mut synth80 = instrument(&shaped(0, 0, 127, 0));
+    for (value, down) in [(0u8, false), (1, false), (63, false), (64, true), (127, true)] {
+        synth80.event(CONTROL, 64, value);
+        assert_eq!(synth80.common().channel(0).sustain, down, "{value}");
+    }
+    synth80.event(NOTE_ON, KEY, 127);
+    render(&mut synth80, 0.05);
+    synth80.event(NOTE_OFF, KEY, 0);
+    let held = envelope(&render(&mut synth80, 1.0), WINDOW);
+    assert!((held[held.len() - 1] / FULL - 1.0).abs() < 0.05, "{}", held[held.len() - 1] / FULL);
+    synth80.event(CONTROL, 64, 0);
+    let fall = reaches(&envelope(&render(&mut synth80, 1.0), WINDOW), WINDOW, 0.1 * FULL, false);
+    assert!((fall - 0.010).abs() < 0.002, "{fall}");
 }
 
 #[test]
 fn a_sustain_of_the_second_kind_ends_when_the_next_key_is_played() {
     let run = |mode: u8| {
         let mut patch = shaped(0, 0, 127, 110);
-        patch.set(Global::SustainMode, mode);
+        patch.set(Global::SustainMode, mode * ON);
         let mut synth80 = instrument(&patch);
         synth80.event(NOTE_ON, KEY, 127);
         render(&mut synth80, 0.05);

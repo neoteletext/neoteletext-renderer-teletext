@@ -7,10 +7,10 @@
 //! BRASS 2 on channel II a little sharp, in four slow chords: the top
 //! note of each is pressed harder as it is held, which brightens it,
 //! raises it and brings in the sub oscillator's vibrato, and the last
-//! chord falls away under the ribbon. Then STRING 1 over STRING 4 an
-//! octave below, the foot switch down so that the notes die away in the
-//! sustain lever's time, a melody gliding from note to note above a held
-//! chord, through the tremolo. It prints each half's peak and RMS level.
+//! chord falls three semitones under the pitch bend. Then STRING 1 over
+//! STRING 4 an octave below, the notes dying away in the SUSTAIN lever's
+//! time, a melody gliding from note to note above a held chord, through
+//! the tremolo. It prints each half's peak and RMS level.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -22,8 +22,9 @@
 )]
 
 use neoteletext_audio_instruments::SAMPLE_RATE;
+use neoteletext_audio_instruments::synth80::patch::ON;
 use neoteletext_audio_instruments::synth80::presets::PRESETS;
-use neoteletext_audio_instruments::synth80::{Feet, Function, Global, Patch, Synth80, Tone};
+use neoteletext_audio_instruments::synth80::{Feet, Function, GlideMode, Global, Patch, Synth80, Tone};
 
 /// Seconds each chord of the first half is held, and between two chords.
 const CHORD: f64 = 1.7;
@@ -71,8 +72,8 @@ fn brass() -> Patch {
     patch
 }
 
-/// The strings: channel II an octave below, a long sustain under the
-/// foot switch, a slow glide, the tremolo.
+/// The strings: channel II an octave below, a long sustain, a slow
+/// portamento, the tremolo.
 fn strings() -> Patch {
     let mut patch = Patch::with_tones(preset("STRING 1"), preset("STRING 4"));
     for (global, value) in [
@@ -81,10 +82,11 @@ fn strings() -> Patch {
         (Global::Brilliance, 40),
         (Global::Sustain, 96),
         (Global::GlideTime, 70),
+        (Global::GlideMode, GlideMode::Portamento as u8),
         (Global::SubSpeed, 60),
         (Global::SubVco, 5),
-        (Global::Effect, 1),
-        (Global::Tremolo, 1),
+        (Global::Effect, ON),
+        (Global::Tremolo, ON),
         (Global::EffectSpeed, 80),
         (Global::EffectDepth, 127),
     ] {
@@ -107,7 +109,7 @@ fn score() -> Vec<Timed> {
             score.push(Timed(time, Change::Midi([0xa0, chord[4], 3 * step])));
         }
     }
-    // The last chord falls under the ribbon, which is then let go.
+    // The last chord falls under the pitch bend, which is then let go.
     for step in 0..=30u16 {
         let bend = 0x2000 - step * 0x100;
         let time = 3.0 * BAR + 1.0 + 0.02 * f64::from(step);
@@ -116,7 +118,6 @@ fn score() -> Vec<Timed> {
     score.push(Timed(HALF - 0.05, Change::Midi([0xe0, 0, 0x40])));
 
     score.push(Timed(HALF, Change::Patch(Box::new(strings()))));
-    score.push(Timed(HALF, Change::Midi([0xb0, 64, 127])));
     for key in [38u8, 50, 57] {
         note(&mut score, key, 105, HALF, 5.5);
     }

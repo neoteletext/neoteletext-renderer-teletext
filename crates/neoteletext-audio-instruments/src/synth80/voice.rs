@@ -15,7 +15,7 @@ use crate::analog::oscillator::{Oscillator, waveform};
 use crate::analog::{LEVEL, Oversampling, STEP_LIMIT, frequency};
 
 use super::law::{self, LEVER_MAX, OCTAVE, SEMITONES};
-use super::patch::{Control, Feet, Global, Patch, Tone};
+use super::patch::{Control, Feet, GlideMode, Global, Patch, Tone};
 
 /// How far above the output rate the voices run.
 ///
@@ -400,7 +400,7 @@ impl Channel {
         if tone.on(Control::Square) {
             waves |= waveform::PULSE;
         }
-        let feet = Feet::from_position(patch.get(if second { Global::FeetTwo } else { Global::FeetOne }));
+        let feet = Feet::from_value(patch.get(if second { Global::FeetTwo } else { Global::FeetOne }));
         let detune = if second { law::centred(DETUNE_RANGE, patch.get(Global::Detune)) } else { 0 };
         // The mix is a balance: each channel's share falls in a straight
         // line from all at its own end to none at the other (own choice).
@@ -449,7 +449,10 @@ impl Channel {
                 coefficient(law::time(law::FALL_SHORTEST, lever(release)), fall),
             ]
         };
-        // SUSTAIN lengthens the release it finds, and never shortens it.
+        // SUSTAIN lengthens the release it finds, and never shortens it;
+        // it is always in effect, as on the instrument with its SUSTAIN
+        // FOOT SWITCH assigner off (S80-26; owner's manual, page 11, item
+        // 13 D).
         let sustained = lever(Control::Release).max(patch.get(Global::Sustain));
         Self {
             waves,
@@ -516,6 +519,9 @@ pub struct Shared {
     /// semitones.
     glide_step: i32,
     glissando: bool,
+    /// SUSTAIN II: a glissando goes on after its key is released
+    /// (S80-27).
+    sustain_two: bool,
     bend_return: i32,
     /// The share of a stroke's voltage that drains away in a tick.
     touch_fall: i32,
@@ -541,6 +547,7 @@ impl Shared {
     /// The settings of a patch.
     pub fn new(patch: &Patch) -> Self {
         let lever = |global: Global| patch.get(global);
+        let mode = GlideMode::from_value(lever(Global::GlideMode));
         let squared = law::scaled(law::level(lever(Global::SubVco)), law::level(lever(Global::SubVco)));
         let period = u64::from(law::raise(GLIDE_CLOCK.0, law::share(GLIDE_CLOCK.1, lever(Global::GlideTime))));
         // A semitone in each period, in octaves a tick.
@@ -564,12 +571,14 @@ impl Shared {
             // key's voltage at once: service manual, page 15, "D-A
             // CONVERTER LSI (YM26700)", pin 3, POR: "When the portament
             // VR is turned on, +8.5V is supplied to the pin and actuate".
-            glide_step: if lever(Global::GlideTime) == 0 {
+            // The selector's centre is off too (S80-27).
+            glide_step: if lever(Global::GlideTime) == 0 || mode == GlideMode::Off {
                 i32::MAX
             } else {
                 i32::try_from(step).unwrap_or(i32::MAX).max(1)
             },
-            glissando: patch.on(Global::Glissando),
+            glissando: mode == GlideMode::Glissando,
+            sustain_two: patch.on(Global::SustainMode),
             bend_return: time_constant(TOUCH_BEND.1, TICK_RATE),
             touch_fall: time_constant(TOUCH_HOLD, TICK_RATE),
             damp: coefficient(DAMP_TIME, TIME_CONSTANT_THOUSANDTHS.1),
@@ -599,17 +608,13 @@ pub struct Controls {
     pub sub: i32,
     /// Each channel's pulse width oscillator, in Q30 either way.
     pub pwm: [i32; 2],
-    /// What the ribbon makes of every frequency, in Q28: one at rest.
-    pub ribbon: u32,
+    /// The pitch bend and the tuning, in octaves, which move every
+    /// pitch and the filters with it (S80-7, S80-47).
+    pub bend: i32,
     /// Octaves the modulation wheel lets the sub oscillator move the
     /// pitch, at its peak.
     pub wheel: i32,
-    /// Whether the foot switch holds the sustain.
-    pub pedal: bool,
 }
-
-/// One in Q28: the ribbon at rest.
-pub const RIBBON_REST: u32 = 1 << 28;
 
 /// The sine of a phase in units of 2⁻³² cycle, between -[`LEVEL`] and
 /// [`LEVEL`]: the odd polynomial of the fifth degree through the quarter
@@ -732,7 +737,6 @@ impl Line {
         key: i32,
         brilliance: i32,
         added: i32,
-        ribbon: u32,
         pwm: i32,
         tremolo: i32,
     ) {
@@ -742,16 +746,12 @@ impl Line {
         let filter_level = self.filter_envelope.tick();
         let amp_level = self.amp_envelope.tick();
 
-        let bent = |millihertz: u32| {
-            let product = u64::from(millihertz).saturating_mul(u64::from(ribbon)) >> RIBBON_BITS;
-            u32::try_from(product).unwrap_or(u32::MAX)
-        };
         let pitch = pitch.saturating_add(channel.pitch).saturating_add(self.trim);
         let [pitch_set, hpf_set, lpf_set] = &mut self.set;
-        let asked = i64::from(pitch) << 32 | i64::from(ribbon);
+        let asked = i64::from(pitch);
         if *pitch_set != asked {
             *pitch_set = asked;
-            self.oscillator.set_step(frequency(bent(law::raise(A4.0, pitch)), RATE));
+            self.oscillator.set_step(frequency(law::raise(A4.0, pitch), RATE));
         }
         let swing = mul_high(channel.pwm.cast_signed(), pwm) << 2;
         let width = channel
@@ -772,10 +772,10 @@ impl Line {
                 .saturating_add(lever)
                 .saturating_add(law::scaled(envelope, envelope_weight))
                 .saturating_add(law::scaled(brilliance, modulation_weight));
-            let asked = i64::from(interval) << 32 | i64::from(ribbon);
+            let asked = i64::from(interval);
             if *set != asked {
                 *set = asked;
-                let cutoff = bent(law::raise(law::CUTOFF_AT_NOTHING, interval));
+                let cutoff = law::raise(law::CUTOFF_AT_NOTHING, interval);
                 let cutoff = cutoff.clamp(law::CUTOFF_FLOOR, law::CUTOFF_CEILING);
                 filter.set(frequency(cutoff, RATE).min(STEP_LIMIT), damping);
             }
@@ -819,9 +819,6 @@ const _: () = assert!(ENVELOPE_ONE >> LEVER_SHIFT == ONE_Q28);
 /// Ticks that leave a new oscillator at a place of its own and let the
 /// edges on the way out of its rings.
 const PLACING_TICKS: u32 = 3 + 2 * Oscillator::DELAY as u32;
-/// Fraction bits of the ribbon's factor.
-const RIBBON_BITS: u32 = 28;
-const _: () = assert!(RIBBON_REST == 1 << RIBBON_BITS);
 /// The gain below which an amplifier whose envelope is at rest is
 /// silent, in Q30.
 const GAIN_REST: u32 = 1 << 10;
@@ -936,10 +933,13 @@ impl Voice {
     /// A tick: the glide moves on, and each line takes its pitch, its
     /// filters' cutoffs and its level.
     pub fn tick(&mut self, channels: &[Channel; 2], shared: &Shared, controls: Controls) {
-        // The glide: a fixed interval in each tick towards the key.
+        // The glide: a fixed interval in each tick towards the key. A
+        // glissando stops where it is when its key is released, unless
+        // SUSTAIN II carries it on (S80-27; owner's manual, page 12).
         let target = law::keys(A4.1, self.key);
         let distance = target.saturating_sub(self.glide);
-        self.glide = self.glide.saturating_add(distance.clamp(shared.glide_step.saturating_neg(), shared.glide_step));
+        let step = if shared.glissando && !self.gate && !shared.sustain_two { 0 } else { shared.glide_step };
+        self.glide = self.glide.saturating_add(distance.clamp(step.saturating_neg(), step));
         let key_voltage = if shared.glissando && self.glide != target {
             // Whole semitones only, counted from the key it is going to:
             // it stays on each until the glide has left it behind.
@@ -957,6 +957,9 @@ impl Voice {
         let sub = controls.sub;
         let vibrato =
             shared.sub_vco.saturating_add(controls.wheel).saturating_add(law::scaled(shared.touch_vco, self.pressure));
+        // The bend and the tuning move the key voltage, so the filters
+        // follow them as they follow the keys (S80-7, S80-47).
+        let key_voltage = key_voltage.saturating_add(controls.bend);
         let pitch = key_voltage.saturating_add(self.bend).saturating_add(law::scaled(vibrato, sub));
         let wah = shared.sub_vcf.saturating_add(law::scaled(shared.touch_vcf, self.pressure));
         let (keyboard_brilliance, keyboard_level) = shared.keyboard(self.key);
@@ -985,15 +988,8 @@ impl Voice {
             let added = keyboard_level
                 .saturating_add(law::scaled(channel.touch_level, self.velocity))
                 .saturating_add(law::scaled(channel.pressure_level, self.pressure));
-            let release = if self.damped {
-                shared.damp
-            } else if controls.pedal {
-                channel.amp_sustained
-            } else {
-                let [_, _, release] = channel.amp_times;
-                release
-            };
-            line.tick(channel, self.gate, release, pitch, key, brilliance, added, controls.ribbon, pwm, tremolo);
+            let release = if self.damped { shared.damp } else { channel.amp_sustained };
+            line.tick(channel, self.gate, release, pitch, key, brilliance, added, pwm, tremolo);
         }
     }
 

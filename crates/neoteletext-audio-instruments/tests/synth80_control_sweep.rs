@@ -1,11 +1,13 @@
 //! synth80's control sweep: every lever, tab and selector of both
-//! tones and of the rest of the panel, and every message the instrument
-//! takes, changed under sounding notes, and the step each makes in the
-//! signal (`control_sweep_support.rs` says how it is measured).
+//! tones and of the rest of the panel, each moved by its control change,
+//! and every message the instrument takes, changed under sounding notes,
+//! and the step each makes in the signal (`control_sweep_support.rs` says
+//! how it is measured; `synth80.md`, S80-37 and S80-47).
 
 #![cfg(feature = "synth80")]
 #![allow(
     clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
@@ -17,10 +19,12 @@ mod control_sweep_support;
 
 use control_sweep_support::{
     AFTER, Allowed, CHANNEL_PRESSURE, CONTROL, Change, Clock, Instrument, KEY_PRESSURE, NOTE_OFF, NOTE_ON, PITCH_BEND,
-    PROGRAM, Sound, all_sound_off_silences, check, continuous, messages_after_all_sound_off_are_taken, on_off, run,
-    sweep, switch, to_crest,
+    Sound, all_sound_off_silences, check, continuous, messages_after_all_sound_off_are_taken, on_off, run, sweep,
+    switch, to_crest,
 };
-use neoteletext_audio_instruments::synth80::patch::{Control, Global};
+use neoteletext_audio_instruments::synth80::patch::{
+    CONTROLLERS, Control, GLIDE_BANDS, Global, KINDS, Kind, ON, SELECTOR_BANDS, TONE_BYTES,
+};
 use neoteletext_audio_instruments::synth80::{Patch, Synth80};
 
 impl Instrument for Synth80 {
@@ -84,7 +88,7 @@ const GLOBALS: [Global; 33] = [
     Global::RingModulation,
     Global::SustainMode,
     Global::Sustain,
-    Global::Glissando,
+    Global::GlideMode,
     Global::GlideTime,
     Global::Effect,
     Global::Chorus,
@@ -130,7 +134,7 @@ fn everything() -> Patch {
             (Control::PwmSpeed, 60),
             (Control::Pwm, 40),
             (Control::PulseWidth, 50),
-            (Control::Square, 1),
+            (Control::Square, ON),
             (Control::Sawtooth, 0),
             (Control::Noise, 5),
             (Control::Hpf, 20),
@@ -176,8 +180,9 @@ fn everything() -> Patch {
         (Global::RingModulation, 20),
         (Global::Sustain, 60),
         (Global::GlideTime, 20),
-        (Global::Effect, 1),
-        (Global::Chorus, 1),
+        (Global::GlideMode, 0),
+        (Global::Effect, ON),
+        (Global::Chorus, ON),
         (Global::EffectSpeed, 60),
         (Global::EffectDepth, 80),
     ] {
@@ -237,35 +242,36 @@ fn changes(synth80: &Synth80) -> Vec<Change<Synth80>> {
     let wheel = if patch == everything() { i32::from(WHEEL) } else { 0 };
     let mut all = Vec::new();
     let position = |position: i32| position.to_string();
-    for channel in 0..2 {
-        for control in CONTROLS {
-            let set = move |synth80: &mut Synth80, value: i32| {
-                let mut patch = *synth80.patch();
-                patch.tones[channel].set(control, value as u8);
-                synth80.set_patch(&patch);
-            };
-            let name = format!("{} {control:?}", ["I", "II"][channel]);
-            let (most, at) = (i32::from(control.max()), patch.tones[channel].get(control).into());
-            if most > 5 {
-                all.extend(continuous(&name, (0, most), at, set));
-            } else {
-                all.extend(switch(&name, most + 1, at, position, set));
+    // Each byte of the patch by the control change of its controller
+    // (S80-10, S80-11, S80-18, S80-20): a lever over its travel, a switch
+    // or a selector by its canonical values.
+    let mut names = Vec::new();
+    for channel in ["I", "II"] {
+        names.extend(CONTROLS.iter().map(|control| format!("{channel} {control:?}")));
+    }
+    names.extend(GLOBALS.iter().map(|global| format!("{global:?}")));
+    let bytes = patch.to_bytes();
+    for (place, name) in names.iter().enumerate() {
+        let number = CONTROLLERS[place];
+        let name = format!("{name} ({number})");
+        let at = bytes[place];
+        let canonical: &'static [u8] = match KINDS[place] {
+            Kind::Lever => {
+                let set = move |synth80: &mut Synth80, value: i32| synth80.event(CONTROL, number, value as u8);
+                all.extend(continuous(&name, (0, 127), i32::from(at), set));
+                continue;
             }
-        }
-    }
-    for global in GLOBALS {
-        let set = move |synth80: &mut Synth80, value: i32| {
-            let mut patch = *synth80.patch();
-            patch.set(global, value as u8);
-            synth80.set_patch(&patch);
+            Kind::Switch => &[0, ON],
+            Kind::Selector => &SELECTOR_BANDS,
+            Kind::Glide => &GLIDE_BANDS,
         };
-        let (name, most, at) = (format!("{global:?}"), i32::from(global.max()), patch.get(global).into());
-        if most > 5 {
-            all.extend(continuous(&name, (0, most), at, set));
-        } else {
-            all.extend(switch(&name, most + 1, at, position, set));
-        }
+        let set = move |synth80: &mut Synth80, value: i32| {
+            synth80.event(CONTROL, number, canonical[value as usize]);
+        };
+        let now = canonical.iter().rposition(|&lowest| at >= lowest).unwrap_or(0) as i32;
+        all.extend(switch(&name, canonical.len() as i32, now, position, set));
     }
+    assert_eq!(names.len(), 2 * TONE_BYTES + GLOBALS.len());
 
     // The messages. A controller's place before the change is given by
     // a message before the keys, as a lever's is by the patch.
@@ -278,6 +284,9 @@ fn changes(synth80: &Synth80) -> Vec<Change<Synth80>> {
     all.extend(continuous("pitch bend", (0, 0x3fff), 0x2000, |synth80: &mut Synth80, value: i32| {
         synth80.event(PITCH_BEND, (value & 0x7f) as u8, (value >> 7) as u8);
     }));
+    // S80-47: coarse and fine pitch slide as a lever does.
+    all.extend(continuous("coarse pitch (93)", (0, 127), 64, controller(93)));
+    all.extend(continuous("fine pitch (94)", (0, 127), 64, controller(94)));
     // The pressure of a key that is down: none before the change, since
     // a key newly down is not yet pressed.
     all.extend(continuous("key pressure", (0, 127), 0, |synth80: &mut Synth80, value: i32| {
@@ -309,8 +318,9 @@ fn changes(synth80: &Synth80) -> Vec<Change<Synth80>> {
         }
     }));
     // What the instrument does not take: nothing may move.
-    all.push(message("program change (ignored)", PROGRAM, 5, 0));
     all.push(message("controller 74 (ignored)", CONTROL, 74, 127));
+    all.push(message("controller 32 (ignored)", CONTROL, 32, 1));
+    all.push(message("controller 9 (ignored)", CONTROL, 9, 127));
     all.push(Change::new("release_all", "called", Synth80::release_all));
     all.push(Change::new("reset", "called", Synth80::reset));
     all
