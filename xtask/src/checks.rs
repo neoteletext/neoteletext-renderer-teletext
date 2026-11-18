@@ -74,6 +74,9 @@ const APPLICATION_CRATES: &[(&str, &[&str])] = &[
             // ANIMATE record's operations are read by the rules crate
             // (animation.md ANIM-6, ANIM-18).
             "neoteletext-rules",
+            // The JSON `rules` message names a synthesizer's field by the
+            // family's PARAMETERS table (page-rules.md RULE-29, RULE-35).
+            "neoteletext-audio-instruments",
         ],
     ),
 ];
