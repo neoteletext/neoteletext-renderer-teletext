@@ -156,13 +156,6 @@ pub fn is_downgrade(from_secure: bool, to: OriginParts<'_>, host: &str) -> bool 
     from_secure && !to.secure && to.host.eq_ignore_ascii_case(host)
 }
 
-/// True when a cookie may be sent over this connection (REQ-SEC-008,
-/// REQ-WEB-006): `Secure` cookies only over encryption.
-#[must_use]
-pub const fn may_send_cookie(cookie_secure: bool, connection_secure: bool) -> bool {
-    !cookie_secure || connection_secure
-}
-
 /// True when a character may be written to a terminal or text file
 /// (REQ-SEC-010): no C0 or C1 control, no DEL, no bidirectional control.
 #[must_use]
