@@ -76,7 +76,7 @@ pub enum SendError {
     ResendFirst,
     /// The item could not be encoded; or, with [`InputError::Bare`], it is
     /// a viewer's input outside a `RULE_EVENT` (RULE-46), which under
-    /// protocol version 9 a receiver never writes at the top level of the
+    /// protocol version 10 a receiver never writes at the top level of the
     /// stream.
     Input(InputError),
 }

@@ -185,7 +185,15 @@ fn an_acknowledgement_is_taken_in_the_answers_frame_and_alone() {
     input.welcome(neoteletext_input::VERSION, 0, None).unwrap();
     // Two rules' reports, which count as a viewer's input does (RULE-46).
     for rule in [0, 1] {
-        let fired = RuleEvent { on: ON, generation: 1, rule, tick: 0, target: Target::NONE, body: RuleBody::Fired };
+        let fired = RuleEvent {
+            on: ON,
+            generation: 1,
+            rule,
+            row: neoteletext_rules::limits::NO_RULE,
+            tick: 0,
+            target: Target::NONE,
+            body: RuleBody::Fired,
+        };
         input.send(&Item::Event(Event::RuleEvent(fired)), 0, &mut out).unwrap();
     }
     let mut taken = Vec::new();
@@ -227,18 +235,35 @@ fn welcomed(source: &mut Recorded) -> Typing {
     typing
 }
 
+/// The page on screen as a record names it.
+fn on_screen() -> (neoteletext_core::types::PageAddress, neoteletext_core::types::SubCode) {
+    (neoteletext_core::types::PageAddress::from_mpp(ON.page).unwrap(), neoteletext_core::types::SubCode::new(ON.sub))
+}
+
+/// The packets of the RULES record that carries the default table of a
+/// channel that sends every input (page-rules.md RULE-53) for the page on
+/// screen, generation 1.
+fn default_table_packets() -> Vec<neoteletext_core::packet::Packet> {
+    let mut table = Box::new(neoteletext_rules::Table::new(ON.page, ON.sub));
+    neoteletext_rules::default_send_all(false, ON.page, ON.sub, &mut table);
+    let mut image = vec![0_u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
+    let length = neoteletext_rules::encode(&table, neoteletext_web::records::body_check, &mut image).unwrap();
+    let (page, subcode) = on_screen();
+    let mut packets = Vec::new();
+    neoteletext_web::records::rules::encode_image(page, subcode, 1, &image[..length], 1, &mut |_| 2, &mut |packet| {
+        packets.push(packet);
+    })
+    .unwrap();
+    packets
+}
+
 /// A session the channel welcomed, with the default table of a channel
 /// that sends every input (page-rules.md RULE-53) arrived for page 100 as
 /// its RULES record's packets, page 100 drawn, and its table's page tick 0
 /// evaluated; what the channel was sent so far forgotten.
 fn welcomed_with_table(source: &mut Recorded) -> Typing {
     let mut typing = welcomed(source);
-    let mut table = Box::new(neoteletext_rules::Table::new());
-    neoteletext_rules::default_send_all(false, &mut table);
-    let mut body = vec![0_u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
-    let length = neoteletext_rules::encode(ON.page, 1, Some(&table), &mut body).unwrap();
-    let mut packets = Vec::new();
-    neoteletext_web::records::rules::encode(&body[..length], 1, 2, &mut |packet| packets.push(packet)).unwrap();
+    let packets = default_table_packets();
     assert!(packets.len() > 1, "a table is a record of several fragments");
     assert!(packets.iter().all(super::typing::is_channel_packet), "the viewer keeps each of them");
     typing.records(source, packets.into_iter(), 0);
@@ -315,11 +340,16 @@ fn a_key_is_stamped_with_the_page_drawn() {
     press(&mut typing, &mut source, 'a', KeyEventKind::Press);
     assert_eq!(source.0, [] as [Vec<u8>; 0], "a key waits for the tick that evaluates it");
     typing.tick(&mut source, turn_us(1), 17);
-    assert_eq!(source.0.len(), 1);
-    assert_eq!(source.0[0][..2], [0xFF, neoteletext_input::event::RULE_EVENT]);
-    assert_eq!(source.0[0][3..6], [0x80, 0x02, 0x00], "page 100 is still on screen");
+    // The table's page tick 1: the focus the page was told of when its
+    // table opened, which no page tick 0 takes (RULE-5 step 2), then the
+    // key.
+    assert_eq!(source.0.len(), 2);
+    assert!(source.0.iter().all(|message| message[..2] == [0xFF, neoteletext_input::event::RULE_EVENT]));
+    assert_eq!(source.0[1][3..6], [0x80, 0x02, 0x00], "page 100 is still on screen");
     let key = vec![0xFF, 0x01, 0x80, 0x02, 0x00, 0x10, b'a', 1, b'a'];
-    assert_eq!(rule_events(&source.0), [(ON, 0, key)], "rule 0, `keys`, carries the key as it was typed");
+    // Rule 10 is `focus` and rule 0 `keys`, which carries the key as it
+    // was typed.
+    assert_eq!(rule_events(&source.0), [(ON, 10, vec![0xFF, 0x05]), (ON, 0, key)]);
 }
 
 /// REQ-6523, page-rules.md RULE-50 and RULE-53: a page with no rule table
@@ -342,10 +372,10 @@ fn a_page_with_no_table_is_sent_no_key() {
     }
     assert_eq!(source.0, [] as [Vec<u8>; 0]);
 
-    let mut body = [0_u8; neoteletext_rules::table::HEADER_BYTES];
-    let length = neoteletext_rules::encode(ON.page, 1, None, &mut body).unwrap();
+    let (page, subcode) = on_screen();
+    let none = neoteletext_web::records::rules::RulesRecord { page, subcode, generation: 1, fragment: None };
     let mut packets = Vec::new();
-    neoteletext_web::records::rules::encode(&body[..length], 1, 2, &mut |packet| packets.push(packet)).unwrap();
+    neoteletext_web::records::rules::encode(&none, 1, 2, &mut |packet| packets.push(packet)).unwrap();
     typing.records(&mut source, packets.into_iter(), 0);
     typing.focus_changed(false, &mut source, 0);
     press(&mut typing, &mut source, 'b', KeyEventKind::Press);
@@ -359,17 +389,14 @@ fn a_page_with_no_table_is_sent_no_key() {
 fn a_page_whose_table_opens_is_told_the_focus() {
     let mut source = Recorded::default();
     let mut typing = welcomed(&mut source);
-    let mut table = Box::new(neoteletext_rules::Table::new());
-    neoteletext_rules::default_send_all(false, &mut table);
-    let mut body = vec![0_u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
-    let length = neoteletext_rules::encode(ON.page, 1, Some(&table), &mut body).unwrap();
-    let mut packets = Vec::new();
-    neoteletext_web::records::rules::encode(&body[..length], 1, 2, &mut |packet| packets.push(packet)).unwrap();
+    let packets = default_table_packets();
     typing.records(&mut source, packets.into_iter(), 0);
     typing.tick(&mut source, 0, 0);
     assert_eq!(source.0, [] as [Vec<u8>; 0], "nothing is drawn, so no table is open");
     typing.set_drawn(Some(ON));
     typing.tick(&mut source, turn_us(1), 0);
+    assert_eq!(source.0, [] as [Vec<u8>; 0], "no input belongs to the table's page tick 0 (RULE-5 step 2)");
+    typing.tick(&mut source, turn_us(2), 0);
     // Rule 10 of the default table is `focus`.
     assert_eq!(rule_events(&source.0), [(ON, 10, vec![0xFF, 0x05])]);
 }

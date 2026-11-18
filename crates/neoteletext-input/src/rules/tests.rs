@@ -24,7 +24,7 @@ fn bytes(item: &Item<'_>) -> Vec<u8> {
 }
 
 fn report(target: Target, body: RuleBody<'_>) -> Item<'_> {
-    Item::Event(Event::RuleEvent(RuleEvent { on: ON, generation: 3, rule: 5, tick: 412, target, body }))
+    Item::Event(Event::RuleEvent(RuleEvent { on: ON, generation: 3, rule: 5, row: 2, tick: 412, target, body }))
 }
 
 fn key_a() -> Item<'static> {
@@ -55,19 +55,20 @@ fn a_rule_event_of_each_kind_round_trips() {
     // The stamp is the page and the sub-code as two varints: 0x101 is
     // 0x81 0x02, and 1 is 0x01.
     let head = [0xFF, RULE_EVENT];
-    let after_stamp = [0x81, 0x02, 0x01, 0, 3, 5, 0, 0, 0x01, 0x9C];
+    // Then the generation, the rule, the row and the tick.
+    let after_stamp = [0x81, 0x02, 0x01, 0, 3, 5, 2, 0, 0, 0x01, 0x9C];
     let fired = bytes(&report(Target::NONE, RuleBody::Fired));
-    assert_eq!(fired, [&head[..], &[14], &after_stamp, &[0, 0, 0, 0]].concat());
+    assert_eq!(fired, [&head[..], &[15], &after_stamp, &[0, 0, 0, 0]].concat());
     let key = bytes(&key_a());
     let input = bytes(&report(Target::NONE, RuleBody::Input(&key)));
     assert_eq!(
         input,
-        [&head[..], &[14 + u8::try_from(key.len()).unwrap()], &after_stamp, &[1, 0, 0, 0], &key].concat()
+        [&head[..], &[15 + u8::try_from(key.len()).unwrap()], &after_stamp, &[1, 0, 0, 0], &key].concat()
     );
     let level = Value::sound(0, SOUND_LEVEL);
     let value = bytes(&report(Target::NONE, RuleBody::Value { value: level, reading: -2 }));
     let body = [5, 0, 0, 1, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFE];
-    assert_eq!(value, [&head[..], &[26], &after_stamp, &[2, 0, 0, 0], &body].concat());
+    assert_eq!(value, [&head[..], &[27], &after_stamp, &[2, 0, 0, 0], &body].concat());
     // A pointer event names the target it was inside, and carries its
     // PICK on a page the ReGIS renderer draws.
     let both = [bytes(&press()), bytes(&pick())].concat();
@@ -95,8 +96,15 @@ fn a_rule_event_of_each_kind_round_trips() {
 fn a_rule_event_out_of_range_is_refused() {
     let refused = |item: &Item<'_>| write(item, &mut [0_u8; crate::MAX_MESSAGE]).is_err();
     let with = |change: &dyn Fn(&mut RuleEvent<'_>)| {
-        let mut event =
-            RuleEvent { on: ON, generation: 3, rule: 5, tick: 0, target: Target::NONE, body: RuleBody::Fired };
+        let mut event = RuleEvent {
+            on: ON,
+            generation: 3,
+            rule: 5,
+            row: 255,
+            tick: 0,
+            target: Target::NONE,
+            body: RuleBody::Fired,
+        };
         change(&mut event);
         refused(&Item::Event(Event::RuleEvent(event)))
     };
@@ -104,6 +112,15 @@ fn a_rule_event_out_of_range_is_refused() {
     assert!(with(&|event| event.generation = 0));
     assert!(!with(&|event| event.rule = 63));
     assert!(with(&|event| event.rule = 64));
+    // 255 is a run no rule made, and no row; a row is a rule's.
+    assert!(!with(&|event| event.rule = 255));
+    assert!(!with(&|event| event.row = 63));
+    assert!(with(&|event| event.row = 64));
+    assert!(with(&|event| (event.rule, event.row) = (255, 0)));
+    let of_sequence = Value::sequence(8, 0);
+    assert!(with(&|event| event.body = RuleBody::Value { value: of_sequence, reading: 0 }));
+    let fired = Value::fired(0);
+    assert!(!with(&|event| event.body = RuleBody::Value { value: fired, reading: 97 }));
     // A firing with no event and a value name no target.
     assert!(with(&|event| event.target = Target::object(1)));
     let unchecked = Value::target(TargetKind::Control, 33, TARGET_SHOWN);
@@ -140,7 +157,7 @@ fn a_rule_event_out_of_range_is_refused() {
     // A kind not listed, a body after a firing, and a payload cut short.
     let fired = bytes(&report(Target::NONE, RuleBody::Fired));
     let mut kind = fired.clone();
-    kind[13] = 3;
+    kind[14] = 3;
     assert!(read(&kind).is_err());
     let mut longer = fired.clone();
     longer[2] += 1;
@@ -152,13 +169,13 @@ fn a_rule_event_out_of_range_is_refused() {
     assert_eq!(read(&shorter), Err(InputError::BadValue("rule event")));
 }
 
-/// RULE-46, RULE-49 (REQ-6528): under protocol version 9 a viewer's input
+/// RULE-46, RULE-49 (REQ-6528): under protocol version 10 a viewer's input
 /// at the top level of the stream is a protocol fault; inside a
 /// `RULE_EVENT` it is read; the session's own events stay at the top
 /// level.
 #[test]
 fn a_bare_input_event_is_a_protocol_fault() {
-    assert_eq!(crate::VERSION, 9);
+    assert_eq!(crate::VERSION, 10);
     let key = bytes(&key_a());
     for bare in [key.clone(), bytes(&press()), bytes(&pick()), b"text".to_vec(), bytes(&Item::Event(Event::FocusIn))] {
         assert_eq!(read_message(&bare, &mut |_| {}), Err(InputError::Bare), "{bare:?}");
@@ -186,15 +203,19 @@ fn a_bare_input_event_is_a_protocol_fault() {
 /// checked by the rule table's own reader.
 #[test]
 fn a_page_state_round_trips_and_is_checked() {
-    let mut table = TableState::new(3, 9120, 0b111);
-    table.variables.push(5).unwrap();
+    let mut table = TableState::new(3, 9120);
+    table.variables[0] = 5;
     table.values.push((Value::sound(0, SOUND_LEVEL), 41)).unwrap();
     let state = PageState { identifier: 42, table: Some(table) };
-    let mut body = [0_u8; neoteletext_rules::state::MAX_BODY_BYTES];
+    let mut body = [0_u8; neoteletext_rules::state::MAX_PAYLOAD_BYTES];
     let length = neoteletext_rules::state::encode(&state, &mut body).unwrap();
     let event = PageStateEvent { on: ON, body: &body[..length] };
     let message = bytes(&Item::Event(Event::PageState(event)));
-    assert_eq!(message[..6], [0xFF, PAGE_STATE, u8::try_from(3 + length).unwrap(), 0x81, 0x02, 0x01]);
+    // The payload's length is a varint of two bytes: the sixteen
+    // variables and the eight timers alone pass 127 bytes.
+    let payload = 3 + length;
+    let varint = [u8::try_from(payload & 0x7F).unwrap() | 0x80, u8::try_from(payload >> 7).unwrap()];
+    assert_eq!(message[..7], [0xFF, PAGE_STATE, varint[0], varint[1], 0x81, 0x02, 0x01]);
     let Some((Item::Event(Event::PageState(back)), used)) = read(&message).unwrap() else { panic!() };
     assert_eq!((used, back, back.state()), (message.len(), event, Some(state)));
     // A page with no table.
@@ -212,20 +233,23 @@ fn a_page_state_round_trips_and_is_checked() {
 }
 
 /// RULE-48 (REQ-6528): a `RULES_FAULT` of each code is its bytes, and a
-/// code not listed is refused.
+/// code not listed is refused: code 2, the first form's `tick_overrun`,
+/// is withdrawn and never read.
 #[test]
 fn a_rules_fault_round_trips_and_is_checked() {
     let names = [
-        "undecodable",
-        "tick_overrun",
-        "sends_dropped",
-        "events_dropped",
-        "actions_skipped",
-        "query_dropped",
-        "local_overrun",
-        "animation_slowed",
+        (1, "undecodable"),
+        (3, "reports_dropped"),
+        (4, "events_dropped"),
+        (5, "commands_skipped"),
+        (6, "query_dropped"),
+        (7, "local_overrun"),
+        (8, "animation_slowed"),
+        (9, "evaluation_late"),
+        (10, "queue_full"),
     ];
-    for (code, name) in (1_u8..).zip(names) {
+    assert_eq!(names.len(), FaultCode::ALL.len());
+    for (code, name) in names {
         let fault = FaultCode::from_code(code).unwrap();
         assert_eq!((fault.code(), fault.name()), (code, name));
         let event = RulesFault { on: ON, generation: 3, fault, count: 12 };
@@ -233,13 +257,15 @@ fn a_rules_fault_round_trips_and_is_checked() {
         assert_eq!(message, [0xFF, RULES_FAULT, 8, 0x81, 0x02, 0x01, 0, 3, code, 0, 12]);
         assert_eq!(read(&message), Ok(Some((Item::Event(Event::RulesFault(event)), message.len()))));
     }
-    assert_eq!(FaultCode::from_code(0), None);
-    assert_eq!(FaultCode::from_code(9), None);
+    for withdrawn_or_none in [0, 2, 11, 255] {
+        assert_eq!(FaultCode::from_code(withdrawn_or_none), None);
+    }
     for bad in [
-        &[0xFF, RULES_FAULT, 8, 0x81, 0x02, 0x01, 0, 3, 9, 0, 12][..],
+        &[0xFF, RULES_FAULT, 8, 0x81, 0x02, 0x01, 0, 3, 11, 0, 12][..],
         &[0xFF, RULES_FAULT, 8, 0x81, 0x02, 0x01, 0, 3, 0, 0, 12],
-        &[0xFF, RULES_FAULT, 7, 0x81, 0x02, 0x01, 0, 3, 2, 0],
-        &[0xFF, RULES_FAULT, 9, 0x81, 0x02, 0x01, 0, 3, 2, 0, 12, 0],
+        &[0xFF, RULES_FAULT, 8, 0x81, 0x02, 0x01, 0, 3, 2, 0, 12],
+        &[0xFF, RULES_FAULT, 7, 0x81, 0x02, 0x01, 0, 3, 1, 0],
+        &[0xFF, RULES_FAULT, 9, 0x81, 0x02, 0x01, 0, 3, 1, 0, 12, 0],
     ] {
         assert_eq!(read(bad), Err(InputError::BadValue("rules fault")), "{bad:?}");
     }

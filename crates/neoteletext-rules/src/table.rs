@@ -1,44 +1,66 @@
-//! The decoded rule table (RULE-3, RULE-9 to RULE-28), in fixed arrays,
-//! and the codec of the RULES record's body (RULE-41 to RULE-45, RULE-70).
+//! The decoded rule table (RULE-3, RULE-9 to RULE-28, RULE-105 to
+//! RULE-120), in fixed arrays, and the codec of its image (RULE-41 to
+//! RULE-45, RULE-70).
 //!
-//! [`decode`] accepts a body whole or refuses it whole; [`encode`] writes
-//! one and reads it back, so nothing is written that a receiver refuses;
-//! [`check`] is the decoder applied to encoded bytes, which is what the
-//! server runs before it sends a table (RULE-39, RULE-59).
+//! [`decode`] accepts an image whole or refuses it whole; [`encode`]
+//! writes one and reads it back, so nothing is written that a receiver
+//! refuses; [`check`] is the decoder applied to an image, which is what
+//! the server runs before it cuts a table into records (RULE-39, RULE-59).
+//!
+//! A table belongs to one page, a page number and a sub-code together
+//! (RULE-112). The image holds neither: the RULES record that carries it
+//! does, and the caller gives them to [`decode`].
 
-use crate::animate::Operation;
 use crate::bounded::Bounded;
+use crate::command::{Binding, BodyCheck};
 use crate::limits::{
-    MAX_ACTIONS, MAX_CONDITION_NODES, MAX_KEYS_PER_TRIGGER, MAX_RECTS, MAX_RULES, MAX_SET_MEMBERS, MAX_SUBPAGE_MASKS,
-    MAX_TIMERS, MAX_VARIABLES,
+    ANY_BUTTON, MAX_CONDITION_NODES, MAX_GROUP_COMMANDS, MAX_GROUPS, MAX_GROUPS_BYTES, MAX_KEYS_PER_TRIGGER, MAX_RECTS,
+    MAX_ROWS, MAX_RULES, MAX_SEQUENCE_STEPS, MAX_SEQUENCES, MAX_SET_MEMBERS, MAX_TRIGGERS_PER_RULE, ROW_PARAMETERS,
 };
 
+mod checks;
 mod decode;
 mod encode;
+mod groups;
 mod index;
 mod value;
 
 pub use decode::{check, decode};
 pub use encode::encode;
+pub use groups::{CommandRef, Framed, Groups};
 pub use index::{
     INTEREST_FOCUS, INTEREST_KEYS, INTEREST_MOVES, INTEREST_POINTER_BUTTONS, INTEREST_TEXT, INTEREST_WHEEL, Index,
     WATCH_ENVELOPE_LEVEL, WATCH_ENVELOPE_STAGE, WATCH_LEVEL, WATCH_VOICES, WatchSlot,
 };
 pub use value::{
     CLASS_BEND, CLASS_CONTROLLER, CLASS_ENVELOPE_LEVEL, CLASS_ENVELOPE_STAGE, CLASS_FIELD, CLASS_NOTE, CLASS_NOTES,
-    CLASS_PROGRAM, CLASS_VELOCITY, CLASS_VOICES, INPUT_BUTTON, INPUT_CHARACTER, INPUT_KEYS_DOWN, INPUT_NAMED,
-    INPUT_PHYSICAL, INPUT_POINTER, POINTER_OVER, POINTER_X, POINTER_Y, SOUND_GAIN, SOUND_HANDLE, SOUND_LEVEL,
-    SOUND_LOCAL, SOUND_PLAYING, SPACE_INPUT, SPACE_SOUND, SPACE_SYNTH, SPACE_TARGET, SPACE_TIMER, SPACE_VARIABLE,
-    TARGET_CYCLING, TARGET_EXISTS, TARGET_FRAME, TARGET_INSIDE, TARGET_LAYER, TARGET_LOOK, TARGET_ORDER, TARGET_SHOWN,
-    TARGET_X, TARGET_Y, TIMER_ELAPSED, TIMER_RUNNING, VALUE_BYTES, Value,
+    CLASS_PROGRAM, CLASS_VELOCITY, CLASS_VOICES, FIRED_CUE, FIRED_KEY, FIRED_P0, FIRED_P3, FIRED_ROW, FIRED_TARGET,
+    INPUT_BUTTON, INPUT_CHARACTER, INPUT_KEYS_DOWN, INPUT_NAMED, INPUT_PHYSICAL, INPUT_POINTER, POINTER_OVER,
+    POINTER_X, POINTER_Y, SEQUENCE_PASSES, SEQUENCE_POSITION, SEQUENCE_RUNNING, SOUND_GAIN, SOUND_HANDLE, SOUND_LEVEL,
+    SOUND_LOCAL, SOUND_PLAYING, SPACE_FIRED, SPACE_INPUT, SPACE_SEQUENCE, SPACE_SOUND, SPACE_SYNTH, SPACE_TARGET,
+    SPACE_TIMER, SPACE_VARIABLE, TARGET_CYCLING, TARGET_EXISTS, TARGET_FRAME, TARGET_INSIDE, TARGET_LAYER, TARGET_LOOK,
+    TARGET_ORDER, TARGET_SHOWN, TARGET_X, TARGET_Y, TIMER_ELAPSED, TIMER_RUNNING, VALUE_BYTES, Value,
 };
 
-/// The bytes of the RULES body's header (RULE-41).
+/// The bytes of the image's header (RULE-41).
 pub const HEADER_BYTES: usize = 12;
 /// The bytes of a target in a record (RULE-43): its kind and its number.
 pub const TARGET_BYTES: usize = 3;
+/// The bytes of a rectangle in the image (RULE-42).
+pub const RECT_BYTES: usize = 8;
+/// The bytes of a binding row in the image (RULE-42).
+pub const ROW_BYTES: usize = ROW_PARAMETERS * 4;
+/// The bit of a key's or a target's kind byte that says its code or
+/// number is a row parameter's index (RULE-43).
+pub const FROM_ROW: u8 = 0x80;
+/// The parameter byte of a compare node that adds no parameter (RULE-44).
+pub const NO_PARAMETER: u8 = 0;
+/// The parameter byte of a compare node that adds `p0` (RULE-44); `p1` to
+/// `p3` follow it. They are the binding sources of the same parameters
+/// (RULE-106).
+pub const FIRST_PARAMETER: u8 = 0x20;
 
-/// Trigger codes (RULE-9), the trigger's byte in the record.
+/// Trigger codes (RULE-9), the trigger's byte in the image.
 pub mod trigger_code {
     /// `key`.
     pub const KEY: u8 = 1;
@@ -72,34 +94,16 @@ pub mod trigger_code {
     pub const FOCUS: u8 = 15;
     /// `blur`.
     pub const BLUR: u8 = 16;
-}
-
-/// Action codes (RULE-20), the action's byte in the record. The codes of
-/// the actions on controls and objects are the animation operations' own
-/// ([`crate::animate::code`]).
-pub mod action_code {
-    /// `midi`.
-    pub const MIDI: u8 = 1;
-    /// `play`.
-    pub const PLAY: u8 = 2;
-    /// `stop`.
-    pub const STOP: u8 = 3;
-    /// `gain`.
-    pub const GAIN: u8 = 4;
-    /// `set`.
-    pub const SET: u8 = 8;
-    /// `add`.
-    pub const ADD: u8 = 9;
-    /// `start_timer`.
-    pub const START_TIMER: u8 = 10;
-    /// `stop_timer`.
-    pub const STOP_TIMER: u8 = 11;
-    /// `enable`.
-    pub const ENABLE: u8 = 12;
-    /// `disable`.
-    pub const DISABLE: u8 = 13;
-    /// `send`.
-    pub const SEND: u8 = 14;
+    /// `held`.
+    pub const HELD: u8 = 17;
+    /// `double`.
+    pub const DOUBLE: u8 = 18;
+    /// `press_held`.
+    pub const PRESS_HELD: u8 = 19;
+    /// `double_press`.
+    pub const DOUBLE_PRESS: u8 = 20;
+    /// `cue`.
+    pub const CUE: u8 = 21;
 }
 
 /// Condition node codes (RULE-18).
@@ -122,25 +126,8 @@ pub mod node_code {
     pub const INSIDE: u8 = 8;
 }
 
-/// MIDI status nibbles a `midi` action may carry (RULE-21; MIDI 1.0
-/// Detailed Specification, "Channel Voice Messages").
-pub mod midi_status {
-    /// Note off, `0x8n`.
-    pub const NOTE_OFF: u8 = 0x80;
-    /// Note on, `0x9n`.
-    pub const NOTE_ON: u8 = 0x90;
-    /// Control change, `0xBn`.
-    pub const CONTROL_CHANGE: u8 = 0xB0;
-    /// Program change, `0xCn`.
-    pub const PROGRAM_CHANGE: u8 = 0xC0;
-    /// Pitch bend, `0xEn`.
-    pub const PITCH_BEND: u8 = 0xE0;
-    /// The bits of a status byte that say which message it is.
-    pub const KIND_MASK: u8 = 0xF0;
-}
-
-/// Why a table was refused (RULE-70): it is refused whole, and nothing of
-/// it is kept.
+/// Why a table, a command or a state answer was refused (RULE-70): it is
+/// refused whole, and nothing of it is kept.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fault {
     /// The bytes end before a field does.
@@ -152,33 +139,29 @@ pub enum Fault {
     /// A field outside its range, and which.
     Range(&'static str),
     /// A count over a limit of RULE-57, named by its constant in
-    /// [`crate::limits`].
+    /// [`crate::limits`]; [`crate::limits::value_of`] gives its value.
     Limit(&'static str),
-    /// A number that refers to a variable, timer, rectangle or rule the
+    /// A number that refers to a rectangle, row, group or sequence the
     /// table does not have, and which.
     Reference(&'static str),
     /// A condition whose nodes are not exactly one tree (RULE-44).
     Tree,
-    /// A shape RULE-3 refuses, and which.
+    /// A shape RULE-3, RULE-43 or RULE-107 refuses, and which.
     Shape(&'static str),
+    /// A command a group may not hold, or whose body its record's reader
+    /// refuses, or that names another page (RULE-119), and which.
+    Command(&'static str),
+    /// A binding RULE-106 does not allow, and why.
+    Binding(&'static str),
+    /// Groups that run each other in a ring (RULE-120).
+    Ring,
     /// The output buffer is too small.
     Full,
     /// What was written does not read back as it was given.
     Unreadable,
 }
 
-/// A page variable's declaration (RULE-14): `min ≤ initial ≤ max`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Variable {
-    /// The least value it holds.
-    pub min: i32,
-    /// The greatest value it holds.
-    pub max: i32,
-    /// Its value when the page opens.
-    pub initial: i32,
-}
-
-/// A rectangle a table declares (RULE-13), in the pixels of the sub-page's
+/// A rectangle a table declares (RULE-13), in the pixels of the page's
 /// picture, origin at the top left.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Rect {
@@ -192,16 +175,13 @@ pub struct Rect {
     pub height: u16,
 }
 
-/// The rules switched off while one sub-page is shown (RULE-17).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct SubpageMask {
-    /// The sub-code, `0x0000` to `0x3F7E`.
-    pub sub: u16,
-    /// Bit `n` switches rule `n` off.
-    pub off: u64,
-}
+/// A binding row (RULE-105): the four constants `p0` to `p3`.
+pub type Row = [i32; ROW_PARAMETERS];
 
-/// The kind of a target (RULE-12), its byte in the record.
+/// The parameters in force where no row is (RULE-105): all 0.
+pub const NO_ROW: Row = [0; ROW_PARAMETERS];
+
+/// The kind of a target (RULE-12), its byte in a record.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TargetKind {
     /// The whole page's picture: 0.
@@ -240,7 +220,7 @@ impl TargetKind {
 }
 
 /// Something on the page (RULE-12): a kind and a number. Number 0 of a
-/// control or an object means any, in the six pointer triggers only.
+/// control or an object means any, in the pointer triggers only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Target {
     /// What kind of thing.
@@ -292,7 +272,50 @@ impl Target {
     }
 }
 
-/// How a key is named (RULE-10), its byte in the record.
+/// A trigger's target (RULE-12, RULE-105): a target, or in a rule that
+/// names rows a kind whose number each row gives.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TriggerTarget {
+    /// What kind of thing.
+    pub kind: TargetKind,
+    /// The number; or, with `from_row`, the index 0 to 3 of the row
+    /// parameter that holds it.
+    pub number: u16,
+    /// Whether the number is a row parameter's (RULE-43: bit 7 of the
+    /// kind byte).
+    pub from_row: bool,
+}
+
+impl TriggerTarget {
+    /// The whole page's picture.
+    pub const PAGE: Self = Self::of(Target::PAGE);
+
+    /// A target written in the table.
+    #[must_use]
+    pub const fn of(target: Target) -> Self {
+        Self { kind: target.kind, number: target.number, from_row: false }
+    }
+
+    /// A target of `kind` whose number is row parameter `parameter`.
+    #[must_use]
+    pub const fn row(kind: TargetKind, parameter: u8) -> Self {
+        Self { kind, number: parameter as u16, from_row: true }
+    }
+
+    /// The target for one row (RULE-105), or `None` when the row's
+    /// parameter is no number of the kind, which [`decode`] refuses.
+    #[must_use]
+    pub fn resolve(&self, row: &Row) -> Option<Target> {
+        if !self.from_row {
+            return Some(Target { kind: self.kind, number: self.number });
+        }
+        let parameter = row.get(usize::from(self.number)).copied()?;
+        let number = u16::try_from(parameter).ok()?;
+        Some(Target { kind: self.kind, number })
+    }
+}
+
+/// How a key is named (RULE-10), its byte in a record.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyKind {
     /// The character the active layout gives the key without Shift: 1.
@@ -326,22 +349,52 @@ impl KeyKind {
     }
 }
 
-/// One key of a key set (RULE-10).
+/// One key of a key set (RULE-10, RULE-105).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Key {
     /// How it is named.
     pub kind: KeyKind,
     /// A Unicode scalar value for a character or a physical key; a
     /// functional code for a named key, which the caller that knows the
-    /// input protocol's table checks (RULE-56).
+    /// input protocol's table checks (RULE-56). With `from_row`, the index
+    /// 0 to 3 of the row parameter that holds the code.
     pub code: u32,
+    /// Whether the code is a row parameter's (RULE-43: bit 7 of the kind
+    /// byte).
+    pub from_row: bool,
 }
 
-/// A key set (RULE-10): empty for any key, else 1 to 16 keys.
+impl Key {
+    /// A key written in the table.
+    #[must_use]
+    pub const fn of(kind: KeyKind, code: u32) -> Self {
+        Self { kind, code, from_row: false }
+    }
+
+    /// A key of `kind` whose code is row parameter `parameter`.
+    #[must_use]
+    pub const fn row(kind: KeyKind, parameter: u8) -> Self {
+        Self { kind, code: parameter as u32, from_row: true }
+    }
+
+    /// The key for one row (RULE-105): its kind and code, or `None` when
+    /// the row's parameter is no code, which [`decode`] refuses.
+    #[must_use]
+    pub fn resolve(&self, row: &Row) -> Option<(KeyKind, u32)> {
+        if !self.from_row {
+            return Some((self.kind, self.code));
+        }
+        let parameter = usize::try_from(self.code).ok().and_then(|index| row.get(index)).copied()?;
+        Some((self.kind, u32::try_from(parameter).ok()?))
+    }
+}
+
+/// A key set (RULE-10): empty for any key, else 1 to
+/// `MAX_KEYS_PER_TRIGGER` keys.
 pub type KeySet = Bounded<Key, MAX_KEYS_PER_TRIGGER>;
 
 /// What a list of keys not yet filled holds.
-const NO_KEY: Key = Key { kind: KeyKind::Character, code: 0 };
+const NO_KEY: Key = Key::of(KeyKind::Character, 0);
 
 /// A key set that matches any key.
 #[must_use]
@@ -349,57 +402,79 @@ pub const fn any_key() -> KeySet {
     Bounded::new(NO_KEY)
 }
 
-/// A trigger (RULE-9): the event that can make a rule fire.
+/// The keys a key trigger names and the modifiers it compares (RULE-9).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct KeyMatch {
+    /// The keys; empty for any.
+    pub keys: KeySet,
+    /// The modifier bits compared.
+    pub mods_mask: u8,
+    /// What they must be: the trigger matches when
+    /// `(mods AND mask) = value`.
+    pub mods_value: u8,
+}
+
+impl KeyMatch {
+    /// Any key, whatever the modifiers.
+    #[must_use]
+    pub const fn any() -> Self {
+        Self { keys: any_key(), mods_mask: 0, mods_value: 0 }
+    }
+
+    /// The keys given, whatever the modifiers. Keys beyond the limit are
+    /// left out, which [`encode`] cannot see: give no more.
+    #[must_use]
+    pub fn of(keys: &[Key]) -> Self {
+        let mut set = any_key();
+        for key in keys {
+            let _ = set.push(*key);
+        }
+        Self { keys: set, mods_mask: 0, mods_value: 0 }
+    }
+}
+
+/// A trigger (RULE-9): an event that can make a rule fire.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trigger {
     /// A key of the set is pressed.
     Key {
-        /// The keys; empty for any.
-        keys: KeySet,
+        /// The keys and modifiers.
+        keys: KeyMatch,
         /// Whether each automatic repeat fires too.
         repeat: bool,
-        /// The modifier bits compared.
-        mods_mask: u8,
-        /// What they must be: the trigger matches when
-        /// `(mods AND mask) = value`.
-        mods_value: u8,
     },
     /// A key of the set is released, or lost.
     KeyUp {
-        /// The keys; empty for any.
-        keys: KeySet,
-        /// The modifier bits compared.
-        mods_mask: u8,
-        /// What they must be.
-        mods_value: u8,
+        /// The keys and modifiers.
+        keys: KeyMatch,
     },
     /// A button or a contact goes down inside the target.
     Press {
         /// Where.
-        target: Target,
+        target: TriggerTarget,
         /// 0 left, 1 middle, 2 right, or 255 for any.
         button: u8,
     },
     /// A button that went down inside the target comes up.
     Release {
         /// Where it went down.
-        target: Target,
+        target: TriggerTarget,
         /// 0, 1, 2, or 255 for any.
         button: u8,
     },
     /// The pointer comes inside the target.
     Enter {
         /// Which.
-        target: Target,
+        target: TriggerTarget,
     },
     /// The pointer goes outside the target, or leaves the page.
     Leave {
         /// Which.
-        target: Target,
+        target: TriggerTarget,
     },
     /// Page tick 0.
     Open,
-    /// The page stops being shown.
+    /// The page is closed while its connection stands.
     Close,
     /// The rule's condition holds now and did not before (RULE-11).
     Becomes,
@@ -407,14 +482,14 @@ pub enum Trigger {
     Every {
         /// The timer, 0 to 7, or 255 for the page timer.
         timer: u8,
-        /// 1 to 216,000.
+        /// 1 to `MAX_TIMER_TICKS`.
         ticks: u32,
     },
     /// Once, `ticks` ticks after the timer started.
     After {
         /// The timer, 0 to 7, or 255 for the page timer.
         timer: u8,
-        /// 1 to 216,000.
+        /// 1 to `MAX_TIMER_TICKS`.
         ticks: u32,
     },
     /// Text arrives that is not a key.
@@ -422,23 +497,67 @@ pub enum Trigger {
     /// The pointer moves to another pixel inside the target.
     Move {
         /// Where.
-        target: Target,
+        target: TriggerTarget,
         /// Only while a button is down.
         held: bool,
     },
     /// The wheel turns with the pointer inside the target.
     Wheel {
         /// Where.
-        target: Target,
+        target: TriggerTarget,
     },
     /// The page gains the keyboard.
     Focus,
     /// The page loses the keyboard.
     Blur,
+    /// A key of the set has been down for exactly `ticks` ticks
+    /// (RULE-108).
+    Held {
+        /// The keys and modifiers, as they were at the press.
+        keys: KeyMatch,
+        /// 1 to `MAX_HOLD_TICKS`.
+        ticks: u16,
+    },
+    /// A key of the set is pressed at most `ticks` ticks after its
+    /// previous press (RULE-108).
+    Double {
+        /// The keys and modifiers.
+        keys: KeyMatch,
+        /// 1 to `MAX_DOUBLE_TICKS`.
+        ticks: u16,
+    },
+    /// A button that went down inside the target has been down for
+    /// exactly `ticks` ticks (RULE-108).
+    PressHeld {
+        /// Where it went down.
+        target: TriggerTarget,
+        /// 0, 1, 2, or 255 for any.
+        button: u8,
+        /// 1 to `MAX_HOLD_TICKS`.
+        ticks: u16,
+    },
+    /// A button goes down inside the target at most `ticks` ticks after
+    /// its previous press there (RULE-108).
+    DoublePress {
+        /// Where.
+        target: TriggerTarget,
+        /// 0, 1, 2, or 255 for any.
+        button: u8,
+        /// 1 to `MAX_DOUBLE_TICKS`.
+        ticks: u16,
+    },
+    /// A cue of the sound playing on an audio channel is heard
+    /// (RULE-109).
+    Cue {
+        /// The audio channel, 0 to 3.
+        channel: u8,
+        /// The cue, 0 to `MAX_CUE`, or 255 for any.
+        number: u8,
+    },
 }
 
 impl Trigger {
-    /// The trigger's byte in the record (RULE-9).
+    /// The trigger's byte in the image (RULE-9).
     #[must_use]
     pub const fn code(&self) -> u8 {
         match self {
@@ -458,25 +577,61 @@ impl Trigger {
             Self::Wheel { .. } => trigger_code::WHEEL,
             Self::Focus => trigger_code::FOCUS,
             Self::Blur => trigger_code::BLUR,
+            Self::Held { .. } => trigger_code::HELD,
+            Self::Double { .. } => trigger_code::DOUBLE,
+            Self::PressHeld { .. } => trigger_code::PRESS_HELD,
+            Self::DoublePress { .. } => trigger_code::DOUBLE_PRESS,
+            Self::Cue { .. } => trigger_code::CUE,
         }
     }
 
     /// The target a pointer trigger names.
     #[must_use]
-    pub const fn target(&self) -> Option<Target> {
+    pub const fn target(&self) -> Option<TriggerTarget> {
         match self {
             Self::Press { target, .. }
             | Self::Release { target, .. }
             | Self::Enter { target }
             | Self::Leave { target }
             | Self::Move { target, .. }
-            | Self::Wheel { target } => Some(*target),
+            | Self::Wheel { target }
+            | Self::PressHeld { target, .. }
+            | Self::DoublePress { target, .. } => Some(*target),
             _ => None,
         }
     }
+
+    /// The keys a key trigger names.
+    #[must_use]
+    pub const fn keys(&self) -> Option<&KeyMatch> {
+        match self {
+            Self::Key { keys, .. } | Self::KeyUp { keys } | Self::Held { keys, .. } | Self::Double { keys, .. } => {
+                Some(keys)
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether an input event can make the trigger occur (RULE-96): these
+    /// are decided on the event's arrival. `held` and `press_held` belong
+    /// to step 4 of the tick and are not.
+    #[must_use]
+    pub const fn is_input(&self) -> bool {
+        !matches!(
+            self,
+            Self::Open
+                | Self::Close
+                | Self::Becomes
+                | Self::Every { .. }
+                | Self::After { .. }
+                | Self::Held { .. }
+                | Self::PressHeld { .. }
+                | Self::Cue { .. }
+        )
+    }
 }
 
-/// A comparison's operator (RULE-18), its byte in the record.
+/// A comparison's operator (RULE-18), its byte in the image.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Operator {
     /// `==`: 1.
@@ -494,7 +649,7 @@ pub enum Operator {
 }
 
 impl Operator {
-    /// The operator's byte in a record.
+    /// The operator's byte in the image.
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {
@@ -535,16 +690,16 @@ impl Operator {
     }
 }
 
-/// The constants of an `in_set` (RULE-18): 1 to 8.
+/// The constants of an `in_set` (RULE-18): 1 to `MAX_SET_MEMBERS`.
 pub type SetMembers = Bounded<i32, MAX_SET_MEMBERS>;
 
 /// One node of a condition (RULE-18). A condition's nodes are in prefix
 /// order: a node, then each of its children in order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Node {
-    /// True when all of its children are: 2 to 8 of them.
+    /// True when all of its children are.
     And(u8),
-    /// True when any of its children is: 2 to 8 of them.
+    /// True when any of its children is.
     Or(u8),
     /// True when its one child is false.
     Not,
@@ -556,6 +711,9 @@ pub enum Node {
         operator: Operator,
         /// With what.
         constant: i32,
+        /// The row parameter, 0 to 3, added to the constant with
+        /// saturation (RULE-105), in a rule that names rows.
+        parameter: Option<u8>,
     },
     /// True when `low ≤ value ≤ high`.
     InRange {
@@ -570,7 +728,7 @@ pub enum Node {
     InSet {
         /// What is read.
         value: Value,
-        /// The constants, 1 to 8.
+        /// The constants.
         members: SetMembers,
     },
     /// True when the two targets' bounding rectangles share a pixel
@@ -582,6 +740,12 @@ pub enum Node {
 }
 
 impl Node {
+    /// A value compared with a constant, with no row parameter.
+    #[must_use]
+    pub const fn compare(value: Value, operator: Operator, constant: i32) -> Self {
+        Self::Compare { value, operator, constant, parameter: None }
+    }
+
     /// The value a term reads, if it reads one.
     #[must_use]
     pub const fn value(&self) -> Option<Value> {
@@ -598,250 +762,242 @@ impl Node {
     }
 }
 
-/// A condition (RULE-18): no node for none, else one tree of at most 16
-/// nodes in prefix order.
+/// A condition (RULE-18): no node for none, else one tree of at most
+/// `MAX_CONDITION_NODES` nodes in prefix order.
 pub type Condition = Bounded<Node, MAX_CONDITION_NODES>;
 
-/// No condition: the rule fires whenever its trigger occurs.
+/// No condition: the rule fires whenever a trigger of its occurs.
 #[must_use]
 pub const fn no_condition() -> Condition {
     Bounded::new(Node::Not)
 }
 
-/// An action (RULE-20): one local effect.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Action {
-    /// One MIDI channel voice message to the local sound on an audio
-    /// channel (RULE-21).
-    Midi {
-        /// The audio channel, 0 to 3.
-        channel: u8,
-        /// The status byte: note off, note on, control change, program
-        /// change or pitch bend, with the part's MIDI channel less one.
-        status: u8,
-        /// The first data byte, 0 to 127.
-        data1: u8,
-        /// The second, 0 to 127; 0 for a program change.
-        data2: u8,
-    },
-    /// Starts a sound the page already has on an audio channel.
-    Play {
-        /// The audio channel, 0 to 3.
-        channel: u8,
-        /// The sound's handle.
-        handle: u8,
-        /// The sound's generation.
-        generation: u16,
-        /// 0 to 100.
-        gain: u8,
-        /// 0 to 10,000 milliseconds.
-        fade_ms: u16,
-        /// Whether it loops.
-        looped: bool,
-    },
-    /// Ramps an audio channel to silence and stops it.
-    Stop {
-        /// The audio channel, 0 to 3.
-        channel: u8,
-        /// 0 to 10,000 milliseconds.
-        fade_ms: u16,
-    },
-    /// Ramps an audio channel to a gain.
-    Gain {
-        /// The audio channel, 0 to 3.
-        channel: u8,
-        /// 0 to 100.
-        gain: u8,
-        /// 0 to 10,000 milliseconds.
-        fade_ms: u16,
-    },
-    /// An operation on a control's or an object's animation state: `show`,
-    /// `hide`, `look`, `move`, `order`, `frame`, `cycle` or `stop_cycle`
-    /// (ANIM-6), the same bytes an `ANIMATE` record holds.
-    Animate(Operation),
-    /// Sets a variable to a constant, held to its range (RULE-14).
-    Set {
-        /// The variable's number.
-        variable: u8,
-        /// The constant.
-        value: i32,
-    },
-    /// Adds a constant to a variable, saturating at its range (RULE-14).
-    Add {
-        /// The variable's number.
-        variable: u8,
-        /// The constant.
-        amount: i32,
-    },
-    /// Starts or restarts a timer (RULE-15).
-    StartTimer(u8),
-    /// Stops a timer.
-    StopTimer(u8),
-    /// Switches rules on: bit `n` for rule `n` (RULE-16).
-    Enable(u64),
-    /// Switches rules off.
-    Disable(u64),
-    /// Reports to the page's channel: the trigger's own event for `None`,
-    /// or one value (RULE-22).
-    Send(Option<Value>),
+/// A condition of the nodes given, in prefix order. Nodes beyond the
+/// limit are left out: give no more.
+#[must_use]
+pub fn condition(nodes: &[Node]) -> Condition {
+    let mut condition = no_condition();
+    for node in nodes {
+        let _ = condition.push(*node);
+    }
+    condition
 }
 
 /// Checks that a condition's nodes, in prefix order, are exactly one tree
-/// within RULE-18's limits: at most 8 terms, operators nested at most 3
-/// deep. No node is no condition, and passes.
+/// within RULE-18's limits. No node is no condition, and passes.
 ///
 /// # Errors
 /// [`Fault::Tree`] when the nodes are not one tree that uses every node,
-/// and [`Fault::Limit`] for a ninth term or a fourth level.
+/// and [`Fault::Limit`] for a term or a level over its limit.
 pub fn check_condition(nodes: &[Node]) -> Result<(), Fault> {
-    decode::check_tree(nodes)
+    checks::check_tree(nodes)
 }
 
-/// A rule's actions (RULE-3): 0 to 16, run in written order.
-pub type Actions = Bounded<Action, MAX_ACTIONS>;
-
-/// No actions.
-#[must_use]
-pub const fn no_actions() -> Actions {
-    Bounded::new(Action::StopTimer(0))
+/// The rows a rule names (RULE-105): a run of the table's rows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RowRun {
+    /// The first row.
+    pub first: u8,
+    /// How many, at least 1.
+    pub count: u8,
 }
 
-/// A rule (RULE-3): a trigger, at most one condition and at most 16
-/// actions.
+/// The triggers of a rule (RULE-107): 1 to `MAX_TRIGGERS_PER_RULE`.
+pub type Triggers = Bounded<Trigger, MAX_TRIGGERS_PER_RULE>;
+
+/// A rule (RULE-3): its triggers, at most one condition, optionally a run
+/// of binding rows, and the one group it runs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Rule {
-    /// Its state when the page opens.
-    pub enabled: bool,
-    /// A `send` of the trigger's own event after its last action
-    /// (RULE-22).
-    pub echo: bool,
-    /// The event that can make it fire.
-    pub trigger: Trigger,
+    /// The group it runs.
+    pub group: u8,
+    /// The rows it is matched once for each of (RULE-105).
+    pub rows: Option<RowRun>,
+    /// The events any of which can make it fire.
+    pub triggers: Triggers,
     /// What must hold for it to fire; for a `becomes` trigger, the
     /// condition whose becoming true fires it.
     pub condition: Condition,
-    /// What it does.
-    pub actions: Actions,
 }
 
 impl Rule {
-    /// A rule of `trigger` that is enabled, has no condition, no actions
-    /// and no `echo`: a start to fill in.
+    /// A rule of one trigger that runs `group`, with no condition and no
+    /// rows: a start to fill in.
     #[must_use]
-    pub const fn new(trigger: Trigger) -> Self {
-        Self { enabled: true, echo: false, trigger, condition: no_condition(), actions: no_actions() }
+    pub fn new(trigger: Trigger, group: u8) -> Self {
+        let mut triggers = Bounded::new(Trigger::Open);
+        let _ = triggers.push(trigger);
+        Self { group, rows: None, triggers, condition: no_condition() }
+    }
+
+    /// How many rows the rule is matched for: its rows, or one without.
+    #[must_use]
+    pub fn row_count(&self) -> usize {
+        self.rows.map_or(1, |rows| usize::from(rows.count))
     }
 }
 
 /// What a list of rules not yet filled holds.
-const NO_RULE: Rule = Rule::new(Trigger::Open);
+const NO_RULE: Rule = Rule { group: 0, rows: None, triggers: Bounded::new(Trigger::Open), condition: no_condition() };
 
-/// What the RULES body's header says (RULE-41).
+/// One step of a sequence (RULE-103).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Header {
-    /// The page the table is for, `0x100` to `0x8FF`.
-    pub page: u16,
-    /// 1 to 65,535 (RULE-40).
-    pub generation: u16,
-    /// Whether a table follows; without one the page has no table.
-    pub has_table: bool,
+pub struct Step {
+    /// The tick offset within a pass, below the sequence's length.
+    pub offset: u32,
+    /// The group run then.
+    pub group: u8,
+}
+
+/// A sequence (RULE-103): steps the receiver plays on its own clock.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Sequence {
+    /// How many passes, 1 to `MAX_SEQUENCE_REPEAT`; 0 for until stopped.
+    pub repeat: u8,
+    /// The length of a pass in ticks, 1 to `MAX_SEQUENCE_TICKS`.
+    pub length: u32,
+    /// The steps, in ascending offset.
+    pub steps: Bounded<Step, MAX_SEQUENCE_STEPS>,
+}
+
+impl Sequence {
+    /// A sequence of `length` ticks and `repeat` passes with no step yet.
+    #[must_use]
+    pub const fn new(length: u32, repeat: u8) -> Self {
+        Self { repeat, length, steps: Bounded::new(Step { offset: 0, group: 0 }) }
+    }
 }
 
 /// A page's rule table (RULE-2, RULE-3), decoded into fixed arrays.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Table {
-    /// The variables, numbered from 0 (RULE-14).
-    pub variables: Bounded<Variable, MAX_VARIABLES>,
-    /// The timers, numbered from 0: whether each runs from opening
-    /// (RULE-15).
-    pub timers: Bounded<bool, MAX_TIMERS>,
+    /// The page number the table is for, `0x100` to `0x8FF` (RULE-112).
+    pub page: u16,
+    /// The page's sub-code, `0x0000` to `0x3F7E` (RULE-112).
+    pub sub: u16,
     /// The rectangles, numbered from 0 (RULE-13).
     pub rects: Bounded<Rect, MAX_RECTS>,
+    /// The binding rows, numbered from 0 (RULE-105).
+    pub rows: Bounded<Row, MAX_ROWS>,
     /// The rules, in rule order (RULE-3).
     pub rules: Bounded<Rule, MAX_RULES>,
-    /// The rules switched off for a sub-page (RULE-17).
-    pub subpages: Bounded<SubpageMask, MAX_SUBPAGE_MASKS>,
+    /// The groups, numbered from 0 (RULE-118).
+    pub groups: Groups,
+    /// The sequences, numbered from 0 (RULE-103).
+    pub sequences: Bounded<Sequence, MAX_SEQUENCES>,
 }
 
 impl Table {
-    /// A table with nothing declared and no rule.
+    /// A table for `page` and `sub` with nothing declared and no rule.
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(page: u16, sub: u16) -> Self {
         Self {
-            variables: Bounded::new(Variable { min: 0, max: 0, initial: 0 }),
-            timers: Bounded::new(false),
+            page,
+            sub,
             rects: Bounded::new(Rect { x: 0, y: 0, width: 1, height: 1 }),
+            rows: Bounded::new(NO_ROW),
             rules: Bounded::new(NO_RULE),
-            subpages: Bounded::new(SubpageMask { sub: 0, off: 0 }),
+            groups: Groups::new(),
+            sequences: Bounded::new(Sequence::new(1, 1)),
         }
     }
 
-    /// Forgets everything declared and every rule.
+    /// Forgets everything declared and every rule; the page stays.
     pub fn clear(&mut self) {
-        self.variables.clear();
-        self.timers.clear();
         self.rects.clear();
+        self.rows.clear();
         self.rules.clear();
-        self.subpages.clear();
+        self.groups.clear();
+        self.sequences.clear();
     }
 
-    /// The rules switched off while sub-page `sub` is shown (RULE-17): 0
-    /// when the table lists none for it.
+    /// Adds a group of `commands` (RULE-118), and gives its number.
+    ///
+    /// # Errors
+    /// [`Fault::Limit`] for a group, a command, a byte or a binding over
+    /// its limit, and [`Fault::Range`] for a group with no command or a
+    /// command with no body. The commands themselves are checked by
+    /// [`Table::check`].
+    pub fn push_group(&mut self, commands: &[Framed<'_>]) -> Result<u8, Fault> {
+        self.groups.push(commands)
+    }
+
+    /// The parameters of row `place` of `rule`'s rows (RULE-105): all 0
+    /// for a rule without rows.
     #[must_use]
-    pub fn off_for(&self, sub: u16) -> u64 {
-        self.subpages.iter().find(|mask| mask.sub == sub).map_or(0, |mask| mask.off)
+    pub fn row_of(&self, rule: &Rule, place: usize) -> Row {
+        let Some(rows) = rule.rows else { return NO_ROW };
+        self.rows.get(usize::from(rows.first).saturating_add(place)).copied().unwrap_or(NO_ROW)
     }
 
-    /// The rules enabled when the page opens: bit `n` for rule `n`.
+    /// Checks everything [`decode`] checks beyond the image's own framing
+    /// (RULE-70): every reference, every command with its record's reader
+    /// and RULE-119's list, every binding (RULE-106), the nesting of
+    /// groups (RULE-120), the rows where a trigger uses them (RULE-105)
+    /// and what the whole table reads and names (RULE-57). A table built
+    /// by hand is checked with this before it is evaluated.
+    ///
+    /// # Errors
+    /// The first fault found.
+    pub fn check(&self, body_check: BodyCheck) -> Result<(), Fault> {
+        checks::check_table(self, body_check)
+    }
+
+    /// How many commands one run of group `group` applies, with every
+    /// group it runs in place (RULE-120): a constant of a checked table.
+    /// 0 for a group the table does not have.
     #[must_use]
-    pub fn enabled_at_opening(&self) -> u64 {
-        let mut mask = 0_u64;
-        for (rule, bit) in self.rules.iter().zip(0_u32..) {
-            if rule.enabled {
-                mask |= 1_u64.checked_shl(bit).unwrap_or(0);
-            }
-        }
-        mask
-    }
-}
-
-impl Default for Table {
-    fn default() -> Self {
-        Self::new()
+    pub fn run_commands(&self, group: u8) -> usize {
+        checks::run_commands(&self.groups, group)
     }
 }
 
 /// The default table of a channel whose configuration says
-/// `"default_rules": "send_all"` (RULE-53): every kind of input is sent,
-/// as push protocol 8 sent it. The last rule, `wheel`, is present only
-/// with `wheel`. Its rules, in order: `keys`, `keys_up`, `text`, `press`,
-/// `release`, `move`, `hover_in`, `hover_out`, `drawing_in`,
-/// `drawing_out`, `focus`, `blur` and `wheel`.
-pub fn default_send_all(wheel: bool, table: &mut Table) {
-    let any = crate::limits::ANY_BUTTON;
+/// `"default_rules": "send_all"` (RULE-53), for the page `page` and
+/// `sub`: every kind of input is reported, as push protocol 8 sent it. It
+/// is one group, which holds one `REPORT` of the firing, and twelve rules
+/// that each run it, with a thirteenth, `wheel`, only with `wheel`. Its
+/// rules, in order: `keys`, `keys_up`, `text`, `press`, `release`,
+/// `move`, `hover_in`, `hover_out`, `drawing_in`, `drawing_out`, `focus`,
+/// `blur` and `wheel`.
+pub fn default_send_all(wheel: bool, page: u16, sub: u16, table: &mut Table) {
+    let over = |target: Target| TriggerTarget::of(target);
     let triggers = [
-        Trigger::Key { keys: any_key(), repeat: true, mods_mask: 0, mods_value: 0 },
-        Trigger::KeyUp { keys: any_key(), mods_mask: 0, mods_value: 0 },
+        Trigger::Key { keys: KeyMatch::any(), repeat: true },
+        Trigger::KeyUp { keys: KeyMatch::any() },
         Trigger::Text,
-        Trigger::Press { target: Target::PAGE, button: any },
-        Trigger::Release { target: Target::PAGE, button: any },
-        Trigger::Move { target: Target::PAGE, held: false },
-        Trigger::Enter { target: Target::ANY_CONTROL },
-        Trigger::Leave { target: Target::ANY_CONTROL },
-        Trigger::Enter { target: Target::ANY_OBJECT },
-        Trigger::Leave { target: Target::ANY_OBJECT },
+        Trigger::Press { target: TriggerTarget::PAGE, button: ANY_BUTTON },
+        Trigger::Release { target: TriggerTarget::PAGE, button: ANY_BUTTON },
+        Trigger::Move { target: TriggerTarget::PAGE, held: false },
+        Trigger::Enter { target: over(Target::ANY_CONTROL) },
+        Trigger::Leave { target: over(Target::ANY_CONTROL) },
+        Trigger::Enter { target: over(Target::ANY_OBJECT) },
+        Trigger::Leave { target: over(Target::ANY_OBJECT) },
         Trigger::Focus,
         Trigger::Blur,
     ];
-    table.clear();
-    let wheel_rule = wheel.then_some(Trigger::Wheel { target: Target::PAGE });
+    *table = Table::new(page, sub);
+    let report = crate::command::Command::Report { value: None };
+    let mut body = [0_u8; crate::command::REPORT_BYTES];
+    // One command of thirteen bytes: the buffer and the table have room.
+    let length = crate::command::encode(&report, page, sub, &mut body).unwrap_or(0);
+    let framed = Framed { kind: crate::command::TYPE_REPORT, body: body.get(..length).unwrap_or(&[]), bindings: &[] };
+    let group = table.push_group(&[framed]).unwrap_or(0);
+    let wheel_rule = wheel.then_some(Trigger::Wheel { target: TriggerTarget::PAGE });
     for trigger in triggers.into_iter().chain(wheel_rule) {
-        let mut rule = Rule::new(trigger);
-        // Thirteen rules of one action each: both lists have room.
-        let _ = rule.actions.push(Action::Send(None));
-        let _ = table.rules.push(rule);
+        // Thirteen rules at most: the list has room.
+        let _ = table.rules.push(Rule::new(trigger, group));
     }
 }
+
+/// The most commands all of a table's groups hold together.
+pub(crate) const MAX_TABLE_COMMANDS: usize = MAX_GROUPS * MAX_GROUP_COMMANDS;
+// RULE-45: every group's frames fit the bytes the groups may take only
+// when the table keeps to both limits; the smaller bound is the bytes'.
+const _: () = assert!(MAX_TABLE_COMMANDS * groups::FRAME_FIXED <= MAX_GROUPS_BYTES);
+
+/// A binding list not yet filled.
+pub(crate) const NO_BINDING: Binding = Binding { item: 0, field: 0, source: 0 };
 
 #[cfg(test)]
 mod tests;

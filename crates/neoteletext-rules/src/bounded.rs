@@ -33,6 +33,12 @@ impl<T: Copy, const N: usize> Bounded<T, N> {
         Ok(place)
     }
 
+    /// Takes the last item away, and gives it.
+    pub fn pop(&mut self) -> Option<T> {
+        self.count = self.count.checked_sub(1)?;
+        self.items.get(usize::from(self.count)).copied()
+    }
+
     /// Forgets every item.
     pub fn clear(&mut self) {
         self.count = 0;

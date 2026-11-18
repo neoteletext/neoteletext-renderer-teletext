@@ -297,18 +297,26 @@ pub(crate) enum Command {
         sequence: SequenceArgs,
     },
     /// Evaluate a page rule table against timed inputs, and write the
-    /// animation operations each tick's actions produce as the script of
-    /// an image sequence (`render --frames --script`, and the ReGIS and
-    /// NAPLPS renderers' programs); reports and sound operations are
+    /// animation operations its groups' commands make as the script of an
+    /// image sequence (`render --frames --script`, and the ReGIS and
+    /// NAPLPS renderers' programs); reports and every other command are
     /// written as comment lines.
     RulesRun {
-        /// The table: a RULES record's body, as bytes or as hexadecimal text.
+        /// The table: the program protocol's `rules` message as JSON, or
+        /// the table's image as bytes or as hexadecimal text.
         table: PathBuf,
         /// The inputs, one a line in ascending tick: `<tick> key down|up
         /// char|name|physical <key>`, `<tick> pointer <x> <y> <buttons>`,
-        /// `<tick> level <audio channel> <0-255>` and `<tick> rectangle <n>
-        /// <x> <y> <width> <height>`, an object's bounding rectangle.
+        /// `<tick> level <audio channel> <0-255>`, `<tick> rectangle <n>
+        /// <x> <y> <width> <height>` (an object's bounding rectangle),
+        /// `<tick> cue <audio channel> <n>` and `<tick> command <record
+        /// type> <hexadecimal body>` (a record the server sends directly).
         inputs: PathBuf,
+        /// The page an image is the table of, e.g. 101 or 101/0001: the
+        /// image holds neither its page nor its sub-code. A `rules`
+        /// message names its own.
+        #[arg(long, default_value = "100", value_name = "PAGE")]
+        page: String,
         /// Evaluate this many ticks from tick 0; by default, to the tick
         /// after the last input.
         #[arg(long, value_name = "TICKS", value_parser = clap::value_parser!(u32).range(1..=i64::from(crate::commands::MAX_SEQUENCE_TICKS)))]
@@ -319,7 +327,7 @@ pub(crate) enum Command {
         picture: crate::commands::Picture,
         /// Give each key and pointer input to the evaluator the moment it
         /// arrives, as a receiver does (page-rules.md RULE-96): the sound
-        /// operations of the rules it fires are written first among its
+        /// commands of the groups it fires are written first among its
         /// tick's lines, and every line is otherwise the same.
         #[arg(long)]
         on_arrival: bool,

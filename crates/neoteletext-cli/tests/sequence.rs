@@ -250,7 +250,7 @@ fn golden_script() -> String {
     // ANIMATE inside a frame: move sprite 2 down two rows and hide sprite 1,
     // both seen at the frame's end and neither before it.
     let animate =
-        hexadecimal(&[&[0x01, 0x00, 0x3F, 0x7F, 2, 0][..], &[15, 2, 0, 2, 1, 0, 0, 0, 2], &[6, 2, 0, 1]].concat());
+        hexadecimal(&[&[0x01, 0x00, 0x00, 0x00, 2, 0][..], &[15, 2, 0, 2, 1, 0, 0, 0, 2], &[6, 2, 0, 1]].concat());
     let begin = hexadecimal(&[0x01, 0x00, 0x00, 0x00, 1, 0, 0, 7]);
     let end = hexadecimal(&[0x01, 0x00, 0x00, 0x00, 2, 0, 0, 7]);
     format!(

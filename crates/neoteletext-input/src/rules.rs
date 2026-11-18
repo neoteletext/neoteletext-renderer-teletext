@@ -1,10 +1,10 @@
 //! The page rule table's messages from the receiver to the channel's
-//! server (neoteletext-common `docs/page-rules.md`, DEC-6522; RULE-46 to
+//! server (neoteletext-common `docs/page-rules.md`, DEC-6522, DEC-6587; RULE-46 to
 //! RULE-48): `RULE_EVENT`, `PAGE_STATE` and `RULES_FAULT`, carried as
 //! extension events of the input stream ([`crate::event::RULE_EVENT`],
 //! [`crate::event::PAGE_STATE`], [`crate::event::RULES_FAULT`]).
 //!
-//! Under push protocol 9 a `RULE_EVENT` is the only way a viewer's input
+//! Under push protocol 10 a `RULE_EVENT` is the only way a viewer's input
 //! reaches a channel (REQ-6523): KEY, MOUSE, WHEEL, PASTE, COMPOSE, TOUCH,
 //! `FOCUS_IN`, `FOCUS_OUT`, HOVER, PICK, `DRAWING_HOVER` and raw text are
 //! carried inside one, exactly as push protocol 8 encoded them, and are a
@@ -19,13 +19,13 @@
 
 use crate::event::{Event, InputError, Item, Stamp};
 use crate::wire::WireError;
-use neoteletext_rules::limits::{MAX_CONTROL, MAX_RECTS, MAX_RULES, MAX_STATE_BYTES, MAX_TIMERS, MAX_VARIABLES};
+use neoteletext_rules::limits::{MAX_CONTROL, MAX_RECTS, MAX_ROWS, MAX_RULES, MAX_SEQUENCES, MAX_STATE_BYTES, NO_RULE};
 use neoteletext_rules::state::PageState;
 use neoteletext_rules::table::{TARGET_BYTES, Target, TargetKind, VALUE_BYTES, Value};
 
 /// The bytes of a `RULE_EVENT` between its stamp and its body (RULE-46):
-/// the generation, the rule, the tick, the kind and the target.
-pub const RULE_EVENT_FIXED: usize = 2 + 1 + 4 + 1 + TARGET_BYTES;
+/// the generation, the rule, the row, the tick, the kind and the target.
+pub const RULE_EVENT_FIXED: usize = 2 + 1 + 1 + 4 + 1 + TARGET_BYTES;
 /// The bytes of a kind 2 body: a value and its reading.
 pub const VALUE_BODY_BYTES: usize = VALUE_BYTES + 4;
 /// The bytes of a `RULES_FAULT` after its stamp (RULE-48): the generation,
@@ -67,8 +67,11 @@ pub struct RuleEvent<'a> {
     pub on: Stamp,
     /// The table's generation, 1 to 65,535.
     pub generation: u16,
-    /// The rule, 0 to 63.
+    /// The rule, 0 to 63; 255 when the run was not made by a rule.
     pub rule: u8,
+    /// The place of the firing row within the rule's rows, 0 to 63; 255
+    /// when none.
+    pub row: u8,
     /// The page tick at which the rule fired.
     pub tick: u32,
     /// The control, object or rectangle the pointer was inside for a rule
@@ -170,13 +173,17 @@ fn take_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
 pub fn read_rule_event(on: Stamp, payload: &[u8]) -> Result<RuleEvent<'_>, InputError> {
     let refused = InputError::BadValue("rule event");
     let (generation, rest) = take_u16(payload).ok_or(refused)?;
-    let (&rule, rest) = rest.split_first().ok_or(refused)?;
+    let (&[rule, row], rest) = rest.split_first_chunk::<2>().ok_or(refused)?;
     let (tick, rest) = take_u32(rest).ok_or(refused)?;
     let (&kind, rest) = rest.split_first().ok_or(refused)?;
     let (&[target_kind, high, low], body) = rest.split_first_chunk::<TARGET_BYTES>().ok_or(refused)?;
     let target =
         Target { kind: TargetKind::from_code(target_kind).ok_or(refused)?, number: u16::from_be_bytes([high, low]) };
-    if generation == 0 || usize::from(rule) >= MAX_RULES || !check_target(target) {
+    // RULE-46: 255 for a run no rule made, and for no row; a row is a
+    // rule's.
+    let ruled = usize::from(rule) < MAX_RULES || rule == NO_RULE;
+    let rowed = row == NO_RULE || (usize::from(row) < MAX_ROWS && rule != NO_RULE);
+    if generation == 0 || !ruled || !rowed || !check_target(target) {
         return Err(refused);
     }
     let body = match kind {
@@ -187,9 +194,9 @@ pub fn read_rule_event(on: Stamp, payload: &[u8]) -> Result<RuleEvent<'_>, Input
         }
         KIND_VALUE if body.len() == VALUE_BODY_BYTES => {
             let value = Value::from_bytes(body).map_err(|_| refused)?;
-            // Whichever table it was, a value names a variable below the
-            // most a table has, and a timer likewise.
-            value.check(MAX_VARIABLES, MAX_TIMERS).map_err(|_| refused)?;
+            // Whichever table it was, a value names a sequence below the
+            // most a table has.
+            value.check(MAX_SEQUENCES).map_err(|_| refused)?;
             let (reading, _) = take_u32(body.get(VALUE_BYTES..).unwrap_or(&[])).ok_or(refused)?;
             RuleBody::Value { value, reading: reading.cast_signed() }
         }
@@ -199,7 +206,7 @@ pub fn read_rule_event(on: Stamp, payload: &[u8]) -> Result<RuleEvent<'_>, Input
     if !matches!(body, RuleBody::Input(_)) && target != Target::NONE {
         return Err(refused);
     }
-    Ok(RuleEvent { on, generation, rule, tick, target, body })
+    Ok(RuleEvent { on, generation, rule, row, tick, target, body })
 }
 
 /// A `RULE_EVENT`'s fixed bytes after its stamp, and its kind 2 body when
@@ -216,7 +223,7 @@ pub fn rule_event_head(event: &RuleEvent<'_>) -> ([u8; RULE_EVENT_FIXED + VALUE_
         .generation
         .to_be_bytes()
         .into_iter()
-        .chain([event.rule])
+        .chain([event.rule, event.row])
         .chain(event.tick.to_be_bytes())
         .chain([kind, event.target.kind.code()])
         .chain(event.target.number.to_be_bytes());
@@ -266,75 +273,84 @@ pub fn read_page_state(on: Stamp, stamp_bytes: usize, body: &[u8]) -> Result<Pag
     Ok(PageStateEvent { on, body })
 }
 
-/// A fault of a page's table (RULE-48), its code on the wire.
+/// A fault of a page's table (RULE-48), its code on the wire. Code 2,
+/// the first form's `tick_overrun`, is withdrawn: it is never sent and
+/// never reused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FaultCode {
-    /// 1: the table could not be decoded and was refused whole; the page
-    /// then has no table.
+    /// The table image could not be assembled or decoded and was refused
+    /// whole: 1.
     Undecodable,
-    /// 2: rule firings dropped by the cap on a tick's actions (RULE-6).
-    TickOverrun,
-    /// 3: sends dropped by the send budget (RULE-52).
-    SendsDropped,
-    /// 4: input events dropped from a full queue (RULE-5).
+    /// Reports dropped by the trusted core's budgets (RULE-52): 3.
+    ReportsDropped,
+    /// Input events dropped from a full queue (RULE-5): 4.
     EventsDropped,
-    /// 5: actions skipped for a missing target or sound (RULE-20).
-    ActionsSkipped,
-    /// 6: a state query dropped (RULE-47).
+    /// Commands that did nothing for a missing target or sound
+    /// (RULE-118): 5.
+    CommandsSkipped,
+    /// A state query dropped: 6.
     QueryDropped,
-    /// 7: a local sound stopped for overrunning its time (RULE-62).
+    /// A local sound stopped for overrunning its time (RULE-62): 7.
     LocalOverrun,
-    /// 8: animation slowed by its budget (ANIM-16).
+    /// Animation slowed by its budget (ANIM-16): 8.
     AnimationSlowed,
+    /// The evaluation of the page's ticks took longer than the ticks' own
+    /// time, so page time slowed (RULE-4): 9.
+    EvaluationLate,
+    /// An armed run not armed, a command the server sent, a cue or a
+    /// sound command dropped at a full queue or budget: 10.
+    QueueFull,
 }
 
-/// Every fault, in the order of its code from 1.
-const FAULT_CODES: [FaultCode; 8] = [
-    FaultCode::Undecodable,
-    FaultCode::TickOverrun,
-    FaultCode::SendsDropped,
-    FaultCode::EventsDropped,
-    FaultCode::ActionsSkipped,
-    FaultCode::QueryDropped,
-    FaultCode::LocalOverrun,
-    FaultCode::AnimationSlowed,
-];
-
 impl FaultCode {
-    /// The fault's byte on the wire.
+    /// Every fault, in code order.
+    pub const ALL: [Self; 9] = [
+        Self::Undecodable,
+        Self::ReportsDropped,
+        Self::EventsDropped,
+        Self::CommandsSkipped,
+        Self::QueryDropped,
+        Self::LocalOverrun,
+        Self::AnimationSlowed,
+        Self::EvaluationLate,
+        Self::QueueFull,
+    ];
+
+    /// The fault's code on the wire.
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {
             Self::Undecodable => 1,
-            Self::TickOverrun => 2,
-            Self::SendsDropped => 3,
+            Self::ReportsDropped => 3,
             Self::EventsDropped => 4,
-            Self::ActionsSkipped => 5,
+            Self::CommandsSkipped => 5,
             Self::QueryDropped => 6,
             Self::LocalOverrun => 7,
             Self::AnimationSlowed => 8,
+            Self::EvaluationLate => 9,
+            Self::QueueFull => 10,
         }
     }
 
-    /// The fault of `code`, or `None` for a byte no fault has.
+    /// The fault of `code`, or `None` for a code no fault has.
     #[must_use]
     pub fn from_code(code: u8) -> Option<Self> {
-        FAULT_CODES.get(usize::from(code.checked_sub(1)?)).copied()
+        Self::ALL.into_iter().find(|fault| fault.code() == code)
     }
 
-    /// The fault's name in the program protocol's `rules_fault` message
-    /// (RULE-48).
+    /// The fault's name in the program protocol (RULE-48).
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Undecodable => "undecodable",
-            Self::TickOverrun => "tick_overrun",
-            Self::SendsDropped => "sends_dropped",
+            Self::ReportsDropped => "reports_dropped",
             Self::EventsDropped => "events_dropped",
-            Self::ActionsSkipped => "actions_skipped",
+            Self::CommandsSkipped => "commands_skipped",
             Self::QueryDropped => "query_dropped",
             Self::LocalOverrun => "local_overrun",
             Self::AnimationSlowed => "animation_slowed",
+            Self::EvaluationLate => "evaluation_late",
+            Self::QueueFull => "queue_full",
         }
     }
 }

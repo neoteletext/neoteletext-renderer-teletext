@@ -10,9 +10,9 @@ use super::*;
 
 const OBJECT: Target = Target::object(0x1234);
 
-fn bytes(operation: &Operation, place: Place) -> std::vec::Vec<u8> {
+fn bytes(operation: &Operation) -> std::vec::Vec<u8> {
     let mut out = [0_u8; MAX_OPERATION_BYTES];
-    let length = write(operation, place, &mut out).unwrap();
+    let length = write(operation, &mut out).unwrap();
     out[..length].to_vec()
 }
 
@@ -35,40 +35,40 @@ fn each_operation_is_its_bytes() {
     ];
     for (kind, expected) in cases {
         let operation = Operation { target: OBJECT, kind };
-        assert_eq!(bytes(&operation, Place::Record), expected, "{kind:?}");
-        assert_eq!(read(expected, Place::Record), Ok((operation, expected.len())));
+        assert_eq!(bytes(&operation), expected, "{kind:?}");
+        assert_eq!(read(expected), Ok((operation, expected.len())));
         // Cut short anywhere, it is short; bytes after it are the next
         // operation's.
         for length in 0..expected.len() {
-            assert_eq!(read(&expected[..length], Place::Record), Err(Fault::Short));
+            assert_eq!(read(&expected[..length]), Err(Fault::Short));
         }
         assert!(is_code(expected[0]));
     }
     assert_eq!(MAX_OPERATION_BYTES, 9);
     for code in [0, 4, 8, 14, 21] {
         assert!(!is_code(code));
-        assert_eq!(read(&[code, 2, 0, 1, 0, 0, 0, 0, 0], Place::Record), Err(Fault::Range("operation code")));
+        assert_eq!(read(&[code, 2, 0, 1, 0, 0, 0, 0, 0]), Err(Fault::Range("operation code")));
     }
 }
 
 /// ANIM-6 (REQ-6529): what each operation applies to, each field's
-/// bounds, the reserved flag bits, and `reset` in a record only.
+/// bounds and the reserved flag bits; `reset` may be in a group's
+/// `ANIMATE` as in any other (ANIM-6).
 #[test]
 fn operations_are_bounded() {
     let reset = Operation { target: Target::control(1), kind: OperationKind::Reset };
-    assert_eq!(reset.check(Place::Record), Ok(()));
-    assert_eq!(reset.check(Place::Rule), Err(Fault::Range("operation's field")));
-    assert_eq!(read(&[20, 2, 0, 1], Place::Rule), Err(Fault::Range("operation's field")));
+    assert_eq!(reset.check(), Ok(()));
+    assert_eq!(read(&[20, 2, 0, 1]).map(|read| read.0.kind), Ok(OperationKind::Reset));
     // A control takes show, hide, look and reset only.
-    assert_eq!(read(&[5, 1, 0, 32], Place::Rule).map(|read| read.0.target), Ok(Target::control(32)));
+    assert_eq!(read(&[5, 1, 0, 32]).map(|read| read.0.target), Ok(Target::control(32)));
     for refused in
         [[5, 1, 0, 33, 0], [5, 1, 0, 0, 0], [5, 2, 0, 0, 0], [5, 0, 0, 0, 0], [5, 3, 0, 0, 0], [17, 1, 0, 1, 0]]
     {
-        assert_eq!(read(&refused, Place::Record), Err(Fault::Range("operation's target")), "{refused:?}");
+        assert_eq!(read(&refused), Err(Fault::Range("operation's target")), "{refused:?}");
     }
-    assert_eq!(read(&[5, 4, 0, 1], Place::Record), Err(Fault::Range("operation's target")));
-    assert_eq!(read(&[15, 2, 0, 1, 2, 0, 0, 0, 0], Place::Record), Err(Fault::Reserved("move flags")));
-    assert_eq!(read(&[18, 2, 0, 1, 0, 1, 0, 1, 0x80], Place::Record), Err(Fault::Reserved("cycle flags")));
+    assert_eq!(read(&[5, 4, 0, 1]), Err(Fault::Range("operation's target")));
+    assert_eq!(read(&[15, 2, 0, 1, 2, 0, 0, 0, 0]), Err(Fault::Reserved("move flags")));
+    assert_eq!(read(&[18, 2, 0, 1, 0, 1, 0, 1, 0x80]), Err(Fault::Reserved("cycle flags")));
     for bad in [
         OperationKind::Look(4),
         OperationKind::Order { layer: 4, order: 0 },
@@ -79,11 +79,11 @@ fn operations_are_bounded() {
         OperationKind::Cycle { first: 0, last: 1, period: 3601, once: false },
     ] {
         let operation = Operation { target: OBJECT, kind: bad };
-        assert_eq!(operation.check(Place::Record), Err(Fault::Range("operation's field")), "{bad:?}");
+        assert_eq!(operation.check(), Err(Fault::Range("operation's field")), "{bad:?}");
         let mut out = [0_u8; MAX_OPERATION_BYTES];
-        assert!(write(&operation, Place::Record, &mut out).is_err());
+        assert!(write(&operation, &mut out).is_err());
     }
-    assert_eq!(write(&reset, Place::Record, &mut [0_u8; 3]), Err(Fault::Full));
+    assert_eq!(write(&reset, &mut [0_u8; 3]), Err(Fault::Full));
 }
 
 /// ANIM-6 (REQ-6529): each operation's effect on the state, and the fold
@@ -196,4 +196,41 @@ fn a_store_keeps_the_states_of_a_sub_page() {
     assert_eq!(store.entries().iter().map(|(target, _)| target.number).collect::<std::vec::Vec<_>>(), [3]);
     store.clear();
     assert_eq!(store.entries(), []);
+}
+
+/// ANIM-6 (REQ-6529, DEC-6599): the `ANIMATE` record's body is its page,
+/// its sub-code, a count, a reserved byte and its operations; the first
+/// form's sub-code `0x3F7F`, "whichever sub-page is shown", is refused.
+#[test]
+fn the_animate_record_names_one_page() {
+    let operations = [
+        Operation { target: OBJECT, kind: OperationKind::Show },
+        Operation { target: Target::control(3), kind: OperationKind::Look(1) },
+    ];
+    let mut out = [0_u8; MAX_RECORD_BYTES];
+    let length = write_record(0x101, 0x0002, &operations, &mut out).unwrap();
+    let body = &out[..length];
+    assert_eq!(body, [0x01, 0x01, 0x00, 0x02, 2, 0, 5, 2, 0x12, 0x34, 7, 1, 0, 3, 1]);
+    let (header, bytes) = read_record(body).unwrap();
+    assert_eq!(header, RecordHeader { page: 0x101, sub: 0x0002, count: 2 });
+    assert!(super::operations(bytes).eq(operations));
+    for (code, length) in [(5, 4), (6, 4), (7, 5), (15, 9), (16, 6), (17, 5), (18, 9), (19, 4), (20, 4)] {
+        assert_eq!(length_of(code), Some(length), "{code}");
+    }
+    assert_eq!(length_of(8), None);
+
+    let mut any = body.to_vec();
+    any[2..4].copy_from_slice(&[0x3F, 0x7F]);
+    assert_eq!(read_record(&any), Err(Fault::Range("sub-code")));
+    let mut none = body.to_vec();
+    none[4] = 0;
+    assert_eq!(read_record(&none), Err(Fault::Range("animate count")));
+    let mut reserved = body.to_vec();
+    reserved[5] = 1;
+    assert_eq!(read_record(&reserved), Err(Fault::Reserved("animate")));
+    let mut long = body.to_vec();
+    long.push(0);
+    assert_eq!(read_record(&long), Err(Fault::Trailing));
+    assert_eq!(read_record(&body[..length - 1]), Err(Fault::Short));
+    assert_eq!(write_record(0x101, 0, &[], &mut out), Err(Fault::Range("animate count")));
 }

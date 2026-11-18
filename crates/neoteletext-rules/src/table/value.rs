@@ -1,11 +1,11 @@
-//! The values a condition can read (RULE-23 to RULE-28): each named by 8
-//! bytes, a space, a byte `a` and three 16-bit fields `b`, `c` and `d`
-//! (RULE-44).
+//! The values a condition, a `REPORT` or a `set` can read (RULE-23 to
+//! RULE-28, RULE-116, RULE-117): each named by 8 bytes, a space, a byte
+//! `a` and three 16-bit fields `b`, `c` and `d` (RULE-44).
 
 use super::{Fault, TargetKind};
 use crate::limits::{
     AUDIO_CHANNELS, FIRST_FAMILY, LAST_FAMILY, MAX_BUTTON, MAX_CONTROL, MAX_MIDI_NUMBER, MAX_PARAMETER, MAX_PART,
-    MAX_SYNTH_CLASS, MAX_VARIANT, PAGE_TIMER,
+    MAX_SYNTH_CLASS, MAX_VARIANT, PAGE_TIMER, TIMERS, VARIABLES,
 };
 use crate::wire::{Reader, Writer};
 
@@ -24,6 +24,30 @@ pub const SPACE_TARGET: u8 = 4;
 pub const SPACE_SOUND: u8 = 5;
 /// Space 6: a synthesizer's state (RULE-28).
 pub const SPACE_SYNTH: u8 = 6;
+/// Space 7: the firing (RULE-116).
+pub const SPACE_FIRED: u8 = 7;
+/// Space 8: sequences (RULE-117).
+pub const SPACE_SEQUENCE: u8 = 8;
+
+/// Space 7, `a`: the code of the key whose event fired the rule.
+pub const FIRED_KEY: u16 = 0;
+/// Space 7, `a`: the number of the target the pointer event was inside.
+pub const FIRED_TARGET: u16 = 1;
+/// Space 7, `a`: the place of the firing row within the rule's rows.
+pub const FIRED_ROW: u16 = 2;
+/// Space 7, `a`: the number of the cue that fired the rule.
+pub const FIRED_CUE: u16 = 3;
+/// Space 7, `a`: row parameter `p0`; `p1` to `p3` follow it.
+pub const FIRED_P0: u16 = 4;
+/// Space 7, `a`: row parameter `p3`, the last property.
+pub const FIRED_P3: u16 = 7;
+
+/// Space 8, `b`: whether the sequence is running.
+pub const SEQUENCE_RUNNING: u16 = 0;
+/// Space 8, `b`: the passes completed since its start.
+pub const SEQUENCE_PASSES: u16 = 1;
+/// Space 8, `b`: its position in ticks within the pass.
+pub const SEQUENCE_POSITION: u16 = 2;
 
 /// Space 2, `a`: a character key's state (RULE-24).
 pub const INPUT_CHARACTER: u8 = 1;
@@ -201,6 +225,19 @@ impl Value {
         }
     }
 
+    /// A value of the firing (RULE-116): `property` 0 the key, 1 the
+    /// target, 2 the row, 3 the cue, 4 to 7 the row parameters.
+    #[must_use]
+    pub const fn fired(property: u16) -> Self {
+        Self { space: SPACE_FIRED, a: property as u8, b: 0, c: 0, d: 0 }
+    }
+
+    /// A property of sequence `sequence` (RULE-117).
+    #[must_use]
+    pub const fn sequence(sequence: u8, property: u16) -> Self {
+        Self { space: SPACE_SEQUENCE, a: sequence, b: property, c: 0, d: 0 }
+    }
+
     /// Space 2's key code (RULE-24): `b` the high half, `c` the low.
     #[must_use]
     pub const fn key_code(&self) -> u32 {
@@ -251,20 +288,20 @@ impl Value {
     }
 
     /// Checks every field against its space's ranges (RULE-44), in a table
-    /// of `variables` variables and `timers` timers.
+    /// of `sequences` sequences.
     ///
     /// # Errors
     /// [`Fault::Range`] for a field outside its range or an unused field
-    /// that is not 0; [`Fault::Reference`] for a variable or a timer the
-    /// table does not have.
-    pub fn check(&self, variables: usize, timers: usize) -> Result<(), Fault> {
+    /// that is not 0; [`Fault::Reference`] for a sequence the table does
+    /// not have.
+    pub fn check(&self, sequences: usize) -> Result<(), Fault> {
         let unused = |fields: &[u16]| {
             if fields.iter().all(|field| *field == 0) { Ok(()) } else { Err(Fault::Range("value's unused field")) }
         };
         match self.space {
             SPACE_VARIABLE => {
                 unused(&[self.b, self.c, self.d])?;
-                if usize::from(self.a) < variables { Ok(()) } else { Err(Fault::Reference("value's variable")) }
+                if usize::from(self.a) < VARIABLES { Ok(()) } else { Err(Fault::Range("value's variable")) }
             }
             SPACE_INPUT => self.check_input(),
             SPACE_TIMER => {
@@ -272,10 +309,10 @@ impl Value {
                 if self.b > TIMER_ELAPSED {
                     return Err(Fault::Range("timer property"));
                 }
-                if usize::from(self.a) < timers || self.a == PAGE_TIMER {
+                if usize::from(self.a) < TIMERS || self.a == PAGE_TIMER {
                     Ok(())
                 } else {
-                    Err(Fault::Reference("value's timer"))
+                    Err(Fault::Range("value's timer"))
                 }
             }
             SPACE_TARGET => {
@@ -296,6 +333,17 @@ impl Value {
                 }
             }
             SPACE_SYNTH => self.check_synth(),
+            SPACE_FIRED => {
+                unused(&[self.b, self.c, self.d])?;
+                if u16::from(self.a) <= FIRED_P3 { Ok(()) } else { Err(Fault::Range("fired property")) }
+            }
+            SPACE_SEQUENCE => {
+                unused(&[self.c, self.d])?;
+                if self.b > SEQUENCE_POSITION {
+                    return Err(Fault::Range("sequence property"));
+                }
+                if usize::from(self.a) < sequences { Ok(()) } else { Err(Fault::Reference("value's sequence")) }
+            }
             _ => Err(Fault::Range("value's space")),
         }
     }

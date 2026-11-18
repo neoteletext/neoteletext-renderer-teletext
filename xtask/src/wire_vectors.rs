@@ -1,5 +1,5 @@
 //! `wire-vectors`: the rows of neoteletext-common's `wire-vectors.tsv` that
-//! the page rule table and animation added under push protocol 9
+//! the page rule table and animation added, at push protocol 10
 //! (page-rules.md RULE-85, animation.md ANIM-23), written from the
 //! engine's own encoders so that their bytes are never typed by hand. The
 //! rows are printed in the table's form, and a test holds that the copy of
@@ -15,18 +15,19 @@ use neoteletext_input::MAX_MESSAGE;
 use neoteletext_input::event::{Action, Event, Item, Key, KeyCode, Stamp, write};
 use neoteletext_input::rules::{FaultCode, PageStateEvent, RuleBody, RuleEvent, RulesFault};
 use neoteletext_rules::animate::{Operation, OperationKind};
-use neoteletext_rules::limits::{MAX_STATE_BYTES, MAX_TABLE_BYTES};
-use neoteletext_rules::state::{PageState, TableState, TimerState};
+use neoteletext_rules::command::{Command, MAX_BODY_BYTES, Operand, RunMode, VariableOperation};
+use neoteletext_rules::limits::{MAX_STATE_BYTES, MAX_TABLE_BYTES, NO_RULE};
+use neoteletext_rules::state::{PageState, SequenceState, TableState, TimerState};
 use neoteletext_rules::table::{SOUND_LEVEL, Table, Target, Value, default_send_all};
-use neoteletext_web::records::{animate, frame, naplps_objects, sheet, sprites};
+use neoteletext_web::records::{animate, body_check, commands, frame, naplps_objects, rules, sheet, sprites};
 
 /// The kinds of row this command writes, in the order the table has them.
 #[cfg(test)]
-const KINDS: [&str; 6] = ["rules", "rule_event", "page_state", "rules_fault", "records", "object"];
+const KINDS: [&str; 7] = ["rules", "command", "rule_event", "page_state", "rules_fault", "records", "object"];
 
 /// The page every vector is for, an example value: 101.
 const PAGE: u16 = 0x101;
-/// Its sub-page, an example value.
+/// Its sub-code, an example value.
 const SUB: u16 = 1;
 /// The audio and input service the records use (DOC-1951).
 const SERVICE: u8 = 0;
@@ -42,6 +43,8 @@ const OBJECT: u16 = 10;
 const NAPLPS_OBJECT: u16 = 301;
 /// The identifier of the atomic frame's vectors, an example value.
 const FRAME: u16 = 7;
+/// The identifier of the state query's vector, as RULE-38's example has.
+const QUERY: u32 = 42;
 /// The bank a local sound's vector names, as RULE-61's example does.
 const BANK: u8 = 2;
 /// The setup of RULE-61's example: at tick 0, a program change to program
@@ -89,31 +92,94 @@ fn packets<E: core::fmt::Debug>(
     Ok(all.join(" "))
 }
 
-/// The RULES record bodies (RULE-41, RULE-53).
-fn rules(rows: &mut Vec<Row>) -> Result<(), String> {
-    let refused = |fault| format!("a table does not encode: {fault:?}");
-    let mut out = [0_u8; MAX_TABLE_BYTES];
-    let mut table = Box::new(Table::new());
+/// The page and the sub-code of the vectors.
+fn place() -> Result<(PageAddress, SubCode), String> {
+    Ok((PageAddress::from_mpp(PAGE).ok_or("the page is out of range")?, SubCode::new(SUB)))
+}
+
+/// The image of the default table (RULE-53), with or without its wheel
+/// rule.
+fn default_image(wheel: bool) -> Result<Vec<u8>, String> {
+    let mut out = vec![0_u8; MAX_TABLE_BYTES];
+    let mut table = Box::new(Table::new(PAGE, SUB));
+    default_send_all(wheel, PAGE, SUB, &mut table);
+    let length = neoteletext_rules::encode(&table, body_check, &mut out)
+        .map_err(|fault| format!("a table does not encode: {fault:?}"))?;
+    out.truncate(length);
+    Ok(out)
+}
+
+/// The table images (RULE-41, RULE-53).
+fn images(rows: &mut Vec<Row>) -> Result<(), String> {
     for (wheel, name, meaning) in [
-        (false, "default_send_all", "the default table of RULE-53 for page 101, generation 1"),
+        (false, "default_send_all", "the image of the default table of RULE-53 for page 101/0001"),
         (
             true,
             "default_send_all_wheel",
-            "the default table of RULE-53 for page 101, generation 1, with the wheel rule",
+            "the image of the default table of RULE-53 for page 101/0001, with the wheel rule",
         ),
     ] {
-        default_send_all(wheel, &mut table);
-        let length = neoteletext_rules::encode(PAGE, 1, Some(&table), &mut out).map_err(refused)?;
-        let value = hexadecimal(out.get(..length).ok_or("the encoder overran its buffer")?);
-        rows.push(Row { kind: "rules", name, value, meaning });
+        rows.push(Row { kind: "rules", name, value: hexadecimal(&default_image(wheel)?), meaning });
     }
-    let length = neoteletext_rules::encode(PAGE, 2, None, &mut out).map_err(refused)?;
-    rows.push(Row {
-        kind: "rules",
-        name: "no_table",
-        value: hexadecimal(out.get(..length).ok_or("the encoder overran its buffer")?),
-        meaning: "page 101, generation 2, no table",
-    });
+    Ok(())
+}
+
+/// A `VARIABLE` command of `operation` on `v0` with `operand`.
+const fn variable(operation: VariableOperation, operand: Operand) -> Command {
+    Command::Variable { operation, variable: 0, operand }
+}
+
+/// The body of each `VARIABLE` operation with each operand kind
+/// (RULE-99), and of one of each other command.
+fn command_bodies(rows: &mut Vec<Row>) -> Result<(), String> {
+    use VariableOperation::{Add, Clear, Dec, Inc, Max, Min, Set, Sub, Toggle, Wrap};
+    let constant = Operand::Constant(4);
+    let plus_variable = Operand::Variable { constant: 1, variable: 1 };
+    let plus_fired = Operand::Fired { constant: 0, property: 0 };
+    let all: [(&'static str, Command, &'static str); 27] = [
+        ("variable_set_constant", variable(Set, constant), "set v0 to 4"),
+        ("variable_set_variable", variable(Set, plus_variable), "set v0 to 1 plus v1"),
+        ("variable_set_fired", variable(Set, plus_fired), "set v0 to 0 plus the firing's key"),
+        (
+            "variable_set_value",
+            variable(Set, Operand::Value(Value::sound(0, SOUND_LEVEL))),
+            "set v0 to the level of audio channel 0",
+        ),
+        ("variable_inc", variable(Inc, Operand::None), "inc v0"),
+        ("variable_dec", variable(Dec, Operand::None), "dec v0"),
+        ("variable_add_constant", variable(Add, constant), "add 4 to v0"),
+        ("variable_add_variable", variable(Add, plus_variable), "add 1 plus v1 to v0"),
+        ("variable_add_fired", variable(Add, plus_fired), "add 0 plus the firing's key to v0"),
+        ("variable_sub_constant", variable(Sub, constant), "sub 4 from v0"),
+        ("variable_sub_variable", variable(Sub, plus_variable), "sub 1 plus v1 from v0"),
+        ("variable_sub_fired", variable(Sub, plus_fired), "sub 0 plus the firing's key from v0"),
+        ("variable_toggle", variable(Toggle, Operand::None), "toggle v0"),
+        ("variable_min_constant", variable(Min, constant), "hold v0 to at most 4"),
+        ("variable_min_variable", variable(Min, plus_variable), "hold v0 to at most 1 plus v1"),
+        ("variable_min_fired", variable(Min, plus_fired), "hold v0 to at most 0 plus the firing's key"),
+        ("variable_max_constant", variable(Max, constant), "hold v0 to at least 4"),
+        ("variable_max_variable", variable(Max, plus_variable), "hold v0 to at least 1 plus v1"),
+        ("variable_max_fired", variable(Max, plus_fired), "hold v0 to at least 0 plus the firing's key"),
+        ("variable_wrap", variable(Wrap, Operand::Range { low: 0, high: 3 }), "wrap v0 within 0 to 3"),
+        ("variable_clear", variable(Clear, Operand::None), "clear v0"),
+        (
+            "variable_clear_all",
+            Command::Variable { operation: Clear, variable: 255, operand: Operand::None },
+            "clear all sixteen variables",
+        ),
+        ("report_firing", Command::Report { value: None }, "report the firing"),
+        ("run_now", Command::Run { group: 1, mode: RunMode::Now }, "run group 1 now"),
+        ("run_at", Command::Run { group: 1, mode: RunMode::At(5400) }, "arm a run of group 1 for page tick 5400"),
+        ("run_after", Command::Run { group: 1, mode: RunMode::After(30) }, "arm a run of group 1 for 30 ticks after"),
+        ("sequence_stop_all", Command::Sequence { start: false, sequence: 255 }, "stop every sequence"),
+    ];
+    for (name, command, meaning) in all {
+        let mut out = [0_u8; MAX_BODY_BYTES];
+        let length = neoteletext_rules::command::encode(&command, PAGE, SUB, &mut out)
+            .map_err(|fault| format!("{name} does not encode: {fault:?}"))?;
+        let value = hexadecimal(out.get(..length).ok_or("the encoder overran its buffer")?);
+        rows.push(Row { kind: "command", name, value, meaning });
+    }
     Ok(())
 }
 
@@ -132,11 +198,12 @@ fn messages(rows: &mut Vec<Row>) -> Result<(), String> {
     let mut key = [0_u8; MAX_MESSAGE];
     let length = write(&Item::Event(Event::Key(press)), &mut key).map_err(|error| format!("{error:?}"))?;
     let key = key.get(..length).ok_or("the encoder overran its buffer")?;
-    let rule_event = |body| {
+    let rule_event = |rule, row, body| {
         message(&Item::Event(Event::RuleEvent(RuleEvent {
             on,
             generation: 1,
-            rule: 0,
+            rule,
+            row,
             tick: FIRED_AT,
             target: Target::NONE,
             body,
@@ -145,51 +212,112 @@ fn messages(rows: &mut Vec<Row>) -> Result<(), String> {
     rows.push(Row {
         kind: "rule_event",
         name: "fired",
-        value: rule_event(RuleBody::Fired)?,
-        meaning: "rule 0 fired at tick 412 on=101/0001 generation=1",
+        value: rule_event(0, NO_RULE, RuleBody::Fired)?,
+        meaning: "rule 0, no row, fired at tick 412 on=101/0001 generation=1",
+    });
+    rows.push(Row {
+        kind: "rule_event",
+        name: "fired_row",
+        value: rule_event(2, 5, RuleBody::Fired)?,
+        meaning: "rule 2, row 5, fired at tick 412 on=101/0001 generation=1",
+    });
+    rows.push(Row {
+        kind: "rule_event",
+        name: "fired_no_rule",
+        value: rule_event(NO_RULE, NO_RULE, RuleBody::Fired)?,
+        meaning: "a run no rule made fired at tick 412 on=101/0001 generation=1",
     });
     rows.push(Row {
         kind: "rule_event",
         name: "input_key",
-        value: rule_event(RuleBody::Input(key))?,
-        meaning: "rule 0 at tick 412 carries: key press a text=a on=101/0001",
+        value: rule_event(0, NO_RULE, RuleBody::Input(key))?,
+        meaning: "rule 0, no row, at tick 412 carries: key press a text=a on=101/0001",
     });
     rows.push(Row {
         kind: "rule_event",
         name: "value",
-        value: rule_event(RuleBody::Value { value: Value::variable(0), reading: 5 })?,
-        meaning: "rule 0 at tick 412: variable 0 reads 5",
+        value: rule_event(0, NO_RULE, RuleBody::Value { value: Value::variable(0), reading: 5 })?,
+        meaning: "rule 0, no row, at tick 412: variable v0 reads 5",
     });
 
     let full = "the state's lists are full";
-    let mut table = TableState::new(1, STATE_AT, 0b111);
-    table.variables.push(5).map_err(|_| full)?;
-    table.timers.push(TimerState { running: true, elapsed: 18 }).map_err(|_| full)?;
+    let mut table = TableState::new(1, STATE_AT);
+    table.variables[0] = 5;
+    table.timers[0] = TimerState { running: true, elapsed: 18 };
+    table.sequences.push(SequenceState { running: true, passes: 3, position: 12 }).map_err(|_| full)?;
+    table.armed = 1;
     table.values.push((Value::sound(0, SOUND_LEVEL), 41)).map_err(|_| full)?;
     let mut body = [0_u8; MAX_STATE_BYTES];
-    let length = neoteletext_rules::state::encode(&PageState { identifier: 42, table: Some(table) }, &mut body)
+    let length = neoteletext_rules::state::encode(&PageState { identifier: QUERY, table: Some(table) }, &mut body)
         .map_err(|fault| format!("the state does not encode: {fault:?}"))?;
     let body = body.get(..length).ok_or("the encoder overran its buffer")?;
     rows.push(Row {
         kind: "page_state",
         name: "answer",
         value: message(&Item::Event(Event::PageState(PageStateEvent { on, body })))?,
-        meaning: "identifier=42 generation=1 tick=9120 enabled=7 variables=[5] timers=[running 18] values=[sound 0 level = 41] on=101/0001",
+        meaning: "identifier=42 generation=1 tick=9120 v0=5 t0=running 18 sequences=[running passes 3 position 12] armed=1 targets=[] values=[sound 0 level = 41] on=101/0001",
     });
-    let fault = RulesFault { on, generation: 3, fault: FaultCode::TickOverrun, count: 12 };
+    let fault = RulesFault { on, generation: 3, fault: FaultCode::EvaluationLate, count: 12 };
     rows.push(Row {
         kind: "rules_fault",
-        name: "tick_overrun",
+        name: "evaluation_late",
         value: message(&Item::Event(Event::RulesFault(fault)))?,
-        meaning: "generation=3 fault=tick_overrun count=12 on=101/0001",
+        meaning: "generation=3 fault=evaluation_late count=12 on=101/0001",
     });
+    Ok(())
+}
+
+/// The RULES and `RULES_QUERY` records and one record of each of the
+/// types 28 to 33 (RULE-41, RULE-47, RULE-85), as packets.
+fn rule_records(rows: &mut Vec<Row>) -> Result<(), String> {
+    let (page, sub) = place()?;
+    let image = default_image(false)?;
+    rows.push(Row {
+        kind: "records",
+        name: "rules_default_send_all",
+        value: packets(|out| rules::encode_image(page, sub, 1, &image, SERVICE, &mut |_| RECORD_ID, out))?,
+        meaning: "page 101 sub 0001 generation 1: the whole image of the rules row default_send_all, in one record",
+    });
+    let none = rules::RulesRecord { page, subcode: sub, generation: 2, fragment: None };
+    rows.push(Row {
+        kind: "records",
+        name: "rules_no_table",
+        value: packets(|out| rules::encode(&none, SERVICE, RECORD_ID, out))?,
+        meaning: "page 101 sub 0001 generation 2: no table",
+    });
+    let query = rules::RulesQueryRecord { page, subcode: sub, identifier: QUERY };
+    rows.push(Row {
+        kind: "records",
+        name: "rules_query",
+        value: packets(|out| rules::encode_query(query, SERVICE, RECORD_ID, out))?,
+        meaning: "page 101 sub 0001 identifier 42",
+    });
+    let each: [(&'static str, Command, &'static str); 6] = [
+        (
+            "local_midi",
+            Command::LocalMidi { channel: 0, status: 0x90, data1: 60, data2: 100 },
+            "page 101 sub 0001: audio channel 0, note on, MIDI channel 1, key 60, velocity 100",
+        ),
+        ("variable", variable(VariableOperation::Set, Operand::Constant(4)), "page 101 sub 0001: set v0 to 4"),
+        ("timer", Command::Timer { start: true, timer: 0 }, "page 101 sub 0001: start t0"),
+        ("report", Command::Report { value: Some(Value::variable(0)) }, "page 101 sub 0001: report variable v0"),
+        (
+            "run",
+            Command::Run { group: 1, mode: RunMode::Beat { timer: 0, ticks: 30 } },
+            "page 101 sub 0001: arm a run of group 1 for the next beat of 30 ticks of t0",
+        ),
+        ("sequence", Command::Sequence { start: true, sequence: 0 }, "page 101 sub 0001: start sequence 0"),
+    ];
+    for (name, command, meaning) in each {
+        let value = packets(|out| commands::encode(&command, page, sub, SERVICE, RECORD_ID, out))?;
+        rows.push(Row { kind: "records", name, value, meaning });
+    }
     Ok(())
 }
 
 /// One record of each of animation's five types (ANIM-23), as packets.
 fn records(rows: &mut Vec<Row>) -> Result<(), String> {
-    let page = PageAddress::from_mpp(PAGE).ok_or("the page is out of range")?;
-    let sub = SubCode::new(SUB);
+    let (page, sub) = place()?;
     let operations = [
         Operation { target: Target::object(OBJECT), kind: OperationKind::Move { relative: true, x: -8, y: 0 } },
         Operation { target: Target::control(3), kind: OperationKind::Look(2) },
@@ -197,7 +325,7 @@ fn records(rows: &mut Vec<Row>) -> Result<(), String> {
     rows.push(Row {
         kind: "records",
         name: "animate",
-        value: packets(|out| animate::encode(page, Some(sub), &operations, SERVICE, RECORD_ID, out))?,
+        value: packets(|out| animate::encode(page, sub, &operations, SERVICE, RECORD_ID, out))?,
         meaning: "page 101 sub 0001: move object 10 by (-8,0); look control 3 pressed",
     });
     // One frame: the local active object 5, as a triplet's reference
@@ -232,12 +360,19 @@ fn records(rows: &mut Vec<Row>) -> Result<(), String> {
         value: packets(|out| naplps_objects::encode((page, sub, 1), &[object], SERVICE, RECORD_ID, out))?,
         meaning: "page 101 sub 0001 generation 1: macro object 301 at (100,50) 64 by 32, frame macro 2/0, pressed look 2/1",
     });
-    let bytes = sheet::SheetRecord { page, kind: sheet::SheetKind::Regis, generation: 1, offset: 0, data: b"P[0,0]" };
+    let bytes = sheet::SheetRecord {
+        page,
+        subcode: sub,
+        kind: sheet::SheetKind::Regis,
+        generation: 1,
+        offset: 0,
+        data: b"P[0,0]",
+    };
     rows.push(Row {
         kind: "records",
         name: "sheet",
         value: packets(|out| sheet::encode(bytes, SERVICE, RECORD_ID, out))?,
-        meaning: "page 101 ReGIS sheet generation 1 offset 0: P[0,0]",
+        meaning: "page 101 sub 0001 ReGIS sheet generation 1 offset 0: P[0,0]",
     });
     for (mark, name, meaning) in [
         (frame::FrameMark::Begin, "frame_begin", "page 101 sub 0001 begin identifier 7"),
@@ -283,8 +418,10 @@ fn object(rows: &mut Vec<Row>) -> Result<(), String> {
 /// A vector the engine's own encoder refuses.
 pub fn rows() -> Result<Vec<Row>, String> {
     let mut rows = Vec::new();
-    rules(&mut rows)?;
+    images(&mut rows)?;
+    command_bodies(&mut rows)?;
     messages(&mut rows)?;
+    rule_records(&mut rows)?;
     records(&mut rows)?;
     object(&mut rows)?;
     Ok(rows)
@@ -307,39 +444,42 @@ mod tests {
 
     use super::*;
 
-    /// The `rules` rows the server writes (RULE-85): the worked examples of
-    /// page-rules.md, whose names the server turns into numbers. The engine
-    /// has no encoder of a table by names, so it cannot write them itself.
+    /// The `rules` rows the server writes (RULE-85): the images of the
+    /// worked examples of page-rules.md, whose names the server turns into
+    /// numbers. The engine's libraries have no encoder of a table by names,
+    /// so it cannot write them itself; the table holds them once the server
+    /// has written them at this version.
     const SERVER_WRITTEN_RULES: [&str; 8] =
         ["rule_35", "example_1", "example_2", "example_3", "example_4", "example_5", "example_6", "music_player"];
 
-    /// Whether `value`, a RULES record's body in hexadecimal, passes the
-    /// check, decodes to a table and encodes back to the same bytes.
+    /// Whether `value`, a table's image in hexadecimal, passes the check,
+    /// decodes to a table for the vectors' page and encodes back to the
+    /// same bytes.
     fn decodes_and_encodes_back(value: &str) -> bool {
         let Some((bytes, length)) = neoteletext_web::wire_vectors::bytes_of(value) else { return false };
-        let Some(body) = bytes.get(..length) else { return false };
-        let mut table = Box::new(Table::new());
-        let Ok(header) = neoteletext_rules::decode(body, &mut table) else { return false };
-        let mut out = [0_u8; MAX_TABLE_BYTES];
-        let encoded =
-            neoteletext_rules::encode(header.page, header.generation, header.has_table.then_some(&*table), &mut out);
-        neoteletext_rules::check(body).is_ok() && encoded.is_ok_and(|length| out.get(..length) == Some(body))
+        let Some(image) = bytes.get(..length) else { return false };
+        let mut table = Box::new(Table::new(PAGE, SUB));
+        if neoteletext_rules::decode(image, PAGE, SUB, body_check, &mut table).is_err() {
+            return false;
+        }
+        let mut out = vec![0_u8; MAX_TABLE_BYTES];
+        let encoded = neoteletext_rules::encode(&table, body_check, &mut out);
+        neoteletext_rules::check(image, PAGE, SUB, body_check).is_ok()
+            && encoded.is_ok_and(|length| out.get(..length) == Some(image))
     }
 
     /// RULE-85, ANIM-23 (REQ-6528, REQ-6529): the table's rows of these
     /// kinds are exactly what the engine's encoders write, in order, so a
-    /// change to an encoder or to the table that parts them fails here. The
-    /// rows the server writes are held to decode and encode back instead.
+    /// change to an encoder or to the table that parts them fails here. A
+    /// row the server writes is held to decode and encode back instead.
     #[test]
     fn the_tables_rows_of_these_kinds_are_what_the_engine_writes() {
         let written = rows().expect("they encode");
-        let mut server_written = Vec::new();
         let held: Vec<Row> = vectors()
             .filter_map(|vector| {
                 let kind = KINDS.into_iter().find(|kind| *kind == vector.kind)?;
                 if kind == "rules" && SERVER_WRITTEN_RULES.contains(&vector.name) {
                     assert!(decodes_and_encodes_back(vector.value), "{}", vector.name);
-                    server_written.push(vector.name);
                     return None;
                 }
                 let row = written.iter().find(|row| row.kind == kind && row.name == vector.name);
@@ -354,6 +494,5 @@ mod tests {
             })
             .collect();
         assert_eq!(held, written);
-        assert_eq!(server_written, SERVER_WRITTEN_RULES);
     }
 }

@@ -107,6 +107,21 @@ pub const TYPE_NAPLPS_OBJECTS: u8 = 25;
 pub const TYPE_SHEET: u8 = 26;
 /// Record type: the begin or the end of an atomic frame (ANIM-2).
 pub const TYPE_FRAME: u8 = 27;
+/// Record type: one MIDI message to a local sound (neoteletext-common
+/// page-rules.md RULE-21), the first of the six commands a page's rule
+/// table runs and the server may send directly (RULE-114), read by
+/// neoteletext-web's record reader; this receiver leaves them alone.
+pub const TYPE_LOCAL_MIDI: u8 = 28;
+/// Record type: a change of one of a page's variables (RULE-99).
+pub const TYPE_VARIABLE: u8 = 29;
+/// Record type: a start or a stop of one of a page's timers (RULE-100).
+pub const TYPE_TIMER: u8 = 30;
+/// Record type: a report asked of a page (RULE-22).
+pub const TYPE_REPORT: u8 = 31;
+/// Record type: a run of a group of a page's rule table (RULE-102).
+pub const TYPE_RUN: u8 = 32;
+/// Record type: a start or a stop of a sequence (RULE-103).
+pub const TYPE_SEQUENCE: u8 = 33;
 
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
@@ -117,8 +132,8 @@ pub const fn is_input_type(kind: u8) -> bool {
 
 /// Whether a record type is one of the channel's records beside sound
 /// (DOC-1951): the input profile's, the index, LOG, links, sub-pages,
-/// redirect, denied, ReGIS, NAPLPS, the three of viewer state, and the seven
-/// of the page rule table and animation. The audio
+/// redirect, denied, ReGIS, NAPLPS, the three of viewer state, the seven
+/// of the page rule table and animation, and the six commands. The audio
 /// receiver leaves every one alone, and counts none as refused.
 #[must_use]
 pub const fn is_channel_type(kind: u8) -> bool {
@@ -144,6 +159,8 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_NAPLPS_OBJECTS
         || kind == TYPE_SHEET
         || kind == TYPE_FRAME
+        // The six commands of the second form (RULE-114).
+        || (kind >= TYPE_LOCAL_MIDI && kind <= TYPE_SEQUENCE)
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,

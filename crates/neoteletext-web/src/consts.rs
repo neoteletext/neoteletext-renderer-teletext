@@ -314,7 +314,7 @@ pub const INVALID_PACKET_REPORT_SECONDS: u64 = 20;
 /// DEC-1759 lesson 14): `neottx.` and the input protocol's
 /// version, `neoteletext_input::VERSION`. The wire vectors' test asserts
 /// that the two agree, and the server imports this one.
-pub const PUSH_SUBPROTOCOL: &str = "neottx.9";
+pub const PUSH_SUBPROTOCOL: &str = "neottx.10";
 /// The first of the close codes that say stop (DOC-1919,
 /// DEC-1759 lesson 10): the fault will be there on the next attempt, so a
 /// receiver does not try again. A code of this range nobody has defined yet

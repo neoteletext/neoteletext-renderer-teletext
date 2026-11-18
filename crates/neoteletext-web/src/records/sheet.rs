@@ -4,26 +4,29 @@
 //!
 //! ```text
 //! bytes 0-1   page: 0x100 to 0x8FF
-//! byte  2     kind: 1 ReGIS, 2 NAPLPS
-//! byte  3     reserved: 0
-//! bytes 4-5   generation: which stream of this page's sheet the bytes are of
-//! bytes 6-9   offset: where in that stream the bytes begin
-//! bytes 10-   data: 0 to 8,174 bytes of the stream
+//! bytes 2-3   sub-code: 0x0000 to 0x3F7E
+//! byte  4     kind: 1 ReGIS, 2 NAPLPS
+//! byte  5     reserved: 0
+//! bytes 6-7   generation: which stream of this page's sheet the bytes are of
+//! bytes 8-11  offset: where in that stream the bytes begin
+//! bytes 12-   data: 0 to 8,172 bytes of the stream
 //! ```
 //!
-//! A sheet is one stream of at most [`MAX_SHEET_BYTES`] for a page and a
-//! kind; a new generation starts it again. The bytes are not read here:
+//! A sheet is one stream of at most [`MAX_SHEET_BYTES`] for a page, a page
+//! number and a sub-code together (DEC-6599, RULE-112), and a kind; a new
+//! generation starts it again. It is never shared with another sub-code
+//! of the same page number. The bytes are not read here:
 //! the renderer bounds what they can cost.
 
 use neoteletext_audio::MAX_FRAMED_BODY as MAX_BODY;
 use neoteletext_core::packet::Packet;
-use neoteletext_core::types::PageAddress;
+use neoteletext_core::types::{PageAddress, SubCode};
 
-use super::{RecordFault, TYPE_SHEET, take_u16, write_packets};
+use super::{RecordFault, TYPE_SHEET, take_place, take_u16, write_packets};
 use crate::consts::MAX_SHEET_BYTES;
 
 /// The fixed fields: page, kind, reserved, generation and offset.
-const FIXED: usize = 2 + 1 + 1 + 2 + 4;
+const FIXED: usize = 2 + 2 + 1 + 1 + 2 + 4;
 /// The most bytes of a sheet one record carries.
 pub const MAX_DATA: usize = MAX_BODY - FIXED;
 
@@ -63,6 +66,8 @@ impl SheetKind {
 pub struct SheetRecord<'a> {
     /// The page whose sheet it is.
     pub page: PageAddress,
+    /// Its sub-code: a sheet belongs to one page (ANIM-17).
+    pub subcode: SubCode,
     /// The renderer it is for.
     pub kind: SheetKind,
     /// Which stream of the page's sheet the bytes are of.
@@ -79,8 +84,7 @@ pub struct SheetRecord<'a> {
 /// A page or a kind outside its range, a reserved byte that is not 0, a
 /// stream that would pass [`MAX_SHEET_BYTES`], or a body cut short.
 pub fn read(body: &[u8]) -> Result<SheetRecord<'_>, RecordFault> {
-    let (page, rest) = take_u16(body)?;
-    let page = PageAddress::from_mpp(page).ok_or(RecordFault::BadValue("sheet page"))?;
+    let (page, subcode, rest) = take_place(body)?;
     let (&[kind, reserved], rest) = rest.split_first_chunk::<2>().ok_or(RecordFault::Length)?;
     let kind = SheetKind::from_code(kind).ok_or(RecordFault::BadValue("sheet kind"))?;
     if reserved != 0 {
@@ -94,7 +98,7 @@ pub fn read(body: &[u8]) -> Result<SheetRecord<'_>, RecordFault> {
     if end.is_none_or(|end| end > MAX_SHEET_BYTES) {
         return Err(RecordFault::BadValue("sheet offset"));
     }
-    Ok(SheetRecord { page, kind, generation, offset, data })
+    Ok(SheetRecord { page, subcode, kind, generation, offset, data })
 }
 
 /// Writes a SHEET record as packets 4/31 of audio service `service`,
@@ -118,6 +122,7 @@ pub fn encode(
         .mpp()
         .to_be_bytes()
         .into_iter()
+        .chain(record.subcode.value().to_be_bytes())
         .chain([record.kind.code(), 0])
         .chain(record.generation.to_be_bytes())
         .chain(record.offset.to_be_bytes());

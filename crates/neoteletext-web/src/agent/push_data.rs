@@ -186,7 +186,13 @@ impl<R: RandomSource> UserAgent<'_, R> {
             | ChannelRecord::Sprites(_)
             | ChannelRecord::NaplpsObjects(_)
             | ChannelRecord::Sheet(_)
-            | ChannelRecord::Frame(_) => {}
+            | ChannelRecord::Frame(_)
+            | ChannelRecord::LocalMidi(_)
+            | ChannelRecord::Variable(_)
+            | ChannelRecord::Timer(_)
+            | ChannelRecord::Report(_)
+            | ChannelRecord::Run(_)
+            | ChannelRecord::Sequence(_) => {}
         }
         0
     }

@@ -1,58 +1,71 @@
 //! `neottx rules-run` (animation.md ANIM-18, REQ-6529): a page rule table
 //! evaluated against a file of timed inputs, with `neoteletext-rules`, and
-//! the animation operations each tick's actions produce written in the
-//! form of an image sequence's script (`crate::script`), so that a
+//! the animation operations its groups' `ANIMATE` commands make written
+//! in the form of an image sequence's script (`crate::script`), so that a
 //! rule-driven page of any renderer can be played into images without the
-//! browser. Reports and sound operations are written as comment lines,
-//! which a script's reader skips.
+//! browser. Reports and every other command a run gives the page are
+//! written as comment lines, which a script's reader skips.
 //!
-//! The table is the RULES record's body (page-rules.md RULE-41), as bytes
-//! or as hexadecimal text. The inputs are one a line, in ascending tick:
+//! The table is one of three things (`crate::rules_json`): the program
+//! protocol's `rules` message as JSON (page-rules.md RULE-35), which names
+//! its own page; or the table's image (RULE-41), as bytes or as
+//! hexadecimal text, for the page `--page` and `--sub` name. The inputs
+//! are one a line, in ascending tick:
 //!
 //! ```text
 //! <tick> key down|up char|name|physical <key>
 //! <tick> pointer <x> <y> <buttons>
 //! <tick> level <audio channel> <0-255>
 //! <tick> rectangle <n> <x> <y> <width> <height>
+//! <tick> cue <audio channel> <n>
+//! <tick> command <record type> <hexadecimal body>
 //! ```
 //!
 //! A `rectangle` gives object `n` its bounding rectangle in the picture's
 //! pixels (ANIM-13), which no renderer is here to report; a `move` the
-//! table then makes moves it with the object. Nothing here reads a clock:
-//! page tick `n` is the `n`th turn of the loop.
+//! table then makes moves it with the object. A `cue` is one the sound
+//! helper reports heard (RULE-109), and a `command` a `VARIABLE`, `TIMER`,
+//! `REPORT`, `RUN` or `SEQUENCE` record the server sends directly
+//! (RULE-114). Nothing here reads a clock: page tick `n` is the `n`th
+//! turn of the loop.
 //!
 //! With `--on-arrival` each key and pointer input is given to the
 //! evaluator as a receiver gives one the moment it arrives (page-rules.md
-//! RULE-96): the sound operations of the rules it fires are written
-//! first among its tick's lines, and every line is otherwise the same.
+//! RULE-96): the sound commands of the groups it fires are written first
+//! among its tick's lines, and every line is otherwise the same.
 
 use super::{io_failure, sandbox_closed};
 use crate::operations::to_core;
 use crate::script::{MAX_SCRIPT_BYTES, write_operation};
 use neoteletext_app::{Failure, exit};
+use neoteletext_audio::record::{FLAG_LOOP, Operation as SoundOperation, Record};
 use neoteletext_core::consts::{CELL_HEIGHT, CELL_WIDTH, PAGE_HEIGHT, PAGE_WIDTH};
 use neoteletext_core::limits::{MAX_ANIMATED_OBJECTS, MAX_CYCLING_OBJECTS};
-use neoteletext_rules::animate::{AnimationStore, Applied, Operation, OperationKind};
+use neoteletext_core::types::SubCode;
+use neoteletext_rules::animate::{self, AnimationStore, Applied, Operation, OperationKind};
+use neoteletext_rules::command::{
+    self, Command, MAX_BODY_BYTES, TYPE_ANIMATE, TYPE_CONTROL, TYPE_LOCAL_MIDI, TYPE_NAPLPS_OBJECTS, TYPE_SPRITES,
+};
 use neoteletext_rules::evaluator::{
-    Bounds, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, Reported, SoundOperation, SoundState,
-    TargetState,
+    Bounds, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, Reported, SoundState, TargetState,
 };
 use neoteletext_rules::limits::{
-    AUDIO_CHANNELS, MAX_BUTTON, MAX_GAIN, MAX_POINTER_OBJECTS, MAX_TABLE_BYTES, MAX_WATCHED, SUBCODE_ANY,
+    AUDIO_CHANNELS, MAX_BUTTON, MAX_CUE, MAX_GAIN, MAX_POINTER_OBJECTS, MAX_TABLE_BYTES, MAX_WATCHED, NO_RULE,
 };
 use neoteletext_rules::state::PageState;
 use neoteletext_rules::table::{Target, TargetKind, WATCH_LEVEL};
 use neoteletext_rules::{Evaluator, Table, World};
+use neoteletext_web::records::body_check;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 
 /// The most ticks a run evaluates, as an image sequence plays (ANIM-18).
 use super::MAX_SEQUENCE_TICKS;
 
-/// The most objects given a rectangle in one run: more than any page's
-/// table names (`MAX_TABLE_TARGETS`, 64), so that a file of inputs cannot
-/// make the run hold an unbounded list.
-const MAX_RECTANGLES: usize = 256;
+/// The most objects given a rectangle in one run: four times what any
+/// page's table names, so that a file of inputs cannot make the run hold
+/// an unbounded list.
+const MAX_RECTANGLES: usize = 4 * neoteletext_rules::limits::MAX_TABLE_TARGETS;
 /// The handle the stand-in local sound of each audio channel answers
 /// with: the first a channel gives a local sound (page-rules.md RULE-90).
 const LOCAL_HANDLE: u8 = 1;
@@ -95,10 +108,35 @@ impl Picture {
 /// One line of the inputs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Given {
-    Key { down: bool, key: KeyIdentity, base: Option<u32> },
-    Pointer { x: u16, y: u16, buttons: u8 },
-    Level { channel: u8, level: u8 },
-    Rectangle { object: u16, bounds: Bounds },
+    Key {
+        down: bool,
+        key: KeyIdentity,
+        base: Option<u32>,
+    },
+    Pointer {
+        x: u16,
+        y: u16,
+        buttons: u8,
+    },
+    Level {
+        channel: u8,
+        level: u8,
+    },
+    Rectangle {
+        object: u16,
+        bounds: Bounds,
+    },
+    Cue {
+        channel: u8,
+        number: u8,
+    },
+    /// A record the server sends directly: its type, its body and the
+    /// body's length.
+    Command {
+        kind: u8,
+        body: [u8; MAX_BODY_BYTES],
+        length: usize,
+    },
 }
 
 fn number<T: core::str::FromStr>(words: &mut core::str::SplitAsciiWhitespace<'_>, what: &str) -> Result<T, String> {
@@ -170,6 +208,22 @@ fn given(name: &str, words: &mut core::str::SplitAsciiWhitespace<'_>) -> Result<
                 bottom: top.saturating_add(i32::from(height)),
             };
             Given::Rectangle { object, bounds }
+        }
+        "cue" => {
+            let (channel, number): (u8, u8) = (number(words, "the audio channel")?, number(words, "the cue")?);
+            if usize::from(channel) >= AUDIO_CHANNELS || number > MAX_CUE {
+                return Err(format!("a cue is an audio channel below {AUDIO_CHANNELS} and a number to {MAX_CUE}"));
+            }
+            Given::Cue { channel, number }
+        }
+        "command" => {
+            let kind: u8 = number(words, "the record type")?;
+            let bytes = hexadecimal(words.next().ok_or("the command's body is missing")?.as_bytes())
+                .ok_or("a command's body is hexadecimal digits, two a byte")?;
+            let mut body = [0_u8; MAX_BODY_BYTES];
+            let room = body.get_mut(..bytes.len()).ok_or("the body is longer than any command's")?;
+            room.copy_from_slice(&bytes);
+            Given::Command { kind, body, length: bytes.len() }
         }
         _ => return Err(format!("{name:?} is not an input")),
     };
@@ -261,8 +315,8 @@ impl World for Run {
         count
     }
 
-    /// No sound plays here. So that a table's MIDI messages are written
-    /// and not skipped for want of an instrument (page-rules.md RULE-20),
+    /// No sound plays here. So that a table's sound commands are written
+    /// and not skipped for want of an instrument (page-rules.md RULE-118),
     /// every audio channel answers as holding a local sound at full gain;
     /// a sound's level is what a `level` line gives.
     fn sound(&self, _channel: u8) -> SoundState {
@@ -273,20 +327,87 @@ impl World for Run {
         0
     }
 
-    fn sound_operation(&mut self, operation: SoundOperation) -> bool {
-        self.out.push(match operation {
-            SoundOperation::Midi { channel, status, data1, data2 } => {
-                format!("# midi {channel} {status:#04x} {data1} {data2}")
+    fn command(&mut self, kind: u8, body: &[u8], tick: u32) -> bool {
+        match kind {
+            TYPE_CONTROL => self.control(body),
+            TYPE_LOCAL_MIDI => {
+                let Ok((_, _, Command::LocalMidi { channel, status, data1, data2 })) = command::decode(kind, body)
+                else {
+                    return false;
+                };
+                self.out.push(format!("# midi {channel} {status:#04x} {data1} {data2}"));
+                true
             }
-            SoundOperation::Play { channel, handle, generation, gain, fade_ms, looped } => {
-                format!("# play {channel} {handle} {generation} {gain} {fade_ms}{}", if looped { " loop" } else { "" })
+            TYPE_ANIMATE => {
+                let Ok((_, bytes)) = animate::read_record(body) else { return false };
+                let mut any = false;
+                for operation in animate::operations(bytes) {
+                    any |= self.animate(operation, tick);
+                }
+                any
             }
-            SoundOperation::Stop { channel, fade_ms } => format!("# stop {channel} {fade_ms}"),
-            SoundOperation::Gain { channel, gain, fade_ms } => format!("# gain {channel} {gain} {fade_ms}"),
+            TYPE_SPRITES | TYPE_NAPLPS_OBJECTS => {
+                let name = if kind == TYPE_SPRITES { "sprites" } else { "naplps_objects" };
+                self.out.push(format!("# {name} {}", hexadecimal_text(body)));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn report(&mut self, report: Report) {
+        let kind = match report.target.kind {
+            TargetKind::Page => "page",
+            TargetKind::Control => "control",
+            TargetKind::Object => "object",
+            TargetKind::Rect => "rectangle",
+        };
+        let what = match report.what {
+            Reported::Fired => "fired".to_owned(),
+            Reported::Input { sequence } => format!("input {sequence}"),
+            Reported::Value { reading, .. } => format!("value {reading}"),
+        };
+        let numbered = |number: u8| if number == NO_RULE { "none".to_owned() } else { number.to_string() };
+        self.out.push(format!(
+            "# report rule {} row {} tick {} target {kind} {} {what}",
+            numbered(report.rule),
+            numbered(report.row),
+            report.tick,
+            report.target.number
+        ));
+    }
+
+    fn advance_cycles(&mut self, tick: u32) {
+        self.animation.advance(tick, &mut |_| {});
+    }
+
+    fn page_state(&mut self, _state: &PageState) {}
+}
+
+impl Run {
+    /// Writes a `CONTROL` command (REQ-AUD-006) as a comment line. The
+    /// audio profile reads one as a whole record, so the body is framed
+    /// as the server frames it and read back.
+    fn control(&mut self, body: &[u8]) -> bool {
+        let mut record = [0_u8; neoteletext_audio::MAX_RECORD];
+        let Some(length) = neoteletext_audio::record::write(TYPE_CONTROL, body, &mut record) else { return false };
+        let Ok(Record::Control(control)) = neoteletext_audio::record::parse(record.get(..length).unwrap_or(&[])) else {
+            return false;
+        };
+        let (channel, fade_ms) = (control.channel, control.fade_ms);
+        self.out.push(match control.operation {
+            SoundOperation::Play => {
+                let looped = if control.flags & FLAG_LOOP != 0 { " loop" } else { "" };
+                format!("# play {channel} {} {} {} {fade_ms}{looped}", control.handle, control.generation, control.gain)
+            }
+            SoundOperation::Stop => format!("# stop {channel} {fade_ms}"),
+            SoundOperation::Gain => format!("# gain {channel} {} {fade_ms}", control.gain),
         });
         true
     }
 
+    /// Applies one operation of an `ANIMATE` command and writes it as a
+    /// line of the script; false when it did nothing.
     fn animate(&mut self, operation: Operation, tick: u32) -> bool {
         // The object's rectangle moves with it, by the picture's units.
         if let (TargetKind::Object, OperationKind::Move { relative, x, y }) = (operation.target.kind, operation.kind) {
@@ -320,43 +441,45 @@ impl World for Run {
             None => false,
         }
     }
-
-    fn report(&mut self, report: Report) {
-        let kind = match report.target.kind {
-            TargetKind::Page => "page",
-            TargetKind::Control => "control",
-            TargetKind::Object => "object",
-            TargetKind::Rect => "rectangle",
-        };
-        let what = match report.what {
-            Reported::Fired => "fired".to_owned(),
-            Reported::Input { sequence } => format!("input {sequence}"),
-            Reported::Value { reading, .. } => format!("value {reading}"),
-        };
-        self.out.push(format!(
-            "# report rule {} tick {} target {kind} {} {what}",
-            report.rule, report.tick, report.target.number
-        ));
-    }
-
-    fn advance_cycles(&mut self, tick: u32) {
-        self.animation.advance(tick, &mut |_| {});
-    }
-
-    fn page_state(&mut self, _state: &PageState) {}
 }
 
-/// The table's bytes: the file's own, or the bytes its hexadecimal text
-/// names when the file is all hexadecimal digits and white space.
-fn table_bytes(file: &[u8]) -> Vec<u8> {
-    let text: Vec<u8> = file.iter().copied().filter(|byte| !byte.is_ascii_whitespace()).collect();
-    let hexadecimal = !text.is_empty() && text.len().is_multiple_of(2) && text.iter().all(u8::is_ascii_hexdigit);
-    if !hexadecimal {
-        return file.to_vec();
+/// The bytes hexadecimal text names, two digits a byte, or `None` when it
+/// is not that.
+fn hexadecimal(text: &[u8]) -> Option<Vec<u8>> {
+    if text.is_empty() || !text.len().is_multiple_of(2) || !text.iter().all(u8::is_ascii_hexdigit) {
+        return None;
     }
     text.chunks(2)
-        .filter_map(|pair| core::str::from_utf8(pair).ok().and_then(|pair| u8::from_str_radix(pair, 16).ok()))
+        .map(|pair| core::str::from_utf8(pair).ok().and_then(|pair| u8::from_str_radix(pair, 16).ok()))
         .collect()
+}
+
+/// Bytes as hexadecimal text.
+fn hexadecimal_text(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut text = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        // Writing to a `String` cannot fail.
+        let _ = write!(text, "{byte:02x}");
+    }
+    text
+}
+
+/// The table's image: the file's own bytes, or the bytes its hexadecimal
+/// text names when the file is all hexadecimal digits and white space.
+fn image_bytes(file: &[u8]) -> Vec<u8> {
+    let text: Vec<u8> = file.iter().copied().filter(|byte| !byte.is_ascii_whitespace()).collect();
+    hexadecimal(&text).unwrap_or_else(|| file.to_vec())
+}
+
+/// The table of `file` (page-rules.md RULE-35, RULE-41): a table's image,
+/// as bytes or as hexadecimal text, for the page `page` and `sub`.
+fn load_table(file: &[u8], page: u16, sub: u16) -> Result<Box<Table>, String> {
+    // A decoded table is about a hundred kilobytes.
+    let mut table = Box::new(Table::new(page, sub));
+    neoteletext_rules::decode(&image_bytes(file), page, sub, body_check, &mut table)
+        .map_err(|fault| format!("the table is refused: {fault:?}"))?;
+    Ok(table)
 }
 
 fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Failure> {
@@ -371,30 +494,35 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Failure> {
     Ok(bytes)
 }
 
-/// Evaluates `ticks` ticks of the table in `table_file`'s bytes against
-/// `inputs`, and gives the lines to write. With `on_arrival`, each event
-/// is given by `Evaluator::push_now` (RULE-96) and not left for the tick.
+/// The generation the run's table is given: its first (RULE-40).
+const GENERATION: u16 = neoteletext_rules::limits::FIRST_GENERATION;
+
+/// Evaluates `ticks` ticks of `table` against `inputs`, and gives the
+/// lines to write. With `on_arrival`, each event is given by
+/// `Evaluator::push_now` (RULE-96) and not left for the tick.
 fn evaluate(
-    table_file: &[u8],
+    table: &Table,
     inputs: &[(u32, Given)],
     ticks: u32,
     picture: Picture,
     on_arrival: bool,
 ) -> Result<Vec<String>, String> {
-    // A decoded table and its evaluator are tens of kilobytes each.
-    let mut table = Box::new(Table::new());
-    let header = neoteletext_rules::decode(&table_bytes(table_file), &mut table)
-        .map_err(|fault| format!("the table is refused: {fault:?}"))?;
-    let mut evaluator =
-        Box::new(Evaluator::new(&table, header.generation, SUBCODE_ANY).map_err(|fault| format!("{fault:?}"))?);
+    let mut evaluator = Box::new(Evaluator::new(table, GENERATION, body_check).map_err(|fault| format!("{fault:?}"))?);
     let watch: Vec<(u8, u8)> = evaluator.index().watch.iter().map(|slot| (slot.channel, slot.kind)).collect();
     let mut metered = [0u8; MAX_WATCHED];
     let mut run = Run { picture, rectangles: Vec::new(), animation: AnimationStore::new(), out: Vec::new() };
-    let mut lines =
-        vec![format!("# page {:03X}, generation {}, {} rules", header.page, header.generation, table.rules.len())];
+    let mut lines = vec![format!(
+        "# page {:03X}/{:04X}, {} rules, {} groups, {} sequences",
+        table.page,
+        table.sub,
+        table.rules.len(),
+        table.groups.len(),
+        table.sequences.len()
+    )];
     let mut pending = inputs.iter().peekable();
     let (mut sequence, mut held, mut at) = (0u32, 0u8, None::<(u16, u16)>);
-    // A report or a sound operation is a comment of its tick.
+    // A report or a command written as a comment is a comment of its
+    // tick.
     let of_tick = |tick: u32, line: String| match line.strip_prefix("# ") {
         Some(comment) => format!("# {tick} {comment}"),
         None => line,
@@ -432,6 +560,14 @@ fn evaluate(
                     }
                     evaluator.set_metered(&metered);
                 }
+                Given::Cue { channel, number } => {
+                    // One over the tick's cues is dropped and counted.
+                    let _ = evaluator.push_cue(channel, number);
+                }
+                Given::Command { kind, body, length } => {
+                    // What the evaluator refuses or drops it counts.
+                    let _ = evaluator.push_command(kind, body.get(..length).unwrap_or(&[]));
+                }
                 Given::Rectangle { object, bounds } => {
                     if let Some((_, held)) = run.rectangles.iter_mut().find(|(number, _)| *number == object) {
                         *held = bounds;
@@ -454,8 +590,8 @@ fn evaluate(
     }
     let counters = evaluator.counters();
     lines.push(format!(
-        "# {} ticks, {} rules fired, {} actions run, {} skipped, {} events dropped, {} overruns",
-        counters.ticks, counters.fired, counters.actions, counters.skipped, counters.events_dropped, counters.overruns
+        "# {} ticks, {} rules fired, {} groups run, {} commands applied, {} skipped, {} events dropped",
+        counters.ticks, counters.fired, counters.groups, counters.commands, counters.skipped, counters.events_dropped
     ));
     Ok(lines)
 }
@@ -468,11 +604,19 @@ fn evaluate(
 pub fn rules_run(
     table: &Path,
     inputs: &Path,
+    page: &str,
     frames: Option<u32>,
     picture: Picture,
     on_arrival: bool,
     no_sandbox: bool,
 ) -> Result<(), Failure> {
+    // The page an image is for: a page alone is its sub-code 0000.
+    let (page, sub) = match super::parse_selection(page)? {
+        super::Selection::Page(address, subcode) => {
+            (address.mpp(), if subcode == SubCode::ANY { 0 } else { subcode.value() })
+        }
+        super::Selection::All => return Err((exit::USAGE, "a table is one page's".to_owned())),
+    };
     // Both files are read, within their bounds, before the sandbox closes,
     // and parsed after it (REQ-SEC-017).
     let table_file = read_bounded(table, MAX_TABLE_BYTES.saturating_mul(3))?;
@@ -484,8 +628,9 @@ pub fn rules_run(
     // is applied.
     let last = given.last().map_or(0, |(tick, _)| *tick);
     let ticks = frames.unwrap_or_else(|| last.saturating_add(2)).min(MAX_SEQUENCE_TICKS);
-    let lines = evaluate(&table_file, &given, ticks, picture, on_arrival)
-        .map_err(|why| (exit::INPUT, format!("{}: {why}", table.display())))?;
+    let named = |why| (exit::INPUT, format!("{}: {why}", table.display()));
+    let loaded = load_table(&table_file, page, sub).map_err(named)?;
+    let lines = evaluate(&loaded, &given, ticks, picture, on_arrival).map_err(named)?;
     let mut out = std::io::stdout().lock();
     for line in lines {
         writeln!(out, "{line}").map_err(|error| (exit::INPUT, error.to_string()))?;

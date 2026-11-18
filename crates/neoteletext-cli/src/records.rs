@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn an_animate_records_operations_are_the_cores() {
         let body = [
-            &[0x01, 0x50, 0x3F, 0x7F, 9, 0][..],
+            &[0x01, 0x50, 0x00, 0x02, 9, 0][..],
             &[5, 2, 0, 10],
             &[6, 1, 0, 3],
             &[7, 2, 0, 10, 3],
@@ -104,7 +104,7 @@ mod tests {
         ]
         .concat();
         let record = animate::read(&body).unwrap();
-        assert_eq!((record.page.mpp(), record.subcode), (0x150, None), "whichever sub-page is shown");
+        assert_eq!((record.page.mpp(), record.subcode.value()), (0x150, 0x0002));
         let object = Target::Object(10);
         let expected = [
             (object, Operation::Show),

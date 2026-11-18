@@ -407,6 +407,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "rules_arrival"
+path = "fuzz_targets/rules_arrival.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rule_commands"
+path = "fuzz_targets/rule_commands.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "rule_event"
 path = "fuzz_targets/rule_event.rs"
 test = false

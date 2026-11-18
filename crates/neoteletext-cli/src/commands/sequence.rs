@@ -47,11 +47,11 @@ fn refused(step: &Step, why: &str) -> Failure {
 }
 
 impl Player {
-    /// Whether a record for `page` and `subcode` is for the page played.
-    /// An ANIMATE record names no sub-page when it is for whichever is
-    /// shown (ANIM-6).
-    fn ours(&self, page: PageAddress, subcode: Option<SubCode>) -> bool {
-        page == self.page && subcode.is_none_or(|subcode| subcode == self.subcode)
+    /// Whether a record for `page` and `subcode` is for the page played:
+    /// a page is its number and its sub-code together (RULE-112), and no
+    /// record names "whichever sub-page is shown" (DEC-6599).
+    fn ours(&self, page: PageAddress, subcode: SubCode) -> bool {
+        page == self.page && subcode == self.subcode
     }
 
     fn operate(&mut self, target: Target, operation: Operation, tick: u32) {
@@ -69,7 +69,7 @@ impl Player {
             Action::Operation { target, operation } => self.operate(*target, *operation, tick),
             Action::Record { kind: RecordKind::Frame, body } => {
                 let mark = frame::read(body).map_err(|fault| refused(step, &records::why(fault)))?;
-                if !self.ours(mark.page, Some(mark.subcode)) {
+                if !self.ours(mark.page, mark.subcode) {
                     return Ok(());
                 }
                 // A second begin ends the frame that was open, as an end
@@ -105,7 +105,7 @@ impl Player {
             }
             RecordKind::Sprites => {
                 let record = sprites::read(body).map_err(|fault| refused(step, &records::why(fault)))?;
-                if self.ours(record.page, Some(record.subcode)) {
+                if self.ours(record.page, record.subcode) {
                     if !cfg!(feature = "objects") {
                         return Err(neoteletext_app::not_in_build("teletext sprites", "objects"));
                     }

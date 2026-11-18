@@ -166,10 +166,11 @@ fn a_rule_event_counts_one_and_what_is_no_input_counts_nothing() {
         count += 1;
         assert_eq!(session.count(), count, "{item:?} counts one");
     }
-    let fired = RuleEvent { on: ON, generation: 1, rule: 63, tick: 7, target: Target::NONE, body: RuleBody::Fired };
+    let fired =
+        RuleEvent { on: ON, generation: 1, rule: 63, row: 255, tick: 7, target: Target::NONE, body: RuleBody::Fired };
     assert!(sent_item(&mut session, &Item::Event(Event::RuleEvent(fired))).is_some());
     assert_eq!(session.count(), count + 1, "a firing with no event counts one too");
-    let fault = RulesFault { on: ON, generation: 1, fault: FaultCode::TickOverrun, count: 12 };
+    let fault = RulesFault { on: ON, generation: 1, fault: FaultCode::EvaluationLate, count: 12 };
     let state = PageStateEvent { on: ON, body: &[0, 0, 0, 42, 0, 0, 0, 0, 0, 0] };
     for item in [
         Item::Event(Event::RulesFault(fault)),
@@ -181,7 +182,7 @@ fn a_rule_event_counts_one_and_what_is_no_input_counts_nothing() {
     }
 }
 
-// RULE-46, RULE-49 (REQ-6528): under protocol version 9 a receiver never
+// RULE-46, RULE-49 (REQ-6528): under protocol version 10 a receiver never
 // writes a viewer's input at the top level of the stream.
 #[test]
 fn a_viewers_input_is_never_sent_bare() {
@@ -268,7 +269,8 @@ fn the_rate_is_120_units_a_second_and_releases_always_go() {
     }
     assert_eq!(sent_item(&mut session, &key(Action::Press, KeyCode::Character('a'))), None, "the 121st unit");
     assert!(sent_item(&mut session, &key(Action::Release, KeyCode::Character('a'))).is_some(), "its release");
-    let fired = RuleEvent { on: ON, generation: 1, rule: 0, tick: 0, target: Target::NONE, body: RuleBody::Fired };
+    let fired =
+        RuleEvent { on: ON, generation: 1, rule: 0, row: 255, tick: 0, target: Target::NONE, body: RuleBody::Fired };
     assert_eq!(sent_item(&mut session, &Item::Event(Event::RuleEvent(fired))), None, "a firing over the rate");
 }
 
@@ -276,7 +278,7 @@ fn key(action: Action, key: KeyCode) -> Item<'static> {
     Item::Event(Event::Key(Key { on: ON, lost: false, action, key, mods: 0, text: Some("a"), base: Some('q') }))
 }
 
-/// Sends `item` as a receiver under protocol version 9 does: a viewer's
+/// Sends `item` as a receiver under protocol version 10 does: a viewer's
 /// input as the session's capabilities carry it, inside a rule's
 /// `RULE_EVENT` (RULE-46), and anything else as it is. Gives the bytes of
 /// the input carried, or of the message for anything else, and `None`
@@ -292,7 +294,7 @@ fn sent_as<const N: usize>(
         let carried = session.carried(item)?;
         let inner_length = write(&carried, &mut inner).unwrap();
         let body = RuleBody::Input(&inner[..inner_length]);
-        let report = RuleEvent { on: ON, generation: 1, rule: 0, tick: 0, target: Target::NONE, body };
+        let report = RuleEvent { on: ON, generation: 1, rule: 0, row: 255, tick: 0, target: Target::NONE, body };
         (session.send(&Item::Event(Event::RuleEvent(report)), 0, &mut out).unwrap(), Some(inner_length))
     } else {
         (session.send(item, 0, &mut out).unwrap(), None)

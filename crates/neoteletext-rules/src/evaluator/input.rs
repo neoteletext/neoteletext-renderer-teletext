@@ -1,87 +1,96 @@
-//! The input state (RULE-8): which keys and buttons are down, where the
-//! pointer is and which targets it is inside. It follows the events, one
-//! by one, and no action can change it.
+//! The input state (RULE-8, RULE-108): which keys and buttons are down
+//! and since which tick, where the pointer is, which targets it is inside
+//! and the recent presses. It follows the events, one by one, and no
+//! command can change it.
 
 use crate::bounded::Bounded;
-use crate::limits::{MAX_BUTTON, MAX_KEYS_DOWN, MAX_POINTER_OBJECTS, MAX_RECTS};
+use crate::limits::{MAX_BUTTON, MAX_KEYS_DOWN, MAX_POINTER_OBJECTS, MAX_RECENT_PRESSES, MAX_RECTS};
 use crate::table::{
-    INPUT_BUTTON, INPUT_CHARACTER, INPUT_KEYS_DOWN, INPUT_NAMED, INPUT_PHYSICAL, INPUT_POINTER, Key, KeyKind,
-    POINTER_OVER, POINTER_X, POINTER_Y, Rect, SPACE_INPUT, Target, TargetKind, Value,
+    INPUT_BUTTON, INPUT_CHARACTER, INPUT_KEYS_DOWN, INPUT_NAMED, INPUT_PHYSICAL, INPUT_POINTER, KeyKind, KeyMatch,
+    POINTER_OVER, POINTER_X, POINTER_Y, Rect, Row, SPACE_INPUT, Target, TargetKind, Value,
 };
 
-/// What a key did.
+/// What a key event says happened.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyAction {
-    /// Pressed.
+    /// The key went down.
     Press,
-    /// Repeating while held.
+    /// An automatic repeat of a key held down.
     Repeat,
-    /// Released, or lost (RULE-8).
+    /// The key came up, or was lost (RULE-8).
     Release,
 }
 
-/// Which key, as the input protocol's KEY event names it (RULE-10).
+/// Which key a key event is of, as the input protocol's KEY event names
+/// it (DOC-1935).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyIdentity {
-    /// A character key: the Unicode scalar value the active layout gives
-    /// it without Shift.
+    /// A character: its Unicode scalar value.
     Character(u32),
-    /// A functional key, by its code in the input protocol's table.
+    /// A functional key: its code in the input protocol's table.
     Named(u32),
 }
 
-/// What a pointer did.
+impl KeyIdentity {
+    /// The key's code (RULE-116): its Unicode scalar value or its
+    /// functional code.
+    #[must_use]
+    pub const fn code(self) -> u32 {
+        match self {
+            Self::Character(code) | Self::Named(code) => code,
+        }
+    }
+}
+
+/// What a pointer event says happened.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PointerAction {
     /// A button or a contact went down.
     Press,
-    /// It came up, or was lost (RULE-8).
+    /// A button or a contact came up, or was lost.
     Release,
     /// The pointer moved.
     Move,
-    /// The pointer left the page (RULE-8): every target it was inside is
-    /// left.
+    /// The pointer left the page.
     Gone,
 }
 
-/// One thing the viewer did, as the receiver gives it to the evaluator.
+/// One input event, as the evaluator needs it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Input {
-    /// A key.
+    /// A key event.
     Key {
-        /// Press, repeat or release.
+        /// What happened.
         action: KeyAction,
-        /// The KEY event's `key`.
+        /// Which key.
         key: KeyIdentity,
-        /// The KEY event's `base`: the character the physical key has on
-        /// a United States layout, when it differs from `key`.
+        /// The character the key carries on a United States layout, when
+        /// the event gives one (DOC-1937).
         base: Option<u32>,
-        /// The modifier bits held.
+        /// The modifier bits (DOC-1935).
         mods: u8,
     },
-    /// Text that is not a key: a paste, an input method's composition or
-    /// its committed text.
+    /// Text that came from no key: a paste, a composition or its commit.
     Text,
-    /// A pointer button, contact or move.
+    /// A pointer event, with where the pointer is.
     Pointer {
-        /// What it did.
+        /// What happened.
         action: PointerAction,
-        /// On a press or a release the button: 0 left (or a contact, or a
-        /// pen touching), 1 middle, 2 right; others are not followed. On a
-        /// move the bit mask of buttons held.
+        /// The button, 0 to 2, of a press or a release; for a move, the
+        /// mask of the buttons the event says are down.
         button: u8,
-        /// The pointer's pixel in the picture's grid (RULE-13).
+        /// The pixel across.
         x: u16,
-        /// See `x`.
+        /// The pixel down.
         y: u16,
-        /// The control under the pointer's cell, 1 to 32, or 0 for none.
+        /// The control under the pointer's cell, or 0.
         control: u16,
     },
     /// The wheel turned.
     Wheel {
-        /// The pointer's pixel.
+        /// The pixel across.
         x: u16,
-        /// See `x`.
+        /// The pixel down.
         y: u16,
         /// The control under the pointer's cell, or 0.
         control: u16,
@@ -92,27 +101,22 @@ pub enum Input {
     Blur,
 }
 
-/// An input event with the number its giver knows it by (RULE-52): a
-/// report of the event names the number, never the event's bytes.
+/// An input event with the number its giver knows it by (RULE-52).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InputEvent {
-    /// The giver's sequence number of the event.
+    /// The giver's sequence number, which a report of the event names.
     pub sequence: u32,
-    /// What the viewer did.
+    /// The event.
     pub input: Input,
 }
 
-/// The targets a pointer is inside at once (RULE-12).
+/// The targets the pointer is inside (RULE-12).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Inside {
-    /// The page: the pointer is over it.
     pub(super) page: bool,
-    /// The control under the pointer, or 0.
     pub(super) control: u16,
-    /// The objects the pointer is inside.
     pub(super) objects: Bounded<u16, MAX_POINTER_OBJECTS>,
-    /// The declared rectangles the pointer is inside: bit `n` for
-    /// rectangle `n`.
+    /// Bit `n` for declared rectangle `n`.
     pub(super) rects: u16,
 }
 
@@ -120,10 +124,9 @@ pub(super) struct Inside {
 const _: () = assert!(MAX_RECTS <= u16::BITS as usize);
 
 impl Inside {
-    /// Inside nothing.
     pub(super) const NOTHING: Self = Self { page: false, control: 0, objects: Bounded::new(0), rects: 0 };
 
-    /// Whether `target`, one thing and never "any", is among them.
+    /// Whether `target` is among them; "any" never is.
     pub(super) fn contains(&self, target: Target) -> bool {
         match target.kind {
             TargetKind::Page => self.page,
@@ -151,10 +154,8 @@ impl Inside {
         }
     }
 
-    /// Gives `each` every target of this set that the trigger's `target`
-    /// names: itself when it is among them, or for "any" each control or
-    /// object in the set (RULE-12). What is given is what a report names
-    /// (RULE-46): all zero for the page.
+    /// Gives `each` every target of this set that `target` names: the
+    /// control or each object for "any", [`Target::NONE`] for the page.
     pub(super) fn matching(&self, target: Target, each: &mut dyn FnMut(Target)) {
         match target.kind {
             TargetKind::Control if target.number == 0 => {
@@ -181,126 +182,224 @@ impl Inside {
     }
 }
 
-/// What one pointer event changed (RULE-9): what `enter`, `leave`, `move`
-/// and `release` triggers match against.
+/// What one pointer event changed.
 #[derive(Clone, Copy)]
 pub(super) struct Transition {
-    /// The targets the pointer came inside.
     pub(super) entered: Inside,
-    /// The targets it went outside.
     pub(super) left: Inside,
-    /// Whether a move took it to another pixel.
+    /// Whether the pointer moved to another pixel.
     pub(super) moved: bool,
-    /// The targets the button released went down inside.
+    /// For a release: what the button's press was inside.
     pub(super) released: Inside,
 }
 
 impl Transition {
-    /// Nothing changed: what an event that is no pointer's gives.
     pub(super) const NONE: Self =
         Self { entered: Inside::NOTHING, left: Inside::NOTHING, moved: false, released: Inside::NOTHING };
 }
 
-/// A key held down: how the event that pressed it named it.
-type Held = (KeyIdentity, Option<u32>);
-
-/// The input state (RULE-8).
-#[derive(Clone, Copy)]
-pub(super) struct InputState {
-    /// The keys down, at most 16: a 17th press is not tracked.
-    keys: Bounded<Held, MAX_KEYS_DOWN>,
-    /// The buttons down over the page: bit `n` for button `n`.
-    pub(super) buttons: u8,
-    /// Whether the pointer is over the page.
-    over: bool,
-    /// The pointer's pixel; (0, 0) while it is not over the page.
-    x: u16,
-    y: u16,
-    /// What the pointer is inside.
-    pub(super) inside: Inside,
-    /// What each button went down inside.
-    pressed: [Inside; MAX_BUTTON as usize + 1],
+/// A key that is down (RULE-108).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct KeyDown {
+    pub(super) key: KeyIdentity,
+    pub(super) base: Option<u32>,
+    /// The modifiers as they were at the press.
+    pub(super) mods: u8,
+    /// The page tick of the event that put it down.
+    pub(super) tick: u32,
+    /// Its place among everything that went down.
+    pub(super) order: u32,
 }
 
-/// Whether `key` of a key set or of a key-state value names the key an
-/// event called `identity`, with `base` (RULE-10).
-pub(super) fn key_names(key: Key, identity: KeyIdentity, base: Option<u32>) -> bool {
-    match key.kind {
-        KeyKind::Character => identity == KeyIdentity::Character(key.code),
-        KeyKind::Named => identity == KeyIdentity::Named(key.code),
+/// A pointer button (RULE-108).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct ButtonDown {
+    pub(super) down: bool,
+    /// What its press was inside.
+    pub(super) inside: Inside,
+    /// The page tick of the press.
+    pub(super) tick: u32,
+    /// Its place among everything that went down.
+    pub(super) order: u32,
+}
+
+/// What was pressed, for a double press (RULE-108).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Pressed {
+    Key(KeyIdentity),
+    /// A button, and what the press was inside.
+    Button(u8, Inside),
+}
+
+/// A press kept for `double` and `double_press` (RULE-108).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct Recent {
+    pub(super) what: Pressed,
+    /// The page tick of the press.
+    pub(super) tick: u32,
+}
+
+/// What a value of the input state reads (RULE-24, RULE-26): the keys
+/// down, the buttons down, where the pointer is and what it is inside.
+#[derive(Clone, Copy)]
+pub(super) struct Seen {
+    pub(super) keys: Bounded<KeyDown, MAX_KEYS_DOWN>,
+    /// Bit `n` while button `n` is down.
+    pub(super) buttons: u8,
+    over: bool,
+    x: u16,
+    y: u16,
+    pub(super) inside: Inside,
+}
+
+/// The input state.
+#[derive(Clone, Copy)]
+pub(super) struct InputState {
+    pub(super) seen: Seen,
+    pub(super) pressed: [ButtonDown; MAX_BUTTON as usize + 1],
+    pub(super) recent: Bounded<Recent, MAX_RECENT_PRESSES>,
+    /// How many keys and buttons have gone down.
+    order: u32,
+}
+
+/// Whether a key of `kind` and `code` names the key of an event
+/// (RULE-10).
+pub(super) fn key_names(kind: KeyKind, code: u32, identity: KeyIdentity, base: Option<u32>) -> bool {
+    match kind {
+        KeyKind::Character => identity == KeyIdentity::Character(code),
+        KeyKind::Named => identity == KeyIdentity::Named(code),
         // The KEY event's `base` when it has one, else its `key` when that
         // is a character (DOC-1937).
-        KeyKind::Physical => base.map_or(identity == KeyIdentity::Character(key.code), |base| base == key.code),
+        KeyKind::Physical => base.map_or(identity == KeyIdentity::Character(code), |base| base == code),
+    }
+}
+
+/// Whether a key trigger's set and modifiers match a key (RULE-9,
+/// RULE-10), with `row`'s parameters standing for the keys the rows give
+/// (RULE-105).
+pub(super) fn keys_match(keys: &KeyMatch, row: &Row, identity: KeyIdentity, base: Option<u32>, mods: u8) -> bool {
+    let named = keys.keys.is_empty()
+        || keys
+            .keys
+            .iter()
+            .any(|key| key.resolve(row).is_some_and(|(kind, code)| key_names(kind, code, identity, base)));
+    named && mods & keys.mods_mask == keys.mods_value
+}
+
+const NO_BUTTON: ButtonDown = ButtonDown { down: false, inside: Inside::NOTHING, tick: 0, order: 0 };
+const NO_KEY: KeyDown = KeyDown { key: KeyIdentity::Character(0), base: None, mods: 0, tick: 0, order: 0 };
+const NO_RECENT: Recent = Recent { what: Pressed::Key(KeyIdentity::Character(0)), tick: 0 };
+
+impl Seen {
+    pub(super) const fn new() -> Self {
+        Self { keys: Bounded::new(NO_KEY), buttons: 0, over: false, x: 0, y: 0, inside: Inside::NOTHING }
     }
 }
 
 impl InputState {
-    /// Nothing down, the pointer not over the page.
     pub(super) const fn new() -> Self {
         Self {
-            keys: Bounded::new((KeyIdentity::Character(0), None)),
-            buttons: 0,
-            over: false,
-            x: 0,
-            y: 0,
-            inside: Inside::NOTHING,
-            pressed: [Inside::NOTHING; MAX_BUTTON as usize + 1],
+            seen: Seen::new(),
+            pressed: [NO_BUTTON; MAX_BUTTON as usize + 1],
+            recent: Bounded::new(NO_RECENT),
+            order: 0,
         }
     }
 
-    /// Follows a key event (RULE-8).
-    pub(super) fn key(&mut self, action: KeyAction, identity: KeyIdentity, base: Option<u32>) {
-        let held = self.keys.iter().position(|(down, _)| *down == identity);
+    fn next_order(&mut self) -> u32 {
+        self.order = self.order.saturating_add(1);
+        self.order
+    }
+
+    /// Follows a key event of page tick `tick`. A press beyond
+    /// `MAX_KEYS_DOWN` is not tracked (RULE-8); an automatic repeat does
+    /// not restart a hold (RULE-108).
+    pub(super) fn key(&mut self, action: KeyAction, key: KeyIdentity, base: Option<u32>, mods: u8, tick: u32) {
+        let held = self.seen.keys.iter().position(|down| down.key == key);
         match (action, held) {
-            // A 17th press finds no room, and is not down for conditions.
             (KeyAction::Press, None) => {
-                let _ = self.keys.push((identity, base));
+                let order = self.next_order();
+                // One press over the limit finds no room, and is not down
+                // for conditions.
+                let _ = self.seen.keys.push(KeyDown { key, base, mods, tick, order });
             }
             (KeyAction::Release, Some(place)) => {
-                let mut kept = Bounded::new((KeyIdentity::Character(0), None));
-                for (_, key) in self.keys.iter().enumerate().filter(|(at, _)| *at != place) {
+                let mut kept = Bounded::new(NO_KEY);
+                for (_, down) in self.seen.keys.iter().enumerate().filter(|(at, _)| *at != place) {
                     // One fewer than the list held.
-                    let _ = kept.push(*key);
+                    let _ = kept.push(*down);
                 }
-                self.keys = kept;
+                self.seen.keys = kept;
             }
             _ => {}
         }
     }
 
-    /// Follows a pointer event at a pixel: where the pointer is and what
-    /// it is inside (RULE-12), and for a press or a release the button.
-    pub(super) fn pointer(&mut self, action: PointerAction, button: u8, now: Inside, x: u16, y: u16) -> Transition {
-        let was = self.inside;
-        let moved = action == PointerAction::Move && (!self.over || (self.x, self.y) != (x, y));
-        (self.over, self.x, self.y, self.inside) = (true, x, y, now);
+    /// Follows a pointer event at a position: what the pointer entered
+    /// and left, whether it moved, and for a release what the press was
+    /// inside.
+    pub(super) fn pointer(
+        &mut self,
+        action: PointerAction,
+        button: u8,
+        now: Inside,
+        (x, y): (u16, u16),
+        tick: u32,
+    ) -> Transition {
+        let was = self.seen.inside;
+        let moved = action == PointerAction::Move && (!self.seen.over || (self.seen.x, self.seen.y) != (x, y));
+        (self.seen.over, self.seen.x, self.seen.y, self.seen.inside) = (true, x, y, now);
         let mut released = Inside::NOTHING;
-        if button <= MAX_BUTTON {
+        if button <= MAX_BUTTON && matches!(action, PointerAction::Press | PointerAction::Release) {
             let bit = 1_u8.checked_shl(u32::from(button)).unwrap_or(0);
-            let slot = self.pressed.get_mut(usize::from(button));
-            match (action, slot) {
-                (PointerAction::Press, Some(slot)) => {
-                    self.buttons |= bit;
-                    *slot = now;
+            let order = if action == PointerAction::Press { self.next_order() } else { 0 };
+            if let Some(slot) = self.pressed.get_mut(usize::from(button)) {
+                if action == PointerAction::Press {
+                    self.seen.buttons |= bit;
+                    *slot = ButtonDown { down: true, inside: now, tick, order };
+                } else {
+                    self.seen.buttons &= !bit;
+                    released = core::mem::replace(slot, NO_BUTTON).inside;
                 }
-                (PointerAction::Release, Some(slot)) => {
-                    self.buttons &= !bit;
-                    released = core::mem::replace(slot, Inside::NOTHING);
-                }
-                _ => {}
             }
         }
         Transition { entered: now.minus(&was), left: was.minus(&now), moved, released }
     }
 
-    /// The pointer left the page (RULE-8): it is inside nothing.
+    /// The pointer left the page: it is inside nothing.
     pub(super) fn gone(&mut self) -> Transition {
-        let was = self.inside;
-        (self.over, self.x, self.y, self.inside) = (false, 0, 0, Inside::NOTHING);
+        let was = self.seen.inside;
+        (self.seen.over, self.seen.x, self.seen.y, self.seen.inside) = (false, 0, 0, Inside::NOTHING);
         Transition { entered: Inside::NOTHING, left: was, moved: false, released: Inside::NOTHING }
     }
 
-    /// The declared rectangles a pixel is inside (RULE-13).
+    /// The most recent kept press that `same` says is of the same key or
+    /// button: its place and its tick (RULE-108).
+    pub(super) fn last_press(&self, same: impl Fn(&Pressed) -> bool) -> Option<(usize, u32)> {
+        let place = self.recent.iter().rposition(|recent| same(&recent.what))?;
+        self.recent.get(place).map(|recent| (place, recent.tick))
+    }
+
+    /// Forgets the kept press at `place`.
+    pub(super) fn forget_press(&mut self, place: usize) {
+        let mut kept = Bounded::new(NO_RECENT);
+        for (_, recent) in self.recent.iter().enumerate().filter(|(at, _)| *at != place) {
+            let _ = kept.push(*recent);
+        }
+        self.recent = kept;
+    }
+
+    /// Keeps a press, the oldest forgotten for it when the list is full
+    /// (RULE-108).
+    pub(super) fn keep_press(&mut self, what: Pressed, tick: u32) {
+        if self.recent.len() >= MAX_RECENT_PRESSES {
+            self.forget_press(0);
+        }
+        let _ = self.recent.push(Recent { what, tick });
+    }
+
+    /// The declared rectangles a pixel is within: bit `n` for rectangle
+    /// `n` (RULE-13).
     pub(super) fn rects_at(rects: &[Rect], x: u16, y: u16) -> u16 {
         let mut mask = 0_u16;
         for (rect, bit) in rects.iter().zip(0_u32..) {
@@ -312,7 +411,9 @@ impl InputState {
         }
         mask
     }
+}
 
+impl Seen {
     /// Reads a value of space 2 (RULE-24).
     pub(super) fn read(&self, value: Value) -> i32 {
         if value.space != SPACE_INPUT {
@@ -325,8 +426,8 @@ impl InputState {
             _ => None,
         };
         if let Some(kind) = kind {
-            let key = Key { kind, code: value.key_code() };
-            return i32::from(self.keys.iter().any(|(identity, base)| key_names(key, *identity, *base)));
+            let code = value.key_code();
+            return i32::from(self.keys.iter().any(|down| key_names(kind, code, down.key, down.base)));
         }
         match (value.a, value.b) {
             (INPUT_BUTTON, button) => i32::from(

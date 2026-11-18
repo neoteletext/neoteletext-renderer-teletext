@@ -1,18 +1,19 @@
 //! The animation state of a control or an object, the operations that
 //! change it, and frame cycling (ANIM-6, ANIM-14).
 //!
-//! An operation is the same bytes whether a rule's action holds it
-//! (RULE-45) or an `ANIMATE` record does, and [`read`] is the one function
-//! that reads them. [`AnimationState::apply`] folds an operation into a
-//! state; [`AnimationStore`] keeps the states of a sub-page's objects.
+//! Operations are carried by the `ANIMATE` record alone, whether the
+//! server sends it or a group of a page's rule table holds it as a command
+//! (RULE-119), and [`read`] is the one function that reads them;
+//! [`read_record`] reads the record's body. [`AnimationState::apply`]
+//! folds an operation into a state; [`AnimationStore`] keeps the states of
+//! a page's objects.
 
 use crate::Fault;
 use crate::limits::{KEEP_LAYER, MAX_CONTROL, MAX_CYCLE_PERIOD, MAX_FRAME, MAX_LAYER, MAX_LOOK};
 use crate::table::{TARGET_BYTES, Target, TargetKind};
 use crate::wire::{Reader, Writer};
 
-/// Operation codes (ANIM-6), which are the rule table's action codes for
-/// the same effects (RULE-20).
+/// Operation codes (ANIM-6).
 pub mod code {
     /// `show`.
     pub const SHOW: u8 = 5;
@@ -30,7 +31,7 @@ pub mod code {
     pub const CYCLE: u8 = 18;
     /// `stop_cycle`.
     pub const STOP_CYCLE: u8 = 19;
-    /// `reset`, in an `ANIMATE` record only.
+    /// `reset`.
     pub const RESET: u8 = 20;
 }
 
@@ -41,16 +42,6 @@ pub const MAX_OPERATION_BYTES: usize = 1 + TARGET_BYTES + 1 + 1 + 2 + 1;
 /// The flag of `move` that makes it relative, and of `cycle` that makes
 /// it run once: bit 0. Every other bit is 0.
 const FLAG: u8 = 1;
-
-/// Where an operation is written, which decides whether `reset` may
-/// appear (ANIM-6).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Place {
-    /// A rule's action (RULE-45): no `reset`.
-    Rule,
-    /// An `ANIMATE` record (ANIM-6).
-    Record,
-}
 
 /// What an operation does to its target's animation state (ANIM-6).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,7 +85,7 @@ pub enum OperationKind {
     },
     /// Stops the cycle at the frame shown.
     StopCycle,
-    /// Forgets the whole animation state. In an `ANIMATE` record only.
+    /// Forgets the whole animation state.
     Reset,
 }
 
@@ -124,12 +115,12 @@ impl Operation {
         }
     }
 
-    /// Checks the operation's target and fields (ANIM-6, RULE-45).
+    /// Checks the operation's target and fields (ANIM-6).
     ///
     /// # Errors
-    /// [`Fault::Range`] for a target the operation does not apply to, a
-    /// field outside its range, or `reset` in a rule.
-    pub fn check(&self, place: Place) -> Result<(), Fault> {
+    /// [`Fault::Range`] for a target the operation does not apply to or a
+    /// field outside its range.
+    pub fn check(&self) -> Result<(), Fault> {
         let objects_only = !matches!(
             self.kind,
             OperationKind::Show | OperationKind::Hide | OperationKind::Look(_) | OperationKind::Reset
@@ -149,14 +140,17 @@ impl Operation {
             OperationKind::Cycle { first, last, period, .. } => {
                 first <= last && last <= MAX_FRAME && (1..=MAX_CYCLE_PERIOD).contains(&period)
             }
-            OperationKind::Reset => place == Place::Record,
-            OperationKind::Show | OperationKind::Hide | OperationKind::Move { .. } | OperationKind::StopCycle => true,
+            OperationKind::Show
+            | OperationKind::Hide
+            | OperationKind::Move { .. }
+            | OperationKind::StopCycle
+            | OperationKind::Reset => true,
         };
         if fields { Ok(()) } else { Err(Fault::Range("operation's field")) }
     }
 
     /// Reads the operation of code `code`, after its code byte.
-    pub(crate) fn read_after_code(code: u8, reader: &mut Reader<'_>, place: Place) -> Result<Self, Fault> {
+    pub(crate) fn read_after_code(code: u8, reader: &mut Reader<'_>) -> Result<Self, Fault> {
         let kind = TargetKind::from_code(reader.u8()?).ok_or(Fault::Range("operation's target"))?;
         let target = Target { kind, number: reader.u16()? };
         let flag =
@@ -180,13 +174,13 @@ impl Operation {
             _ => return Err(Fault::Range("operation code")),
         };
         let operation = Self { target, kind };
-        operation.check(place)?;
+        operation.check()?;
         Ok(operation)
     }
 
     /// Writes the operation, its code byte first.
-    pub(crate) fn write(&self, writer: &mut Writer<'_>, place: Place) -> Result<(), Fault> {
-        self.check(place)?;
+    pub(crate) fn write(&self, writer: &mut Writer<'_>) -> Result<(), Fault> {
+        self.check()?;
         writer.u8(self.code())?;
         writer.u8(self.target.kind.code())?;
         writer.u16(self.target.number)?;
@@ -219,6 +213,103 @@ pub const fn is_code(code: u8) -> bool {
     matches!(code, code::SHOW..=code::LOOK | code::MOVE..=code::RESET)
 }
 
+/// The bytes of an operation before its own fields: its code and its
+/// target.
+pub const OPERATION_FIXED: usize = 1 + TARGET_BYTES;
+
+/// The bytes the operation of code `code` takes, its code byte and its
+/// target among them (ANIM-6), or `None` for a code no operation has.
+#[must_use]
+pub const fn length_of(code: u8) -> Option<usize> {
+    match code {
+        code::SHOW | code::HIDE | code::STOP_CYCLE | code::RESET => Some(OPERATION_FIXED),
+        code::LOOK | code::FRAME => Some(OPERATION_FIXED + 1),
+        code::ORDER => Some(OPERATION_FIXED + 2),
+        code::MOVE => Some(OPERATION_FIXED + 1 + 2 + 2),
+        code::CYCLE => Some(OPERATION_FIXED + 1 + 1 + 2 + 1),
+        _ => None,
+    }
+}
+
+/// The bytes of an `ANIMATE` record's body before its operations
+/// (ANIM-6): the page, the sub-code, the count and a reserved byte.
+pub const RECORD_FIXED: usize = 2 + 2 + 1 + 1;
+/// The place of the count of operations in an `ANIMATE` record's body.
+pub const RECORD_COUNT_AT: usize = 4;
+/// The most bytes of an `ANIMATE` record's body.
+pub const MAX_RECORD_BYTES: usize = RECORD_FIXED + crate::limits::MAX_ANIMATE_OPERATIONS * MAX_OPERATION_BYTES;
+
+/// What an `ANIMATE` record's body says before its operations (ANIM-6).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RecordHeader {
+    /// The page number, `0x100` to `0x8FF`.
+    pub page: u16,
+    /// The sub-code, `0x0000` to `0x3F7E`: the first form's `0x3F7F`,
+    /// "whichever sub-page is shown", is refused (DEC-6599).
+    pub sub: u16,
+    /// How many operations, 1 to 64.
+    pub count: u8,
+}
+
+/// Reads an `ANIMATE` record's body (ANIM-6), checking every operation,
+/// and gives its header and the operations' bytes, which [`read`] reads
+/// one after another.
+///
+/// # Errors
+/// A page or a sub-code outside its range, a count of 0 or over
+/// `MAX_ANIMATE_OPERATIONS`, a reserved byte that is not 0, an operation
+/// [`read`] refuses, or bytes after the last operation.
+pub fn read_record(body: &[u8]) -> Result<(RecordHeader, &[u8]), Fault> {
+    let mut reader = Reader::new(body);
+    let (page, sub) = crate::command::read_page(&mut reader)?;
+    let count = reader.u8()?;
+    if count == 0 || usize::from(count) > crate::limits::MAX_ANIMATE_OPERATIONS {
+        return Err(Fault::Range("animate count"));
+    }
+    if reader.u8()? != 0 {
+        return Err(Fault::Reserved("animate"));
+    }
+    let operations = body.get(reader.used()..).ok_or(Fault::Short)?;
+    let mut rest = operations;
+    for _ in 0..count {
+        let (_, used) = read(rest)?;
+        rest = rest.get(used..).ok_or(Fault::Short)?;
+    }
+    if rest.is_empty() { Ok((RecordHeader { page, sub, count }, operations)) } else { Err(Fault::Trailing) }
+}
+
+/// Writes an `ANIMATE` record's body of `operations` for the page `page`
+/// and `sub` at the front of `out`, and how many bytes it took.
+///
+/// # Errors
+/// What [`read_record`] refuses, and [`Fault::Full`] when `out` is too
+/// small.
+pub fn write_record(page: u16, sub: u16, operations: &[Operation], out: &mut [u8]) -> Result<usize, Fault> {
+    let count = u8::try_from(operations.len()).map_err(|_| Fault::Range("animate count"))?;
+    let mut writer = Writer::new(out);
+    writer.u16(page)?;
+    writer.u16(sub)?;
+    writer.u8(count)?;
+    writer.u8(0)?;
+    for operation in operations {
+        operation.write(&mut writer)?;
+    }
+    let length = writer.used();
+    read_record(out.get(..length).ok_or(Fault::Full)?)?;
+    Ok(length)
+}
+
+/// The operations of an `ANIMATE` record's body [`read_record`] accepted,
+/// in order.
+pub fn operations(bytes: &[u8]) -> impl Iterator<Item = Operation> + '_ {
+    let mut rest = bytes;
+    core::iter::from_fn(move || {
+        let (operation, used) = read(rest).ok()?;
+        rest = rest.get(used..).unwrap_or(&[]);
+        Some(operation)
+    })
+}
+
 /// Reads one operation from the front of `bytes`, and how many bytes it
 /// took.
 ///
@@ -226,10 +317,10 @@ pub const fn is_code(code: u8) -> bool {
 /// [`Fault::Short`] when the bytes end inside it, and otherwise what
 /// [`Operation::check`] refuses, a code that is no operation's, or a
 /// reserved flag bit.
-pub fn read(bytes: &[u8], place: Place) -> Result<(Operation, usize), Fault> {
+pub fn read(bytes: &[u8]) -> Result<(Operation, usize), Fault> {
     let mut reader = Reader::new(bytes);
     let code = reader.u8()?;
-    let operation = Operation::read_after_code(code, &mut reader, place)?;
+    let operation = Operation::read_after_code(code, &mut reader)?;
     Ok((operation, reader.used()))
 }
 
@@ -238,9 +329,9 @@ pub fn read(bytes: &[u8], place: Place) -> Result<(Operation, usize), Fault> {
 /// # Errors
 /// What [`Operation::check`] refuses, and [`Fault::Full`] when `out` is
 /// too small.
-pub fn write(operation: &Operation, place: Place, out: &mut [u8]) -> Result<usize, Fault> {
+pub fn write(operation: &Operation, out: &mut [u8]) -> Result<usize, Fault> {
     let mut writer = Writer::new(out);
-    operation.write(&mut writer, place)?;
+    operation.write(&mut writer)?;
     Ok(writer.used())
 }
 

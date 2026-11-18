@@ -32,6 +32,14 @@ impl<'a> Reader<'a> {
         taken.try_into().map_err(|_| Fault::Short)
     }
 
+    /// The next `length` bytes, as they are.
+    pub(crate) fn take(&mut self, length: usize) -> Result<&'a [u8], Fault> {
+        let end = self.used.checked_add(length).ok_or(Fault::Short)?;
+        let taken = self.bytes.get(self.used..end).ok_or(Fault::Short)?;
+        self.used = end;
+        Ok(taken)
+    }
+
     pub(crate) fn u8(&mut self) -> Result<u8, Fault> {
         self.array::<1>().map(u8::from_be_bytes)
     }
@@ -54,10 +62,6 @@ impl<'a> Reader<'a> {
 
     pub(crate) fn i32(&mut self) -> Result<i32, Fault> {
         self.array::<4>().map(i32::from_be_bytes)
-    }
-
-    pub(crate) fn u64(&mut self) -> Result<u64, Fault> {
-        self.array::<8>().map(u64::from_be_bytes)
     }
 }
 
@@ -110,10 +114,6 @@ impl<'a> Writer<'a> {
     }
 
     pub(crate) fn i32(&mut self, value: i32) -> Result<(), Fault> {
-        self.bytes(&value.to_be_bytes())
-    }
-
-    pub(crate) fn u64(&mut self, value: u64) -> Result<(), Fault> {
         self.bytes(&value.to_be_bytes())
     }
 }

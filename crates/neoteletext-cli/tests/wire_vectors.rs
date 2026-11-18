@@ -160,7 +160,16 @@ fn rules_message(vector: &Vector<'_>, kind: u8) {
                 // carries is a key as the table's own KEY row has it.
                 let carried = event.input().map(|(input, _)| said(&input));
                 match (vector.name, event.body) {
-                    ("fired", RuleBody::Fired) | ("value", RuleBody::Value { .. }) => assert_eq!(carried, None),
+                    ("fired" | "fired_row" | "fired_no_rule", RuleBody::Fired) | ("value", RuleBody::Value { .. }) => {
+                        assert_eq!(carried, None);
+                        // The rule and the row the row's name says.
+                        let named = match vector.name {
+                            "fired_row" => (2, 5),
+                            "fired_no_rule" => (255, 255),
+                            _ => (0, 255),
+                        };
+                        assert_eq!((event.rule, event.row), named, "{}", vector.name);
+                    }
                     ("input_key", RuleBody::Input(_)) => {
                         assert_eq!(carried.as_deref(), Some("key press a text=a on=101/0001"));
                     }
@@ -184,36 +193,62 @@ fn rules_message(vector: &Vector<'_>, kind: u8) {
     assert_eq!(items, 1, "{}", vector.name);
 }
 
-/// A RULES record's body (RULE-41): it decodes, encodes back to the same
-/// bytes, and the default table's rows are what `default_send_all` builds.
-/// The rows of the worked examples (RULE-85) are written by the server,
-/// which turns a table's names into numbers; the engine has no such table
-/// to compare them with, so that they pass the check, decode and encode
-/// back to their own bytes is what it holds of them.
-fn rules_body(vector: &Vector<'_>) {
+/// The page the vectors are for: 101, sub-code 0001.
+const PAGE: (u16, u16) = (0x101, 0x0001);
+
+/// A table's image (RULE-41): it decodes for the vectors' page, encodes
+/// back to the same bytes, and the default table's rows are what
+/// `default_send_all` builds. The rows of the worked examples (RULE-85)
+/// are written by the server, which turns a table's names into numbers;
+/// the engine's libraries have no such table to compare them with, so
+/// that they pass the check, decode and encode back to their own bytes is
+/// what it holds of them.
+fn rules_image(vector: &Vector<'_>) {
     use neoteletext_rules::Table;
-    let body = bytes(vector.value);
-    let mut table = Box::new(Table::new());
-    let header = neoteletext_rules::decode(&body, &mut table).unwrap_or_else(|fault| panic!("{fault:?}"));
-    neoteletext_rules::check(&body).unwrap();
-    let mut out = [0; neoteletext_rules::limits::MAX_TABLE_BYTES];
-    let length =
-        neoteletext_rules::encode(header.page, header.generation, header.has_table.then_some(&*table), &mut out)
-            .unwrap();
-    assert_eq!(out[..length], body[..], "{} encodes back", vector.name);
-    let mut default = Box::new(Table::new());
+    use neoteletext_web::records::body_check;
+    let image = bytes(vector.value);
+    let (page, sub) = PAGE;
+    let mut table = Box::new(Table::new(page, sub));
+    neoteletext_rules::decode(&image, page, sub, body_check, &mut table).unwrap_or_else(|fault| panic!("{fault:?}"));
+    neoteletext_rules::check(&image, page, sub, body_check).unwrap();
+    let mut out = vec![0; neoteletext_rules::limits::MAX_TABLE_BYTES];
+    let length = neoteletext_rules::encode(&table, body_check, &mut out).unwrap();
+    assert_eq!(out[..length], image[..], "{} encodes back", vector.name);
+    let mut default = Box::new(Table::new(page, sub));
     match vector.name {
-        "default_send_all" => neoteletext_rules::default_send_all(false, &mut default),
-        "default_send_all_wheel" => neoteletext_rules::default_send_all(true, &mut default),
-        "no_table" => return assert!(!header.has_table),
-        _ => return assert!(header.has_table, "{}", vector.name),
+        "default_send_all" => neoteletext_rules::default_send_all(false, page, sub, &mut default),
+        "default_send_all_wheel" => neoteletext_rules::default_send_all(true, page, sub, &mut default),
+        _ => return,
     }
-    assert!(header.has_table && *table == *default, "{}", vector.name);
+    assert!(*table == *default, "{}", vector.name);
 }
 
-/// The packets of one record of animation (ANIM-23): the receiver's reader
-/// takes them and gives one record, of the type the row's name begins
-/// with, when the last arrives.
+/// A command's body (RULE-99 and the records beside it): the reader of
+/// the record its name begins with takes it for the vectors' page, and
+/// writes back the same bytes.
+fn command_body(vector: &Vector<'_>) {
+    use neoteletext_rules::command::{self, MAX_BODY_BYTES};
+    let names = [
+        ("local_midi", command::TYPE_LOCAL_MIDI),
+        ("variable", command::TYPE_VARIABLE),
+        ("timer", command::TYPE_TIMER),
+        ("report", command::TYPE_REPORT),
+        ("run", command::TYPE_RUN),
+        ("sequence", command::TYPE_SEQUENCE),
+    ];
+    let kind = names.into_iter().find(|(name, _)| vector.name.starts_with(name)).map(|(_, kind)| kind);
+    let kind = kind.unwrap_or_else(|| panic!("{} names no command", vector.name));
+    let body = bytes(vector.value);
+    let (page, sub, read) = command::decode(kind, &body).unwrap_or_else(|fault| panic!("{}: {fault:?}", vector.name));
+    assert_eq!((page, sub), PAGE, "{}", vector.name);
+    let mut out = [0_u8; MAX_BODY_BYTES];
+    let length = command::encode(&read, page, sub, &mut out).unwrap();
+    assert_eq!(out[..length], body[..], "{} writes back", vector.name);
+}
+
+/// The packets of one record of the page rule table or of animation
+/// (RULE-85, ANIM-23): the receiver's reader takes them and gives one
+/// record, of the type the row's name begins with, when the last arrives.
 fn animation_record(vector: &Vector<'_>) {
     let mut reader = RecordReader::new();
     let packets: Vec<&str> = vector.value.split(' ').collect();
@@ -226,6 +261,13 @@ fn animation_record(vector: &Vector<'_>) {
         }
         let Read::Record(record) = read else { panic!("{}: {read:?}", vector.name) };
         let kind = match record {
+            ChannelRecord::Rules(_) | ChannelRecord::RulesQuery(_) => "rules",
+            ChannelRecord::LocalMidi(_) => "local_midi",
+            ChannelRecord::Variable(_) => "variable",
+            ChannelRecord::Timer(_) => "timer",
+            ChannelRecord::Report(_) => "report",
+            ChannelRecord::Run(_) => "run",
+            ChannelRecord::Sequence(_) => "sequence",
             ChannelRecord::Animate(_) => "animate",
             ChannelRecord::Sprites(_) => "sprites",
             ChannelRecord::NaplpsObjects(_) => "naplps_objects",
@@ -273,7 +315,8 @@ fn every_row_of_the_wire_vectors_holds() {
                 assert_eq!(record(&Packet { bytes }), meaning, "{}", vector.name);
                 assert_eq!(written(meaning, id), bytes, "{}", vector.name);
             }
-            "rules" => rules_body(&vector),
+            "rules" => rules_image(&vector),
+            "command" => command_body(&vector),
             "rule_event" => rules_message(&vector, RULE_EVENT),
             "page_state" => rules_message(&vector, PAGE_STATE),
             "rules_fault" => rules_message(&vector, RULES_FAULT),
@@ -286,6 +329,7 @@ fn every_row_of_the_wire_vectors_holds() {
         kinds.into_iter().collect::<Vec<_>>(),
         [
             "close",
+            "command",
             "input",
             "object",
             "page_state",

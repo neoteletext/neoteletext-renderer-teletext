@@ -1,551 +1,354 @@
 //! Evaluation on arrival (REQ-6526, DEC-6580 item 1; RULE-5, RULE-7 and
-//! RULE-96): an event given by `push_now` has its rules' sound operations
-//! at once and everything else at its tick, and both ways of giving an
-//! event have the same result.
+//! RULE-96): an event given by `push_now` has the sound commands of the
+//! groups it fires at once and everything else at its tick, and both
+//! ways of giving an event have the same result.
 
 use super::*;
-use crate::limits::{MAX_ACTIONS_PER_TICK, MAX_EVENTS_PER_TICK, MAX_QUEUED_EVENTS};
-use crate::table::{INPUT_CHARACTER, TIMER_ELAPSED};
+use crate::animate::{Operation, OperationKind};
+use crate::command::{Binding, Source, TYPE_ANIMATE, TYPE_CONTROL, TYPE_LOCAL_MIDI, field};
+use crate::limits::MAX_EVENTS_PER_TICK;
+use crate::table::{RowRun, SOUND_LEVEL};
+use crate::testing::{animated, control};
 
-const NOTE_ON: Action = Action::Midi { channel: 0, status: 0x90, data1: 60, data2: 100 };
-const NOTE_ON_SOUND: SoundOperation = SoundOperation::Midi { channel: 0, status: 0x90, data1: 60, data2: 100 };
-
-/// A world with a local sound on audio channel 0.
-fn with_local_sound() -> Script {
-    let mut world = Script::default();
-    world.sounds[0] = SoundState { playing: true, local: true, handle: 1, gain: 100, family: 14, variant: 0 };
-    world
+fn inc(variable: u8) -> Built {
+    built(Command::Variable { operation: VariableOperation::Inc, variable, operand: Operand::None })
 }
 
-/// RULE-96, RULE-5 (REQ-6526): the four sound actions of a rule fired by
-/// an event given on arrival reach the world before the tick, in written
-/// order; its variable, its animation operation, its `send` and its `echo`
-/// wait for the tick and leave in order, without the sound operations;
-/// and the tick does not evaluate the event again.
+/// A note whose key is 60 plus `v0`.
+fn note_by_v0() -> Built {
+    note(60).bound(Binding::of(field::MIDI_DATA1, Source::Variable(0)))
+}
+
+/// RULE-96, RULE-5 (REQ-6526): the sound commands of a group fired by an
+/// event given on arrival reach the world before the tick, in written
+/// order, those of a group it runs in place among them; its `ANIMATE`,
+/// its variable and its report wait for the tick and are applied in
+/// order, without the sound commands a second time.
 #[test]
-fn sound_actions_leave_on_arrival_and_the_rest_at_the_tick() {
-    let object = Target::object(5);
-    let moved = Operation { target: object, kind: OperationKind::Move { relative: true, x: 8, y: 0 } };
-    let mut table = Table::new();
-    let count = variable(&mut table, 0, 9, 0);
-    let play = Action::Play { channel: 1, handle: 5, generation: 2, gain: 80, fade_ms: 5, looped: false };
-    let mut key = rule(
-        on_key('a'),
-        &[
-            SEND,
-            NOTE_ON,
-            Action::Animate(moved),
-            play,
-            Action::Add { variable: count, amount: 1 },
-            Action::Stop { channel: 0, fade_ms: 20 },
-            Action::Gain { channel: 0, gain: 10, fade_ms: 0 },
-        ],
-    );
-    key.echo = true;
-    table.rules.push(key).unwrap();
-    table.rules.push(rule(on_key('v'), &[Action::Send(Some(Value::variable(count)))])).unwrap();
+fn sound_commands_leave_on_arrival_and_the_rest_at_the_tick() {
+    let mut table = empty();
+    let moved =
+        animated(&[Operation { target: Target::object(5), kind: OperationKind::Move { relative: true, x: 8, y: 0 } }]);
+    let inner = group(&mut table, &[control(1, 2, 0, 0, 20), set(3, 9)]);
+    let all = [
+        built(Command::Report { value: None }),
+        note(60),
+        moved.clone(),
+        control(1, 1, 5, 80, 5),
+        inc(0),
+        built(Command::Run { group: inner, mode: RunMode::Now }),
+        built(Command::Timer { start: true, timer: 0 }),
+        report_variable(3),
+    ];
+    let every = group(&mut table, &all);
+    rule(&mut table, on_key('a'), every);
     let mut evaluator = evaluator(&table);
-    let mut world = with_local_sound().with(object, shown_at(0, 0, 10, 10));
-    world.handles.push(5);
+    let mut world = Script::default();
     evaluator.tick(&mut world);
     world.log.clear();
 
     assert!(evaluator.push_now(press_key(77, 'a'), &mut world));
-    assert_eq!(
-        world.log,
-        std::vec![
-            Out::Sound(NOTE_ON_SOUND),
-            Out::Sound(SoundOperation::Play {
-                channel: 1,
-                handle: 5,
-                generation: 2,
-                gain: 80,
-                fade_ms: 5,
-                looped: false
-            }),
-            Out::Sound(SoundOperation::Stop { channel: 0, fade_ms: 20 }),
-            Out::Sound(SoundOperation::Gain { channel: 0, gain: 10, fade_ms: 0 }),
-        ],
-        "only the sound operations, at once"
-    );
-    assert_eq!(world.state(object).x, 0, "the animation operation waits for the tick");
+    let sounds = [note(60), control(1, 1, 5, 80, 5), control(1, 2, 0, 0, 20)];
+    let expected: Vec<Out> = sounds.iter().map(|sound| Out::Command(sound.kind, sound.body.clone(), 1)).collect();
+    assert_eq!(world.log, expected, "only the sound commands, at once, stamped with the coming tick");
     assert_eq!(evaluator.page_tick(), 1, "no tick has run");
+    assert_eq!(*evaluator.variables(), [0; 16], "the real writes wait for the tick");
     world.log.clear();
 
     evaluator.tick(&mut world);
-    let report = |what| Out::Report(Report { rule: 0, tick: 1, target: Target::NONE, what });
+    let report = |what| Out::Report(Report { rule: 0, row: NO_RULE, tick: 1, target: Target::NONE, what });
     assert_eq!(
         world.log,
-        std::vec![
+        [
+            report(Reported::Input { sequence: 77 }),
+            Out::Command(TYPE_ANIMATE, moved.body.clone(), 1),
+            report(Reported::Value { value: Value::variable(3), reading: 9 }),
             Out::Cycles(1),
-            report(Reported::Input { sequence: 77 }),
-            Out::Animate(moved, 1),
-            report(Reported::Input { sequence: 77 }),
         ],
-        "the rest at the tick, in order, and no sound operation a second time"
+        "everything else, in order, and no sound command again"
     );
-    assert_eq!(evaluator.counters().fired, 1, "the event is evaluated once");
-    assert_eq!(evaluator.counters().actions, 8);
+    assert_eq!((evaluator.variables()[0], evaluator.variables()[3]), (1, 9));
+    let counters = evaluator.counters();
+    assert_eq!((counters.fired, counters.groups, counters.commands, counters.reports), (1, 2, 10, 2));
     world.log.clear();
-    evaluator.push_now(press_key(78, 'v'), &mut world);
     evaluator.tick(&mut world);
-    assert_eq!(world.reports(), [(1, Reported::Value { value: Value::variable(count), reading: 1 })]);
+    assert_eq!(world.log, [Out::Cycles(2)], "the event is not decided a second time");
 }
 
-/// RULE-7 as revised, RULE-6 (REQ-6526): a condition evaluated on arrival
-/// reads the variables and timers as the last completed tick left them;
-/// what an earlier event of the same interval wrote is not seen until the
-/// next tick, whichever way the events are given.
+/// RULE-96, RULE-7 (REQ-6526): the arrival copy. A group `inc v0`,
+/// `LOCAL_MIDI 60 + v0` delivers key 61 on arrival and leaves `v0` at 1
+/// after the tick; two keys in one interval read each other's writes in
+/// arrival order; and a condition on the variable reads the last
+/// completed tick's value, so the second key's rule on it does not fire
+/// until the next interval.
 #[test]
-fn an_arrival_reads_what_the_last_completed_tick_left() {
-    let mut table = Table::new();
-    table.timers.push(false).unwrap();
-    let armed = variable(&mut table, 0, 1, 0);
-    table.rules.push(rule(on_key('s'), &[Action::Set { variable: armed, value: 1 }, Action::StartTimer(0)])).unwrap();
-    table.rules.push(when(rule(on_key('a'), &[NOTE_ON]), &[is(Value::variable(armed), 1)])).unwrap();
-    table.rules.push(when(rule(on_key('t'), &[NOTE_ON]), &[is(Value::timer(0, TIMER_ELAPSED), 1)])).unwrap();
+fn an_amount_on_arrival_reads_the_arrival_copy() {
+    let mut table = empty();
+    let plays = group(&mut table, &[inc(0), note_by_v0()]);
+    rule(&mut table, on_key('a'), plays);
+    let seen = group(&mut table, &[note(1)]);
+    let after = rule(&mut table, on_key('b'), seen);
+    table.rules.as_mut_slice()[after].condition = condition(&[Node::compare(Value::variable(0), Operator::Greater, 0)]);
     let mut evaluator = evaluator(&table);
-    let mut world = with_local_sound();
+    let mut world = Script::default();
     evaluator.tick(&mut world);
-    // Tick 1's interval: `s` arms, and `a` after it in the same interval
-    // still reads the variable as tick 0 left it.
-    evaluator.push_now(press_key(1, 's'), &mut world);
-    evaluator.push_now(press_key(2, 'a'), &mut world);
-    assert_eq!(world.log.iter().filter(|out| matches!(out, Out::Sound(_))).count(), 0);
-    evaluator.tick(&mut world);
-    // Tick 2's interval: tick 1 is complete, so `a` sounds at once; the
-    // timer started in tick 1 runs since tick 2 and reads 0 there.
     world.log.clear();
+    evaluator.push_now(press_key(1, 'a'), &mut world);
+    assert_eq!(notes(&world), [61]);
+    evaluator.push_now(press_key(2, 'b'), &mut world);
     evaluator.push_now(press_key(3, 'a'), &mut world);
-    evaluator.push_now(press_key(4, 't'), &mut world);
-    assert_eq!(world.log, [Out::Sound(NOTE_ON_SOUND)]);
+    assert_eq!(notes(&world), [61, 62], "the second key reads the first's write; `b` reads the snapshot");
+    assert_eq!(evaluator.variables()[0], 0);
     evaluator.tick(&mut world);
-    world.log.clear();
-    evaluator.push_now(press_key(5, 't'), &mut world);
-    assert_eq!(world.log, [Out::Sound(NOTE_ON_SOUND)], "one tick elapsed at tick 3");
+    assert_eq!(evaluator.variables()[0], 2, "the real writes, at step 3 of the tick");
+    assert_eq!(notes(&world), [61, 62], "and nothing delivered twice");
+    evaluator.push_now(press_key(4, 'b'), &mut world);
+    evaluator.push_now(press_key(5, 'a'), &mut world);
+    assert_eq!(notes(&world), [61, 62, 1, 63], "in the next interval the condition holds");
 }
 
-/// RULE-8, RULE-96 (REQ-6526): key state on arrival is as the events that
-/// arrived before left it, in arrival order: a chord given in one interval
-/// fires at once, and not when the keys arrive the other way round.
+/// RULE-96, RULE-5 (REQ-6526, REQ-6608): the first event over
+/// `MAX_EVENTS_PER_TICK` in an interval waits, and is decided as soon as
+/// the tick before its own has completed; and an event that arrives
+/// before page tick 0 has been evaluated belongs to page tick 1.
 #[test]
-fn key_state_on_arrival_follows_arrival_order() {
-    let held = Value::key(INPUT_CHARACTER, u32::from('z'));
-    let table = table_of(&[when(rule(on_key('a'), &[NOTE_ON]), &[is(held, 1)])]);
-    let mut world = with_local_sound();
-    let mut first = evaluator(&table);
-    first.push_now(press_key(1, 'z'), &mut world);
-    first.push_now(press_key(2, 'a'), &mut world);
-    assert_eq!(world.log, [Out::Sound(NOTE_ON_SOUND)]);
-    world.log.clear();
-    let mut second = evaluator(&table);
-    second.push_now(press_key(1, 'a'), &mut world);
-    second.push_now(press_key(2, 'z'), &mut world);
-    assert_eq!(world.log, []);
-}
-
-/// RULE-7 as revised (REQ-6526): the snapshot of a tick is taken once,
-/// when the first event of its interval arrives; a metered report and a
-/// sub-page shown after it are not seen by the interval's later arrivals.
-/// The tick's own `becomes` rule reads the newest metered report at the
-/// tick, the one exception, and the next interval sees both.
-#[test]
-fn the_world_after_the_snapshot_is_seen_by_the_next_tick() {
-    let level = Value::sound(0, SOUND_LEVEL);
-    let mut table = Table::new();
-    table.rules.push(when(rule(on_key('a'), &[NOTE_ON]), &[above(level, 100)])).unwrap();
-    table.rules.push(when(rule(Trigger::Becomes, &[SEND]), &[above(level, 100)])).unwrap();
-    table.rules.push(rule(on_key('b'), &[SEND])).unwrap();
-    table.subpages.push(SubpageMask { sub: 0x0002, off: 0b100 }).unwrap();
+fn an_event_over_the_ticks_events_is_decided_after_the_tick() {
+    let mut table = empty();
+    let plays = group(&mut table, &[inc(0), note_by_v0(), built(Command::Report { value: None })]);
+    rule(&mut table, on_key('a'), plays);
     let mut evaluator = evaluator(&table);
-    let mut world = with_local_sound();
-    evaluator.tick(&mut world);
-    world.log.clear();
-    evaluator.push_now(press_key(1, 'b'), &mut world);
-    // After the snapshot of tick 1.
-    evaluator.set_metered(&[200]);
-    evaluator.set_subpage(0x0002);
-    evaluator.push_now(press_key(2, 'a'), &mut world);
-    evaluator.push_now(press_key(3, 'b'), &mut world);
-    evaluator.tick(&mut world);
-    assert_eq!(world.log.iter().filter(|out| matches!(out, Out::Sound(_))).count(), 0);
-    assert_eq!(
-        world.take_rules(),
-        [2, 2, 1],
-        "tick 1's arrivals read the sub-page and the level of its snapshot; its `becomes` the newest level"
-    );
-    evaluator.push_now(press_key(4, 'a'), &mut world);
-    evaluator.push_now(press_key(5, 'b'), &mut world);
-    assert_eq!(world.log, [Out::Sound(NOTE_ON_SOUND)]);
-    evaluator.tick(&mut world);
-    assert_eq!(world.take_rules(), [0_u8; 0], "tick 2's arrivals see both: the level, and rule 2 off");
-}
-
-/// RULE-5 step 2, RULE-96 (REQ-6526): events are handled in arrival
-/// order whichever way each is given: one waiting from `push` is handled
-/// before a later one given on arrival; the 17th of an interval waits for
-/// the next tick, where its sound operation leaves with the tick; and the
-/// 65th of an interval is dropped and counted, as with `push` alone.
-#[test]
-fn arrivals_keep_the_order_and_the_bounds_of_the_tick() {
-    let table = table_of(&[rule(any_key_down(), &[SEND, NOTE_ON])]);
-    let mut evaluator = evaluator(&table);
-    let mut world = with_local_sound();
-    let sequences = |world: &Script| -> Vec<u32> {
-        world
-            .reports()
-            .iter()
-            .map(|(_, what)| if let Reported::Input { sequence } = what { *sequence } else { panic!("{what:?}") })
-            .collect()
-    };
-    let sounds = |world: &Script| world.log.iter().filter(|out| matches!(out, Out::Sound(_))).count();
-    assert!(evaluator.push(press_key(0, 'a')));
+    let mut world = Script::default();
     assert!(evaluator.push_now(press_key(1, 'a'), &mut world));
-    assert_eq!(sounds(&world), 2, "the one that waited is handled first, and both sound");
-    for sequence in 2..64 {
-        assert!(evaluator.push_now(press_key(sequence, 'a'), &mut world));
-    }
-    assert_eq!(sounds(&world), MAX_EVENTS_PER_TICK, "sixteen events a tick, on arrival as at the tick");
-    assert!(!evaluator.push_now(press_key(64, 'a'), &mut world), "the 65th waiting is dropped");
-    assert!(!evaluator.push(press_key(65, 'a')));
-    assert_eq!(evaluator.counters().events_dropped, 2);
+    assert_eq!(world.log, [], "before page tick 0 nothing is decided");
     evaluator.tick(&mut world);
-    assert_eq!(sequences(&world), (0..16).collect::<Vec<_>>());
-    assert_eq!(sounds(&world), MAX_EVENTS_PER_TICK);
-    // The next tick takes the next sixteen from the queue itself.
+    assert_eq!(world.log, [Out::Cycles(0), Out::Command(TYPE_LOCAL_MIDI, note(61).body, 1)], "then at once");
     evaluator.tick(&mut world);
-    assert_eq!(sequences(&world), (0..32).collect::<Vec<_>>());
-    assert_eq!(sounds(&world), 2 * MAX_EVENTS_PER_TICK);
-    // An arrival now is behind the 32 that wait: the next sixteen are
-    // handled at once, and it waits its turn.
-    assert!(evaluator.push_now(press_key(66, 'a'), &mut world));
-    assert_eq!(sounds(&world), 3 * MAX_EVENTS_PER_TICK);
-    for _ in 0..3 {
-        evaluator.tick(&mut world);
+    assert_eq!(world.reports()[0].tick, 1, "it belongs to page tick 1");
+    world.log.clear();
+
+    for sequence in 0..=u32::try_from(MAX_EVENTS_PER_TICK).unwrap() {
+        assert!(evaluator.push_now(press_key(10 + sequence, 'a'), &mut world));
     }
-    let mut expected: Vec<u32> = (0..64).collect();
-    expected.push(66);
-    assert_eq!(sequences(&world), expected);
-    assert_eq!(sounds(&world), MAX_QUEUED_EVENTS + 1);
+    assert_eq!(notes(&world).len(), MAX_EVENTS_PER_TICK, "one waits");
+    evaluator.tick(&mut world);
+    let after_tick: Vec<&Out> = world.log.iter().skip_while(|out| **out != Out::Cycles(2)).collect();
+    // v0 was 1; sixteen keys of tick 2 make it 17, and the one that waited
+    // plays 60 plus 18, stamped with tick 3.
+    assert_eq!(after_tick, [&Out::Cycles(2), &Out::Command(TYPE_LOCAL_MIDI, note(78).body, 3)]);
+    assert_eq!(world.reports().len(), MAX_EVENTS_PER_TICK);
+    evaluator.tick(&mut world);
+    assert_eq!(world.reports().len(), MAX_EVENTS_PER_TICK + 1);
+    assert_eq!(
+        world.reports().last().map(|report| (report.tick, report.what)),
+        Some((3, Reported::Input { sequence: 26 }))
+    );
+    assert_eq!(evaluator.variables()[0], 18);
 }
 
-/// RULE-6, RULE-96 (REQ-6526): a firing on arrival counts against its
-/// tick's 256 actions; a firing past the cap is dropped whole, its sound
-/// operations with it, and the tick's own rules find the cap already
-/// spent.
+/// RULE-96 (REQ-6526): when the page closes with events decided on
+/// arrival whose tick has not run, that tick is run before the final
+/// tick, so what their groups wrote and reported is not lost when their
+/// sound has left.
 #[test]
-fn arrivals_count_against_the_ticks_actions() {
-    let mut loud = rule(any_key_down(), &[NOTE_ON; MAX_ACTIONS]);
-    loud.echo = false;
-    let mut rules = std::vec![loud; 2];
-    rules.push(rule(Trigger::Every { timer: PAGE_TIMER, ticks: 1 }, &[SEND]));
-    let table = table_of(&rules);
+fn close_runs_the_tick_of_events_decided_on_arrival() {
+    let mut table = empty();
+    let plays = group(&mut table, &[note(60), built(Command::Report { value: None })]);
+    rule(&mut table, on_key('a'), plays);
+    let closing = mark(&mut table, 8);
+    rule(&mut table, Trigger::Close, closing);
     let mut evaluator = evaluator(&table);
-    let mut world = with_local_sound();
+    let mut world = Script::default();
     evaluator.tick(&mut world);
+    evaluator.push_now(press_key(5, 'a'), &mut world);
     world.log.clear();
-    // Each event fires two rules of 16 actions: eight events are 256.
-    for sequence in 0..10 {
-        evaluator.push_now(press_key(sequence, 'a'), &mut world);
-    }
-    assert_eq!(world.log.len(), MAX_ACTIONS_PER_TICK, "no sound operation past the cap");
-    assert_eq!(evaluator.counters().overruns, 4);
-    evaluator.tick(&mut world);
-    assert_eq!(world.reports(), [], "the timer's rule is dropped: the tick's actions were spent on arrival");
-    assert_eq!(evaluator.counters().overruns, 5);
-    world.log.clear();
-    evaluator.tick(&mut world);
-    assert_eq!(world.rules(), [2], "the next tick has its own 256");
-}
-
-/// RULE-96 (REQ-6526): the page closing after an arrival and before its
-/// tick runs that tick first, so that what the event's rules wrote and
-/// reported is not lost when their sound has already left.
-#[test]
-fn closing_completes_the_tick_of_an_arrival() {
-    let table = table_of(&[rule(on_key('a'), &[NOTE_ON, SEND]), rule(Trigger::Close, &[SEND])]);
-    let mut evaluator = evaluator(&table);
-    let mut world = with_local_sound();
-    evaluator.push_now(press_key(9, 'a'), &mut world);
     evaluator.close(&mut world);
-    assert_eq!(world.reports(), [(0, Reported::Input { sequence: 9 }), (1, Reported::Fired)]);
-    assert_eq!(evaluator.counters().ticks, 1);
-    assert!(!evaluator.push_now(press_key(10, 'a'), &mut world) || evaluator.is_closed());
-    assert_eq!(world.log.iter().filter(|out| matches!(out, Out::Sound(_))).count(), 1, "nothing after the close");
+    let reports: Vec<(u32, Reported)> = world.reports().iter().map(|report| (report.tick, report.what)).collect();
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0], (1, Reported::Input { sequence: 5 }));
+    assert_eq!(reports[1].0, 2, "then the final tick's `close` rule");
+    assert_eq!(notes(&world), [] as [u8; 0], "the note left on arrival, once");
 }
 
-/// A small generator of numbers for the property test: xorshift, 64 bits
-/// (Marsaglia, "Xorshift RNGs", 2003, the 13, 7, 17 triple).
+/// RULE-7 (REQ-6526): a snapshot an arrival took is the tick's one
+/// snapshot for every value but the meters: a metered report after the
+/// interval's first arrival is not seen by its later arrivals, and is
+/// seen by the tick's `becomes` rule.
+#[test]
+fn a_meter_is_never_a_tick_late_because_a_key_arrived() {
+    let level = Value::sound(0, SOUND_LEVEL);
+    let loud = condition(&[Node::compare(level, Operator::GreaterOrEqual, 128)]);
+    let mut table = empty();
+    let keyed = mark(&mut table, 3);
+    let became = mark(&mut table, 10);
+    let first = rule(&mut table, on_key('a'), keyed);
+    let second = rule(&mut table, Trigger::Becomes, became);
+    table.rules.as_mut_slice()[first].condition = loud;
+    table.rules.as_mut_slice()[second].condition = loud;
+    let mut evaluator = evaluator(&table);
+    let mut world = Script::default();
+    evaluator.tick(&mut world);
+    evaluator.push_now(press_key(1, 'a'), &mut world);
+    evaluator.set_metered(&[200]);
+    evaluator.push_now(press_key(2, 'a'), &mut world);
+    evaluator.tick(&mut world);
+    assert_eq!(readings(&world), [10], "the keys read the level of the first arrival; `becomes` the newest");
+}
+
+/// A small generator of numbers, the same on every run.
 struct Numbers(u64);
 
 impl Numbers {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
-
-    /// A number below `bound`.
-    fn below(&mut self, bound: u64) -> u64 {
-        self.next() % bound
-    }
-
-    fn byte(&mut self, bound: u8) -> u8 {
-        u8::try_from(self.below(u64::from(bound))).unwrap()
-    }
-
-    fn pick<T: Copy>(&mut self, from: &[T]) -> T {
-        from[usize::try_from(self.below(from.len() as u64)).unwrap()]
+    fn next(&mut self, below: u32) -> u32 {
+        // A linear congruential step (Knuth's MMIX constants); the high
+        // bits are the better ones.
+        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        u32::try_from(self.0 >> 33).unwrap() % below
     }
 }
 
-const KEYS: [char; 4] = ['a', 'b', 'c', 'd'];
-const THINGS: [Target; 3] = [Target::object(1), Target::object(2), Target::control(3)];
-const VARIABLES: u8 = 3;
-const TIMERS: u8 = 2;
-const RULES: u8 = 12;
-
-fn random_value(numbers: &mut Numbers) -> Value {
-    match numbers.below(8) {
-        0 | 1 => Value::variable(numbers.byte(VARIABLES)),
-        2 => Value::key(INPUT_CHARACTER, u32::from(numbers.pick(&KEYS))),
-        3 => Value::keys_down(),
-        4 => Value::timer(numbers.byte(TIMERS), TIMER_ELAPSED),
-        5 => Value::sound(numbers.byte(2), numbers.pick(&[SOUND_LEVEL, SOUND_PLAYING, SOUND_LOCAL])),
-        6 => {
-            let thing = numbers.pick(&THINGS);
-            Value::target(thing.kind, thing.number, numbers.pick(&[TARGET_SHOWN, TARGET_X, TARGET_INSIDE]))
-        }
-        _ => Value::pointer(POINTER_OVER),
-    }
-}
-
-fn random_term(numbers: &mut Numbers) -> Node {
-    let operator = numbers.pick(&[Operator::Equal, Operator::NotEqual, Operator::Less, Operator::Greater]);
-    Node::Compare { value: random_value(numbers), operator, constant: i32::from(numbers.byte(4)) }
-}
-
-fn random_condition(numbers: &mut Numbers) -> Vec<Node> {
-    match numbers.below(5) {
-        0 => Vec::new(),
-        1 | 2 => std::vec![random_term(numbers)],
-        3 => std::vec![Node::And(2), random_term(numbers), random_term(numbers)],
-        _ => std::vec![Node::Or(2), Node::Not, random_term(numbers), random_term(numbers)],
-    }
-}
-
-fn random_trigger(numbers: &mut Numbers) -> Trigger {
-    let key = numbers.pick(&KEYS);
-    let target = numbers.pick(&[THINGS[0], THINGS[1], THINGS[2], Target::PAGE]);
-    match numbers.below(14) {
-        0..=3 => on_key(key),
-        4 => any_key_down(),
-        5 => {
-            let Trigger::Key { keys, .. } = on_key(key) else { panic!() };
-            Trigger::KeyUp { keys, mods_mask: 0, mods_value: 0 }
-        }
-        6 => Trigger::Press { target, button: ANY_BUTTON },
-        7 => Trigger::Release { target, button: ANY_BUTTON },
-        8 => Trigger::Enter { target },
-        9 => Trigger::Text,
-        10 => Trigger::Every { timer: numbers.pick(&[PAGE_TIMER, 0, 1]), ticks: 1 + u32::from(numbers.byte(4)) },
-        11 => Trigger::After { timer: numbers.pick(&[PAGE_TIMER, 0, 1]), ticks: 1 + u32::from(numbers.byte(6)) },
-        12 => Trigger::Open,
-        _ => Trigger::Becomes,
-    }
-}
-
-fn random_action(numbers: &mut Numbers) -> Action {
-    let channel = numbers.byte(2);
-    let thing = numbers.pick(&THINGS);
-    let mask = 1_u64 << numbers.below(u64::from(RULES));
-    match numbers.below(16) {
-        0..=2 => Action::Midi { channel, status: 0x90, data1: 60 + numbers.byte(12), data2: 100 },
-        3 => Action::Play { channel, handle: numbers.byte(4), generation: 1, gain: 80, fade_ms: 5, looped: false },
-        4 => Action::Stop { channel, fade_ms: 5 },
-        5 => Action::Gain { channel, gain: numbers.byte(101), fade_ms: 5 },
-        6 => Action::Set { variable: numbers.byte(VARIABLES), value: i32::from(numbers.byte(4)) },
-        7 | 8 => Action::Add { variable: numbers.byte(VARIABLES), amount: i32::from(numbers.byte(3)) - 1 },
-        9 => Action::StartTimer(numbers.byte(TIMERS)),
-        10 => Action::StopTimer(numbers.byte(TIMERS)),
-        11 => Action::Enable(mask),
-        12 => Action::Disable(mask),
-        13 => Action::Send(Some(random_value(numbers))),
-        // A control takes `show`, `hide` and `look` alone (ANIM-6).
-        14 if thing.kind == TargetKind::Control => Action::Animate(Operation {
-            target: thing,
-            kind: numbers.pick(&[OperationKind::Show, OperationKind::Hide]),
-        }),
-        14 => Action::Animate(Operation {
-            target: thing,
-            kind: numbers.pick(&[
-                OperationKind::Show,
-                OperationKind::Hide,
-                OperationKind::Move { relative: true, x: 40, y: 0 },
-            ]),
-        }),
-        _ => SEND,
-    }
-}
-
-/// A table of twelve rules the codec accepts.
-fn random_table(numbers: &mut Numbers) -> Box<Table> {
-    let mut table = Box::new(Table::new());
-    for _ in 0..VARIABLES {
-        variable(&mut table, 0, 3, 0);
-    }
-    for _ in 0..TIMERS {
-        table.timers.push(numbers.below(2) == 0).unwrap();
-    }
-    table.subpages.push(SubpageMask { sub: 0x0002, off: numbers.below(1 << RULES) }).unwrap();
-    for _ in 0..RULES {
-        let trigger = random_trigger(numbers);
-        let mut actions = Vec::new();
-        for _ in 0..=numbers.below(5) {
-            actions.push(random_action(numbers));
-        }
-        let mut made = when(rule(trigger, &actions), &random_condition(numbers));
-        if trigger == Trigger::Becomes && made.condition.is_empty() {
-            made.condition.push(random_term(numbers)).unwrap();
-        }
-        made.echo = numbers.below(3) == 0;
-        made.enabled = numbers.below(6) != 0;
-        table.rules.push(made).unwrap();
-    }
+/// A table that uses every kind of command and trigger an input can
+/// reach: bound notes, variables, a nested group, an armed run, a timer,
+/// a sequence, rows, a pointer rule on any object and a `becomes` rule.
+fn busy_table() -> Box<Table> {
+    let mut table = empty();
+    table.rows.push(['a' as i32, 3, 0, 0]).unwrap();
+    table.rows.push(['b' as i32, 5, 0, 0]).unwrap();
+    let by_row = Binding::of(field::MIDI_DATA1, Source::Parameter(1));
+    let moved =
+        animated(&[Operation { target: Target::object(5), kind: OperationKind::Move { relative: true, x: 0, y: 0 } }])
+            .bound(Binding::of_operation(0, field::X, Source::Variable(1)));
+    let inner = group(&mut table, &[inc(1), note_by_v0(), report_variable(1)]);
+    let keyed = group(
+        &mut table,
+        &[
+            built(Command::Variable {
+                operation: VariableOperation::Add,
+                variable: 0,
+                operand: Operand::Fired { constant: 0, property: 5 },
+            }),
+            note(40).bound(by_row),
+            built(Command::Run { group: inner, mode: RunMode::Now }),
+            control(2, 3, 0, 10, 0).bound(Binding::of(field::CONTROL_GAIN, Source::Variable(1))),
+            moved,
+            built(Command::Report { value: None }),
+            built(Command::Variable {
+                operation: VariableOperation::Wrap,
+                variable: 0,
+                operand: Operand::Range { low: 0, high: 40 },
+            }),
+        ],
+    );
+    let timed = group(
+        &mut table,
+        &[
+            built(Command::Timer { start: true, timer: 1 }),
+            built(Command::Sequence { start: true, sequence: 0 }),
+            built(Command::Run { group: inner, mode: RunMode::After(3) }),
+            note_by_v0(),
+        ],
+    );
+    let pointed = group(&mut table, &[note(20).bound(Binding::of(field::MIDI_DATA1, Source::Fired(1))), inc(2)]);
+    let by_key = KeyMatch::of(&[Key::row(KeyKind::Character, 0)]);
+    let first = rule(&mut table, Trigger::Key { keys: by_key, repeat: true }, keyed);
+    table.rules.as_mut_slice()[first].rows = Some(RowRun { first: 0, count: 2 });
+    rule(&mut table, Trigger::KeyUp { keys: keys_of("c") }, timed);
+    let odd = rule(&mut table, on_key('c'), inner);
+    table.rules.as_mut_slice()[odd].condition = condition(&[Node::compare(Value::variable(1), Operator::Greater, 2)]);
+    rule(&mut table, Trigger::Press { target: TriggerTarget::of(Target::ANY_OBJECT), button: 255 }, pointed);
+    rule(&mut table, Trigger::After { timer: 1, ticks: 2 }, inner);
+    rule(&mut table, Trigger::Double { keys: keys_of("ab"), ticks: 4 }, pointed);
+    let high = rule(&mut table, Trigger::Becomes, timed);
+    table.rules.as_mut_slice()[high].condition = condition(&[Node::compare(Value::variable(2), Operator::Greater, 3)]);
+    let mut steps = Sequence::new(5, 2);
+    steps.steps.push(Step { offset: 1, group: pointed }).unwrap();
+    table.sequences.push(steps).unwrap();
     table
 }
 
-fn random_event(numbers: &mut Numbers, sequence: u32) -> InputEvent {
-    let key = numbers.pick(&KEYS);
-    let x = u16::try_from(numbers.below(300)).unwrap();
-    match numbers.below(10) {
-        0..=3 => press_key(sequence, key),
-        4 | 5 => release_key(sequence, key),
-        6 => pointer(sequence, PointerAction::Press, 0, x, 20, 3),
-        7 => pointer(sequence, PointerAction::Release, 0, x, 20, 0),
-        8 => pointer(sequence, PointerAction::Move, 0, x, 20, 0),
-        _ => InputEvent { sequence, input: Input::Text },
-    }
-}
-
-/// What one interval and its tick gave the world: the sound operations in
-/// order, everything else in order, and the counts after the tick.
-type Interval = (Vec<SoundOperation>, Vec<Out>, Counters);
-
-/// How one event is given.
-#[derive(Clone, Copy, PartialEq)]
+/// How an event of the property test is given.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Way {
-    Queued,
+    /// Every event by `push`: decided at its tick.
+    AtTheTick,
+    /// Every event by `push_now`: decided on arrival.
     OnArrival,
+    /// Some one way and some the other, freely mixed.
+    Mixed,
 }
 
-/// One interval's script: the world's changes when it begins, then its
-/// events.
-struct Step {
-    sounds: [SoundState; AUDIO_CHANNELS],
-    metered: [u8; 2],
-    sub: u16,
-    events: Vec<(InputEvent, Way)>,
-}
+/// What a run of the property test gave: for each tick, the reports, the
+/// commands that are not sound commands, the counters and the variables;
+/// and for the whole run the sound commands in order.
+type Outcome = (Vec<(Vec<Out>, Counters, [i32; 16])>, Vec<Out>);
 
-fn random_script(numbers: &mut Numbers) -> Vec<Step> {
-    let mut sequence = 0_u32;
-    let mut steps = Vec::new();
-    for _ in 0..40 {
-        let mut sounds = [SoundState::default(); AUDIO_CHANNELS];
-        for sound in sounds.iter_mut().take(2) {
-            let local = numbers.below(3) != 0;
-            *sound = SoundState { playing: numbers.below(4) != 0, local, handle: 1, gain: 100, family: 14, variant: 0 };
-        }
-        // Mostly a few events; sometimes more than a tick handles, and
-        // sometimes more than the queue holds.
-        let count = match numbers.below(20) {
-            0 => 70,
-            1 | 2 => 20,
-            3..=8 => 0,
-            _ => numbers.below(5),
-        };
-        let mut events = Vec::new();
-        for _ in 0..count {
+fn play(seed: u64, way: Way) -> Outcome {
+    let mut numbers = Numbers(seed);
+    let mut choice = Numbers(seed ^ 0x5DEE_CE66);
+    let mut evaluator = evaluator(&busy_table());
+    let mut world = Script { under: std::vec![7, 9], ..Script::default() };
+    let (mut ticks, mut sounds, mut sequence) = (Vec::new(), Vec::new(), 0);
+    for interval in 0..64 {
+        // Up to twenty events an interval, so that some intervals pass
+        // the sixteen a tick handles; none in the last four, so that
+        // every event that waited has had its tick.
+        let busy = if numbers.next(4) == 0 { numbers.next(21) } else { numbers.next(4) };
+        let events = if interval < 60 { busy } else { 0 };
+        for _ in 0..events {
             sequence += 1;
-            let way = if numbers.below(4) == 0 { Way::Queued } else { Way::OnArrival };
-            events.push((random_event(numbers, sequence), way));
-        }
-        steps.push(Step {
-            sounds,
-            metered: [numbers.byte(4), numbers.byte(4)],
-            sub: 1 + u16::from(numbers.byte(2)),
-            events,
-        });
-    }
-    steps
-}
-
-/// Runs a script, each event given as its step says or, with `all`, every
-/// event that way.
-fn run_script(table: &Table, steps: &[Step], all: Option<Way>) -> Vec<Interval> {
-    let mut evaluator = Box::new(Evaluator::new(table, 1, 0x0001).unwrap());
-    let mut world = Script::default()
-        .with(THINGS[0], shown_at(0, 0, 100, 100))
-        .with(THINGS[1], shown_at(50, 0, 200, 100))
-        .with(THINGS[2], shown_at(0, 0, 40, 40));
-    world.handles.extend([1, 2]);
-    let mut intervals = Vec::new();
-    for (step, number) in steps.iter().zip(0_u32..) {
-        world.sounds = step.sounds;
-        evaluator.set_metered(&step.metered);
-        evaluator.set_subpage(step.sub);
-        evaluator.query(number);
-        for (event, way) in &step.events {
-            match all.unwrap_or(*way) {
-                Way::Queued => evaluator.push(*event),
-                Way::OnArrival => evaluator.push_now(*event, &mut world),
+            let key = ['a', 'b', 'c'][usize::try_from(numbers.next(3)).unwrap()];
+            let event = match numbers.next(6) {
+                0 | 1 => press_key(sequence, key),
+                2 => key_action(sequence, KeyAction::Release, key),
+                3 => key_action(sequence, KeyAction::Repeat, key),
+                4 => pointer(sequence, PointerAction::Press, 0, 3, 3),
+                _ => pointer(sequence, PointerAction::Release, 0, 3, 3),
             };
+            let now = match way {
+                Way::AtTheTick => false,
+                Way::OnArrival => true,
+                Way::Mixed => choice.next(2) == 0,
+            };
+            if now {
+                evaluator.push_now(event, &mut world);
+            } else {
+                evaluator.push(event);
+            }
         }
         evaluator.tick(&mut world);
-        let (mut sounds, mut others) = (Vec::new(), Vec::new());
-        for out in world.log.drain(..) {
-            if let Out::Sound(operation) = out { sounds.push(operation) } else { others.push(out) }
-        }
-        intervals.push((sounds, others, *evaluator.counters()));
+        let is_sound =
+            |out: &Out| matches!(out, Out::Command(kind, ..) if [TYPE_LOCAL_MIDI, TYPE_CONTROL].contains(kind));
+        let (sound, rest): (Vec<Out>, Vec<Out>) = world.log.drain(..).partition(is_sound);
+        sounds.extend(sound);
+        ticks.push((rest, *evaluator.counters(), *evaluator.variables()));
     }
-    evaluator.close(&mut world);
-    intervals.push((Vec::new(), world.log, *evaluator.counters()));
-    intervals
+    (ticks, sounds)
 }
 
-/// RULE-96, RULE-5 (REQ-6526, DEC-6580 item 1): for random tables and
-/// random events at random places, giving every event at the tick, every
-/// event on arrival, or each either way gives the world the same sound
-/// operations in the same order, the same animation operations, reports
-/// and state answers in the same order, and the same counts, at every
-/// tick: only the moment a sound operation is given differs.
+fn key_action(sequence: u32, action: KeyAction, character: char) -> InputEvent {
+    key(sequence, action, character)
+}
+
+/// RULE-96 (REQ-6526): for the same table and the same events in the
+/// same arrival order within the same tick intervals, deciding at the
+/// tick, deciding on arrival and any mixture of the two produce the same
+/// firings, the same reports with the same page ticks, the same commands
+/// in the same order, the same counters and the same rule state at the
+/// end of every tick; the sound commands are the same, with the same
+/// amounts and the same page ticks, and only the moment they leave
+/// differs. A replay of the same script gives the same outputs.
 #[test]
-fn both_ways_of_giving_an_event_have_the_same_result() {
-    const TABLES: u64 = 300;
-    let mut early_sounds = 0_usize;
-    let mut fired = 0_u32;
-    for seed in 1..=TABLES {
-        // The multiplier spreads consecutive seeds over the 64 bits
-        // (Knuth's MMIX linear congruential multiplier).
-        let mut numbers = Numbers(seed.wrapping_mul(6_364_136_223_846_793_005) | 1);
-        let table = random_table(&mut numbers);
-        let mut encoded = [0_u8; crate::limits::MAX_TABLE_BYTES];
-        crate::encode(0x101, 1, Some(&table), &mut encoded).unwrap();
-        let steps = random_script(&mut numbers);
-        let at_the_tick = run_script(&table, &steps, Some(Way::Queued));
-        let on_arrival = run_script(&table, &steps, Some(Way::OnArrival));
-        let mixed = run_script(&table, &steps, None);
-        for (((queued, arrived), mixed), tick) in at_the_tick.iter().zip(&on_arrival).zip(&mixed).zip(0_u32..) {
-            assert_eq!(queued, arrived, "table {seed}, tick {tick}: on arrival");
-            assert_eq!(queued, mixed, "table {seed}, tick {tick}: either way");
+fn deciding_at_the_tick_and_on_arrival_agree() {
+    let mut fired = 0;
+    for seed in 1..=40 {
+        let at_the_tick = play(seed, Way::AtTheTick);
+        let on_arrival = play(seed, Way::OnArrival);
+        for (tick, (expected, given)) in at_the_tick.0.iter().zip(&on_arrival.0).enumerate() {
+            assert_eq!(expected, given, "seed {seed}, tick {tick}");
         }
-        assert_eq!(at_the_tick.len(), on_arrival.len());
-        early_sounds += at_the_tick.iter().map(|(sounds, ..)| sounds.len()).sum::<usize>();
-        fired += at_the_tick.last().unwrap().2.fired;
+        assert_eq!(at_the_tick.1, on_arrival.1, "seed {seed}: the sound commands");
+        assert_eq!(play(seed, Way::Mixed), at_the_tick, "seed {seed}: mixed");
+        assert_eq!(play(seed, Way::OnArrival), on_arrival, "seed {seed}: a replay");
+        fired += at_the_tick.0.last().map_or(0, |(_, counters, _)| counters.fired);
     }
-    // The instrument exercises what it claims to.
-    assert!(early_sounds > 1000, "{early_sounds} sound operations");
-    assert!(fired > 10_000, "{fired} firings");
+    assert!(fired > 1000, "the scripts fire rules: {fired}");
 }

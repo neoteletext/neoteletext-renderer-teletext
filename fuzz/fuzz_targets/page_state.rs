@@ -7,19 +7,19 @@
 use libfuzzer_sys::fuzz_target;
 use neoteletext_input::MAX_MESSAGE;
 use neoteletext_input::event::{Event, Item, read, write};
-use neoteletext_rules::limits::{MAX_STATE_BYTES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES, MAX_TIMERS, MAX_VARIABLES};
-use neoteletext_rules::state::{MAX_BODY_BYTES, decode, encode};
+use neoteletext_rules::limits::{MAX_ARMED_RUNS, MAX_SEQUENCES, MAX_STATE_BYTES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES};
+use neoteletext_rules::state::{MAX_PAYLOAD_BYTES, decode, encode};
 
 fuzz_target!(|data: &[u8]| {
     // The answer after its stamp.
     if let Ok(state) = decode(data) {
-        assert!(data.len() <= MAX_BODY_BYTES);
+        assert!(data.len() <= MAX_PAYLOAD_BYTES);
         if let Some(table) = &state.table {
             assert!(table.generation != 0);
-            assert!(table.variables.len() <= MAX_VARIABLES && table.timers.len() <= MAX_TIMERS);
+            assert!(table.sequences.len() <= MAX_SEQUENCES && usize::from(table.armed) <= MAX_ARMED_RUNS);
             assert!(table.targets.len() <= MAX_TABLE_TARGETS && table.values.len() <= MAX_TABLE_VALUES);
         }
-        let mut out = [0_u8; MAX_BODY_BYTES];
+        let mut out = [0_u8; MAX_PAYLOAD_BYTES];
         let length = encode(&state, &mut out).expect("what was decoded is encoded");
         assert_eq!(&out[..length], data);
     }

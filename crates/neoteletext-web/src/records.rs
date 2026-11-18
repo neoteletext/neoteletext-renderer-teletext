@@ -5,8 +5,9 @@
 //! `STATE_CHALLENGE`, `STATE_END` and `STATE_KEEP_OFFER` (types 18 to 20),
 //! and those of the page rule table and animation (neoteletext-common's
 //! page-rules.md and animation.md): RULES (type 21), `RULES_QUERY` (22),
-//! ANIMATE (23), SPRITES (24), `NAPLPS_OBJECTS` (25), SHEET (26) and FRAME
-//! (27), in the audio profile's record frame
+//! ANIMATE (23), SPRITES (24), `NAPLPS_OBJECTS` (25), SHEET (26), FRAME
+//! (27), and the six commands `LOCAL_MIDI`, VARIABLE, TIMER, REPORT, RUN and
+//! SEQUENCE (28 to 33), in the audio profile's record frame
 //! (REQ-AUD-003) on data channel 12, packet 4/31, cut into as many
 //! fragments as a record needs (DOC-1952).
 //!
@@ -24,6 +25,7 @@ use neoteletext_audio::record::{RecordError, record_length, split, write};
 use neoteletext_core::packet::Packet;
 
 pub mod animate;
+pub mod commands;
 pub mod denied;
 pub mod drawing_links;
 pub mod frame;
@@ -40,6 +42,7 @@ pub mod sprites;
 pub mod state;
 pub mod subpages;
 
+pub use commands::{TYPE_LOCAL_MIDI, TYPE_REPORT, TYPE_RUN, TYPE_SEQUENCE, TYPE_TIMER, TYPE_VARIABLE, body_check};
 pub use neoteletext_audio::record::{
     TYPE_ANIMATE, TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_FRAME, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_NAPLPS,
     TYPE_NAPLPS_OBJECTS, TYPE_REDIRECT, TYPE_REGIS, TYPE_REGIS_CURSOR, TYPE_RULES, TYPE_RULES_QUERY, TYPE_SHEET,
@@ -58,7 +61,6 @@ const _: () =
 // they are the core's.
 const _: () = assert!(
     neoteletext_rules::limits::SUBCODE_MASK == neoteletext_core::limits::SUBCODE_MASK
-        && neoteletext_rules::limits::SUBCODE_ANY == neoteletext_core::limits::SUBCODE_ANY
         && neoteletext_rules::limits::LAST_SUBCODE == neoteletext_core::limits::LAST_SUBPAGE_CODE
         && neoteletext_rules::limits::LAST_PAGE == neoteletext_core::limits::LAST_PAGE_ADDRESS
         && neoteletext_rules::limits::FIRST_PAGE == neoteletext_core::limits::FIRST_PAGE_ADDRESS
@@ -181,6 +183,18 @@ pub enum ChannelRecord<'a> {
     Sheet(sheet::SheetRecord<'a>),
     /// The begin or the end of an atomic frame (ANIM-2).
     Frame(frame::FrameRecord),
+    /// One MIDI message to a local sound (page-rules.md RULE-21).
+    LocalMidi(commands::CommandRecord<'a>),
+    /// A change of one of a page's variables (RULE-99).
+    Variable(commands::CommandRecord<'a>),
+    /// A start or a stop of one of a page's timers (RULE-100).
+    Timer(commands::CommandRecord<'a>),
+    /// A report asked of a page (RULE-22).
+    Report(commands::CommandRecord<'a>),
+    /// A run of a group of a page's rule table (RULE-102).
+    Run(commands::CommandRecord<'a>),
+    /// A start or a stop of a sequence (RULE-103).
+    Sequence(commands::CommandRecord<'a>),
 }
 
 /// What one packet gave the reader.
@@ -255,7 +269,7 @@ impl RecordReader {
                     | state::TYPE_STATE_CHALLENGE
                     | state::TYPE_STATE_END
                     | state::TYPE_STATE_KEEP_OFFER
-                    | TYPE_RULES..=TYPE_FRAME
+                    | TYPE_RULES..=TYPE_SEQUENCE
             ) {
                 return (Read::Nothing, 0);
             }
@@ -303,6 +317,12 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
         TYPE_NAPLPS_OBJECTS => naplps_objects::read(body).map(ChannelRecord::NaplpsObjects),
         TYPE_SHEET => sheet::read(body).map(ChannelRecord::Sheet),
         TYPE_FRAME => frame::read(body).map(ChannelRecord::Frame),
+        TYPE_LOCAL_MIDI => commands::read(kind, body).map(ChannelRecord::LocalMidi),
+        TYPE_VARIABLE => commands::read(kind, body).map(ChannelRecord::Variable),
+        TYPE_TIMER => commands::read(kind, body).map(ChannelRecord::Timer),
+        TYPE_REPORT => commands::read(kind, body).map(ChannelRecord::Report),
+        TYPE_RUN => commands::read(kind, body).map(ChannelRecord::Run),
+        TYPE_SEQUENCE => commands::read(kind, body).map(ChannelRecord::Sequence),
         _ => Err(RecordFault::BadValue("record type")),
     }
 }

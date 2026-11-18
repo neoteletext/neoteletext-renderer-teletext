@@ -113,6 +113,44 @@ check_document_names() {
 # 3 November 2026, so rdm is the one source on languages and character sets.
 readonly LANGUAGE_DESIGN_NAME='(^|[^-A-Za-z0-9_])(language[s]|character-sets-and-font[s]|notes-language[s])\.md'
 readonly LANGUAGE_DESIGN_HISTORY='docs/spec/design/reorganisation-2026-10-24.md'
+# page-rules.md RULE-57 (REQ-6608): every limit of a page's rule table is
+# one named constant of crates/neoteletext-rules/src/limits.rs, used by
+# name. No other tracked file may state one of those figures as a literal
+# beside the constant's name: a line outside that crate that holds a
+# limit's name and its value, written with or without separators, fails.
+# The one line let be is the engine core's own `MAX_CYCLE_PERIOD`: the core
+# has no dependency (REQ-GEN-017), so it cannot use the rule table's
+# constant, and crates/neoteletext-cli/src/operations.rs, where both are
+# linked, asserts the two equal.
+check_rule_limits() {
+    local limits=crates/neoteletext-rules/src/limits.rs name value number hits found=0
+    while read -r name; do
+        value="$(sed -n "s/^pub const $name: [a-z0-9]* = \([0-9_]*\);\$/\1/p" "$limits" | tr -d _)"
+        [[ -n "$value" ]] || { echo "$limits does not define $name as a literal" >&2; return 1; }
+        # The value's digits, with a comma or an underscore allowed between,
+        # standing alone: no digit, letter, underscore or point beside them.
+        number="(^|[^0-9A-Za-z_.])$(sed 's/./&[_,]?/g; s/\[_,\]?$//' <<<"$value")([^0-9A-Za-z_]|\$)"
+        # Each line that names the limit, as `file:line:text`; the figure is
+        # looked for in the text alone.
+        hits="$(git grep -n -w -e "$name" -- . ':!crates/neoteletext-rules' | awk -v number="$number" '{
+            if ($0 ~ /^crates\/neoteletext-core\/src\/limits.rs:[0-9]*:pub const MAX_CYCLE_PERIOD: /) next
+            text = $0
+            sub(/^[^:]*:[0-9]*:/, "", text)
+            # The number that begins a row of a Markdown table is the
+            # row'"'"'s own, no figure of a limit.
+            sub(/^\| *[0-9]+ *\|/, "", text)
+            if (text ~ number) print
+        }' || true)"
+        if [[ -n "$hits" ]]; then
+            echo "$name is stated as the literal $value outside $limits:" >&2
+            echo "$hits" >&2
+            found=1
+        fi
+    done < <(sed -n '/^pub const RULE_57:/,/^];/s/^    ("\([A-Z_0-9]*\)".*/\1/p' "$limits"; echo TICKS_PER_SECOND)
+    [[ "$found" == 0 ]] || return 1
+    echo "ok: no file outside crates/neoteletext-rules states a limit of RULE-57 as a literal"
+}
+
 check_language_design_deleted() {
     local found status=0
     found="$(git grep --cached -nIE "$LANGUAGE_DESIGN_NAME" -- . ":(exclude,literal)$LANGUAGE_DESIGN_HISTORY")" || status=$?
@@ -145,6 +183,9 @@ commit_steps() {
 
     step "the documents name the entry file and the link scheme the code does (DEC-1726)"
     check_document_names
+
+    step "no file outside neoteletext-rules states a limit of the page rule table as a literal (REQ-6608, RULE-57)"
+    check_rule_limits
 
     step "appendix A of page-rules.md is the synthesizer families' PARAMETERS tables (REQ-6527, RULE-29)"
     NEOTELETEXT_COMMON="$common" cargo xtask check-appendix-a

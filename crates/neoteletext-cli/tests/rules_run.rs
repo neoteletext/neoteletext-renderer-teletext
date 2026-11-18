@@ -1,7 +1,7 @@
 //! `neottx rules-run` (animation.md ANIM-18, REQ-6529): a page rule table
-//! evaluated against timed inputs, its animation operations written as the
-//! script of an image sequence, and its reports and sound operations as
-//! comment lines.
+//! evaluated against timed inputs, the animation operations its groups'
+//! commands make written as the script of an image sequence, and its
+//! reports and its other commands as comment lines.
 #![allow(
     clippy::unwrap_used,
     reason = "a test reports a failure by panicking, so it uses `unwrap` on results it expects to be good"
@@ -9,49 +9,86 @@
 
 mod common;
 
-use common::{folder, neottx};
-use neoteletext_rules::animate::{Operation, OperationKind};
-use neoteletext_rules::table::{Action, Key, KeyKind, Node, Rule, Table, Target, Trigger, Variable, any_key};
+use std::fmt::Write as _;
 
-/// A table of four rules: at opening, object 10 cycles its frames and
-/// control 1 is pressed; the key `a` moves object 10 one unit right, counts
-/// it and reports it; a press on object 20 shows its frame 2; and when
-/// object 10 comes to overlap object 20, object 20 is hidden and a note
-/// sounds.
+use common::{folder, neottx};
+use neoteletext_rules::animate::{self, Operation, OperationKind};
+use neoteletext_rules::command::{self, Command, Operand, TYPE_ANIMATE, VariableOperation};
+use neoteletext_rules::table::{Framed, Key, KeyKind, KeyMatch, Node, Rule, Table, Target, Trigger, TriggerTarget};
+use neoteletext_web::records::body_check;
+
+/// The page the tables are for: 150, sub-code 0002.
+const PAGE: u16 = 0x150;
+const SUB: u16 = 0x0002;
+/// How `rules-run` is told that page.
+const PAGE_ARGUMENT: [&str; 2] = ["--page", "150/0002"];
+
+/// One command of a group: its record type and its body.
+type Built = (u8, Vec<u8>);
+
+fn animated(target: Target, kind: OperationKind) -> Built {
+    let mut body = [0_u8; animate::MAX_RECORD_BYTES];
+    let length = animate::write_record(PAGE, SUB, &[Operation { target, kind }], &mut body).unwrap();
+    (TYPE_ANIMATE, body.get(..length).unwrap().to_vec())
+}
+
+fn commanded(command: Command) -> Built {
+    let mut body = [0_u8; command::MAX_BODY_BYTES];
+    let length = command::encode(&command, PAGE, SUB, &mut body).unwrap();
+    (command.kind(), body.get(..length).unwrap().to_vec())
+}
+
+fn group(table: &mut Table, commands: &[Built]) -> u8 {
+    let framed: Vec<Framed<'_>> =
+        commands.iter().map(|(kind, body)| Framed { kind: *kind, body, bindings: &[] }).collect();
+    table.push_group(&framed).unwrap()
+}
+
+fn image(table: &Table) -> Vec<u8> {
+    let mut out = vec![0u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
+    let used = neoteletext_rules::encode(table, body_check, &mut out).unwrap();
+    out.truncate(used);
+    out
+}
+
+fn on_key_a() -> Trigger {
+    Trigger::Key { keys: KeyMatch::of(&[Key::of(KeyKind::Character, u32::from('a'))]), repeat: false }
+}
+
+/// A table of four rules, each with its group: at opening, object 10
+/// cycles its frames and control 1 is pressed; the key `a` moves object 10
+/// one unit right, counts it and reports it; a press on object 20 shows
+/// its frame 2; and when object 10 comes to overlap object 20, object 20
+/// is hidden and a note sounds.
 fn table() -> Vec<u8> {
     let object = Target::object;
-    let animate = |target, kind| Action::Animate(Operation { target, kind });
-    let mut table = Box::new(Table::new());
-    table.variables.push(Variable { min: 0, max: 10, initial: 0 }).unwrap();
-
-    let mut open = Rule::new(Trigger::Open);
+    let mut table = Box::new(Table::new(PAGE, SUB));
     let cycle = OperationKind::Cycle { first: 0, last: 3, period: 6, once: false };
-    open.actions.push(animate(object(10), cycle)).unwrap();
-    open.actions.push(animate(Target::control(1), OperationKind::Look(2))).unwrap();
-    table.rules.push(open).unwrap();
+    let opening =
+        group(&mut table, &[animated(object(10), cycle), animated(Target::control(1), OperationKind::Look(2))]);
+    table.rules.push(Rule::new(Trigger::Open, opening)).unwrap();
 
-    let mut keys = any_key();
-    keys.push(Key { kind: KeyKind::Character, code: u32::from('a') }).unwrap();
-    let mut key = Rule::new(Trigger::Key { keys, repeat: false, mods_mask: 0, mods_value: 0 });
-    key.actions.push(animate(object(10), OperationKind::Move { relative: true, x: 1, y: 0 })).unwrap();
-    key.actions.push(Action::Add { variable: 0, amount: 1 }).unwrap();
-    key.actions.push(Action::Send(None)).unwrap();
-    table.rules.push(key).unwrap();
+    let count = Command::Variable { operation: VariableOperation::Inc, variable: 0, operand: Operand::None };
+    let moving = group(
+        &mut table,
+        &[
+            animated(object(10), OperationKind::Move { relative: true, x: 1, y: 0 }),
+            commanded(count),
+            commanded(Command::Report { value: None }),
+        ],
+    );
+    table.rules.push(Rule::new(on_key_a(), moving)).unwrap();
 
-    let mut press = Rule::new(Trigger::Press { target: object(20), button: 0 });
-    press.actions.push(animate(object(20), OperationKind::Frame(2))).unwrap();
-    table.rules.push(press).unwrap();
+    let framing = group(&mut table, &[animated(object(20), OperationKind::Frame(2))]);
+    let press = Trigger::Press { target: TriggerTarget::of(object(20)), button: 0 };
+    table.rules.push(Rule::new(press, framing)).unwrap();
 
-    let mut collide = Rule::new(Trigger::Becomes);
+    let note = Command::LocalMidi { channel: 0, status: 0x90, data1: 60, data2: 100 };
+    let colliding = group(&mut table, &[animated(object(20), OperationKind::Hide), commanded(note)]);
+    let mut collide = Rule::new(Trigger::Becomes, colliding);
     collide.condition.push(Node::Overlaps(object(10), object(20))).unwrap();
-    collide.actions.push(animate(object(20), OperationKind::Hide)).unwrap();
-    collide.actions.push(Action::Midi { channel: 0, status: 0x90, data1: 60, data2: 100 }).unwrap();
     table.rules.push(collide).unwrap();
-
-    let mut body = vec![0u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
-    let used = neoteletext_rules::encode(0x150, 7, Some(&table), &mut body).unwrap();
-    body.truncate(used);
-    body
+    image(&table)
 }
 
 /// Objects 10 and 20 are one teletext cell each, a cell apart; the pointer
@@ -76,11 +113,12 @@ fn run(name: &str, table_file: &[u8], inputs: &str, more: &[&str]) -> std::proce
     std::fs::write(&table_path, table_file).unwrap();
     std::fs::write(&inputs_path, inputs).unwrap();
     let mut arguments = vec!["rules-run", table_path.to_str().unwrap(), inputs_path.to_str().unwrap()];
+    arguments.extend(PAGE_ARGUMENT);
     arguments.extend(more);
     neottx(&arguments)
 }
 
-/// ANIM-18 (REQ-6529): the operations each tick's actions produce are
+/// ANIM-18 (REQ-6529): the operations each tick's commands make are
 /// written in the script's form at their tick, and the reports and MIDI
 /// messages as comment lines; the same on every run; and the output is a
 /// script `neottx render --frames` reads.
@@ -90,17 +128,17 @@ fn a_table_is_run_into_a_script() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let text = String::from_utf8(output.stdout).unwrap();
     let expected = "\
-# page 150, generation 7, 4 rules
+# page 150/0002, 4 rules, 4 groups, 0 sequences
 0 cycle 10 0 3 6
 0 look control:1 2
 2 frame 20 2
 4 move 10 1 0 relative
-# 4 report rule 1 tick 4 target page 0 input 4
+# 4 report rule 1 row none tick 4 target page 0 input 4
 6 move 10 1 0 relative
-# 6 report rule 1 tick 6 target page 0 input 6
+# 6 report rule 1 row none tick 6 target page 0 input 6
 7 hide 20
 # 7 midi 0 0x90 60 100
-# 9 ticks, 5 rules fired, 11 actions run, 0 skipped, 0 events dropped, 0 overruns
+# 9 ticks, 5 rules fired, 5 groups run, 11 commands applied, 0 skipped, 0 events dropped
 ";
     assert_eq!(text, expected);
 
@@ -110,7 +148,7 @@ fn a_table_is_run_into_a_script() {
     assert_eq!(String::from_utf8(again.stdout).unwrap(), text);
 
     // RULE-96 (REQ-6526): with every event given on arrival the output
-    // is the same: this table's one sound action is a `becomes` rule's,
+    // is the same: this table's one sound command is a `becomes` rule's,
     // which stays on the tick.
     let arrival = run("rules_run_arrival", &table(), INPUTS, &["--on-arrival"]);
     assert!(arrival.status.success(), "{}", String::from_utf8_lossy(&arrival.stderr));
@@ -150,33 +188,66 @@ fn a_table_is_run_into_a_script() {
 }
 
 /// RULE-96 (REQ-6526, DEC-6580 item 1): with `--on-arrival` a key
-/// rule's sound operations are written first among its tick's lines, as
+/// rule's sound commands are written first among its tick's lines, as
 /// the world is given them on the key's arrival; its report and its
 /// animation operation stay in their order, and the counts are the same.
 #[test]
 fn a_key_rules_sound_is_written_on_arrival() {
-    let mut table = Box::new(Table::new());
-    let mut keys = any_key();
-    keys.push(Key { kind: KeyKind::Character, code: u32::from('a') }).unwrap();
-    let mut key = Rule::new(Trigger::Key { keys, repeat: false, mods_mask: 0, mods_value: 0 });
-    key.actions.push(Action::Send(None)).unwrap();
+    let mut table = Box::new(Table::new(PAGE, SUB));
     let moved = OperationKind::Move { relative: true, x: 1, y: 0 };
-    key.actions.push(Action::Animate(Operation { target: Target::object(10), kind: moved })).unwrap();
-    key.actions.push(Action::Midi { channel: 0, status: 0x90, data1: 60, data2: 100 }).unwrap();
-    table.rules.push(key).unwrap();
-    let mut body = vec![0u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
-    let used = neoteletext_rules::encode(0x150, 7, Some(&table), &mut body).unwrap();
-    body.truncate(used);
+    let note = Command::LocalMidi { channel: 0, status: 0x90, data1: 60, data2: 100 };
+    let all = group(
+        &mut table,
+        &[commanded(Command::Report { value: None }), animated(Target::object(10), moved), commanded(note)],
+    );
+    table.rules.push(Rule::new(on_key_a(), all)).unwrap();
+    let body = image(&table);
     let inputs = "0 rectangle 10 0 0 12 20\n1 key down char a\n";
 
     let at_the_tick = run("rules_run_key_tick", &body, inputs, &[]);
     let on_arrival = run("rules_run_key_arrival", &body, inputs, &["--on-arrival"]);
-    let head = "# page 150, generation 7, 1 rules\n";
-    let report = "# 1 report rule 0 tick 1 target page 0 input 1\n";
+    let head = "# page 150/0002, 1 rules, 1 groups, 0 sequences\n";
+    let report = "# 1 report rule 0 row none tick 1 target page 0 input 1\n";
     let (moved, midi) = ("1 move 10 1 0 relative\n", "# 1 midi 0 0x90 60 100\n");
-    let counts = "# 3 ticks, 1 rules fired, 3 actions run, 0 skipped, 0 events dropped, 0 overruns\n";
+    let counts = "# 3 ticks, 1 rules fired, 1 groups run, 3 commands applied, 0 skipped, 0 events dropped\n";
     assert_eq!(String::from_utf8(at_the_tick.stdout).unwrap(), [head, report, moved, midi, counts].concat());
     assert_eq!(String::from_utf8(on_arrival.stdout).unwrap(), [head, midi, report, moved, counts].concat());
+}
+
+/// RULE-109, RULE-114 (REQ-6613, REQ-6612): a `cue` line fires the
+/// table's `cue` rule at the next tick, and a `command` line is a record
+/// the server sends directly, applied at step 5 of its tick, before the
+/// cue of the same tick.
+#[test]
+fn a_cue_and_a_servers_command_are_inputs() {
+    let mut table = Box::new(Table::new(PAGE, SUB));
+    let reported = group(&mut table, &[commanded(Command::Report { value: None })]);
+    table.rules.push(Rule::new(Trigger::Cue { channel: 1, number: 255 }, reported)).unwrap();
+    let set =
+        commanded(Command::Variable { operation: VariableOperation::Set, variable: 2, operand: Operand::Constant(7) });
+    let read = commanded(Command::Report { value: Some(neoteletext_rules::table::Value::variable(2)) });
+    let hexadecimal = |body: &[u8]| {
+        body.iter().fold(String::new(), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        })
+    };
+    let inputs = format!(
+        "2 cue 1 9\n2 cue 0 9\n2 command {} {}\n2 command {} {}\n",
+        set.0,
+        hexadecimal(&set.1),
+        read.0,
+        hexadecimal(&read.1)
+    );
+    let output = run("rules_run_cue", &image(&table), &inputs, &[]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = "\
+# page 150/0002, 1 rules, 1 groups, 0 sequences
+# 2 report rule none row none tick 2 target page 0 value 7
+# 2 report rule 0 row none tick 2 target page 0 fired
+# 4 ticks, 1 rules fired, 1 groups run, 3 commands applied, 0 skipped, 0 events dropped
+";
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
 }
 
 /// ANIM-18: a table its decoder refuses, and a line of the inputs that is
@@ -198,6 +269,10 @@ fn a_refused_table_and_refused_inputs_say_why() {
         ("0 rectangle 0 1 2 3 4", "an object's number is 1 to 65,535"),
         ("0 rectangle 1 1 2 3 4 5", "follows the input's last word"),
         ("0 wheel 1", "is not an input"),
+        ("0 cue 4 1", "a cue is an audio channel below 4"),
+        ("0 cue 0 128", "a cue is an audio channel below 4"),
+        ("0 command 29 0g", "a command's body is hexadecimal digits"),
+        ("0 command 29", "the command's body is missing"),
         ("5 key down char a\n4 key up char a", "line 2: tick 4 comes after tick 5"),
     ] {
         let output = run("rules_run_inputs", &table(), inputs, &[]);

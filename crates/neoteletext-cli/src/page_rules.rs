@@ -1,35 +1,39 @@
 //! A page's rule table as `neottx view` and `neottx keyboard` hold it
-//! (neoteletext-common `docs/page-rules.md`, DEC-6522, REQ-6523): under
-//! push protocol 9 a viewer's input reaches a channel only inside a
-//! `RULE_EVENT` of a rule that asked for it (RULE-46), so a receiver keeps
-//! the table of the page on screen, evaluates it once a tick (RULE-4,
-//! RULE-5) and sends what its `send` and `echo` report. A page with no
-//! table sends nothing (RULE-50).
+//! (neoteletext-common `docs/page-rules.md`, DEC-6522, DEC-6587,
+//! REQ-6523): under push protocol 10 a viewer's input reaches a channel
+//! only inside a `RULE_EVENT` of a rule whose group reported it (RULE-46),
+//! so a receiver keeps the table of the page on screen, evaluates it once
+//! a tick (RULE-4, RULE-5) and sends what its groups' `REPORT` commands
+//! report. A page with no table sends nothing (RULE-50). A page is a page
+//! number and a sub-code together (RULE-112): another sub-code is another
+//! page, with a table and sixteen variables of its own.
 //!
 //! Nothing here reads a clock or a socket: the caller says the time in
 //! microseconds, gives the channel's records and the viewer's input, and
 //! writes what [`PageRules::tick`] gives it through its input session.
 //!
 //! A terminal has no pointer, plays no sound and draws no object, so the
-//! page the evaluator reads has no target and no sound: an action on one
-//! is skipped and counted (RULE-20), and a table's key, text and focus
-//! rules, its variables and its timers work as they do in the browser.
+//! page the evaluator reads has no target and no sound: a command for one
+//! does nothing and is counted (RULE-118), and a table's key, text and
+//! focus rules, its variables, its timers, its sequences and its armed
+//! runs work as they do in the browser.
 
 use neoteletext_core::consts::{PAGE_HEIGHT, PAGE_WIDTH};
 use neoteletext_input::MAX_MESSAGE;
 use neoteletext_input::event::{Action, Event, Item, KeyCode, Stamp, write};
 use neoteletext_input::rules::{FaultCode, PageStateEvent, RuleBody, RuleEvent, RulesFault};
-use neoteletext_rules::animate::Operation;
 use neoteletext_rules::clock::Clock;
+use neoteletext_rules::command::{TYPE_RUN, TYPE_SEQUENCE, TYPE_TIMER};
 use neoteletext_rules::evaluator::{
-    Counters, Input, InputEvent, KeyAction, KeyIdentity, Report, Reported, SoundOperation, SoundState, TargetState,
+    Counters, Input, InputEvent, KeyAction, KeyIdentity, Report, Reported, SoundState, TargetState,
 };
 use neoteletext_rules::limits::{MAX_POINTER_OBJECTS, MAX_STATE_BYTES};
 use neoteletext_rules::state::PageState;
-use neoteletext_rules::table::{Target, Trigger, Value};
+use neoteletext_rules::table::{Target, Value};
 use neoteletext_rules::{Evaluator, Table, World};
-use neoteletext_web::records::ChannelRecord;
-use neoteletext_web::records::rules::RulesRecord;
+use neoteletext_web::records::commands::CommandRecord;
+use neoteletext_web::records::rules::{Assembled, Assembler, RulesRecord};
+use neoteletext_web::records::{ChannelRecord, body_check};
 use std::collections::VecDeque;
 
 /// The pages whose newest table is kept. A server sends a page's table
@@ -42,8 +46,9 @@ const INPUT_RING: usize = 64;
 /// The least time between two `RULES_FAULT`s of one code for a page
 /// (RULE-48), and between two state queries answered (RULE-47): a second.
 const ONCE_A_SECOND_US: u64 = 1_000_000;
-/// The codes a `RULES_FAULT` has (RULE-48): 1 to 8.
-const FAULT_CODES: usize = 8;
+/// The codes a `RULES_FAULT` has (RULE-48): 1 to 10, of which 2 is
+/// withdrawn and never sent.
+const FAULT_CODES: usize = 10;
 
 /// What a `RULE_EVENT` to send reports (RULE-46).
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -52,7 +57,8 @@ pub(crate) enum Body {
     Fired,
     /// The viewer's input that fired the rule, as the input stream's bytes.
     Input(Vec<u8>),
-    /// One value as the snapshot held it.
+    /// One value: a variable as the working state held it, any other as
+    /// the snapshot did.
     Value {
         /// The value.
         value: Value,
@@ -64,14 +70,16 @@ pub(crate) enum Body {
 /// One message for the page's channel, to send through the input session.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum Outgoing {
-    /// A rule's `send` or `echo` (RULE-46).
+    /// A `REPORT` a run applied (RULE-22, RULE-46).
     Rule {
         /// The page on screen.
         on: Stamp,
         /// The table's generation.
         generation: u16,
-        /// The rule.
+        /// The rule, or 255 when the run was not made by a rule.
         rule: u8,
+        /// The place of the firing row, or 255 when none.
+        row: u8,
         /// The page tick at which it fired.
         tick: u32,
         /// The target the pointer was inside, or [`Target::NONE`].
@@ -94,14 +102,21 @@ impl Outgoing {
     /// Gives `send` the message as an item of the input stream.
     pub(crate) fn with_item<R>(&self, send: impl FnOnce(&Item<'_>) -> R) -> R {
         match self {
-            Self::Rule { on, generation, rule, tick, target, body } => {
+            Self::Rule { on, generation, rule, row, tick, target, body } => {
                 let body = match body {
                     Body::Fired => RuleBody::Fired,
                     Body::Input(bytes) => RuleBody::Input(bytes),
                     Body::Value { value, reading } => RuleBody::Value { value: *value, reading: *reading },
                 };
-                let event =
-                    RuleEvent { on: *on, generation: *generation, rule: *rule, tick: *tick, target: *target, body };
+                let event = RuleEvent {
+                    on: *on,
+                    generation: *generation,
+                    rule: *rule,
+                    row: *row,
+                    tick: *tick,
+                    target: *target,
+                    body,
+                };
                 send(&Item::Event(Event::RuleEvent(event)))
             }
             Self::State { on, body } => send(&Item::Event(Event::PageState(PageStateEvent { on: *on, body }))),
@@ -110,9 +125,10 @@ impl Outgoing {
     }
 }
 
-/// The newest RULES record of a page.
+/// The newest table of a page.
 struct Held {
-    page: u16,
+    /// The page: its number and its sub-code (RULE-112).
+    page: (u16, u16),
     generation: u16,
     /// The table, or `None` when the record said the page has none, or
     /// could not be decoded.
@@ -130,8 +146,8 @@ struct Open {
     clock: Clock,
     /// When the page was opened, which its clock counts from (RULE-4).
     opened_us: u64,
-    /// The table has a rule that time alone can fire, so every tick is
-    /// evaluated when it is due and not only those with input.
+    /// The table has something that time alone can make happen, so every
+    /// tick is evaluated when it is due and not only those with input.
     timed: bool,
     /// Input or a query waits for the next tick.
     pending: bool,
@@ -176,11 +192,8 @@ impl World for Terminal {
         0
     }
 
-    fn sound_operation(&mut self, _operation: SoundOperation) -> bool {
-        false
-    }
-
-    fn animate(&mut self, _operation: Operation, _tick: u32) -> bool {
+    fn command(&mut self, _kind: u8, _body: &[u8], _tick: u32) -> bool {
+        // No sound, no object: a command for one does nothing (RULE-118).
         false
     }
 
@@ -223,11 +236,25 @@ fn input_of(item: &Item<'_>) -> Option<Input> {
     }
 }
 
+/// Whether time alone can make something of `table` happen: a rule with
+/// a trigger no input makes, a sequence, or a command that starts a timer
+/// or a sequence or arms a run. A table without any is evaluated only at
+/// the ticks that have input (RULE-58: no wake without work).
+fn is_timed(table: &Table) -> bool {
+    let triggered = table.rules.iter().any(|rule| rule.triggers.iter().any(|trigger| !trigger.is_input()));
+    let commanded = (0..table.groups.len()).any(|group| {
+        table.groups.commands(group).any(|command| matches!(command.kind, TYPE_TIMER | TYPE_RUN | TYPE_SEQUENCE))
+    });
+    triggered || commanded || !table.sequences.is_empty()
+}
+
 /// The rule tables of a channel's pages, and the evaluator of the page on
 /// screen.
-#[derive(Default)]
 pub(crate) struct PageRules {
     held: VecDeque<Held>,
+    /// The image in flight of a table that travels in several records
+    /// (RULE-41).
+    assembler: Box<Assembler>,
     open: Option<Open>,
     /// The page on screen.
     on: Option<Stamp>,
@@ -246,6 +273,30 @@ pub(crate) struct PageRules {
     world: Terminal,
 }
 
+impl Default for PageRules {
+    fn default() -> Self {
+        Self {
+            held: VecDeque::new(),
+            assembler: Box::new(Assembler::new()),
+            open: None,
+            on: None,
+            sequence: 0,
+            ring: VecDeque::new(),
+            out: Vec::new(),
+            query_without_table: None,
+            queried_us: None,
+            faults: [Tally::default(); FAULT_CODES],
+            world: Terminal::default(),
+        }
+    }
+}
+
+/// The page a stamp names: its number and its sub-code together
+/// (RULE-112).
+const fn page_of(on: Stamp) -> (u16, u16) {
+    (on.page, on.sub)
+}
+
 impl PageRules {
     /// No table and no page.
     pub(crate) fn new() -> Self {
@@ -258,14 +309,16 @@ impl PageRules {
         self.open.is_some()
     }
 
-    /// Takes one of the channel's records at `now_us`: a page's table, or
-    /// a query of its state. Every other record is another reader's.
+    /// Takes one of the channel's records at `now_us`: a fragment of a
+    /// page's table, a query of its state, or a command the server sent
+    /// directly. Every other record is another reader's.
     pub(crate) fn record(&mut self, record: &ChannelRecord<'_>, now_us: u64) {
+        let on = self.on.map(page_of);
         match record {
-            ChannelRecord::Rules(rules) => self.table(rules, now_us),
+            ChannelRecord::Rules(rules) => self.fragment(rules, now_us),
             ChannelRecord::RulesQuery(query) => {
                 // RULE-47: a query of a page that is not open is ignored.
-                if self.on.map(|on| on.page) != Some(query.page.mpp()) {
+                if on != Some((query.page.mpp(), query.subcode.value())) {
                     return;
                 }
                 let early = self.queried_us.is_some_and(|last| now_us.saturating_sub(last) < ONCE_A_SECOND_US);
@@ -282,52 +335,91 @@ impl PageRules {
                     None => self.query_without_table = Some(query.identifier),
                 }
             }
+            ChannelRecord::Variable(command)
+            | ChannelRecord::Timer(command)
+            | ChannelRecord::Report(command)
+            | ChannelRecord::Run(command)
+            | ChannelRecord::Sequence(command) => self.command(command),
+            // A terminal plays no local sound: the message does nothing,
+            // and is counted (RULE-21).
+            ChannelRecord::LocalMidi(command) if on == Some((command.page.mpp(), command.subcode.value())) => {
+                self.count(FaultCode::CommandsSkipped, 1);
+            }
             _ => {}
         }
     }
 
-    /// Takes a page's RULES record (RULE-41): the table replaces the one
-    /// held for the page when its generation differs, and the page on
-    /// screen is opened afresh with it (RULE-2).
-    fn table(&mut self, record: &RulesRecord<'_>, now_us: u64) {
-        let page = record.page.mpp();
-        if self.held.iter().any(|held| held.page == page && held.generation == record.generation) {
-            return;
+    /// Takes a command the server sent directly (RULE-114): the open
+    /// page's evaluator applies it at step 5 of its next tick. For a page
+    /// with no table, or one that is not the open page, it is dropped and
+    /// counted (RULE-50).
+    fn command(&mut self, command: &CommandRecord<'_>) {
+        let ours = self.on.map(page_of) == Some((command.page.mpp(), command.subcode.value()));
+        match self.open.as_mut().filter(|_| ours) {
+            Some(open) => {
+                // What the evaluator refuses it counts itself.
+                let _ = open.evaluator.push_command(command.kind, command.body);
+                open.pending = true;
+            }
+            None => self.count(FaultCode::CommandsSkipped, 1),
         }
-        let mut table = Box::new(Table::new());
-        // RULE-70: a table the decoder refuses is refused whole, and the
-        // page then has no table.
-        let (table, refused) = match record.decode(&mut table) {
-            Ok(header) => (header.has_table.then_some(table), false),
-            Err(_) => (None, true),
+    }
+
+    /// Takes one RULES record (RULE-41): a fragment of a page's table
+    /// image, or the word that the page has no table. A whole image is
+    /// decoded (RULE-70) and replaces the table held for the page, and the
+    /// page on screen is opened afresh with it (RULE-2).
+    fn fragment(&mut self, record: &RulesRecord<'_>, now_us: u64) {
+        let (page, generation, table, refused) = match self.assembler.push(record) {
+            Assembled::Incomplete => return,
+            Assembled::Removed { page, subcode, generation } => {
+                ((page.mpp(), subcode.value()), generation, None, false)
+            }
+            // RULE-41, RULE-48: the incomplete image is discarded and the
+            // page keeps the table it had; the fault is reported.
+            Assembled::OutOfPlace { page, subcode, generation } => {
+                if let Some(on) = self.on.filter(|on| page_of(*on) == (page.mpp(), subcode.value())) {
+                    let fault = RulesFault { on, generation, fault: FaultCode::Undecodable, count: 1 };
+                    self.out.push(Outgoing::Fault(fault));
+                }
+                return;
+            }
+            Assembled::Whole { page, subcode, generation, image } => {
+                let page = (page.mpp(), subcode.value());
+                let mut table = Box::new(Table::new(page.0, page.1));
+                // RULE-70: a table the decoder refuses is refused whole,
+                // and the page then has no table.
+                match neoteletext_rules::decode(image, page.0, page.1, body_check, &mut table) {
+                    Ok(()) => (page, generation, Some(table), false),
+                    Err(_) => (page, generation, None, true),
+                }
+            }
         };
         self.held.retain(|held| held.page != page);
         if self.held.len() >= MAX_HELD_TABLES {
             // The oldest that is not the page on screen's.
-            let on = self.on.map(|on| on.page);
+            let on = self.on.map(page_of);
             if let Some(oldest) = self.held.iter().position(|held| Some(held.page) != on) {
                 self.held.remove(oldest);
             }
         }
-        self.held.push_back(Held { page, generation: record.generation, table, refused });
-        if self.on.map(|on| on.page) == Some(page) {
+        self.held.push_back(Held { page, generation, table, refused });
+        if self.on.map(page_of) == Some(page) {
             // The table it replaces ends without its `close` rules: the
-            // page is still shown.
+            // page is still shown. Its variables, timers, sequences and
+            // armed runs go with it (RULE-2).
             self.open = None;
             self.open_page(now_us);
         }
     }
 
-    /// The page on screen is `on` at `now_us`: another page closes the one
-    /// that was open (RULE-5) and opens this one's table at page tick 0
-    /// (RULE-4); another sub-page of the same page switches its list of
-    /// rules (RULE-17). True when a table was opened afresh.
+    /// The page on screen is `on` at `now_us`: another page, which is
+    /// another page number or another sub-code (RULE-112), closes the one
+    /// that was open (RULE-5, RULE-111) and opens this one's table at page
+    /// tick 0 (RULE-4) with every variable 0. True when a table was opened
+    /// afresh.
     pub(crate) fn show(&mut self, on: Option<Stamp>, now_us: u64) -> bool {
-        if self.on.map(|on| on.page) == on.map(|on| on.page) {
-            if let (Some(open), Some(on)) = (self.open.as_mut(), on) {
-                open.evaluator.set_subpage(on.sub);
-            }
-            self.on = on;
+        if self.on.map(page_of) == on.map(page_of) {
             return false;
         }
         self.close(now_us);
@@ -341,7 +433,7 @@ impl PageRules {
     /// reports a table that was refused.
     fn open_page(&mut self, now_us: u64) -> bool {
         let Some(on) = self.on else { return false };
-        let Some(held) = self.held.iter_mut().find(|held| held.page == on.page) else { return false };
+        let Some(held) = self.held.iter_mut().find(|held| held.page == page_of(on)) else { return false };
         let generation = held.generation;
         if core::mem::take(&mut held.refused) {
             self.out.push(Outgoing::Fault(RulesFault { on, generation, fault: FaultCode::Undecodable, count: 1 }));
@@ -349,12 +441,8 @@ impl PageRules {
         }
         let Some(table) = held.table.as_deref() else { return false };
         // A decoded table is never refused here.
-        let Ok(evaluator) = Evaluator::new(table, generation, on.sub) else { return false };
-        let timed = table
-            .rules
-            .as_slice()
-            .iter()
-            .any(|rule| matches!(rule.trigger, Trigger::Becomes | Trigger::Every { .. } | Trigger::After { .. }));
+        let Ok(evaluator) = Evaluator::new(table, generation, body_check) else { return false };
+        let timed = is_timed(table);
         self.ring.clear();
         self.open = Some(Open {
             generation,
@@ -413,9 +501,12 @@ impl PageRules {
         if let Some(mut open) = self.open.take() {
             let due = open.clock.wake(now_us.saturating_sub(open.opened_us));
             for _ in 0..due {
+                // RULE-5 step 2: no input belongs to page tick 0, so what
+                // waits then still waits after it.
+                let first = open.evaluator.page_tick() == 0;
                 open.evaluator.tick(&mut self.world);
                 self.collect(on, open.generation);
-                open.pending = false;
+                open.pending = first;
             }
             self.count_from(&mut open);
             self.flush_faults(on, open.generation, now_us);
@@ -425,7 +516,7 @@ impl PageRules {
                 // RULE-47: generation 0 and tick 0 say the page has no table.
                 self.state(on, &PageState { identifier, table: None });
             }
-            let generation = self.held.iter().find(|held| held.page == on.page).map_or(0, |held| held.generation);
+            let generation = self.held.iter().find(|held| held.page == page_of(on)).map_or(0, |held| held.generation);
             self.flush_faults(on, generation, now_us);
         }
         out.append(&mut self.out);
@@ -461,6 +552,7 @@ impl PageRules {
                 on,
                 generation,
                 rule: report.rule,
+                row: report.row,
                 tick: report.tick,
                 target: report.target,
                 body,
@@ -493,9 +585,14 @@ impl PageRules {
     fn count_from(&mut self, open: &mut Open) {
         let now = *open.evaluator.counters();
         let before = core::mem::replace(&mut open.reported, now);
-        self.count(FaultCode::TickOverrun, now.overruns.saturating_sub(before.overruns));
         self.count(FaultCode::EventsDropped, now.events_dropped.saturating_sub(before.events_dropped));
-        self.count(FaultCode::ActionsSkipped, now.skipped.saturating_sub(before.skipped));
+        self.count(FaultCode::CommandsSkipped, now.skipped.saturating_sub(before.skipped));
+        // RULE-48, code 10: an armed run not armed, and a command the
+        // server sent or a cue dropped at a full queue.
+        let full = |counters: &Counters| {
+            counters.not_armed.saturating_add(counters.commands_dropped).saturating_add(counters.cues_dropped)
+        };
+        self.count(FaultCode::QueueFull, full(&now).saturating_sub(full(&before)));
     }
 
     /// Reports each fault counted, at most once a second for each code
