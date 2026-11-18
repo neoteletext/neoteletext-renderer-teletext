@@ -14,7 +14,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.10"
-neoteletext-core = { path = "../crates/neoteletext-core" }
+# `objects`, which no default has, for the sprites of animation.md ANIM-7,
+# each of which invokes one, and for the enhancement walk's objects.
+neoteletext-core = { path = "../crates/neoteletext-core", features = ["default", "objects"] }
 # Every format, and `std` for the TTI writer, which the enhancement-line
 # target writes back.
 neoteletext-formats = { path = "../crates/neoteletext-formats", features = ["default", "std"] }
@@ -428,6 +430,13 @@ bench = false
 [[bin]]
 name = "sprites_record"
 path = "fuzz_targets/sprites_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sprites_compose"
+path = "fuzz_targets/sprites_compose.rs"
 test = false
 doc = false
 bench = false

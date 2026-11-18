@@ -41,10 +41,10 @@ fn round_trip(block: &[u8]) {
     let mut writer = BlockWriter::new(&mut buffer);
     let mut events = Vec::new();
     for read in Events::new(block) {
-        if let Read::Event(event) = read {
-            if writer.push(event.time, &event.message).is_ok() {
-                events.push(event);
-            }
+        if let Read::Event(event) = read
+            && writer.push(event.time, &event.message).is_ok()
+        {
+            events.push(event);
         }
     }
     let again: Vec<_> = Events::new(writer.bytes())
