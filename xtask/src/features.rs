@@ -77,6 +77,11 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio", features: "pcm16" },
     Build { package: "neoteletext-audio", features: "encode" },
     Build { package: "neoteletext-audio", features: "error-trait" },
+    // The MIDI layer alone, and the server's build: the encoder with every
+    // family's interface and no synthesis (SRV-87, SRV-88). Without either
+    // the crate takes nothing of the instruments crate (DEC-2355).
+    Build { package: "neoteletext-audio", features: "midi" },
+    Build { package: "neoteletext-audio", features: "encode,neoteletext-audio-instruments/interface" },
     // The desktop build (Windows, macOS, Linux): PCM16 and IMA ADPCM
     // compiled out, Opus alone (decision E.131).
     Build { package: "neoteletext-audio", features: "idl,opus" },

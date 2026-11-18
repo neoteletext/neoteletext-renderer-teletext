@@ -256,6 +256,7 @@ pub const MOST_EVENT_BLOCK_BYTES: usize =
 // MIDI-30: 1,024 − 4 − 4 − 9 − 2 = 1,005, the figure the instruments' event
 // lists are bounded by.
 const _: () = assert!(MOST_EVENT_BLOCK_BYTES == 1_005);
+#[cfg(feature = "midi")]
 const _: () = assert!(MOST_EVENT_BLOCK_BYTES == neoteletext_audio_instruments::midi::MOST_BLOCK_BYTES);
 /// The most blocks of a stored sound of an event codec: two minutes
 /// (MIDI-40, MIDI-104).
@@ -269,12 +270,19 @@ const _: () = assert!(MOST_EVENT_SOUND_BYTES == 960_000);
 /// fixed layout carries (MIDI-55).
 pub const BANK_PIECE_BYTES: usize = crate::MAX_BODY - crate::record::DATA_FIXED;
 const _: () = assert!(BANK_PIECE_BYTES == 1_011);
-/// The most bytes of a bank image (MIDI-55).
-pub const MOST_BANK_BYTES: u32 = neoteletext_audio_instruments::midi::MOST_BANK_BYTES as u32;
+/// The most bytes of a bank image (MIDI-55): 16 KiB. Named here rather than
+/// taken from the instruments crate, so that a build without that crate
+/// (DEC-2355) reads banks to the same bound; the assertion below holds the
+/// two equal.
+pub const MOST_BANK_BYTES: u32 = 16_384;
 /// The most banks a sound names (MIDI-57).
-pub const MOST_BANKS: usize = neoteletext_audio_instruments::midi::MOST_BANKS;
-// The instruments render what the profile says a block is.
+pub const MOST_BANKS: usize = 10;
+// The instruments render what the profile says a block is, and bound banks
+// as the profile does.
+#[cfg(feature = "midi")]
 const _: () = {
+    assert!(MOST_BANK_BYTES as usize == neoteletext_audio_instruments::midi::MOST_BANK_BYTES);
+    assert!(MOST_BANKS == neoteletext_audio_instruments::midi::MOST_BANKS);
     assert!(INSTRUMENT_RATE == neoteletext_audio_instruments::SAMPLE_RATE);
     assert!(INSTRUMENT_BLOCK_SAMPLES as usize == neoteletext_audio_instruments::BLOCK_SAMPLES);
 };

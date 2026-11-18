@@ -91,7 +91,9 @@ pub use codec::*;
 /// The synthesizers' MIDI layer (midi-architecture.md): the event-list
 /// reader and writer, the common behaviours, the restatement and the
 /// [`midi::Instrument`] trait, from the instruments crate, so that a
-/// publisher reaches them through this crate.
+/// publisher reaches them through this crate. Built with the `midi`
+/// feature, which every family and `encode` name (DEC-2355).
+#[cfg(feature = "midi")]
 pub use neoteletext_audio_instruments::midi;
 
 /// Copies `source` into `target` as far as both go. Unlike
