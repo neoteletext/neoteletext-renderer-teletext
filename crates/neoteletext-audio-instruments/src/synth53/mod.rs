@@ -633,6 +633,12 @@ impl Synth53 {
         }
     }
 
+    /// How far the pitch wheel bends at either end, in cents (S53-8).
+    #[must_use]
+    pub const fn bend_range_cents(&self) -> u16 {
+        self.bend_range_cents
+    }
+
     /// Sets brightness, controller 74: so many dial steps added to the
     /// cutoff, the sum held at the model's top (S53-12).
     pub fn set_brightness(&mut self, value: u8) {
