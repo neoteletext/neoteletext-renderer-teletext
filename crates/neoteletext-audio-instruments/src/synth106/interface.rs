@@ -14,10 +14,10 @@
 //! Every reader here takes untrusted bytes: each length is checked against
 //! a named constant before it is used, and nothing panics.
 
-use super::patch::{
-    ChorusMode, FIRST_SWITCHES, Model, PATCH_BYTES, Patch, PatchError, PwmSource, Range, SECOND_SWITCHES, SLIDER_MAX,
-    Slider,
-};
+use super::patch::{FIRST_SWITCHES, PATCH_BYTES, SECOND_SWITCHES, SLIDER_MAX};
+// The patch's value type and its fields, under the names the server calls
+// (`server.md`, SRV-88).
+pub use super::patch::{ChorusMode, Model, Patch, PatchError, PwmSource, Range, Slider};
 use crate::midi::common::{Action, CENTS_PER_SEMITONE, Common, Config, Selected};
 use crate::midi::{
     Banks, CHANNEL_MASK, ChannelMessage, DATA_MAX, KIND_MASK, MOST_BANK_BYTES, MOST_BANK_PATCHES, Message, Outcome,
