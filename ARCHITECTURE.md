@@ -252,6 +252,17 @@ Sound carried with teletext sits beside the page layers, as the web user agent d
 
 The input system's protocol (DOC-1781 of `neoteletext-common/PROTOCOL.html`), beside the page layers as audio is: it shares the packet type with L1 and the record frame and data-line carriage with `neoteletext-audio`. `no_std`, with no allocation, so a microcontroller can be a receiver or a channel. `event` encodes and decodes the input stream, MOUSE's device and gone, HOVER, TOUCH and RESUME among it; `cursor` and `control` the channel's records, WELCOME with a session's token; `session::SessionOf` is a receiver's side of a session, the rate and the input count, and with RESUME the unacknowledged messages kept to send again (`ResumableSession`; `Session` keeps none); `pace::Pacer` paces the pointer's moves at 60 a second, one slot a contact, and `contacts::Contacts` numbers a touch screen's contacts (decision E.133). The browser's trusted core and `neottx` use them alike; the web agent carries the messages and knows only that a message is a contact's move.
 
+### Page rules — `neoteletext-rules` (REQ-6526)
+
+The page rule table (neoteletext-common's `docs/page-rules.md`, DEC-6522) sits beside the page layers and shares nothing with them: `neoteletext-rules` has no dependency, not even the core, so that the server checks a table with the code every receiver decodes it with, on every target (RULE-56). It is `no_std`, allocates nothing and uses integers only.
+- `limits`: every bound of RULE-57, each defined once.
+- `table`: the decoded table in fixed arrays; `decode`, `encode` and `check` of the RULES record's body; what a table reads and names (`Index`: the watch list and the interest mask); and the channel default table `default_send_all`.
+- `animate`: the animation operations a rule's action and an ANIMATE record share, the animation state they fold into, and frame cycling (neoteletext-common's `docs/animation.md`, ANIM-6 and ANIM-14).
+- `evaluator`: the rule state and the tick, in the fixed order of RULE-5; it reads the page and issues its outputs through the `World` trait, which the receiver implements.
+- `state`: the PAGE_STATE payload. `clock`: which ticks of the presentation clock are due.
+
+`neoteletext-input` carries its reports (RULE_EVENT, PAGE_STATE, RULES_FAULT) and `neoteletext-web` its records (RULES, RULES_QUERY, ANIMATE); both read a target, a value and an operation with this crate's functions.
+
 ### Pictures — `neoteletext-picture`, `neoteletext-picture-cli` (DEC-2325)
 
 The picture-to-page converter sits beside the page layers, as audio and input do: it writes pages, and shares only Foundation's constants with the core and the TTI reader and T42 writer with L0. `neoteletext-picture` is a sans-IO `std` library (REQ-2327): `convert` takes a picture file's bytes and an `Options` value and returns the page as TTI text, and `Page::t42` the same page as T42 packets. `decode` reads the five formats of DEC-2114 through the `image` crate within fixed bounds (REQ-2330), `raster` holds the picture and its fixed-point resampler, `fit` places it on the page and averages the sixels (REQ-2331 to REQ-2334), `quant` reduces it to starting palettes, `level1` and `enhanced` are the encoders of Levels 1 and 1.5 and of 2.5 and 3.5 (REQ-2335), and `tti` writes the page file. It opens nothing, so a program may run it in a confined process, as the browser does. `neoteletext-picture-cli` is the program `neottx-picture` (REQ-2337), which reads the file and writes the page; it is not part of `neottx` (DEC-2325 item 2).
@@ -457,6 +468,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | `neoteletext-audio-mix` | Audio: the software mixer for ports with an operating system's audio output | `no_std` with `alloc` |
 | `neoteletext-audio-instruments` | Audio: the profile's instruments (REQ-6412), synth6581, synth7 and five analogue synthesizers (synth106, synthD, synth53, synth8 and synth80), each rendered from its own input to samples; `neoteletext-audio` plays them behind its `synth6581` and `synth7` features and the feature of each synthesizer | `no_std`, no allocation, integer only |
 | `neoteletext-opus` | Audio: the Opus decoder of the audio profile (decision E.123) | `no_std`, no allocation, integer only |
+| `neoteletext-rules` | Page rules (section 3, "Page rules"): the rule table's codec, checks and evaluator, and the animation operations | `no_std`, no allocation, integer only, no dependency |
 | `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages | `std`, sans-IO |
 | `neoteletext-picture-cli` | L9: the program `neottx-picture` | `std` |
 | `neoteletext-transport` | L9: a client's sockets: the reader thread, the TLS pump, the blocking writes and the connection through a proxy, shared by `neoteletext-app`, `neoteletext-qrkeyboard` and the browser's fetcher (DEC-1905) | `std` |
@@ -670,6 +682,7 @@ What each library crate may use of `neoteletext-core`, which `cargo xtask check-
 | `neoteletext-audio-mix` | — |
 | `neoteletext-audio-instruments` | — |
 | `neoteletext-opus` | — |
+| `neoteletext-rules` | — |
 | `neoteletext-picture` | Foundation (the page's geometry, attributes, triplet fields and the Colour Map's defaults) |
 
 The application crates use whatever they need of it.

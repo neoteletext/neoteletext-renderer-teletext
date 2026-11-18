@@ -13,6 +13,7 @@ members = [
     "crates/neoteletext-audio-instruments",
     "crates/neoteletext-opus",
     "crates/neoteletext-input",
+    "crates/neoteletext-rules",
     "crates/neoteletext-transport",
     "crates/neoteletext-qrkeyboard",
     "crates/neoteletext-app",
@@ -44,6 +45,7 @@ neoteletext-audio-mix = { path = "crates/neoteletext-audio-mix" }
 neoteletext-audio-instruments = { path = "crates/neoteletext-audio-instruments", default-features = false }
 neoteletext-opus = { path = "crates/neoteletext-opus" }
 neoteletext-input = { path = "crates/neoteletext-input" }
+neoteletext-rules = { path = "crates/neoteletext-rules" }
 neoteletext-transport = { path = "crates/neoteletext-transport" }
 neoteletext-qrkeyboard = { path = "crates/neoteletext-qrkeyboard" }
 neoteletext-app = { path = "crates/neoteletext-app", default-features = false }

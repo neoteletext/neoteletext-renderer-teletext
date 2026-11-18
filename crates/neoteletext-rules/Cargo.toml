@@ -1,0 +1,21 @@
+[package]
+name = "neoteletext-rules"
+description = "The page rule table (neoteletext-common docs/page-rules.md): its codec, its checks and its evaluator, and the animation operations it shares with the ANIMATE record; no_std, no allocation, integer-only, no dependency"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# RULE-56: no dependency of any kind, not even another engine crate, so
+# that the server checks a table with the code every receiver decodes it
+# with, on every target.
+[dependencies]
+
+[features]
+# REQ-GEN-011 and REQ-GEN-016: `core::error::Error` for the error type,
+# which needs `core::fmt`.
+error-trait = []
+
+[lints]
+workspace = true

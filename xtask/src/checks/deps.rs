@@ -35,6 +35,9 @@ const PERMITTED: &[(&str, &[&str])] = &[
     // Decision E.123: an integer Opus decoder written here, with no dependency.
     ("neoteletext-opus", &[]),
     ("neoteletext-input", &["neoteletext-core", "neoteletext-audio"]),
+    // page-rules.md RULE-56: no dependency of any kind, not even another
+    // engine crate.
+    ("neoteletext-rules", &[]),
 ];
 
 /// `cargo tree`'s output for `krate`: its resolved normal dependencies with
