@@ -2,7 +2,11 @@
 //! (DOC-1951): the index (type 6), LOG
 //! (type 7), LINKS (type 9), SUBPAGES (type 10),
 //! REDIRECT (type 11), DENIED (type 12), and viewer state's
-//! `STATE_CHALLENGE`, `STATE_END` and `STATE_KEEP_OFFER` (types 18 to 20), in the audio profile's record frame
+//! `STATE_CHALLENGE`, `STATE_END` and `STATE_KEEP_OFFER` (types 18 to 20),
+//! and those of the page rule table and animation (neoteletext-common's
+//! page-rules.md and animation.md): RULES (type 21), `RULES_QUERY` (22),
+//! ANIMATE (23), SPRITES (24), `NAPLPS_OBJECTS` (25), SHEET (26) and FRAME
+//! (27), in the audio profile's record frame
 //! (REQ-AUD-003) on data channel 12, packet 4/31, cut into as many
 //! fragments as a record needs (DOC-1952).
 //!
@@ -16,14 +20,20 @@ use neoteletext_audio::idl::{FRAGMENT_DATA, MAX_FRAGMENTS, Reassembler, fragment
 use neoteletext_audio::record::{RecordError, record_length, split, write};
 use neoteletext_core::packet::Packet;
 
+pub mod animate;
 pub mod denied;
 pub mod drawing_links;
+pub mod frame;
 pub mod index;
 pub mod links;
 pub mod log;
+pub mod naplps_objects;
 pub mod redirect;
 pub mod regis;
 pub mod regis_cursor;
+pub mod rules;
+pub mod sheet;
+pub mod sprites;
 pub mod state;
 pub mod subpages;
 
@@ -31,6 +41,43 @@ pub use neoteletext_audio::record::{
     TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_NAPLPS, TYPE_REDIRECT, TYPE_REGIS,
     TYPE_REGIS_CURSOR, TYPE_SUBPAGES,
 };
+
+/// Record type: a page's rule table (page-rules.md RULE-41).
+pub const TYPE_RULES: u8 = 21;
+/// Record type: a query of a page's rule state (RULE-47).
+pub const TYPE_RULES_QUERY: u8 = 22;
+/// Record type: animation operations (animation.md ANIM-6).
+pub const TYPE_ANIMATE: u8 = 23;
+/// Record type: a sub-page's teletext sprites (ANIM-7).
+pub const TYPE_SPRITES: u8 = 24;
+/// Record type: a sub-page's NAPLPS objects (ANIM-11).
+pub const TYPE_NAPLPS_OBJECTS: u8 = 25;
+/// Record type: bytes of a page's sprite sheet (ANIM-17).
+pub const TYPE_SHEET: u8 = 26;
+/// Record type: the begin or the end of an atomic frame (ANIM-2).
+pub const TYPE_FRAME: u8 = 27;
+
+// The audio receiver leaves these seven alone by their numbers
+// (`is_channel_type`), which must be the numbers read here.
+const _: () = {
+    let mut kind = TYPE_RULES;
+    while kind <= TYPE_FRAME {
+        assert!(neoteletext_audio::record::is_channel_type(kind));
+        kind += 1;
+    }
+    assert!(TYPE_RULES == state::TYPE_STATE_KEEP_OFFER + 1 && !neoteletext_audio::record::is_channel_type(kind));
+};
+
+// The rule table's crate has no dependency (page-rules.md RULE-56), so it
+// states the page and sub-code bounds itself; here both are linked, and
+// they are the core's.
+const _: () = assert!(
+    neoteletext_rules::limits::SUBCODE_MASK == neoteletext_core::limits::SUBCODE_MASK
+        && neoteletext_rules::limits::SUBCODE_ANY == neoteletext_core::limits::SUBCODE_ANY
+        && neoteletext_rules::limits::LAST_SUBCODE == neoteletext_core::limits::LAST_SUBPAGE_CODE
+        && neoteletext_rules::limits::LAST_PAGE == neoteletext_core::limits::LAST_PAGE_ADDRESS
+        && neoteletext_rules::limits::FIRST_PAGE == neoteletext_core::limits::FIRST_PAGE_ADDRESS
+);
 
 /// Why a record was refused: it is discarded whole, and its packets are
 /// counted as invalid (REQ-1462, DOC-1952).
@@ -80,6 +127,21 @@ pub(crate) fn take_u16(bytes: &[u8]) -> Result<(u16, &[u8]), RecordFault> {
     Ok((u16::from_be_bytes(head), rest))
 }
 
+/// Reads a page and a sub-code, `0x0000` to `0x3F7E`, at the front of
+/// `bytes`, and what follows them: how the records of a sub-page begin.
+pub(crate) fn take_place(
+    bytes: &[u8],
+) -> Result<(neoteletext_core::types::PageAddress, neoteletext_core::types::SubCode, &[u8]), RecordFault> {
+    use neoteletext_core::limits::{LAST_SUBPAGE_CODE, SUBCODE_MASK};
+    let (page, rest) = take_u16(bytes)?;
+    let page = neoteletext_core::types::PageAddress::from_mpp(page).ok_or(RecordFault::BadValue("page"))?;
+    let (subcode, rest) = take_u16(rest)?;
+    if subcode > LAST_SUBPAGE_CODE || subcode & !SUBCODE_MASK != 0 {
+        return Err(RecordFault::BadValue("sub-code"));
+    }
+    Ok((page, neoteletext_core::types::SubCode::new(subcode), rest))
+}
+
 /// One record the reader accepted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ChannelRecord<'a> {
@@ -111,6 +173,20 @@ pub enum ChannelRecord<'a> {
     StateEnd(state::StateEnd),
     /// The channel suggests that the viewer have it remember them (VS-208).
     StateKeepOffer,
+    /// A page's rule table (page-rules.md RULE-41), not yet decoded.
+    Rules(rules::RulesRecord<'a>),
+    /// A query of a page's rule state (RULE-47).
+    RulesQuery(rules::RulesQueryRecord),
+    /// Animation operations for a sub-page (animation.md ANIM-6).
+    Animate(animate::AnimateRecord<'a>),
+    /// A sub-page's teletext sprites (ANIM-7).
+    Sprites(sprites::SpritesRecord<'a>),
+    /// A sub-page's NAPLPS objects (ANIM-11).
+    NaplpsObjects(naplps_objects::NaplpsObjectsRecord<'a>),
+    /// Bytes of a page's sprite sheet (ANIM-17).
+    Sheet(sheet::SheetRecord<'a>),
+    /// The begin or the end of an atomic frame (ANIM-2).
+    Frame(frame::FrameRecord),
 }
 
 /// What one packet gave the reader.
@@ -185,6 +261,7 @@ impl RecordReader {
                     | state::TYPE_STATE_CHALLENGE
                     | state::TYPE_STATE_END
                     | state::TYPE_STATE_KEEP_OFFER
+                    | TYPE_RULES..=TYPE_FRAME
             ) {
                 return (Read::Nothing, 0);
             }
@@ -225,6 +302,13 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
         state::TYPE_STATE_CHALLENGE => state::read_challenge(body).map(ChannelRecord::StateChallenge),
         state::TYPE_STATE_END => state::read_end(body).map(ChannelRecord::StateEnd),
         state::TYPE_STATE_KEEP_OFFER => state::read_keep_offer(body).map(|()| ChannelRecord::StateKeepOffer),
+        TYPE_RULES => rules::read(body).map(ChannelRecord::Rules),
+        TYPE_RULES_QUERY => rules::read_query(body).map(ChannelRecord::RulesQuery),
+        TYPE_ANIMATE => animate::read(body).map(ChannelRecord::Animate),
+        TYPE_SPRITES => sprites::read(body).map(ChannelRecord::Sprites),
+        TYPE_NAPLPS_OBJECTS => naplps_objects::read(body).map(ChannelRecord::NaplpsObjects),
+        TYPE_SHEET => sheet::read(body).map(ChannelRecord::Sheet),
+        TYPE_FRAME => frame::read(body).map(ChannelRecord::Frame),
         _ => Err(RecordFault::BadValue("record type")),
     }
 }

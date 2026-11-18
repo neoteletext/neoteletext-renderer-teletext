@@ -901,6 +901,7 @@ dependencies = [
  "neoteletext-core",
  "neoteletext-formats",
  "neoteletext-input",
+ "neoteletext-rules",
  "proptest",
 ]
 

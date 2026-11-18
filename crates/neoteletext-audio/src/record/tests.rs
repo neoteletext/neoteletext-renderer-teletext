@@ -357,5 +357,6 @@ fn every_rate_code_names_its_rate_and_no_other_code_does() {
 #[test]
 fn the_channel_record_types_are_exactly_these() {
     let channel: Vec<u8> = (0..=u8::MAX).filter(|&kind| is_channel_type(kind)).collect();
-    assert_eq!(channel, [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20]);
+    // And 21 to 27, the page rule table's and animation's (RULE-41, ANIM-2).
+    assert_eq!(channel, [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
 }

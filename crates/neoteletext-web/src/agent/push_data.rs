@@ -177,7 +177,16 @@ impl<R: RandomSource> UserAgent<'_, R> {
             ChannelRecord::Regis(_)
             | ChannelRecord::Naplps(_)
             | ChannelRecord::DrawingLinks(_)
-            | ChannelRecord::RegisCursor(_) => {}
+            | ChannelRecord::RegisCursor(_)
+            // Nor a page's rule table and its animation, which the port's
+            // evaluator and renderers read (page-rules.md RULE-58).
+            | ChannelRecord::Rules(_)
+            | ChannelRecord::RulesQuery(_)
+            | ChannelRecord::Animate(_)
+            | ChannelRecord::Sprites(_)
+            | ChannelRecord::NaplpsObjects(_)
+            | ChannelRecord::Sheet(_)
+            | ChannelRecord::Frame(_) => {}
         }
         0
     }
