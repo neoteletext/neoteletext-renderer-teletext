@@ -1650,6 +1650,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "neoteletext-audio",
+ "neoteletext-audio-instruments",
  "neoteletext-core",
  "neoteletext-formats",
  "neoteletext-input",

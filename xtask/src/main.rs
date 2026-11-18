@@ -30,7 +30,12 @@
 //!   REQ-GEN-019).
 //! - `spec-examples OUT.json`: write the byte examples of the generated
 //!   protocol document from the engine's encoders (REQ-1734).
+//! - `appendix-a`: print appendix A of neoteletext-common's page-rules.md,
+//!   the readable patch fields of each synthesizer family, from the
+//!   families' tables (REQ-6527; page-rules.md, RULE-29).
+//! - `check-appendix-a`: check that the document's appendix A is that.
 
+mod appendix_a;
 mod checks;
 mod corpus;
 mod features;
@@ -68,9 +73,12 @@ fn main() -> ExitCode {
         "features" => features::run(&root),
         "size" => size::run(&root, &std::env::args().skip(2).collect::<Vec<_>>()),
         "spec-examples" => spec_examples::write_examples(&root, &std::env::args().skip(2).collect::<Vec<_>>()),
+        "appendix-a" => appendix_a::print(),
+        "check-appendix-a" => appendix_a::check(),
         _ => Err(format!(
             "usage: cargo xtask <glyphs|corpus|check-layers|check-deps|check-constants|check-io|\
-             check-noto|misc-fixed|check-misc-fixed|level25-stream|features|size|spec-examples> (got {command:?})"
+             check-noto|misc-fixed|check-misc-fixed|level25-stream|features|size|spec-examples|\
+             appendix-a|check-appendix-a> (got {command:?})"
         )),
     };
     match result {

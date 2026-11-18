@@ -145,6 +145,9 @@ commit_steps() {
 
     step "the documents name the entry file and the link scheme the code does (DEC-1726)"
     check_document_names
+
+    step "appendix A of page-rules.md is the synthesizer families' PARAMETERS tables (REQ-6527, RULE-29)"
+    NEOTELETEXT_COMMON="$common" cargo xtask check-appendix-a
 }
 
 push_steps() {
