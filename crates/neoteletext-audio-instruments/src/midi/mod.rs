@@ -14,8 +14,6 @@
 //!   by [`common::Common`].
 //! - [`restate`]: each part's state as the sender keeps it, and its
 //!   restatement (MIDI-93 to MIDI-99), for the server.
-//! - [`classic`]: the bridge from the common layer to the instruments as
-//!   they were built before it, which take three-byte channel messages.
 //! - [`Instrument`]: the one trait the receiver plays every family
 //!   through, with the banks of its sound ([`Banks`]).
 //!
@@ -23,7 +21,6 @@
 //! untrusted bytes: every bound is a named constant below.
 
 pub mod block;
-pub mod classic;
 pub mod common;
 mod instrument;
 pub mod restate;
