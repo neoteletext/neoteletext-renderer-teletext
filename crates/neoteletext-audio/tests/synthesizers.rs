@@ -28,7 +28,7 @@ use neoteletext_audio::record::{Record, TYPE_OBJECT, parse};
 use neoteletext_audio::{Codec, INSTRUMENT_BLOCK_SAMPLES, INSTRUMENT_RATE, MOST_EVENT_BLOCK_BYTES};
 use neoteletext_audio_instruments::midi::block::BlockFault;
 use neoteletext_audio_instruments::midi::{ChannelMessage, Message, status};
-use neoteletext_audio_instruments::{synth7, synth8, synth53, synth80, synth106, synthd};
+use neoteletext_audio_instruments::{synth7, synth8, synth53, synth80, synth106, synth6581, synthd};
 
 /// The samples of a block, as a length.
 const BLOCK: usize = INSTRUMENT_BLOCK_SAMPLES as usize;
@@ -498,13 +498,29 @@ fn the_retired_codes_are_ignored_and_counted() {
     assert_eq!(receiver.store().entries().count(), 0);
 }
 
-// Verifies MIDI-3 for the synth6581 family under the new carriage: its
-// sound is stored and played, the chip silent until its interface is
-// built, and every message passed over.
-#[test]
-fn a_synth6581_sound_is_stored_and_played() {
-    let blocks = vec![vec![0, 0xF0, 3, 0x2D, 0x4C, 0xF7]; 3];
-    let sound = Sound::events(SOUND, 1, Codec::Synth6581, &blocks).unwrap();
+/// A synth6581 family block: a full register update at tick 0 (S6581-45)
+/// sounding voice 1's sawtooth at full volume past the filter, then a start
+/// message, which has no effect (S6581-18).
+fn synth6581_block() -> Vec<u8> {
+    let mut values = [0_u8; synth6581::interface::FULL_UPDATE_IDS];
+    values[0] = 0x45; // voice 1 frequency, near 440 Hz on the PAL clock
+    values[1] = 0x1D;
+    values[5] = 0xF0; // sustain at the peak
+    values[21] = 0x0F; // full volume
+    values[22] = 0x21; // sawtooth, gated
+    let packed = synth6581::interface::pack_patch(&synth6581::interface::Patch { values });
+    let mut block = vec![0, status::SYSTEM_EXCLUSIVE, (packed.len() - 1) as u8];
+    block.extend_from_slice(&packed[1..]);
+    block.extend_from_slice(&[0, 0xF0, 3, 0x2D, 0x4C, 0xF7]);
+    block
+}
+
+/// Plays `blocks` as a stored sound of the synth6581 family's codec with
+/// the chip and clock byte `chip` (tag 3, S6581-39), giving the samples
+/// and the receiver's count of events passed over.
+fn play_synth6581(blocks: &[Vec<u8>], chip: u8) -> (Vec<i16>, u32) {
+    let mut sound = Sound::events(SOUND, 1, Codec::Synth6581, blocks).unwrap();
+    sound.chip = Some(chip);
     let mut arena = vec![0_u8; 64 * 1024];
     let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
     let mut sink = Recorder::default();
@@ -514,8 +530,34 @@ fn a_synth6581_sound_is_stored_and_played() {
         receiver.tick(0, &mut sink);
     }
     assert_eq!(sink.starts.len(), 1);
-    assert_eq!(sink.pcm.len(), 3 * BLOCK);
-    assert_eq!(receiver.statistics().events_passed_over, 3);
+    (sink.pcm, receiver.statistics().events_passed_over)
+}
+
+// Verifies MIDI-3 and S6581-1, S6581-9 and S6581-39 end to end: a sound of
+// the synth6581 family's codec is stored and played through ASID, its
+// register data written and its start messages taken without a count; the
+// chip bit of tag 3 chooses synth8580 and the clock bit the NTSC clock.
+#[test]
+fn a_synth6581_sound_is_stored_and_played() {
+    let blocks = vec![synth6581_block(), Vec::new(), Vec::new()];
+    let (pal, passed_over) = play_synth6581(&blocks, 0);
+    assert_eq!(pal.len(), 3 * BLOCK);
+    assert_eq!(passed_over, 0);
+    assert!(pal.iter().any(|&sample| sample != pal[0]));
+    let (synth8580, _) = play_synth6581(&blocks, neoteletext_audio::record::SYNTH6581_CHIP_8580);
+    let (ntsc, _) = play_synth6581(&blocks, neoteletext_audio::record::SYNTH6581_CLOCK_NTSC);
+    assert_ne!(synth8580, pal);
+    assert_ne!(ntsc, pal);
+    // A channel message is passed over and counted (S6581-26).
+    let note = Message::Channel(ChannelMessage::new(status::NOTE_ON, 0, 60, 100));
+    let mut noted = blocks.clone();
+    let mut buffer = [0_u8; MOST_EVENT_BLOCK_BYTES];
+    let mut writer = neoteletext_audio_instruments::midi::block::BlockWriter::new(&mut buffer);
+    writer.push(0, &note).unwrap();
+    noted[1] = writer.bytes().to_vec();
+    let (with_note, passed_over) = play_synth6581(&noted, 0);
+    assert_eq!(passed_over, 1);
+    assert_eq!(with_note, pal);
 }
 
 /// A small generator of random numbers, the same on every run: xorshift64

@@ -93,6 +93,13 @@ pub mod synth106;
 pub mod synth53;
 #[cfg(feature = "synth6581")]
 pub mod synth6581;
+/// synth6581 and synth8580: the adopted interface alone, without the chip,
+/// for the server (SRV-88).
+#[cfg(all(feature = "interface", not(feature = "synth6581")))]
+pub mod synth6581 {
+    #[path = "interface.rs"]
+    pub mod interface;
+}
 #[cfg(feature = "synth7")]
 pub mod synth7;
 #[cfg(feature = "synth8")]

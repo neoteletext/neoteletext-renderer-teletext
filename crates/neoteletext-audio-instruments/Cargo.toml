@@ -19,6 +19,9 @@ publish.workspace = true
 default = ["synth6581", "synth7"]
 # synth6581 and synth8580 (codec 12, MIDI-107; REQ-6412 item 4).
 synth6581 = []
+# The interfaces alone, for the server (`server.md`, SRV-87, SRV-88): each
+# family's tables, readers, packers and trackers, with no synthesis.
+interface = []
 # synth7 (codec 13, its banks codec 19, MIDI-107; REQ-6412 items 5 and 6).
 synth7 = []
 # The building blocks of the analogue synthesizers (DEC-6429): oscillators,
