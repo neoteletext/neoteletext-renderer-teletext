@@ -13,7 +13,7 @@ fn public(title: &str, text: &str) -> String {
     public_page(
         "News",
         ADDRESS,
-        &PublicPage { title, text, canonical: ADDRESS, picture: Some((b"not really a png", 480, 500)) },
+        &PublicPage { title, text, canonical: ADDRESS, picture: Some((b"not really a png", 480, 500)), alt: None },
     )
 }
 
@@ -83,7 +83,11 @@ fn a_public_page_holds_its_title_its_picture_and_the_offer() {
 /// A page with no picture is still a page, for a host that cannot draw one.
 #[test]
 fn a_public_page_may_have_no_picture() {
-    let page = public_page("News", ADDRESS, &PublicPage { title: "t", text: "x", canonical: ADDRESS, picture: None });
+    let page = public_page(
+        "News",
+        ADDRESS,
+        &PublicPage { title: "t", text: "x", canonical: ADDRESS, picture: None, alt: None },
+    );
     assert!(!page.contains("<img"));
     assert!(page.contains("isAccessibleForFree"));
 }
@@ -143,7 +147,7 @@ fn a_public_page_carries_exactly_the_link_preview_tags() {
     let page = public_page(
         "News & <Views>",
         ADDRESS,
-        &PublicPage { title: "Rain \"today\"", text: "secret words", canonical: ADDRESS, picture: None },
+        &PublicPage { title: "Rain \"today\"", text: "secret words", canonical: ADDRESS, picture: None, alt: None },
     );
     let tags: vec::Vec<&str> = page.lines().filter(|line| line.starts_with("<meta property=\"og:")).collect();
     assert_eq!(
@@ -159,4 +163,15 @@ fn a_public_page_carries_exactly_the_link_preview_tags() {
     for page in [private_page("News", ADDRESS), channel_page("News", ADDRESS)] {
         assert!(!page.contains("og:"));
     }
+}
+
+/// Renderer parity PAR-26: a picture's own title is its `alt`, escaped;
+/// without one the page's title is.
+#[test]
+fn a_pictures_own_title_is_its_alt() {
+    let page =
+        |alt| PublicPage { title: "Weather", text: "x", canonical: ADDRESS, picture: Some((b"png", 800, 480)), alt };
+    let answered = public_page("News", ADDRESS, &page(Some("Map of \"rain\"")));
+    assert!(answered.contains("alt=\"Map of &quot;rain&quot;\""), "{answered}");
+    assert!(public_page("News", ADDRESS, &page(None)).contains("alt=\"Weather\""));
 }

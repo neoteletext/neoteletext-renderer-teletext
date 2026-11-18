@@ -104,6 +104,7 @@ fn public_html(
             text: &page_text(&grid),
             canonical: place,
             picture: Some((&picture, width, height)),
+            alt: None,
         },
     ))
 }

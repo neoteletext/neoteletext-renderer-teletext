@@ -63,6 +63,10 @@ pub struct PublicPage<'a> {
     /// The picture, as a PNG, and its width and height in pixels; none when
     /// the host could not draw one.
     pub picture: Option<(&'a [u8], usize, usize)>,
+    /// The picture's own text for its `alt`, when it has one: a ReGIS or
+    /// NAPLPS picture's title (renderer parity PAR-26; REQ-6644, REQ-6653).
+    /// None gives the page's title, as before.
+    pub alt: Option<&'a str>,
 }
 
 /// `text` safe in HTML, in a tag's text or in an attribute in double quotes.
@@ -178,14 +182,14 @@ fn link_preview(name: &str, title: &str, canonical: &str) -> String {
 
 /// The inline image of `png`, a page's picture (REQ-1728 item 4): inside the
 /// answer, so that no new address is added to the URL map.
-fn image(png: &[u8], width: usize, height: usize, title: &str) -> String {
+fn image(png: &[u8], width: usize, height: usize, alt: &str) -> String {
     let mut encoded = vec![0_u8; base64::encoded_len(png.len())];
     // The buffer is the encoded length, so this cannot fail, and base64's
     // alphabet needs no escaping.
     let written = base64::encode(png, &mut encoded).unwrap_or(0);
     let encoded = String::from_utf8_lossy(encoded.get(..written).unwrap_or_default());
     format!(
-        "<p><img src=\"data:image/png;base64,{encoded}\" width=\"{width}\" height=\"{height}\" alt=\"{title}\"></p>\n"
+        "<p><img src=\"data:image/png;base64,{encoded}\" width=\"{width}\" height=\"{height}\" alt=\"{alt}\"></p>\n"
     )
 }
 
@@ -202,7 +206,8 @@ pub fn public_page(name: &str, address: &str, page: &PublicPage<'_>) -> String {
         link_preview(&name, &title, &canonical),
         structured_data(page.title, page.canonical)
     );
-    let picture = page.picture.map_or_else(String::new, |(png, width, height)| image(png, width, height, &title));
+    let alt = page.alt.map_or_else(|| title.clone(), escaped);
+    let picture = page.picture.map_or_else(String::new, |(png, width, height)| image(png, width, height, &alt));
     let body = format!(
         "<h1>{title}</h1>\n<p>A page of {name}, a teletext channel, which opens in the NeoTeletext browser.</p>\n{picture}{}\
          <div class=\"{HIDDEN_TEXT_CLASS}\">{text}</div>\n",
