@@ -186,6 +186,10 @@ fn rules_message(vector: &Vector<'_>, kind: u8) {
 
 /// A RULES record's body (RULE-41): it decodes, encodes back to the same
 /// bytes, and the default table's rows are what `default_send_all` builds.
+/// The rows of the worked examples (RULE-85) are written by the server,
+/// which turns a table's names into numbers; the engine has no such table
+/// to compare them with, so that they pass the check, decode and encode
+/// back to their own bytes is what it holds of them.
 fn rules_body(vector: &Vector<'_>) {
     use neoteletext_rules::Table;
     let body = bytes(vector.value);
@@ -202,7 +206,7 @@ fn rules_body(vector: &Vector<'_>) {
         "default_send_all" => neoteletext_rules::default_send_all(false, &mut default),
         "default_send_all_wheel" => neoteletext_rules::default_send_all(true, &mut default),
         "no_table" => return assert!(!header.has_table),
-        other => panic!("{other}"),
+        _ => return assert!(header.has_table, "{}", vector.name),
     }
     assert!(header.has_table && *table == *default, "{}", vector.name);
 }
