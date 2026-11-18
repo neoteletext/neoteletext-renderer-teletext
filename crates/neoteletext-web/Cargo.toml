@@ -12,8 +12,10 @@ publish.workspace = true
 neoteletext-core.workspace = true
 embedded-io.workspace = true
 # The record frame and its data-line carriage, which the channel's index,
-# LOG and viewer-state records share with sound (DOC-1951).
-neoteletext-audio = { workspace = true, features = ["idl"] }
+# LOG and viewer-state records share with sound (DOC-1951). Its MIDI layer
+# (`midi`), whose highest data byte bounds a cue number in a block, which a
+# page's `cue` trigger names (page-rules.md RULE-109).
+neoteletext-audio = { workspace = true, features = ["idl", "midi"] }
 # A LOG record is checked by the rules of a TTI `LG` line (REQ-INP-026),
 # and given on as the same `LogLine`; a LINKS record's targets by the TTI
 # reader's parser, and given on as its `LinkLine`, `NumberLink` and
