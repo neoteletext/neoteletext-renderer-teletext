@@ -872,6 +872,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "neoteletext-rules"
+version = "0.1.0"
+
+[[package]]
 name = "neoteletext-slicer"
 version = "0.1.0"
 dependencies = [
