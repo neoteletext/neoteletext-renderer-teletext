@@ -29,10 +29,11 @@ impl VoiceSink for Keeper {
         self.pcm[first as usize..first as usize + pcm.len()].copy_from_slice(pcm);
     }
     fn forget(&mut self, _: SoundId) {}
-    fn stream(&mut self, _: SoundId, _: u32) {
+    fn end_stream(&mut self, _: u8, _: SoundId) {}
+    fn stream(&mut self, _: u8, _: SoundId, _: u32) {
         self.pcm.clear();
     }
-    fn stream_samples(&mut self, _: SoundId, pcm: &[i16]) {
+    fn stream_samples(&mut self, _: u8, _: SoundId, pcm: &[i16]) {
         self.pcm.extend_from_slice(pcm);
     }
     fn start(&mut self, channel: u8, start: Start) {

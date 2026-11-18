@@ -28,6 +28,7 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
             received: 0,
             conflict: false,
             at_sink: false,
+            streams: 0,
             live,
             newest: None,
             next: 0,

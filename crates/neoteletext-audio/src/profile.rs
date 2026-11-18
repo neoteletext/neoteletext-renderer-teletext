@@ -65,6 +65,21 @@ pub const OPUS_DECODERS: usize = 2;
 /// 2026). With every instrument the four are 136,032 bytes.
 pub const INSTRUMENT_LANES: usize = CHANNELS as usize;
 
+/// The least lead, in blocks of 20 ms, a playing synthesizer sound's stream
+/// is kept rendered ahead of what is heard (integration.md, INT-34): 40 ms,
+/// the progressive start's buffer ([`PROGRESSIVE_BUFFER_MS`]). NeoTeletext's
+/// own figure, to be confirmed by measurement (INT-88).
+pub const INSTRUMENT_LEAD_MIN_BLOCKS: u32 = 2;
+/// The largest lead, in blocks of 20 ms (INT-34): 100 ms, which bounds what
+/// rendering ahead adds to the delay of a stop or a new play. NeoTeletext's
+/// own figure, to be confirmed by measurement (INT-88).
+pub const INSTRUMENT_LEAD_MAX_BLOCKS: u32 = 5;
+/// What a sink holds of a stream, in milliseconds: two seconds (DOC-2295,
+/// a stream counted as two seconds at 48 kHz). The largest lead stays below
+/// it (INT-34).
+pub const STREAM_HELD_MS: u64 = 2_000;
+const _: () = assert!(PROGRESSIVE_BUFFER_MS == INSTRUMENT_LEAD_MIN_BLOCKS * 20);
+
 /// A kibibyte: the audio design's "KB" and "MB" of receiver memory are
 /// binary multiples (DEC-2372), as a port's buffers are.
 const KIB: usize = 1024;

@@ -206,7 +206,7 @@ impl Lanes {
                 }
                 None => break,
             }
-            sink.stream_samples(entry.sound, &pcm);
+            super::stream_out(sink, entry, &pcm);
             next = next.wrapping_add(1);
         }
         lane.next = next;

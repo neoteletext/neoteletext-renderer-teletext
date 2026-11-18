@@ -2,7 +2,9 @@
 //! (`neoteletext-common/docs/audio/midi-architecture.md`, cited as
 //! "MIDI-n"): sounds whose blocks are event lists and their banks, written
 //! by the publishing encoder, read back by the receiver, played through each
-//! family's front end and given to a recording sink as samples.
+//! family's front end and given to a recording sink as streams, one for
+//! each playing, named by its audio channel and sound
+//! (`neoteletext-common/docs/audio/integration.md`, INT-33, INT-37).
 #![cfg(all(
     feature = "encode",
     feature = "synth6581",
@@ -25,7 +27,10 @@ use neoteletext_audio::encode::{BlocksError, Command, EncodeError, Sound, TimedE
 use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
 use neoteletext_audio::record::{Record, TYPE_OBJECT, parse};
-use neoteletext_audio::{Codec, INSTRUMENT_BLOCK_SAMPLES, INSTRUMENT_RATE, MOST_EVENT_BLOCK_BYTES};
+use neoteletext_audio::{
+    Codec, INSTRUMENT_BLOCK_SAMPLES, INSTRUMENT_LEAD_MAX_BLOCKS, INSTRUMENT_LEAD_MIN_BLOCKS, INSTRUMENT_RATE,
+    MOST_EVENT_BLOCK_BYTES,
+};
 use neoteletext_audio_instruments::midi::block::BlockFault;
 use neoteletext_audio_instruments::midi::{ChannelMessage, Message, status};
 use neoteletext_audio_instruments::{synth7, synth8, synth53, synth80, synth106, synth6581, synthd};
@@ -37,34 +42,65 @@ const BANK: u8 = 9;
 /// The handle the tests' sounds have.
 const SOUND: u8 = 4;
 
+/// One stream the sink was given (INT-37): its audio channel, sound and
+/// rate, its samples in order, and whether it has ended.
+#[derive(Debug)]
+struct Streamed {
+    channel: u8,
+    sound: SoundId,
+    rate_hz: u32,
+    pcm: Vec<i16>,
+    ended: bool,
+}
+
 /// What the sink was given, assembled.
 #[derive(Default)]
 struct Recorder {
     defined: Vec<(SoundId, SoundFormat)>,
-    pcm: Vec<i16>,
-    streams: Vec<(SoundId, u32)>,
-    streamed: Vec<i16>,
+    samples: usize,
+    streams: Vec<Streamed>,
     starts: Vec<(u8, SoundId)>,
     concealed: Vec<u16>,
+}
+
+impl Recorder {
+    /// The stream of `sound` on `channel` that has not ended.
+    fn open(&mut self, channel: u8, sound: SoundId) -> Option<&mut Streamed> {
+        self.streams.iter_mut().rev().find(|stream| stream.channel == channel && stream.sound == sound && !stream.ended)
+    }
+
+    /// The streams begun, as (channel, sound, rate).
+    fn names(&self) -> Vec<(u8, SoundId, u32)> {
+        self.streams.iter().map(|stream| (stream.channel, stream.sound, stream.rate_hz)).collect()
+    }
 }
 
 impl VoiceSink for Recorder {
     fn define(&mut self, sound: SoundId, format: SoundFormat) {
         self.defined.push((sound, format));
-        self.pcm = vec![0; format.samples as usize];
     }
-    fn samples(&mut self, _sound: SoundId, first: u32, pcm: &[i16]) {
-        let first = first as usize;
-        if let Some(place) = self.pcm.get_mut(first..first + pcm.len()) {
-            place.copy_from_slice(pcm);
+    fn samples(&mut self, _sound: SoundId, _first: u32, _pcm: &[i16]) {
+        self.samples += 1;
+    }
+    fn forget(&mut self, sound: SoundId) {
+        for stream in self.streams.iter_mut().filter(|stream| stream.sound == sound) {
+            stream.ended = true;
         }
     }
-    fn forget(&mut self, _sound: SoundId) {}
-    fn stream(&mut self, sound: SoundId, rate_hz: u32) {
-        self.streams.push((sound, rate_hz));
+    fn stream(&mut self, channel: u8, sound: SoundId, rate_hz: u32) {
+        if let Some(old) = self.open(channel, sound) {
+            old.ended = true;
+        }
+        self.streams.push(Streamed { channel, sound, rate_hz, pcm: Vec::new(), ended: false });
     }
-    fn stream_samples(&mut self, _sound: SoundId, pcm: &[i16]) {
-        self.streamed.extend_from_slice(pcm);
+    fn stream_samples(&mut self, channel: u8, sound: SoundId, pcm: &[i16]) {
+        self.open(channel, sound)
+            .expect("samples come only to a stream begun and not ended")
+            .pcm
+            .extend_from_slice(pcm);
+    }
+    fn end_stream(&mut self, channel: u8, sound: SoundId) {
+        self.open(channel, sound).expect("only a stream begun ends").ended = true;
     }
     fn start(&mut self, channel: u8, start: Start) {
         self.starts.push((channel, start.sound));
@@ -75,6 +111,28 @@ impl VoiceSink for Recorder {
         self.concealed.push(block);
     }
 }
+
+/// Ticks the receiver whenever it asks to be (INT-34), from `from_ms` until
+/// it asks for nothing or for a moment past `until_ms`, as a port does.
+/// Answers the receiver's time at the end.
+fn run(receiver: &mut Receiver<'_, 8, 2>, sink: &mut Recorder, from_ms: u64, until_ms: u64) -> u64 {
+    let mut now = from_ms;
+    for _ in 0..1_000_000 {
+        match receiver.next_tick_ms() {
+            Some(at) if at <= until_ms => {
+                now = now.max(at);
+                receiver.tick(now, sink);
+            }
+            _ => return now,
+        }
+    }
+    panic!("the receiver asked to be ticked without end");
+}
+
+/// The milliseconds of a block.
+const BLOCK_MS: u64 = 20;
+/// Longer than any test's sound.
+const FOREVER_MS: u64 = 10 * 60 * 1_000;
 
 /// One family with banks, as the tests need it: its patches in the form
 /// its interim front end reads, and how a bank image is made of them.
@@ -273,13 +331,15 @@ fn rendered(bank: &Sound, sound: &Sound) -> (Vec<i16>, Counted) {
     push(&mut receiver, bank, &mut sink);
     push(&mut receiver, sound, &mut sink);
     receiver.push_record(&play(0, 1, sound), &mut sink);
-    while receiver.next_tick_ms() == Some(0) {
-        receiver.tick(0, &mut sink);
-    }
-    assert_eq!(sink.starts, vec![(0, SoundId { handle: SOUND, generation: 1 })]);
+    run(&mut receiver, &mut sink, 0, FOREVER_MS);
+    let id = SoundId { handle: SOUND, generation: 1 };
+    assert_eq!(sink.starts, vec![(0, id)]);
+    assert_eq!(sink.names(), vec![(0, id, INSTRUMENT_RATE)]);
+    assert!(sink.streams[0].ended, "an unlooped sound's stream ends after its last block (INT-36)");
+    assert!(sink.defined.is_empty() && sink.samples == 0, "a synthesizer's sound is never defined (INT-33)");
     let statistics = receiver.statistics();
     (
-        sink.pcm,
+        std::mem::take(&mut sink.streams[0].pcm),
         Counted {
             passed_over: statistics.events_passed_over,
             malformed: statistics.blocks_malformed,
@@ -320,11 +380,10 @@ fn a_sound_of_each_family_waits_for_its_banks_and_then_plays() {
         receiver.push_record(pieces.last().unwrap(), &mut sink);
         let id = SoundId { handle: SOUND, generation: 1 };
         assert_eq!(sink.starts, vec![(1, id)], "{:?}", family.codec);
-        assert_eq!(
-            sink.defined,
-            vec![(id, SoundFormat { rate_hz: INSTRUMENT_RATE, samples: 22 * INSTRUMENT_BLOCK_SAMPLES })]
-        );
-        assert!(loud(&sink.pcm[..BLOCK * 10]), "{:?}: the note sounds", family.codec);
+        assert_eq!(sink.names(), vec![(1, id, INSTRUMENT_RATE)]);
+        assert_eq!(sink.defined, []);
+        run(&mut receiver, &mut sink, 0, 10 * BLOCK_MS);
+        assert!(loud(&sink.streams[0].pcm[..BLOCK * 10]), "{:?}: the note sounds", family.codec);
         assert_eq!(receiver.statistics().events_passed_over, 0);
         // A bank is never played.
         receiver.push_record(&play(2, 1, &banks[0]), &mut sink);
@@ -443,17 +502,17 @@ fn a_live_sound_of_each_family_plays_and_a_lost_block_releases_its_notes() {
     const LAST: u16 = 150;
     for family in families() {
         let whole = live(&family, LAST, &[]);
-        assert_eq!(whole.streams, vec![(SoundId { handle: SOUND, generation: 1 }, INSTRUMENT_RATE)]);
+        assert_eq!(whole.names(), vec![(0, SoundId { handle: SOUND, generation: 1 }, INSTRUMENT_RATE)]);
         assert_eq!(whole.concealed, [], "{:?}", family.codec);
-        assert_eq!(whole.streamed.len(), BLOCK * (usize::from(LAST) + 1), "{:?}", family.codec);
+        assert_eq!(whole.streams[0].pcm.len(), BLOCK * (usize::from(LAST) + 1), "{:?}", family.codec);
         let tail = BLOCK * (usize::from(LAST) - 10);
-        assert!(loud(&whole.streamed[..BLOCK * 10]), "{:?}: the note sounds", family.codec);
-        assert!(loud(&whole.streamed[tail..]), "{:?}: and is held to the end", family.codec);
+        assert!(loud(&whole.streams[0].pcm[..BLOCK * 10]), "{:?}: the note sounds", family.codec);
+        assert!(loud(&whole.streams[0].pcm[tail..]), "{:?}: and is held to the end", family.codec);
         let gapped = live(&family, LAST, &[5]);
         assert_eq!(gapped.concealed, vec![5], "{:?}", family.codec);
-        assert_eq!(gapped.streamed[..BLOCK * 5], whole.streamed[..BLOCK * 5], "the same until the gap");
+        assert_eq!(gapped.streams[0].pcm[..BLOCK * 5], whole.streams[0].pcm[..BLOCK * 5], "the same until the gap");
         assert!(
-            energy(&gapped.streamed[tail..]) * 4 < energy(&whole.streamed[tail..]),
+            energy(&gapped.streams[0].pcm[tail..]) * 4 < energy(&whole.streams[0].pcm[tail..]),
             "{:?}: the note was released at the gap",
             family.codec
         );
@@ -560,11 +619,9 @@ fn play_synth6581(blocks: &[Vec<u8>], chip: u8) -> (Vec<i16>, u32) {
     let mut sink = Recorder::default();
     push(&mut receiver, &sound, &mut sink);
     receiver.push_record(&play(0, 1, &sound), &mut sink);
-    while receiver.next_tick_ms() == Some(0) {
-        receiver.tick(0, &mut sink);
-    }
+    run(&mut receiver, &mut sink, 0, FOREVER_MS);
     assert_eq!(sink.starts.len(), 1);
-    (sink.pcm, receiver.statistics().events_passed_over)
+    (std::mem::take(&mut sink.streams[0].pcm), receiver.statistics().events_passed_over)
 }
 
 // Verifies MIDI-3 and S6581-1, S6581-9 and S6581-39 end to end: a sound of
@@ -649,4 +706,167 @@ fn random_records_and_random_banks_never_panic() {
             assert!(round < 4);
         }
     }
+}
+
+/// A stored synth7 sound of `blocks` blocks, a note on in block 0 and
+/// another key in every eighth block after it, so that each block's samples
+/// depend on where the playing started.
+fn synth7_tune(blocks: usize) -> Sound {
+    let tune: Vec<Vec<u8>> = (0..blocks)
+        .map(|index| if index % 8 == 0 { vec![0, 0x90, 57 + (index / 8 % 12) as u8, 100] } else { Vec::new() })
+        .collect();
+    let mut sound = Sound::events(SOUND, 1, Codec::Synth7, &tune).unwrap();
+    sound.banks = vec![BANK];
+    sound
+}
+
+/// The bank the tune plays: 32 plain voices.
+fn synth7_bank() -> Sound {
+    bank(BANK, Codec::Synth7, &dump(&[]))
+}
+
+/// What `sound`'s blocks render to played in order into a new synth7
+/// instance with its bank: the samples a playing of it must stream.
+fn synth7_alone(sound: &Sound) -> Vec<i16> {
+    use neoteletext_audio_instruments::midi::{Banks, Instrument, play_block};
+    let mut synth = synth7::midi::Midi::new();
+    let image = dump(&[]);
+    let mut banks = Banks::none();
+    banks.push(&image);
+    synth.start(&banks);
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < sound.data.len() {
+        let length = usize::from(u16::from_be_bytes([sound.data[at], sound.data[at + 1]]));
+        let block = &sound.data[at + 2..at + 2 + length];
+        let mut pcm = [0_i16; BLOCK];
+        play_block(&mut synth, block, &banks, &mut pcm);
+        out.extend_from_slice(&pcm);
+        at += 2 + length;
+    }
+    out
+}
+
+// Verifies INT-33 and INT-34: a stored sound is streamed in order, its
+// samples those of its blocks rendered one after another, never defined;
+// with the clock stepped a millisecond at a time and the receiver ticked
+// only when it asks, the stream stays between the least and the largest
+// lead ahead of what has been heard, and it ends after the last block.
+#[test]
+fn a_stored_sound_streams_in_order_a_lead_ahead() {
+    const BLOCKS: usize = 150;
+    let sound = synth7_tune(BLOCKS);
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder::default();
+    push(&mut receiver, &synth7_bank(), &mut sink);
+    push(&mut receiver, &sound, &mut sink);
+    receiver.push_record(&play(0, 1, &sound), &mut sink);
+    let mut now = 0;
+    while !sink.streams[0].ended {
+        now += 1;
+        assert!(now < FOREVER_MS);
+        if receiver.next_tick_ms().is_some_and(|at| at <= now) {
+            receiver.tick(now, &mut sink);
+        }
+        let rendered = (sink.streams[0].pcm.len() / BLOCK) as u64;
+        let heard = now / BLOCK_MS;
+        if rendered < BLOCKS as u64 {
+            assert!(
+                rendered >= heard + u64::from(INSTRUMENT_LEAD_MIN_BLOCKS)
+                    && rendered <= heard + u64::from(INSTRUMENT_LEAD_MAX_BLOCKS) + 1,
+                "at {now} ms {rendered} blocks rendered, {heard} heard"
+            );
+        }
+    }
+    assert_eq!(sink.streams.len(), 1);
+    assert!(sink.defined.is_empty() && sink.samples == 0);
+    assert_eq!(sink.streams[0].pcm, synth7_alone(&sound));
+    assert!(loud(&sink.streams[0].pcm));
+    // It ends once its last block is rendered, the lead before it is heard.
+    let last_heard_ms = BLOCKS as u64 * BLOCK_MS;
+    assert!(now <= last_heard_ms && now + u64::from(INSTRUMENT_LEAD_MAX_BLOCKS) * BLOCK_MS >= last_heard_ms, "{now}");
+}
+
+// Verifies INT-37 and MIDI-3: one stored sound played on audio channels 0
+// and 1, the second 300 ms after the first, is two streams, each the
+// sound's samples from its own start, from its own instance.
+#[test]
+fn one_sound_on_two_channels_is_two_independent_streams() {
+    let sound = synth7_tune(60);
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder::default();
+    push(&mut receiver, &synth7_bank(), &mut sink);
+    push(&mut receiver, &sound, &mut sink);
+    receiver.push_record(&play(0, 1, &sound), &mut sink);
+    let now = run(&mut receiver, &mut sink, 0, 300);
+    receiver.tick(now.max(300), &mut sink);
+    receiver.push_record(&play(1, 1, &sound), &mut sink);
+    run(&mut receiver, &mut sink, 300, FOREVER_MS);
+    let id = SoundId { handle: SOUND, generation: 1 };
+    assert_eq!(sink.starts, vec![(0, id), (1, id)]);
+    assert_eq!(sink.names(), vec![(0, id, INSTRUMENT_RATE), (1, id, INSTRUMENT_RATE)]);
+    let alone = synth7_alone(&sound);
+    for stream in &sink.streams {
+        assert!(stream.ended, "channel {}", stream.channel);
+        assert_eq!(stream.pcm, alone, "channel {} plays the sound from its own start", stream.channel);
+    }
+}
+
+// Verifies MIDI-105 and INT-36: a looped stored sound goes on from its last
+// block to block 0 in the same stream, without a new stream, until stopped.
+#[test]
+fn a_looped_sound_plays_on_in_one_stream() {
+    const BLOCKS: usize = 10;
+    let sound = synth7_tune(BLOCKS);
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder::default();
+    push(&mut receiver, &synth7_bank(), &mut sink);
+    push(&mut receiver, &sound, &mut sink);
+    let mut looped = play(0, 1, &sound);
+    let Ok(Record::Control(control)) = parse(&looped) else { panic!("a command") };
+    looped = Command {
+        channel: 0,
+        sequence: 1,
+        operation: 1,
+        handle: SOUND,
+        generation: 1,
+        gain: 100,
+        fade_ms: 0,
+        flags: neoteletext_audio::record::FLAG_LOOP,
+        duck: 0,
+        page: control.page.filter(|_| false),
+    }
+    .record();
+    receiver.push_record(&looped, &mut sink);
+    run(&mut receiver, &mut sink, 0, 3 * BLOCKS as u64 * BLOCK_MS);
+    assert_eq!(sink.streams.len(), 1);
+    assert!(!sink.streams[0].ended);
+    assert!(sink.streams[0].pcm.len() >= 3 * BLOCKS * BLOCK, "{}", sink.streams[0].pcm.len() / BLOCK);
+    let alone = synth7_alone(&sound);
+    assert_eq!(sink.streams[0].pcm[..BLOCKS * BLOCK], alone[..], "the first pass is the sound");
+    assert!(loud(&sink.streams[0].pcm[BLOCKS * BLOCK..2 * BLOCKS * BLOCK]), "the second pass sounds");
+    // A stop ends the stream at the end of its fade (INT-36).
+    let stop = Command {
+        channel: 0,
+        sequence: 2,
+        operation: 2,
+        handle: SOUND,
+        generation: 1,
+        gain: 100,
+        fade_ms: 100,
+        flags: 0,
+        duck: 0,
+        page: None,
+    }
+    .record();
+    let at = 3 * BLOCKS as u64 * BLOCK_MS;
+    receiver.tick(at, &mut sink);
+    receiver.push_record(&stop, &mut sink);
+    assert!(!sink.streams[0].ended, "it plays on through the fade");
+    let end = run(&mut receiver, &mut sink, at, FOREVER_MS);
+    assert!(sink.streams[0].ended);
+    assert_eq!(end, at + 100);
 }

@@ -28,8 +28,9 @@ impl VoiceSink for Counter {
         self.samples += 1;
     }
     fn forget(&mut self, _: SoundId) {}
-    fn stream(&mut self, _: SoundId, _: u32) {}
-    fn stream_samples(&mut self, _: SoundId, _: &[i16]) {}
+    fn end_stream(&mut self, _: u8, _: SoundId) {}
+    fn stream(&mut self, _: u8, _: SoundId, _: u32) {}
+    fn stream_samples(&mut self, _: u8, _: SoundId, _: &[i16]) {}
     fn start(&mut self, _: u8, _: Start) {
         self.started += 1;
     }

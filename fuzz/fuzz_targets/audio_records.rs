@@ -21,10 +21,11 @@ impl VoiceSink for Checker {
         assert!(pcm.len() <= neoteletext_audio::MAX_BLOCK_SAMPLES);
     }
     fn forget(&mut self, _: SoundId) {}
-    fn stream(&mut self, _: SoundId, rate_hz: u32) {
+    fn end_stream(&mut self, _: u8, _: SoundId) {}
+    fn stream(&mut self, _: u8, _: SoundId, rate_hz: u32) {
         assert!(neoteletext_audio::SAMPLE_RATES.contains(&rate_hz));
     }
-    fn stream_samples(&mut self, _: SoundId, pcm: &[i16]) {
+    fn stream_samples(&mut self, _: u8, _: SoundId, pcm: &[i16]) {
         assert!(pcm.len() <= neoteletext_audio::MAX_BLOCK_SAMPLES);
     }
     fn start(&mut self, channel: u8, start: Start) {

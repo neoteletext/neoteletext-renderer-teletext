@@ -95,7 +95,8 @@ pub struct Receiver<'a, const OBJECTS: usize, const SLOTS: usize> {
     /// Opus sounds' decoders (decision E.124).
     #[cfg(feature = "opus")]
     opus: opus::Lanes,
-    /// Instrument sounds' instruments (REQ-6411).
+    /// The synthesizers' lanes, each rendering one playing into a stream
+    /// (INT-32, INT-33).
     #[cfg(any(
         feature = "synth6581",
         feature = "synth7",
@@ -106,6 +107,9 @@ pub struct Receiver<'a, const OBJECTS: usize, const SLOTS: usize> {
         feature = "synth80"
     ))]
     instruments: instruments::Lanes,
+    /// When each channel's latest play is heard to its end, by the
+    /// receiver's clock, for a play after it (INT-36).
+    heard: [play::Heard; CHANNELS as usize],
     /// Each channel's stored-sound play, followed for the `concealed`
     /// report (REQ-AUD-013).
     progress: [Option<loss::Progress>; CHANNELS as usize],
@@ -137,6 +141,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                 feature = "synth80"
             ))]
             instruments: instruments::Lanes::new(),
+            heard: [play::Heard::Idle; CHANNELS as usize],
             progress: [None; CHANNELS as usize],
         }
     }
@@ -161,6 +166,9 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                     sink.stop(index, crate::LIVE_STALL_FADE_MS);
                     channel.playing = None;
                     channel.waiting = Some(play);
+                    if let Some(heard) = self.heard.get_mut(usize::from(index)) {
+                        *heard = play::Heard::Idle;
+                    }
                 }
             }
             sink.forget(entry.sound);
@@ -178,6 +186,26 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             ))]
             self.instruments.release(entry.sound);
         }
+        self.render(sink);
+        self.judge(sink);
+    }
+
+    /// Renders the synthesizers' playings as far as they are owed, within
+    /// the render budget (INT-34, INT-35). Every call that can start, feed
+    /// or advance a playing ends with it.
+    #[cfg_attr(
+        not(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        )),
+        expect(clippy::unused_self, reason = "a build without the MIDI layer has no lanes")
+    )]
+    fn render(&mut self, sink: &mut dyn VoiceSink) {
         #[cfg(any(
             feature = "synth6581",
             feature = "synth7",
@@ -187,35 +215,26 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             feature = "synth8",
             feature = "synth80"
         ))]
-        self.render_waiting(sink);
-        self.judge(sink);
-    }
-
-    /// Goes on rendering the stored instrument sounds whose blocks wait, a
-    /// budget's worth each (REQ-6411): a long sound is rendered over several
-    /// ticks, well ahead of the voice that plays it.
-    #[cfg(any(
-        feature = "synth6581",
-        feature = "synth7",
-        feature = "synth106",
-        feature = "synthd",
-        feature = "synth53",
-        feature = "synth8",
-        feature = "synth80"
-    ))]
-    fn render_waiting(&mut self, sink: &mut dyn VoiceSink) {
-        for sound in self.instruments.waiting(&self.store).into_iter().flatten() {
-            if let Some(entry) = self.store.entries().find(|entry| entry.sound == sound).copied() {
-                self.instruments.send_stored(&self.store, &entry, &mut self.statistics, sink);
-            }
-        }
+        self.instruments.render(&self.store, self.now_ms, &mut self.statistics, sink);
+        #[cfg(not(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        )))]
+        let _ = sink;
     }
 
     /// When the receiver next needs [`Receiver::tick`], in its milliseconds:
     /// the moment the live sound at the sink whose last block came longest
     /// ago would stall (REQ-AUD-014), or a stored sound's play reaches a
-    /// block that has not arrived, to report it concealed (REQ-AUD-013); or
-    /// `None` while neither can happen, when it needs no tick at all. A port
+    /// block that has not arrived, to report it concealed (REQ-AUD-013), or
+    /// a synthesizer's playing must be rendered to keep its lead (INT-34) or
+    /// is owed blocks the render budget left (INT-35); or `None` while none
+    /// of these can happen, when it needs no tick at all. A port
     /// sleeps until then, rather than ticking on a fixed interval (decision
     /// E.98).
     #[must_use]
@@ -226,8 +245,6 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             .filter(|entry| entry.live && entry.at_sink)
             .map(|entry| entry.arrived_ms.saturating_add(crate::LIVE_STALL_MS))
             .min();
-        // A stored instrument sound with blocks still to render wants its
-        // next tick at once (REQ-6411).
         #[cfg(any(
             feature = "synth6581",
             feature = "synth7",
@@ -237,7 +254,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             feature = "synth8",
             feature = "synth80"
         ))]
-        let rendering = self.instruments.pending(&self.store).then_some(self.now_ms);
+        let rendering = self.instruments.next_tick_ms(&self.store, self.now_ms);
         #[cfg(not(any(
             feature = "synth6581",
             feature = "synth7",
@@ -305,6 +322,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         ))]
         self.instruments.clear();
         self.channels = [Channel::default(); CHANNELS as usize];
+        self.heard = [play::Heard::Idle; CHANNELS as usize];
         self.progress = [None; CHANNELS as usize];
     }
 
@@ -329,6 +347,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             channel.playing_page = None;
             channel.playing = None;
         }
+        self.heard = [play::Heard::Idle; CHANNELS as usize];
         self.progress = [None; CHANNELS as usize];
     }
 
@@ -431,6 +450,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             },
             Record::Control(control) => self.command(&control, sink),
         }
+        self.render(sink);
         self.judge(sink);
     }
 
@@ -451,6 +471,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         if self.page_sounds {
             self.start_armed(sink);
         }
+        self.render(sink);
     }
 
     /// The user's page sounds setting (REQ-AUD-012).
@@ -469,6 +490,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                 self.drop_waiting_page_play(index);
             }
         }
+        self.render(sink);
     }
 
     /// Stops channel `index`'s page sound. `playing` goes too: left set, a
@@ -480,6 +502,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             channel.playing = None;
         }
         sink.stop(index, crate::MIN_FADE_MS);
+        self.stop_streams(index, crate::MIN_FADE_MS, sink);
         self.end_progress(index);
     }
 
@@ -524,12 +547,33 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                 channel.playing_page = None;
                 channel.playing = None;
                 sink.stop(index, fade(control.fade_ms));
+                self.stop_streams(index, fade(control.fade_ms), sink);
                 self.end_progress(index);
             }
             Operation::Gain => sink.gain(index, control.gain, fade(control.fade_ms)),
         }
     }
 }
+
+/// The audio channels on which the sink holds a stream of a live sound
+/// (INT-37).
+#[cfg(any(feature = "opus", feature = "pcm16", feature = "ima"))]
+fn stream_channels(entry: &Entry) -> impl Iterator<Item = u8> + use<> {
+    let streams = entry.streams;
+    (0..CHANNELS).filter(move |&channel| streams.checked_shr(u32::from(channel)).is_some_and(|bits| bits & 1 == 1))
+}
+
+/// Gives a live sound's next samples to each of its streams (INT-37): every
+/// audio channel that plays it hears the same samples.
+#[cfg(any(feature = "opus", feature = "pcm16", feature = "ima"))]
+fn stream_out(sink: &mut dyn VoiceSink, entry: &Entry, pcm: &[i16]) {
+    for channel in stream_channels(entry) {
+        sink.stream_samples(channel, entry.sound, pcm);
+    }
+}
+
+// A bit of `Entry::streams` for each audio channel.
+const _: () = assert!(CHANNELS as u32 <= u8::BITS);
 
 /// Counts one more.
 fn bump(counter: &mut u32) {

@@ -28,10 +28,12 @@ pub(super) struct Progress {
 
 impl Progress {
     /// A play of `entry` started at `now_ms`; `None` when nothing in it can
-    /// be missing (a whole or a live sound) or its start is not known (a
-    /// play after the current sound).
+    /// be missing (a whole or a live sound, or a synthesizer's) or its start
+    /// is not known (a play after the current sound).
     pub(super) fn follow(entry: &Entry, after_current: bool, now_ms: u64) -> Option<Self> {
-        (!entry.live && !entry.complete() && !after_current).then_some(Self {
+        // A synthesizer's playing judges its own blocks as it renders them
+        // (INT-25).
+        (!entry.live && !entry.complete() && !after_current && !entry.codec.is_instrument()).then_some(Self {
             sound: entry.sound,
             anchor_ms: now_ms,
             anchor_sample: 0,

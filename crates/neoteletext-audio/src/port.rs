@@ -75,17 +75,33 @@ pub trait VoiceSink {
     /// Samples of a sound, starting at sample `first`.
     fn samples(&mut self, sound: SoundId, first: u32, pcm: &[i16]);
 
-    /// The sound is gone. A voice already playing it plays to its end; a
-    /// live sound's voice plays what it holds, then ends.
+    /// The sound is gone. A voice already playing it plays to its end; every
+    /// stream of it, on any audio channel, ends as [`VoiceSink::end_stream`]
+    /// ends one.
     fn forget(&mut self, sound: SoundId);
 
-    /// A live sound exists (REQ-AUD-014): its samples come without end, in
-    /// order, through [`VoiceSink::stream_samples`]. The sink buffers them,
-    /// starts a voice once enough are held, and follows the sender's clock.
-    fn stream(&mut self, sound: SoundId, rate_hz: u32);
+    /// A stream begins on audio channel `channel` (REQ-AUD-014; INT-33,
+    /// INT-37): samples of `sound` that come in order through
+    /// [`VoiceSink::stream_samples`], with no length known ahead, until
+    /// [`VoiceSink::end_stream`] or [`VoiceSink::forget`]. A stream is named
+    /// by its audio channel and its sound together, so one sound may stream
+    /// on two audio channels at once, each its own playing; a stream begun
+    /// under a name the sink still holds replaces the one before it. A live
+    /// sound streams on each audio channel that plays it; each playing of a
+    /// synthesizer's sound, stored or live, is a stream of its own, rendered
+    /// as it plays. The sink buffers a stream's samples, at most two seconds
+    /// of them ([`crate::STREAM_HELD_MS`]), starts its voice once enough
+    /// are held, and follows the sender's clock.
+    fn stream(&mut self, channel: u8, sound: SoundId, rate_hz: u32);
 
-    /// The next samples of a live sound, in order.
-    fn stream_samples(&mut self, sound: SoundId, pcm: &[i16]);
+    /// The next samples of the stream of `sound` on audio channel `channel`,
+    /// in order.
+    fn stream_samples(&mut self, channel: u8, sound: SoundId, pcm: &[i16]);
+
+    /// The stream of `sound` on audio channel `channel` ends (INT-36): no
+    /// more samples come. A voice playing it plays what it holds, then ends,
+    /// and a sound waiting after it on the channel starts.
+    fn end_stream(&mut self, channel: u8, sound: SoundId);
 
     /// Starts a sound on a channel, ramping out what the channel played.
     fn start(&mut self, channel: u8, start: Start);
@@ -132,10 +148,11 @@ pub trait VoiceSink {
     /// sink that decodes it itself, fading either edge as the block says.
     fn ima_samples(&mut self, _sound: SoundId, _first: u32, _block: ImaBlock<'_>) {}
 
-    /// A live IMA ADPCM sound's next block, in order, for a sink that
-    /// decodes it itself. Nothing of it is held back: before a block given
-    /// as silence, which comes through [`VoiceSink::stream_samples`] after
-    /// a [`VoiceSink::concealed`] report, the sink fades out the last 5 ms
-    /// it holds (REQ-AUD-013).
-    fn ima_stream(&mut self, _sound: SoundId, _block: ImaBlock<'_>) {}
+    /// A live IMA ADPCM sound's next block, in order, for the stream of it
+    /// on audio channel `channel` (INT-37), for a sink that decodes it
+    /// itself. Nothing of it is held back: before a block given as silence,
+    /// which comes through [`VoiceSink::stream_samples`] after a
+    /// [`VoiceSink::concealed`] report, the sink fades out the last 5 ms it
+    /// holds (REQ-AUD-013).
+    fn ima_stream(&mut self, _channel: u8, _sound: SoundId, _block: ImaBlock<'_>) {}
 }

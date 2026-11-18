@@ -1,6 +1,16 @@
 //! Starting plays: a play starts once its sound is ready, or waits for it
 //! (REQ-AUD-011 to REQ-AUD-013).
 
+#[cfg(any(
+    feature = "synth6581",
+    feature = "synth7",
+    feature = "synth106",
+    feature = "synthd",
+    feature = "synth53",
+    feature = "synth8",
+    feature = "synth80"
+))]
+use super::instruments::Begun;
 use super::loss::Progress;
 use super::{MS_PER_SECOND, Receiver, duration_ms};
 use crate::control::Play;
@@ -37,14 +47,60 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             channel.waiting = Some(play);
             return;
         };
-        channel.waiting = None;
-        channel.playing_page = play.page;
-        channel.playing = Some(play);
-        self.set_progress(index, Progress::follow(&entry, play.after_current, self.now_ms));
+        let start_ms = self.start_ms(index, play);
+        // A synthesizer's playing is a stream of its own, rendered as it
+        // plays (INT-33, INT-37). It needs a lane (INT-32): without one the
+        // play waits, and is tried again with the next record.
+        #[cfg(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        ))]
+        if entry.codec.is_instrument() {
+            if !play.after_current {
+                self.stop_streams(index, play.fade_ms, sink);
+            }
+            let begun = self.instruments.begin(
+                &self.store,
+                &entry,
+                index,
+                start_ms,
+                play.looped,
+                play.after_current,
+                &mut self.statistics,
+                sink,
+            );
+            if begun == Begun::NoLane {
+                if let Some(channel) = self.channels.get_mut(usize::from(index)) {
+                    channel.waiting = Some(play);
+                }
+                return;
+            }
+            self.store.set_at_sink(entry.sound, true);
+            self.played(index, play, &entry, start_ms);
+            if begun == Begun::Started {
+                sink.start(index, start_of(play));
+            }
+            return;
+        }
+        if !play.after_current {
+            self.stop_streams(index, play.fade_ms, sink);
+        }
+        self.played(index, play, &entry, start_ms);
         if entry.live {
+            let bit = 1_u8.checked_shl(u32::from(index)).unwrap_or(0);
+            if entry.streams & bit == 0 {
+                // Each audio channel that plays a live sound has its own
+                // stream of it (INT-37), joined where the sound is now.
+                sink.stream(index, entry.sound, entry.rate_hz);
+                self.store.add_stream(entry.sound, index);
+            }
             if !entry.at_sink {
                 // Join at the newest block: a live sound is heard as it is now.
-                sink.stream(entry.sound, entry.rate_hz);
                 self.store.set_at_sink(entry.sound, true);
                 self.store.set_live_cursor(entry.sound, entry.newest.unwrap_or(0), entry.arrived_ms);
                 self.store.set_live_edge(entry.sound, LiveEdge::Joined);
@@ -53,17 +109,74 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         } else if !entry.at_sink {
             self.send_sound(&entry, sink);
         }
-        sink.start(
-            index,
-            Start {
-                sound: play.sound,
-                gain: play.gain,
-                fade_ms: play.fade_ms,
-                looped: play.looped,
-                duck_percent: play.duck_percent,
-                after_current: play.after_current,
-            },
-        );
+        sink.start(index, start_of(play));
+    }
+
+    /// When a play on channel `index` starting now is first heard, by the
+    /// receiver's clock: now, or after the channel's current sound when
+    /// the play waits for it, at its end where the receiver knows it;
+    /// `None` where it does not (a looped or a live sound plays on).
+    fn start_ms(&self, index: u8, play: Play) -> Option<u64> {
+        if !play.after_current {
+            return Some(self.now_ms);
+        }
+        match self.heard.get(usize::from(index)).copied().unwrap_or_default() {
+            Heard::Idle => Some(self.now_ms),
+            Heard::Until(end_ms) => Some(end_ms.max(self.now_ms)),
+            Heard::Unknown => None,
+        }
+    }
+
+    /// Records a play just started on channel `index`: it is what the channel
+    /// plays, followed for loss, and heard to its end at a time the receiver
+    /// knows for a stored sound played once from a known start.
+    fn played(&mut self, index: u8, play: Play, entry: &Entry, start_ms: Option<u64>) {
+        if let Some(channel) = self.channels.get_mut(usize::from(index)) {
+            channel.waiting = None;
+            channel.playing_page = play.page;
+            channel.playing = Some(play);
+        }
+        self.set_progress(index, Progress::follow(entry, play.after_current, self.now_ms));
+        let heard = match start_ms {
+            Some(start_ms) if !play.looped && !entry.live => {
+                Heard::Until(start_ms.saturating_add(u64::from(duration_ms(entry))))
+            }
+            _ => Heard::Unknown,
+        };
+        if let Some(slot) = self.heard.get_mut(usize::from(index)) {
+            *slot = heard;
+        }
+    }
+
+    /// Channel `index` was stopped, or is to start another sound, with a fade
+    /// of `fade_ms`: what it played is heard no longer, and its synthesizer
+    /// streams end with the fade (INT-26, INT-36).
+    #[cfg_attr(
+        not(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        )),
+        expect(unused_variables, reason = "only the lanes fade a stream out")
+    )]
+    pub(super) fn stop_streams(&mut self, index: u8, fade_ms: u16, sink: &mut dyn VoiceSink) {
+        if let Some(heard) = self.heard.get_mut(usize::from(index)) {
+            *heard = Heard::Idle;
+        }
+        #[cfg(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        ))]
+        self.instruments.stop(index, fade_ms, self.now_ms, sink);
     }
 
     pub(super) fn start_waiting(&mut self, sink: &mut dyn VoiceSink) {
@@ -105,4 +218,30 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         let samples = (0..blocks).map(|index| entry.block_samples(index)).fold(0_u32, u32::saturating_add);
         samples.saturating_mul(MS_PER_SECOND).checked_div(entry.rate_hz).unwrap_or(0)
     }
+}
+
+/// The sink's start of `play`.
+fn start_of(play: Play) -> Start {
+    Start {
+        sound: play.sound,
+        gain: play.gain,
+        fade_ms: play.fade_ms,
+        looped: play.looped,
+        duck_percent: play.duck_percent,
+        after_current: play.after_current,
+    }
+}
+
+/// When a channel's latest play is heard to its end (INT-36), for a play
+/// that waits for it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(super) enum Heard {
+    /// The channel plays nothing: a play after it starts at once.
+    #[default]
+    Idle,
+    /// Its sound ends then, in the receiver's milliseconds.
+    Until(u64),
+    /// Its sound plays on for a time the receiver does not know: looped, or
+    /// live, or itself waiting for one that does.
+    Unknown,
 }

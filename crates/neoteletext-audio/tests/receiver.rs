@@ -74,11 +74,12 @@ impl VoiceSink for Recorder {
     fn forget(&mut self, sound: SoundId) {
         self.calls.push(Call::Forget(sound));
     }
-    fn stream(&mut self, sound: SoundId, rate_hz: u32) {
+    fn end_stream(&mut self, _channel: u8, _sound: SoundId) {}
+    fn stream(&mut self, _channel: u8, sound: SoundId, rate_hz: u32) {
         self.calls.push(Call::Stream(sound, rate_hz));
         self.pcm.push((sound, Vec::new()));
     }
-    fn stream_samples(&mut self, sound: SoundId, pcm: &[i16]) {
+    fn stream_samples(&mut self, _channel: u8, sound: SoundId, pcm: &[i16]) {
         self.calls.push(Call::StreamSamples(sound, pcm.len()));
         if let Some((_, buffer)) = self.pcm.iter_mut().rev().find(|(id, _)| *id == sound) {
             buffer.extend_from_slice(pcm);
@@ -1251,8 +1252,9 @@ mod ima_to_the_sink {
             self.samples_calls += 1;
         }
         fn forget(&mut self, _: SoundId) {}
-        fn stream(&mut self, _: SoundId, _: u32) {}
-        fn stream_samples(&mut self, _: SoundId, pcm: &[i16]) {
+        fn end_stream(&mut self, _: u8, _: SoundId) {}
+        fn stream(&mut self, _: u8, _: SoundId, _: u32) {}
+        fn stream_samples(&mut self, _: u8, _: SoundId, pcm: &[i16]) {
             assert!(pcm.iter().all(|&sample| sample == 0), "only silence comes as samples");
             self.silences += 1;
         }
@@ -1265,7 +1267,7 @@ mod ima_to_the_sink {
         fn ima_samples(&mut self, _: SoundId, first: u32, block: ImaBlock<'_>) {
             self.given.push((Some(first), block.bytes.to_vec(), block.samples, block.fade_in, block.fade_out));
         }
-        fn ima_stream(&mut self, _: SoundId, block: ImaBlock<'_>) {
+        fn ima_stream(&mut self, _: u8, _: SoundId, block: ImaBlock<'_>) {
             self.given.push((None, block.bytes.to_vec(), block.samples, block.fade_in, block.fade_out));
         }
     }

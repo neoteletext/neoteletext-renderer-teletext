@@ -56,8 +56,12 @@ pub struct Entry {
     /// A block arrived twice with different bytes: the sound is not played
     /// until a newer generation replaces it.
     pub conflict: bool,
-    /// The sink holds the sound's samples.
+    /// The sink holds the sound's samples, or streams of it.
     pub at_sink: bool,
+    /// The audio channels on which the sink holds a stream of this live
+    /// sound of a codec other than an event codec, one bit each, channel 0
+    /// the lowest (INT-37): each is given the sound's samples.
+    pub streams: u8,
     /// A live sound (REQ-AUD-014): `blocks` slots of a ring, filled by block
     /// index modulo their count.
     pub live: bool,
@@ -289,10 +293,22 @@ impl<'a, const OBJECTS: usize> Store<'a, OBJECTS> {
         self.entries.iter().flatten()
     }
 
-    /// Marks whether the sink holds a sound's samples.
+    /// Marks whether the sink holds a sound's samples; a sound it no longer
+    /// holds has no streams there.
     pub fn set_at_sink(&mut self, sound: SoundId, at_sink: bool) {
         if let Some(entry) = self.entries.iter_mut().flatten().find(|entry| entry.sound == sound) {
             entry.at_sink = at_sink;
+            if !at_sink {
+                entry.streams = 0;
+            }
+        }
+    }
+
+    /// Records that the sink holds a stream of a live sound on audio channel
+    /// `channel` (INT-37).
+    pub fn add_stream(&mut self, sound: SoundId, channel: u8) {
+        if let Some(entry) = self.entries.iter_mut().flatten().find(|entry| entry.sound == sound) {
+            entry.streams |= 1_u8.checked_shl(u32::from(channel)).unwrap_or(0);
         }
     }
 
@@ -307,6 +323,7 @@ impl<'a, const OBJECTS: usize> Store<'a, OBJECTS> {
     pub fn sink_lost(&mut self) {
         for entry in self.entries.iter_mut().flatten() {
             entry.at_sink = false;
+            entry.streams = 0;
         }
     }
 

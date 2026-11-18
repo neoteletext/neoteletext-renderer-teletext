@@ -23,17 +23,6 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         // Sent whole: an Opus sound is decoded again from its first block.
         #[cfg(feature = "opus")]
         self.opus.release(entry.sound);
-        // And an instrument's sound is rendered again from its first.
-        #[cfg(any(
-            feature = "synth6581",
-            feature = "synth7",
-            feature = "synth106",
-            feature = "synthd",
-            feature = "synth53",
-            feature = "synth8",
-            feature = "synth80"
-        ))]
-        self.instruments.release(entry.sound);
         self.send_blocks(entry, 0, entry.blocks, sink);
     }
 
@@ -44,18 +33,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         expect(unused_variables, reason = "only PCM16 and IMA ADPCM send the blocks that arrived")
     )]
     #[cfg_attr(
-        not(any(
-            feature = "pcm16",
-            feature = "ima",
-            feature = "opus",
-            feature = "synth6581",
-            feature = "synth7",
-            feature = "synth106",
-            feature = "synthd",
-            feature = "synth53",
-            feature = "synth8",
-            feature = "synth80"
-        )),
+        not(any(feature = "pcm16", feature = "ima", feature = "opus")),
         expect(clippy::unused_self, reason = "a build with no decoder holds no sound to send")
     )]
     pub(super) fn send_blocks(&mut self, entry: &Entry, first: u16, count: u16, sink: &mut dyn VoiceSink) {
@@ -75,27 +53,8 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Pcm16 | Codec::ImaAdpcm => {}
             // A bank is patches, never samples (MIDI-55).
             Codec::Bank => {}
-            // An instrument's. A codec the build leaves out renders
-            // silence, and none of one is stored.
-            #[cfg(any(
-                feature = "synth6581",
-                feature = "synth7",
-                feature = "synth106",
-                feature = "synthd",
-                feature = "synth53",
-                feature = "synth8",
-                feature = "synth80"
-            ))]
-            _ => self.instruments.send_stored(&self.store, entry, &mut self.statistics, sink),
-            #[cfg(not(any(
-                feature = "synth6581",
-                feature = "synth7",
-                feature = "synth106",
-                feature = "synthd",
-                feature = "synth53",
-                feature = "synth8",
-                feature = "synth80"
-            )))]
+            // A synthesizer's: each playing renders it as it plays
+            // (`receiver::instruments`, INT-33), never sent whole.
             _ => {}
         }
     }
@@ -105,18 +64,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// sent as silence, or concealed by an Opus decoder, so a lost block
     /// never stops the sound.
     #[cfg_attr(
-        not(any(
-            feature = "pcm16",
-            feature = "ima",
-            feature = "opus",
-            feature = "synth6581",
-            feature = "synth7",
-            feature = "synth106",
-            feature = "synthd",
-            feature = "synth53",
-            feature = "synth8",
-            feature = "synth80"
-        )),
+        not(any(feature = "pcm16", feature = "ima", feature = "opus")),
         expect(unused_variables, reason = "a build with no decoder holds no sound to send")
     )]
     pub(super) fn send_live(&mut self, sound: SoundId, sink: &mut dyn VoiceSink) {
@@ -135,28 +83,8 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
             Codec::Bank => {}
-            #[cfg(any(
-                feature = "synth6581",
-                feature = "synth7",
-                feature = "synth106",
-                feature = "synthd",
-                feature = "synth53",
-                feature = "synth8",
-                feature = "synth80"
-            ))]
-            _ => {
-                let next = self.instruments.send_live(&self.store, &entry, &mut self.statistics, sink);
-                self.store.set_live_cursor(sound, next, entry.arrived_ms);
-            }
-            #[cfg(not(any(
-                feature = "synth6581",
-                feature = "synth7",
-                feature = "synth106",
-                feature = "synthd",
-                feature = "synth53",
-                feature = "synth8",
-                feature = "synth80"
-            )))]
+            // A synthesizer's: each playing renders it from its own cursor
+            // (`receiver::instruments`, INT-37).
             _ => {}
         }
     }
@@ -268,10 +196,10 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                     // Nothing is held back: the sink fades its own end
                     // before a silence (VoiceSink::ima_stream).
                     let samples = u32::try_from(count).unwrap_or(u32::MAX);
-                    sink.ima_stream(
-                        sound,
-                        ImaBlock { bytes, samples, fade_in: edge == LiveEdge::Gap, fade_out: false },
-                    );
+                    let block = ImaBlock { bytes, samples, fade_in: edge == LiveEdge::Gap, fade_out: false };
+                    for channel in super::stream_channels(entry) {
+                        sink.ima_stream(channel, sound, block);
+                    }
                     edge = LiveEdge::Joined;
                     next = next.wrapping_add(1);
                     continue;
@@ -289,13 +217,13 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                 if faded_in {
                     fade::fade_in(pcm.get_mut(..held).unwrap_or(&mut []));
                 }
-                sink.stream_samples(sound, pcm.get(..count.saturating_sub(held)).unwrap_or(&[]));
+                super::stream_out(sink, entry, pcm.get(..count.saturating_sub(held)).unwrap_or(&[]));
                 edge = LiveEdge::Held { faded_in };
             } else if newest.wrapping_sub(next) >= crate::LIVE_LOOKAHEAD_BLOCKS {
                 if let LiveEdge::Held { faded_in } = edge {
                     self.send_live_tail(entry, next.wrapping_sub(1), faded_in, true, sink);
                 }
-                sink.stream_samples(sound, silence.get(..per_block).unwrap_or(&[]));
+                super::stream_out(sink, entry, silence.get(..per_block).unwrap_or(&[]));
                 bump(&mut self.statistics.concealed);
                 sink.concealed(sound, next, entry.samples_per_block());
                 edge = LiveEdge::Gap;
@@ -328,7 +256,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         if faded_out {
             fade::fade_out(tail);
         }
-        sink.stream_samples(entry.sound, tail);
+        super::stream_out(sink, entry, tail);
     }
 }
 

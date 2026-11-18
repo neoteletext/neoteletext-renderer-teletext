@@ -474,10 +474,11 @@ mod audio {
         fn forget(&mut self, sound: SoundId) {
             black_box(sound);
         }
-        fn stream(&mut self, sound: SoundId, rate_hz: u32) {
+        fn end_stream(&mut self, _: u8, _: SoundId) {}
+        fn stream(&mut self, _: u8, sound: SoundId, rate_hz: u32) {
             black_box((sound, rate_hz));
         }
-        fn stream_samples(&mut self, sound: SoundId, pcm: &[i16]) {
+        fn stream_samples(&mut self, _: u8, sound: SoundId, pcm: &[i16]) {
             black_box((sound, pcm));
         }
         fn start(&mut self, channel: u8, start: Start) {
