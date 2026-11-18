@@ -102,6 +102,7 @@ mod analogue;
 mod decimator;
 mod envelope;
 pub mod fir_table;
+pub mod interface;
 pub mod midi;
 mod oscillator;
 
@@ -114,11 +115,18 @@ use oscillator::{Oscillator, control};
 /// 1: seven for each voice, two of the cutoff, resonance with routing, and
 /// mode with volume).
 pub const REGISTERS: usize = 25;
+// The interface's table reaches exactly these registers (S6581-27).
+const _: () = assert!(interface::REGISTERS == REGISTERS);
 
 /// Registers of one voice.
 const VOICE_REGISTERS: u8 = 7;
 /// The address of the first filter register, after the three voices.
 const FILTER_REGISTERS: u8 = 3 * VOICE_REGISTERS;
+// The interface reads the same layout (S6581-27).
+const _: () = assert!(
+    interface::VOICE_REGISTERS == VOICE_REGISTERS as usize
+        && interface::FIRST_FILTER_REGISTER == FILTER_REGISTERS as usize
+);
 /// The address that reads the upper eight bits of voice 3's waveform (data
 /// sheet, register $1B, "OSC 3/RANDOM").
 pub const OSCILLATOR_3: u8 = 0x1B;

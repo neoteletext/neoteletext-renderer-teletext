@@ -350,3 +350,12 @@ fn every_rate_code_names_its_rate_and_no_other_code_does() {
     }
     assert_eq!(sample_rate(next), None);
 }
+
+// Verifies DOC-1951 under viewer state (DEC-6471, VS-204): the channel's
+// record types the audio receiver leaves alone are exactly these, type 8,
+// the retired `SET_COOKIE`, no longer among them and 18 to 20 added.
+#[test]
+fn the_channel_record_types_are_exactly_these() {
+    let channel: Vec<u8> = (0..=u8::MAX).filter(|&kind| is_channel_type(kind)).collect();
+    assert_eq!(channel, [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20]);
+}
