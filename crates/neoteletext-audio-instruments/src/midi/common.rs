@@ -355,6 +355,17 @@ impl Common {
         offset.saturating_mul(i32::from(state.bend_range_cents)).checked_div(i32::from(PITCH_BEND_CENTRE)).unwrap_or(0)
     }
 
+    /// Sets `channel`'s pitch bend range, in cents, held to the family's
+    /// most: for a family whose adopted interface has a message of its own
+    /// for the range, which sets the same range, the last received of
+    /// either holding (MIDI-90).
+    pub fn set_bend_range_cents(&mut self, channel: u8, cents: u16) {
+        let most = self.config.most_bend_range_cents;
+        if let Some(state) = self.channels.get_mut(usize::from(channel & super::CHANNEL_MASK)) {
+            state.bend_range_cents = cents.min(most);
+        }
+    }
+
     /// Input was lost (MIDI-102): every channel's parameter selection
     /// becomes none and its sustain pedal goes up. The family releases
     /// every note itself.

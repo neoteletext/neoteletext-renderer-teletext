@@ -25,9 +25,14 @@ synth7 = []
 # filters, envelopes, the chorus and the voice allocator. Not a codec by
 # itself, so it is not on by default.
 analog = []
+# What the server needs of each family without its sound engine: the
+# messages' bytes, the patch's packer and check, the bank image and the
+# tracker (`server.md`, SRV-88). No synthesis code, no allocation, no
+# floating point.
+interface = []
 # synth106 and synth60, made from the analogue building blocks
 # (TODO-6431), codec 14. Not on by default.
-synth106 = ["analog"]
+synth106 = ["analog", "interface"]
 # synthD, made from the analogue building blocks
 # (TODO-6432), codec 15. Not on by default.
 synthd = ["analog"]

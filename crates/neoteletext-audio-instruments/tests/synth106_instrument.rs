@@ -120,27 +120,39 @@ fn the_same_input_gives_the_same_samples_however_the_calls_are_cut() {
     assert_ne!(random_run(Model::Synth106, 42, 150, BLOCK_SAMPLES), random_run(Model::Synth60, 42, 150, BLOCK_SAMPLES));
 }
 
+// Verifies S106-34: six voices, one a key round the six; a seventh key
+// held does not sound (DEC-6465 answer 22); a key when fewer are held takes
+// the voice whose release began first.
 #[test]
-fn six_voices_and_the_seventh_key_takes_the_first() {
+fn s106_34_six_voices_and_a_seventh_key_held_does_not_sound() {
     for model in MODELS {
-        let mut synth106 = instrument(model, &flat(model, square()).with(Slider::Release, 0));
+        let mut long = flat(model, square()).with(Slider::Release, 127);
+        long.vca_gate = false;
+        let mut synth106 = instrument(model, &long);
         for (count, key) in (60..67u8).enumerate() {
             synth106.event(NOTE_ON, key, 100);
             render(&mut synth106, 0.02);
             assert_eq!(synth106.sounding_voices(), (count + 1).min(VOICES), "{model:?}");
         }
-        // Six keys up leave the seventh's voice, and then none.
-        for key in 61..66u8 {
-            synth106.event(NOTE_OFF, key, 0);
-        }
-        render(&mut synth106, 0.1);
-        assert_eq!(synth106.sounding_voices(), 1, "{model:?}");
-        synth106.event(NOTE_ON | 9, 66, 0);
-        render(&mut synth106, 0.1);
-        assert_eq!(synth106.sounding_voices(), 0, "{model:?}");
-        // But for the coupling capacitor's last charge, some five units
-        // of a 16-bit sample, which runs out over a second.
-        assert!(rms(&render(&mut synth106, 0.1)) < 3.0e-4, "{model:?}: not silent");
+        // The seventh, key 66, does not sound: its note off finds no voice,
+        // and the six sound on.
+        synth106.event(NOTE_OFF, 66, 0);
+        render(&mut synth106, 0.02);
+        assert_eq!(synth106.sounding_voices(), VOICES, "{model:?}: the seventh key took a voice");
+        // Two keys up, 62 then 61, release slowly; a new key takes 62's
+        // voice, whose release began first, and leaves 61's ringing.
+        synth106.event(NOTE_OFF, 62, 0);
+        render(&mut synth106, 0.01);
+        synth106.event(NOTE_OFF, 61, 0);
+        render(&mut synth106, 0.01);
+        synth106.event(NOTE_ON, 70, 100);
+        render(&mut synth106, 0.02);
+        assert_eq!(synth106.sounding_voices(), VOICES, "{model:?}");
+        // Key 61 is still sounding: a note on of it takes its own voice
+        // again, so no voice is added and none taken from another key.
+        synth106.event(NOTE_ON, 61, 100);
+        render(&mut synth106, 0.02);
+        assert_eq!(synth106.sounding_voices(), VOICES, "{model:?}");
     }
 }
 
@@ -186,12 +198,12 @@ fn the_pedal_holds_and_the_controllers_do_what_midi_says() {
     }
 }
 
+// Verifies S106-9 and MIDI-87: hold is off at 0 to 63 and on at 64 to 127
+// on both models; the Juno-106's on at 1 to 127 is a departure (section
+// 15.4).
 #[test]
-fn the_pedal_is_down_at_any_value_but_0_on_the_synth106_and_from_64_on_the_synth60() {
-    // JUNO-106 owner's manual, MIDI Implementation 2.1: "hold OFF" is a
-    // third byte of 0 and "hold ON" is "vvvvvvv = 1 - 127". synth60
-    // has no MIDI of its own and keeps MIDI 1.0's rule, on from 64.
-    for (model, down_from) in [(Model::Synth106, 1u8), (Model::Synth60, 64)] {
+fn s106_9_hold_is_down_from_64_on_both_models() {
+    for model in MODELS {
         for value in [0u8, 1, 2, 63, 64, 127] {
             let mut synth106 = instrument(model, &flat(model, square()));
             synth106.event(CONTROL, 64, value);
@@ -199,13 +211,8 @@ fn the_pedal_is_down_at_any_value_but_0_on_the_synth106_and_from_64_on_the_synth
             render(&mut synth106, 0.05);
             synth106.event(NOTE_OFF, 60, 0);
             render(&mut synth106, 0.1);
-            let held = usize::from(value >= down_from);
+            let held = usize::from(value >= 64);
             assert_eq!(synth106.sounding_voices(), held, "{model:?}: the pedal at {value}");
-            // A pedal that was down stays down at any value that is down,
-            // and 0 lets go on both.
-            synth106.event(CONTROL, 64, down_from);
-            render(&mut synth106, 0.1);
-            assert_eq!(synth106.sounding_voices(), held, "{model:?}: the pedal from {value} to {down_from}");
             synth106.event(CONTROL, 64, 0);
             render(&mut synth106, 0.1);
             assert_eq!(synth106.sounding_voices(), 0, "{model:?}: the pedal from {value} to 0");
@@ -270,8 +277,8 @@ fn the_mode_messages_are_all_notes_off_as_the_owners_manual_says() {
     for model in MODELS {
         for controller in 123..=127u8 {
             let mut synth106 = instrument(model, &flat(model, square()));
-            // Seven keys, so that one voice has been taken from a key
-            // that is still down; then the pedal, and one key up.
+            // Seven keys, the seventh of which does not sound (S106-34);
+            // then the pedal, and the seventh key up.
             for key in 60..67u8 {
                 synth106.event(NOTE_ON, key, 100);
                 render(&mut synth106, 0.01);
