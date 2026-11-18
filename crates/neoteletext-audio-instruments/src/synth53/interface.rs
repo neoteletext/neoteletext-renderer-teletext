@@ -1764,5 +1764,10 @@ impl Part {
     }
 }
 
+// Named by its path so that it is found both where the module is a file of
+// its own and where the feature `interface` alone reads it through a path
+// from the crate root (lib.rs), whose `mod tests` would otherwise be looked
+// for beside this file.
 #[cfg(test)]
+#[path = "interface/tests.rs"]
 mod tests;
