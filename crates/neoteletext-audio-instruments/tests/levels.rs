@@ -120,6 +120,16 @@ fn players() -> Vec<Player> {
         instrument.set_patch(&patch);
         midi(name, synth53::VOICES, instrument, synth53::Synth53::event, synth53::Synth53::render)
     };
+    // synth7's reference note is one carrier at full output level: the
+    // default voice with algorithm 16, whose one carrier is operator 1. The
+    // default voice itself (S7-51) is algorithm 1, of two carriers, which
+    // sounds its operator 1 a doubling lower.
+    let mut sine = *synth7::Patch::DEFAULT.params();
+    sine.algorithm = 15;
+    let mut sines = synth7::Bank::new();
+    sines.set(0, synth7::Patch::new(sine).unwrap());
+    let mut seven = synth7::Rack::new();
+    seven.set_bank(&sines);
     let mut one_voice = synthd::SynthD::new();
     one_voice.set_drift(0);
     one_voice.set_patch(&synthd::Patch::DEFAULT);
@@ -130,7 +140,7 @@ fn players() -> Vec<Player> {
     vec![
         synth6581("synth6581", Variant::Synth6581),
         synth6581("synth8580", Variant::Synth8580),
-        midi("synth7", synth7::rack::NOTES, synth7::Rack::new(), synth7::Rack::event, synth7::Rack::render),
+        midi("synth7", synth7::rack::NOTES, seven, synth7::Rack::event, synth7::Rack::render),
         synth106("synth106", synth106::Model::Synth106),
         synth106("synth60", synth106::Model::Synth60),
         midi("synthD", 1, one_voice, synthd::SynthD::event, synthd::SynthD::render),

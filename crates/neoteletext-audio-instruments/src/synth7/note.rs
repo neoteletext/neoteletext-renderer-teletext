@@ -66,8 +66,21 @@ const REST_FADE_STEP: u32 = ATTENUATION_SILENT / 750;
 /// largest; in 32 blocks by 0.9%.
 const CUT_FADE_STEP: u32 = ATTENUATION_SILENT / 32;
 
+/// The full depth of a modulation, as the parameter layer scales a
+/// patch's depth of 99 ([`note::pitch_mod_depth`]: 99 is 255).
+pub(crate) const FULL_DEPTH: u32 = u8::MAX as u32;
+
+/// The shift that makes a depth of 0 to [`FULL_DEPTH`] the parameter
+/// layer's depth in Q32, as a patch's depth times the oscillator's delay
+/// (0..1 in Q24) is.
+const DEPTH_SHIFT: u32 = 24;
+
+/// A semitone as a logarithm of frequency, in Q24: what a glissando moves
+/// by (S7-27).
+const SEMITONE: i32 = Q24_ONE / 12;
+
 /// What the part gives each of its notes for a block.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Controls {
     /// The low frequency oscillator's sample, 0..1 in Q24.
     pub lfo_value: i32,
@@ -75,8 +88,17 @@ pub(crate) struct Controls {
     pub lfo_delay: i32,
     /// The pitch bend, in Q24 of an octave.
     pub bend: i32,
-    /// The modulation wheel, 0 to 127.
-    pub wheel: u8,
+    /// The pitch modulation depth the part's controllers add, 0 to
+    /// [`FULL_DEPTH`] (S7-36 item 1).
+    pub pitch_depth: u32,
+    /// The amplitude modulation depth they add, 0 to [`FULL_DEPTH`] (S7-36
+    /// item 2).
+    pub amplitude_depth: u32,
+    /// The EG bias they take, 0 to [`FULL_DEPTH`] of the full amplitude
+    /// modulation depth at its deepest (S7-36 item 3).
+    pub bias: u32,
+    /// Whether a glide moves in semitones (S7-27).
+    pub glissando: bool,
     /// The attenuation of the part's volume, in the kernel's units.
     pub volume: u32,
 }
@@ -104,6 +126,14 @@ pub(crate) struct Note {
     released: bool,
     /// Whether the carriers were all silent at the end of the last block.
     silent: bool,
+    /// The key, after transpose, and the velocity the note was started
+    /// with, for a parameter that changes under it (S7-44).
+    midinote: i32,
+    velocity: u8,
+    /// The glide still to go to the key's pitch, in Q24 of an octave, and
+    /// what it moves by each block (S7-27).
+    glide: i32,
+    glide_step: i32,
 }
 
 impl Note {
@@ -125,6 +155,10 @@ impl Note {
             fade_step: 0,
             released: true,
             silent: true,
+            midinote: 0,
+            velocity: 0,
+            glide: 0,
+            glide_step: 0,
         }
     }
 
@@ -200,6 +234,87 @@ impl Note {
         self.fade_step = 0;
         self.released = false;
         self.silent = false;
+        self.midinote = midinote;
+        self.velocity = velocity;
+        self.glide = 0;
+        self.glide_step = 0;
+    }
+
+    /// The pitch of the note's key now, glide included, as a logarithm of
+    /// frequency in Q24: where a glide to the next key starts (S7-27).
+    pub(crate) fn pitch(&self) -> i32 {
+        note::midinote_to_logfreq(self.midinote).saturating_add(self.glide)
+    }
+
+    /// Glides from `from`, a pitch as [`Note::pitch`] gives it, to the
+    /// note's own, by `step` each block; a step of 0 does not glide.
+    pub(crate) fn glide_from(&mut self, from: i32, step: i32) {
+        if step > 0 {
+            self.glide = from.saturating_sub(note::midinote_to_logfreq(self.midinote));
+            self.glide_step = step;
+        } else {
+            self.glide = 0;
+        }
+    }
+
+    /// Moves a sounding note to another key without starting its envelopes
+    /// again (S7-26: legato; S7-27: a sustained note that follows), gliding
+    /// from where it is by `step` each block.
+    pub(crate) fn retarget(&mut self, patch: &Patch, key: u8, step: i32) {
+        let from = self.pitch();
+        let params = patch.params();
+        self.midinote =
+            i32::from(key).saturating_add(i32::from(params.transpose)).saturating_sub(i32::from(TRANSPOSE_CENTRE));
+        for (base_pitch, operator) in self.base_pitch.iter_mut().zip(&params.operators) {
+            *base_pitch = note::osc_freq(
+                self.midinote,
+                operator.oscillator_mode,
+                operator.frequency_coarse,
+                operator.frequency_fine,
+                operator.detune,
+            );
+        }
+        self.glide_from(from, step);
+    }
+
+    /// Takes a change of the current voice into the sounding note, for the
+    /// parameters the engine reads continuously (S7-44): each operator's
+    /// output level, the operator switch, the modulation depths and the
+    /// pitch modulation sensitivity.
+    pub(crate) fn follow(&mut self, patch: &Patch) {
+        let params = patch.params();
+        for (envelope, operator) in self.envelopes.iter_mut().zip(&params.operators) {
+            let scaling = LevelScaling {
+                break_pt: operator.break_point,
+                left_depth: operator.left_depth,
+                right_depth: operator.right_depth,
+                left_curve: operator.left_curve,
+                right_curve: operator.right_curve,
+            };
+            envelope.set_outlevel(note::operator_outlevel(
+                self.midinote,
+                i32::from(self.velocity),
+                operator.output_level,
+                scaling,
+                operator.key_velocity_sensitivity,
+            ));
+        }
+        self.operators_on = params.operators_on;
+        self.pitch_mod_depth = note::pitch_mod_depth(params.lfo_pitch_mod_depth);
+        self.pitch_mod_sens = note::pitch_mod_sens(params.pitch_mod_sensitivity);
+        self.amp_mod_depth = note::pitch_mod_depth(params.lfo_amp_mod_depth);
+        for (sensitivity, operator) in self.amp_mod_sensitivity.iter_mut().zip(&params.operators) {
+            *sensitivity = operator.amp_mod_sensitivity;
+        }
+    }
+
+    /// Runs [`Note::control`] for a note started part way through the
+    /// rack's block, and sounds it for the `samples` left of that block,
+    /// so that it starts at its own sample (S7-52).
+    pub(crate) fn control_partial(&mut self, controls: &Controls, samples: usize) -> bool {
+        let sounds = self.control(controls);
+        self.voice.shorten_block(samples);
+        sounds
     }
 
     /// The key goes up: every envelope starts its last stage.
@@ -233,25 +348,41 @@ impl Note {
         let algorithm = self.algorithm();
         let delay = controls.lfo_delay.clamp(0, Q24_ONE).cast_unsigned();
 
-        // Own choice: the wheel adds vibrato depth, at full travel as much
-        // as a patch's depth of 99, without the oscillator's delay.
-        let wheel = u32::from(controls.wheel);
-        let wheel_depth = (wheel << 1 | wheel >> 6) << 24;
+        // S7-36: the controllers add their depth to the patch's, without
+        // the oscillator's delay, the sum not past the full depth. At full
+        // travel and range the modulation wheel adds as much as a patch's
+        // depth of 99, as it did before it had a range.
+        let full = FULL_DEPTH << DEPTH_SHIFT;
         let depth = u32::from(self.pitch_mod_depth)
             .saturating_mul(delay)
-            .saturating_add(wheel_depth)
-            .min(u32::from(u8::MAX) << 24);
+            .saturating_add(controls.pitch_depth << DEPTH_SHIFT)
+            .min(full);
+        // S7-27: the glide, in semitones for a glissando, towards the key.
+        self.glide = if self.glide > 0 {
+            self.glide.saturating_sub(self.glide_step).max(0)
+        } else {
+            self.glide.saturating_add(self.glide_step).min(0)
+        };
+        let glide = if controls.glissando { (self.glide / SEMITONE).saturating_mul(SEMITONE) } else { self.glide };
         let pitch = self
             .pitch_envelope
             .getsample()
             .saturating_add(note::lfo_pitch_mod(depth, self.pitch_mod_sens, controls.lfo_value))
-            .saturating_add(controls.bend);
+            .saturating_add(controls.bend)
+            .saturating_add(glide);
 
         // The fraction of the full amplitude modulation depth taken now, in
-        // Q32: the patch's depth, times the delay, times how far the
-        // oscillator is below its top.
+        // Q32: the patch's depth, times the delay, with the controllers'
+        // (S7-36), times how far the oscillator is below its top.
         let swing = Q24_ONE.saturating_sub(controls.lfo_value).clamp(0, Q24_ONE).cast_unsigned();
-        let amp_fraction = (u32::from(self.amp_mod_depth).saturating_mul(delay) >> 16).saturating_mul(swing >> 8);
+        let amp_depth = u32::from(self.amp_mod_depth)
+            .saturating_mul(delay)
+            .saturating_add(controls.amplitude_depth << DEPTH_SHIFT)
+            .min(full);
+        let amp_fraction = (amp_depth >> 16).saturating_mul(swing >> 8);
+        // S7-36 item 3: EG bias, the fraction of the full depth at the
+        // oscillator's deepest, in Q32 as `amp_fraction` is.
+        let bias_fraction = controls.bias.min(FULL_DEPTH) << DEPTH_SHIFT;
 
         if self.released
             && self.fade_step == 0
@@ -266,7 +397,7 @@ impl Note {
         for (index, ((envelope, &base_pitch), &sensitivity)) in operators.enumerate() {
             let level = envelope.getsample();
             let mut attenuation = LEVEL_CEILING.saturating_sub(level).max(0).cast_unsigned();
-            let on = (self.operators_on >> index) & 1 == 1;
+            let on = operator_on(self.operators_on, index);
             if algorithm.is_carrier(index) {
                 attenuation = attenuation.saturating_add(self.compensation).saturating_add(self.fade);
                 // Whether the note has ended is asked of the envelope and
@@ -275,7 +406,7 @@ impl Note {
                 attenuation = attenuation.saturating_add(controls.volume);
             }
             if let Some(&shift) = usize::from(sensitivity).checked_sub(1).and_then(|at| AMP_MOD_SHIFTS.get(at)) {
-                attenuation = attenuation.saturating_add(amp_fraction >> shift);
+                attenuation = attenuation.saturating_add(amp_fraction >> shift).saturating_add(bias_fraction >> shift);
             }
             if !on {
                 attenuation = ATTENUATION_MAX;
@@ -293,7 +424,7 @@ impl Note {
         self.envelopes
             .iter()
             .enumerate()
-            .filter(move |&(index, _)| algorithm.is_carrier(index) && (on >> index) & 1 == 1)
+            .filter(move |&(index, _)| algorithm.is_carrier(index) && operator_on(on, index))
             .map(|(_, envelope)| envelope)
     }
 
@@ -302,6 +433,16 @@ impl Note {
         let algorithm = self.algorithm();
         self.voice.render(algorithm, self.feedback, out);
     }
+}
+
+/// Whether the operator at `index` (0 for operator 1) is on in `switch`,
+/// voice parameter 155: bit 5 is operator 1 and bit 0 operator 6, as all
+/// three of the maker's manuals draw it (`synth7.md`, S7-30; DX7 manual,
+/// page 31: "D5 … OP1 … D0 OP6"; TX7 manual, printed page 39, note *7; DX7
+/// II manual, printed page Add-8: "B5:OP1,..,B0:OP6").
+pub(crate) fn operator_on(switch: u8, index: usize) -> bool {
+    let bit = (OPERATORS - 1).checked_sub(index);
+    bit.and_then(|bit| u32::try_from(bit).ok()).is_some_and(|bit| (switch >> bit) & 1 == 1)
 }
 
 /// One doubling of attenuation is one doubling of level.

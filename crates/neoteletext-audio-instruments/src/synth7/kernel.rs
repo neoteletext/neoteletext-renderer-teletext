@@ -31,17 +31,9 @@
 use super::msfa::LG_N;
 use super::tables::{EXPONENT, LOG_ONE, LOG_SINE, ROM_ENTRIES};
 
-/// Operators in a voice.
-///
-/// Source: Yamaha DX7 owner's manual, MIDI data format (printed page 31):
-/// voice parameters for OP6 to OP1.
-pub const OPERATORS: usize = 6;
-
-/// The algorithms of the instrument.
-///
-/// Source: Yamaha DX7 owner's manual, MIDI data format (printed page 31):
-/// "ALGORITHM SELECT 0 ~ 31".
-pub const ALGORITHM_COUNT: usize = 32;
+// The voice's figures are the interface's, defined once with the voice
+// (`synth7.md`, S7-28), which the server reads without the kernel.
+pub use super::patch::{ALGORITHM_COUNT, FEEDBACK_MAX, OPERATORS};
 
 /// The logarithm to base two of [`BLOCK_SAMPLES`].
 ///
@@ -113,12 +105,6 @@ const ADDRESS_MASK: u32 = (ROM_ENTRIES as u32) - 1;
 ///
 /// Source: Shirriff, part II, note 2, as [`SINE_BITS`].
 const MANTISSA_SHIFT: u32 = 2;
-
-/// The largest feedback setting of a patch.
-///
-/// Source: Yamaha DX7 owner's manual, MIDI data format (printed page 31):
-/// "FEED BACK 0 ~ 7".
-pub const FEEDBACK_MAX: u8 = 7;
 
 /// The sum of the feedback operator's last two samples is shifted left by
 /// this plus the feedback setting to make a phase.
@@ -362,6 +348,14 @@ impl Voice {
     pub fn begin_block(&mut self) {
         self.fresh = false;
         self.remaining = BLOCK_SAMPLES;
+    }
+
+    /// Ends the block begun after `samples` more, at most
+    /// [`BLOCK_SAMPLES`]: for a voice started part way through its rack's
+    /// block, so that it sounds from its own sample and ends with the
+    /// others.
+    pub fn shorten_block(&mut self, samples: usize) {
+        self.remaining = self.remaining.min(samples);
     }
 
     /// Adds the voice's next samples to `out`: as many as `out` holds, but

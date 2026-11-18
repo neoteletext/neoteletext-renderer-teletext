@@ -20,6 +20,10 @@ use neoteletext_audio_instruments::synth7::{Bank, Patch, Rack, VoiceParams};
 /// The default sine, changed by `change`.
 fn patch(change: impl FnOnce(&mut VoiceParams)) -> Patch {
     let mut params = *Patch::DEFAULT.params();
+    // Algorithm 16, whose one carrier is operator 1, so that the sine is at
+    // a single carrier's full level: the default voice's algorithm 1 has
+    // two carriers and sounds a doubling lower (S7-51).
+    params.algorithm = 15;
     change(&mut params);
     Patch::new(params).unwrap()
 }
@@ -64,7 +68,8 @@ fn a_note_sounds_until_its_key_goes_up() {
     assert_eq!(peak(&render(&mut rack, 960)), 0);
     rack.event(0x90, 60, 100);
     assert_eq!(rack.sounding_notes(), 1);
-    assert!(peak(&render(&mut rack, 960)) > 2000);
+    // The default voice: one carrier of algorithm 1's two (S7-51).
+    assert!(peak(&render(&mut rack, 960)) > 1000);
     rack.event(0x80, 60, 64);
     render(&mut rack, 960);
     assert_eq!(rack.sounding_notes(), 0);
@@ -317,17 +322,15 @@ fn other_messages_are_ignored_and_counted() {
     let mut rack = Rack::new();
     let ignored = [
         (0xa0, 60, 100),   // polyphonic key pressure
-        (0xd0, 100, 0),    // channel pressure
         (0xf0, 0x43, 0),   // system exclusive
         (0xf8, 0, 0),      // timing clock
         (0xff, 0, 0),      // reset
         (0x00, 60, 100),   // not a status byte
         (0x7f, 60, 100),   // not a status byte
         (0xb0, 0, 0),      // bank select
-        (0xb0, 2, 64),     // breath controller
-        (0xb0, 65, 127),   // portamento switch
+        (0xb0, 3, 64),     // controller 3
+        (0xb0, 6, 64),     // data entry, which only the front end takes
         (0xb0, 122, 0),    // local control
-        (0xb0, 127, 0),    // poly mode
         (0x90, 0x80, 100), // a data byte above 127
         (0x90, 60, 0x80),
         (0x80, 60, 0xff),
@@ -343,8 +346,21 @@ fn other_messages_are_ignored_and_counted() {
     assert_eq!(rack.sounding_notes(), 0);
     assert_eq!(peak(&render(&mut rack, 960)), 0);
 
-    let handled =
-        [(0x90, 60, 1), (0x80, 60, 0), (0x80, 61, 0), (0xb0, 1, 5), (0xb0, 7, 90), (0xb0, 64, 0), (0xb0, 120, 0)];
+    let handled = [
+        (0x90, 60, 1),
+        (0x80, 60, 0),
+        (0x80, 61, 0),
+        (0xb0, 1, 5),
+        (0xb0, 2, 64),
+        (0xb0, 4, 64),
+        (0xb0, 5, 64),
+        (0xb0, 7, 90),
+        (0xb0, 64, 0),
+        (0xb0, 65, 127),
+        (0xb0, 120, 0),
+        (0xb0, 127, 0),
+        (0xd0, 100, 0),
+    ];
     let before = rack.ignored_events();
     for (status, data1, data2) in
         handled.into_iter().chain([(0xb0, 121, 0), (0xb0, 123, 0), (0xc0, 0, 0), (0xe0, 0, 64)])

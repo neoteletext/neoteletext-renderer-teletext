@@ -110,7 +110,7 @@ pub mod synth6581 {
     #[path = "interface.rs"]
     pub mod interface;
 }
-#[cfg(feature = "synth7")]
+#[cfg(any(feature = "synth7", feature = "interface"))]
 pub mod synth7;
 #[cfg(any(feature = "synth8", feature = "interface"))]
 pub mod synth8;

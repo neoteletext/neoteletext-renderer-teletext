@@ -1,18 +1,41 @@
-//! Patches: the instrument's voices, checked, and a bank of 32 of them.
+//! Patches: the instrument's voices, checked, and a bank of 32 of them
+//! (`neoteletext-common/docs/audio/synth7.md`, cited here as "S7-n").
 //!
-//! A voice arrives as 128 bytes, the packed form in which the instrument
-//! sends its 32 voices in bulk. [`Patch::from_packed`] unpacks one and
-//! checks every field against its range, so that nothing after it can meet
-//! a value outside the instrument's own; a [`Patch`] cannot be made any
-//! other way than through that check.
+//! A voice arrives in one of two forms: the 155 voice parameters 0 to 154
+//! of a single-voice dump or of parameter changes (S7-28, S7-38;
+//! [`Patch::from_parameters`]), or the 128-byte packed form in which a
+//! 32-voice dump carries it (S7-46; [`Patch::from_packed`]). Each is read
+//! and every field checked against its range (S7-29), so that nothing
+//! after it can meet a value outside the instrument's own; a [`Patch`]
+//! cannot be made any other way than through that check.
 //!
 //! Source: Yamaha DX7 owner's manual, "MIDI data format" (printed pages 30
-//! to 32), for the bulk message and each parameter's range; the packed
-//! layout is the instrument's data format sheet as transcribed in "DX7
-//! Data Format" (E. Macpherson, 1993, section F), which agrees with the
-//! unpacking in music-synthesizer-for-android's `patch.cc`.
+//! to 32), for the messages and each parameter's range; the TX7 manual,
+//! "MIDI DATA FORMAT", printed pages 38 and 39 (section 4-1, the voice
+//! parameters 0 to 155 and their notes), 41 (section 4-5, the single-voice
+//! dump's data in parameter order) and 44 (section 4-8, the packed layout,
+//! every byte and bit field), which the DX7 II manual's printed page Add-11
+//! draws the same.
 
-use super::kernel::{ALGORITHM_COUNT, FEEDBACK_MAX, OPERATORS};
+use super::sysex::{DumpError, bank_voice, check_bank_dump};
+
+/// Operators in a voice.
+///
+/// Source: Yamaha DX7 owner's manual, MIDI data format (printed page 31):
+/// voice parameters for OP6 to OP1.
+pub const OPERATORS: usize = 6;
+
+/// The algorithms of the instrument.
+///
+/// Source: Yamaha DX7 owner's manual, MIDI data format (printed page 31):
+/// "ALGORITHM SELECT 0 ~ 31".
+pub const ALGORITHM_COUNT: usize = 32;
+
+/// The largest feedback setting of a patch.
+///
+/// Source: Yamaha DX7 owner's manual, MIDI data format (printed page 31):
+/// "FEED BACK 0 ~ 7".
+pub const FEEDBACK_MAX: u8 = 7;
 
 /// Bytes of one voice in the packed form.
 ///
@@ -27,7 +50,8 @@ pub const BANK_VOICES: usize = 32;
 
 /// Bytes of one operator in the packed form.
 ///
-/// Source: "DX7 Data Format", section F: operator 6 is bytes 0 to 16.
+/// Source: TX7 manual, printed page 44, section 4-8: operator 6 is bytes 0
+/// to 16, operators 5 to 1 the same at 17 to 101 (S7-46).
 const PACKED_OPERATOR_BYTES: usize = 17;
 
 /// Characters in a voice's name.
@@ -74,10 +98,12 @@ pub const MAX_DETUNE: u8 = 14;
 /// Source: Yamaha DX7 owner's manual, printed page 31: "0 ~ 31".
 pub const MAX_ALGORITHM: u8 = (ALGORITHM_COUNT as u8) - 1;
 /// The largest low frequency oscillator waveform: sample and hold. The
-/// manual's table says 4; the instrument has six waveforms, 0 to 5.
+/// DX7 manual's table says 4, a misprint; the instrument has six
+/// waveforms, 0 to 5 (S7-31).
 ///
-/// Source: "DX7 Data Format", section D: "0-5, (data sheet claims 9-4 ?!?)
-/// 0:TR, 1:SD, 2:SU, 3:SQ, 4:SI, 5:SH".
+/// Source: TX7 manual, printed page 38, "LFO WAVE 0 ~ 5", and page 39,
+/// note *6, 0 triangle to 5 sample and hold; DX7 II manual, printed page
+/// Add-8, "LFW 0 - 5"; DX7 manual, pages 13 and 27, six waveforms.
 pub const MAX_LFO_WAVE: u8 = 5;
 /// The largest pitch modulation sensitivity.
 ///
@@ -89,7 +115,8 @@ pub const MAX_PITCH_MOD_SENSITIVITY: u8 = 7;
 pub const MAX_TRANSPOSE: u8 = 48;
 /// The transpose that changes nothing.
 ///
-/// Source: "DX7 Data Format", section D: "TRANSPOSE 0-48 12 = C2".
+/// Source: TX7 manual, printed page 38, "TRANSPOSE 0 ~ 48 … Concert pitch
+/// at 24" (S7-8).
 pub const TRANSPOSE_CENTRE: u8 = 24;
 /// Every operator switched on.
 ///
@@ -174,8 +201,10 @@ pub struct VoiceParams {
     pub transpose: u8,
     /// The name, ten characters.
     pub name: [u8; NAME_BYTES],
-    /// The operators switched on: bit 0 is operator 1. The packed form does
-    /// not hold it; an unpacked voice has all six on.
+    /// The operators switched on, voice parameter 155: bit 5 is operator 1
+    /// and bit 0 operator 6, a 1 on (`synth7.md`, S7-30; DX7 manual, page
+    /// 31; TX7 manual, printed page 39, note *7). No stored voice holds it;
+    /// an unpacked voice has all six on.
     pub operators_on: u8,
 }
 
@@ -240,6 +269,8 @@ pub enum Field {
     Transpose,
     /// The mask of operators switched on.
     OperatorsOn,
+    /// A character of the name: a seven-bit data byte (S7-32).
+    Name,
 }
 
 /// Why a voice was refused.
@@ -272,6 +303,11 @@ pub enum BankError {
     Checksum,
     /// The message does not end with F7.
     Terminator,
+    /// A byte before the last has bit 7 set (S7-45).
+    DataByte {
+        /// Its place, counted from F0.
+        at: u16,
+    },
     /// A voice was refused.
     Patch {
         /// Which voice, 0 to 31.
@@ -306,14 +342,18 @@ impl Check {
 }
 
 impl Patch {
-    /// The voice a part plays when its bank has none: a plain sine.
-    /// Operator 1 alone sounds, at full level and a ratio of 1.00, with an
-    /// envelope that starts and stops at once; the other five are at level
-    /// 0. The algorithm is the instrument's 16, in which operator 1 is the
-    /// only carrier, so that the sine is at a single carrier's full level:
-    /// in algorithm 32 each of six carriers is attenuated for six.
+    /// The voice a part plays when its bank has none, or the voice it holds
+    /// was refused: the maker's initial voice, "INIT VOICE" (S7-51).
+    /// Algorithm 1; operator 1 alone sounds, at output level 99 and a ratio
+    /// of 1.00, with an envelope that starts and stops at once; the other
+    /// five are at level 0. Algorithm 1 has two carriers, operators 1 and
+    /// 3, so the kernel's carrier compensation sounds operator 1 a doubling
+    /// below a single carrier's full level.
     ///
-    /// Source: own choice of every value.
+    /// Source: DX7 II manual, printed page Add-8, section 5-1, the "INIT"
+    /// column of the voice parameter table, value by value (DEC-6465 answer
+    /// 16). The operator switch, which that column does not give, is all
+    /// six on (S7-21, S7-54).
     pub const DEFAULT: Self = Self {
         params: VoiceParams {
             operators: [
@@ -337,13 +377,14 @@ impl Patch {
             lfo_wave: 0,
             pitch_mod_sensitivity: 3,
             transpose: TRANSPOSE_CENTRE,
-            name: *b"PLAIN SINE",
+            name: *b"INIT VOICE",
             operators_on: ALL_OPERATORS_ON,
         },
     };
 
-    /// The algorithm of [`Patch::DEFAULT`]: the instrument's 16.
-    const DEFAULT_ALGORITHM: u8 = 15;
+    /// The algorithm of [`Patch::DEFAULT`]: the instrument's 1 (S7-31: value
+    /// 0 is algorithm 1).
+    const DEFAULT_ALGORITHM: u8 = 0;
 
     /// An operator of [`Patch::DEFAULT`] at an output level.
     const fn default_operator(output_level: u8) -> OperatorParams {
@@ -401,12 +442,12 @@ impl Patch {
         check.fields(Field::PitchEgLevel, params.pitch_eg_levels, MAX_99)?;
         check.field(Field::Algorithm, params.algorithm, MAX_ALGORITHM)?;
         check.field(Field::Feedback, params.feedback, FEEDBACK_MAX)?;
-        check.field(Field::OscillatorKeySync, params.oscillator_key_sync, 1)?;
+        check.field(Field::OscillatorKeySync, params.oscillator_key_sync, MAX_SWITCH)?;
         check.field(Field::LfoSpeed, params.lfo_speed, MAX_99)?;
         check.field(Field::LfoDelay, params.lfo_delay, MAX_99)?;
         check.field(Field::LfoPitchModDepth, params.lfo_pitch_mod_depth, MAX_99)?;
         check.field(Field::LfoAmpModDepth, params.lfo_amp_mod_depth, MAX_99)?;
-        check.field(Field::LfoKeySync, params.lfo_key_sync, 1)?;
+        check.field(Field::LfoKeySync, params.lfo_key_sync, MAX_SWITCH)?;
         check.field(Field::LfoWave, params.lfo_wave, MAX_LFO_WAVE)?;
         check.field(Field::PitchModSensitivity, params.pitch_mod_sensitivity, MAX_PITCH_MOD_SENSITIVITY)?;
         check.field(Field::Transpose, params.transpose, MAX_TRANSPOSE)?;
@@ -564,6 +605,312 @@ impl Patch {
     pub const fn params(&self) -> &VoiceParams {
         &self.params
     }
+
+    /// The voice as its 155 voice parameters 0 to 154, in the order of the
+    /// parameter change's numbers and of a single-voice dump's data (S7-28,
+    /// S7-38): operator 6's 21 first, operator 1's at 105 to 125, then the
+    /// voice's own 126 to 154.
+    #[must_use]
+    pub fn to_parameters(&self) -> [u8; VOICE_PARAMETERS] {
+        let mut out = [0_u8; VOICE_PARAMETERS];
+        let params = &self.params;
+        let (blocks, tail) = out.split_at_mut(OPERATOR_PARAMETERS.saturating_mul(OPERATORS));
+        let (blocks, _) = blocks.as_chunks_mut::<OPERATOR_PARAMETERS>();
+        // Operator 6 first: the operators array holds operator 1 first.
+        for (block, operator) in blocks.iter_mut().zip(params.operators.iter().rev()) {
+            let [r1, r2, r3, r4] = operator.eg_rates;
+            let [l1, l2, l3, l4] = operator.eg_levels;
+            *block = [
+                r1,
+                r2,
+                r3,
+                r4,
+                l1,
+                l2,
+                l3,
+                l4,
+                operator.break_point,
+                operator.left_depth,
+                operator.right_depth,
+                operator.left_curve,
+                operator.right_curve,
+                operator.rate_scaling,
+                operator.amp_mod_sensitivity,
+                operator.key_velocity_sensitivity,
+                operator.output_level,
+                operator.oscillator_mode,
+                operator.frequency_coarse,
+                operator.frequency_fine,
+                operator.detune,
+            ];
+        }
+        let [pr1, pr2, pr3, pr4] = params.pitch_eg_rates;
+        let [pl1, pl2, pl3, pl4] = params.pitch_eg_levels;
+        let voice = [
+            pr1,
+            pr2,
+            pr3,
+            pr4,
+            pl1,
+            pl2,
+            pl3,
+            pl4,
+            params.algorithm,
+            params.feedback,
+            params.oscillator_key_sync,
+            params.lfo_speed,
+            params.lfo_delay,
+            params.lfo_pitch_mod_depth,
+            params.lfo_amp_mod_depth,
+            params.lfo_key_sync,
+            params.lfo_wave,
+            params.pitch_mod_sensitivity,
+            params.transpose,
+        ];
+        for (place, value) in tail.iter_mut().zip(voice.into_iter().chain(params.name)) {
+            *place = value;
+        }
+        out
+    }
+
+    /// Reads and checks a voice from its 155 voice parameters, as
+    /// [`Patch::to_parameters`] lays them out, with every operator on.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError::OutOfRange`] for the first parameter above its range
+    /// (S7-29), the name's characters above 127 among them (S7-32).
+    pub fn from_parameters(values: &[u8; VOICE_PARAMETERS]) -> Result<Self, PatchError> {
+        let (blocks, tail) = values.split_at(OPERATOR_PARAMETERS.saturating_mul(OPERATORS));
+        let (blocks, _) = blocks.as_chunks::<OPERATOR_PARAMETERS>();
+        let mut operators = [Self::default_operator(0); OPERATORS];
+        for (operator, block) in operators.iter_mut().rev().zip(blocks) {
+            let &[r1, r2, r3, r4, l1, l2, l3, l4, bp, ld, rd, lc, rc, rs, ams, kvs, ol, mode, coarse, fine, detune] =
+                block;
+            *operator = OperatorParams {
+                eg_rates: [r1, r2, r3, r4],
+                eg_levels: [l1, l2, l3, l4],
+                break_point: bp,
+                left_depth: ld,
+                right_depth: rd,
+                left_curve: lc,
+                right_curve: rc,
+                rate_scaling: rs,
+                amp_mod_sensitivity: ams,
+                key_velocity_sensitivity: kvs,
+                output_level: ol,
+                oscillator_mode: mode,
+                frequency_coarse: coarse,
+                frequency_fine: fine,
+                detune,
+            };
+        }
+        let Some((
+            &[
+                pr1,
+                pr2,
+                pr3,
+                pr4,
+                pl1,
+                pl2,
+                pl3,
+                pl4,
+                algorithm,
+                feedback,
+                sync,
+                speed,
+                delay,
+                pmd,
+                amd,
+                lfo_sync,
+                wave,
+                pms,
+                transpose,
+            ],
+            name,
+        )) = tail.split_first_chunk::<VOICE_OWN_PARAMETERS>()
+        else {
+            return Err(PatchError::OutOfRange { field: Field::Name, operator: None, value: 0, max: 0 });
+        };
+        let mut name_bytes = [0_u8; NAME_BYTES];
+        for (to, &from) in name_bytes.iter_mut().zip(name) {
+            if from > DATA_MASK {
+                return Err(PatchError::OutOfRange { field: Field::Name, operator: None, value: from, max: DATA_MASK });
+            }
+            *to = from;
+        }
+        Self::new(VoiceParams {
+            operators,
+            pitch_eg_rates: [pr1, pr2, pr3, pr4],
+            pitch_eg_levels: [pl1, pl2, pl3, pl4],
+            algorithm,
+            feedback,
+            oscillator_key_sync: sync,
+            lfo_speed: speed,
+            lfo_delay: delay,
+            lfo_pitch_mod_depth: pmd,
+            lfo_amp_mod_depth: amd,
+            lfo_key_sync: lfo_sync,
+            lfo_wave: wave,
+            pitch_mod_sensitivity: pms,
+            transpose,
+            name: name_bytes,
+            operators_on: ALL_OPERATORS_ON,
+        })
+    }
+
+    /// Voice parameter `number`, 0 to 155 (S7-28), or `None` above 155.
+    #[must_use]
+    pub fn parameter(&self, number: u16) -> Option<u8> {
+        if number == OPERATOR_SWITCH_PARAMETER {
+            return Some(self.params.operators_on);
+        }
+        self.to_parameters().get(usize::from(number)).copied()
+    }
+
+    /// The voice with voice parameter `number` (0 to 155) set to `value`:
+    /// what a parameter change of group 0 does (S7-44). The operator switch
+    /// (155) is kept as it is unless it is the one set.
+    ///
+    /// # Errors
+    ///
+    /// [`PatchError::OutOfRange`] for a value above the parameter's range
+    /// (S7-29), or for a number above 155 (as [`Field::OperatorsOn`]).
+    pub fn with_parameter(&self, number: u16, value: u8) -> Result<Self, PatchError> {
+        if number == OPERATOR_SWITCH_PARAMETER {
+            let mut params = self.params;
+            params.operators_on = value;
+            return Self::new(params);
+        }
+        let mut values = self.to_parameters();
+        let Some(place) = values.get_mut(usize::from(number)) else {
+            return Err(PatchError::OutOfRange {
+                field: Field::OperatorsOn,
+                operator: None,
+                value,
+                max: ALL_OPERATORS_ON,
+            });
+        };
+        *place = value;
+        let mut patch = Self::from_parameters(&values)?;
+        patch.params.operators_on = self.params.operators_on;
+        Ok(patch)
+    }
+
+    /// The voice with every operator on: what a program change or a
+    /// single-voice dump gives a part (S7-21, S7-40).
+    #[must_use]
+    pub const fn all_operators_on(mut self) -> Self {
+        self.params.operators_on = ALL_OPERATORS_ON;
+        self
+    }
+}
+
+/// The voice parameters a voice holds: 0 to 154 (S7-28).
+///
+/// Source: TX7 manual, printed page 41, section 4-5: "155 bytes of data …
+/// parameters 0 thru 154".
+pub const VOICE_PARAMETERS: usize = 155;
+/// The parameters of each operator, at offsets 0 to 20 of its block.
+///
+/// Source: TX7 manual, printed page 38, section 4-1: "21 ~ 41 OP5" and on.
+pub const OPERATOR_PARAMETERS: usize = 21;
+/// The voice parameters after the six operators' and before the name:
+/// 126 to 144 (S7-28).
+const VOICE_OWN_PARAMETERS: usize = 19;
+/// Voice parameter 155, OPERATOR ON/OFF: a parameter of the part's current
+/// voice that no stored voice holds (S7-30).
+///
+/// Source: DX7 manual, page 31.
+pub const OPERATOR_SWITCH_PARAMETER: u16 = 155;
+/// The highest voice parameter number a parameter change sets: 155. The
+/// TX7's 156, OPERATOR SELECT, is not taken (S7-43).
+pub const LAST_VOICE_PARAMETER: u16 = OPERATOR_SWITCH_PARAMETER;
+// The operators' blocks, the voice's own parameters and the name are the
+// 155, and the packed form holds the same in 128 bytes.
+const _: () = assert!(OPERATOR_PARAMETERS * OPERATORS + VOICE_OWN_PARAMETERS + NAME_BYTES == VOICE_PARAMETERS);
+
+/// The largest value of each voice parameter 0 to 155, as S7-28's table
+/// gives them: operator 6's 21 first, then operators 5 to 1, the voice's
+/// own, the ten characters of the name (seven bits each) and the operator
+/// switch.
+///
+/// Source: DX7 manual, page 31; TX7 manual, printed page 38.
+pub const PARAMETER_MAX: [u8; VOICE_PARAMETERS + 1] = parameter_max();
+
+/// The largest value of each operator parameter, offsets 0 to 20 (S7-28).
+const OPERATOR_PARAMETER_MAX: [u8; OPERATOR_PARAMETERS] = [
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_CURVE,
+    MAX_CURVE,
+    MAX_RATE_SCALING,
+    MAX_AMP_MOD_SENSITIVITY,
+    MAX_KEY_VELOCITY_SENSITIVITY,
+    MAX_99,
+    MAX_OSCILLATOR_MODE,
+    MAX_FREQUENCY_COARSE,
+    MAX_99,
+    MAX_DETUNE,
+];
+
+/// The largest value of the voice's own parameters, 126 to 144 (S7-28).
+const VOICE_OWN_PARAMETER_MAX: [u8; VOICE_OWN_PARAMETERS] = [
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_ALGORITHM,
+    FEEDBACK_MAX,
+    MAX_SWITCH,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_99,
+    MAX_SWITCH,
+    MAX_LFO_WAVE,
+    MAX_PITCH_MOD_SENSITIVITY,
+    MAX_TRANSPOSE,
+];
+
+/// The largest value of a parameter of two settings, off and on: the two
+/// sync parameters 136 and 141 (S7-31).
+///
+/// Source: DX7 manual, page 31: "0 ~ 1".
+pub const MAX_SWITCH: u8 = 1;
+
+#[expect(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "evaluated only at compile time, where an index out of range fails the build"
+)]
+const fn parameter_max() -> [u8; VOICE_PARAMETERS + 1] {
+    let mut table = [DATA_MASK; VOICE_PARAMETERS + 1];
+    let mut index = 0;
+    while index < OPERATOR_PARAMETERS * OPERATORS {
+        table[index] = OPERATOR_PARAMETER_MAX[index % OPERATOR_PARAMETERS];
+        index += 1;
+    }
+    let mut own = 0;
+    while own < VOICE_OWN_PARAMETERS {
+        table[OPERATOR_PARAMETERS * OPERATORS + own] = VOICE_OWN_PARAMETER_MAX[own];
+        own += 1;
+    }
+    table[VOICE_PARAMETERS] = ALL_OPERATORS_ON;
+    table
 }
 
 impl Default for Patch {
@@ -584,29 +931,11 @@ impl Default for Bank {
     }
 }
 
-/// The bytes before the voices of a bulk dump of 32 voices.
+/// The length of a bulk dump of 32 voices: 4,104 bytes (S7-41): a header
+/// of six bytes, 32 packed voices, the checksum and `F7`.
 ///
-/// Source: Yamaha DX7 owner's manual, printed page 30, "Bulk data of 32
-/// voices": status, identification, sub-status and channel, format number
-/// and the two bytes of the count.
-const SYSEX_HEADER_BYTES: usize = 6;
-/// The bytes after the voices: the checksum and the end of exclusive.
-const SYSEX_TRAILER_BYTES: usize = 2;
-/// The length of a bulk dump of 32 voices: 4,104 bytes.
-pub const SYSEX_BYTES: usize = SYSEX_HEADER_BYTES + BANK_VOICES * PACKED_VOICE_BYTES + SYSEX_TRAILER_BYTES;
-/// The status byte that starts a system exclusive message.
-const SYSEX_START: u8 = 0xf0;
-/// The status byte that ends one.
-const SYSEX_END: u8 = 0xf7;
-/// The maker's identification number in a bank's message: 67.
-const SYSEX_MAKER: u8 = 0x43;
-/// The format number of 32 voices.
-const SYSEX_FORMAT_32_VOICES: u8 = 0x09;
-/// The two bytes of the count, 4,096, seven bits in each.
-const SYSEX_COUNT: [u8; 2] = [0x20, 0x00];
-/// The bits of the third byte that must be zero: the sub-status. The four
-/// below it are the channel, which may be any.
-const SYSEX_SUB_STATUS_MASK: u8 = 0xf0;
+/// Source: DX7 manual, printed page 30, "Bulk data of 32 voices".
+pub const SYSEX_BYTES: usize = 6 + BANK_VOICES * PACKED_VOICE_BYTES + 2;
 
 impl Bank {
     /// An empty bank.
@@ -630,47 +959,38 @@ impl Bank {
     }
 
     /// Reads a bank from the instrument's bulk dump of 32 voices: a system
-    /// exclusive message of 4,104 bytes.
+    /// exclusive message of 4,104 bytes (S7-41), every voice of which must
+    /// be in range.
     ///
     /// # Errors
     ///
     /// - [`BankError::Length`] if `message` is not 4,104 bytes.
     /// - [`BankError::Header`] if it does not start F0 43 0n 09 20 00.
+    /// - [`BankError::DataByte`] if a byte before the last has bit 7 set.
     /// - [`BankError::Terminator`] if it does not end with F7.
     /// - [`BankError::Checksum`] if the sum of the 4,096 data bytes and the
     ///   checksum byte is not zero in its low seven bits.
     /// - [`BankError::Patch`] for the first voice [`Patch::from_packed`]
     ///   refuses.
     pub fn from_sysex(message: &[u8]) -> Result<Self, BankError> {
-        if message.len() != SYSEX_BYTES {
-            return Err(BankError::Length);
-        }
-        let Some((&[start, maker, channel, format, count_high, count_low], rest)) = message.split_first_chunk() else {
-            return Err(BankError::Length);
-        };
-        if start != SYSEX_START
-            || maker != SYSEX_MAKER
-            || channel & SYSEX_SUB_STATUS_MASK != 0
-            || format != SYSEX_FORMAT_32_VOICES
-            || [count_high, count_low] != SYSEX_COUNT
-        {
-            return Err(BankError::Header);
-        }
-        let Some((data, &[checksum, end])) = rest.split_last_chunk() else {
-            return Err(BankError::Length);
-        };
-        if end != SYSEX_END {
-            return Err(BankError::Terminator);
-        }
-        let sum = data.iter().fold(checksum, |sum, &byte| sum.wrapping_add(byte));
-        if sum & DATA_MASK != 0 {
-            return Err(BankError::Checksum);
-        }
+        let data = check_bank_dump(message).map_err(BankError::from)?;
         let mut bank = Self::new();
-        let (voices, _) = data.as_chunks::<PACKED_VOICE_BYTES>();
-        for ((place, packed), index) in bank.patches.iter_mut().zip(voices).zip(0_u8..) {
-            *place = Some(Patch::from_packed(packed).map_err(|error| BankError::Patch { index, error })?);
+        for (index, place) in bank.patches.iter_mut().enumerate() {
+            *place = Some(bank_voice(data, index).map_err(BankError::from)?);
         }
         Ok(bank)
+    }
+}
+
+impl From<DumpError> for BankError {
+    fn from(error: DumpError) -> Self {
+        match error {
+            DumpError::Length => Self::Length,
+            DumpError::Header => Self::Header,
+            DumpError::DataByte { at } => Self::DataByte { at },
+            DumpError::Checksum => Self::Checksum,
+            DumpError::Terminator => Self::Terminator,
+            DumpError::Patch { index, error } => Self::Patch { index, error },
+        }
     }
 }

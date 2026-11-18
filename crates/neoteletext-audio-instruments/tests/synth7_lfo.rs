@@ -151,6 +151,10 @@ fn a_key_restarts_the_delay_and_a_synced_waveform() {
 
 fn rack_with(change: impl FnOnce(&mut VoiceParams)) -> Rack {
     let mut params = *Patch::DEFAULT.params();
+    // Algorithm 16, whose one carrier is operator 1, so that the sine is at
+    // a single carrier's full level: the default voice's algorithm 1 has
+    // two carriers and sounds a doubling lower (S7-51).
+    params.algorithm = 15;
     change(&mut params);
     let mut bank = Bank::new();
     bank.set(0, Patch::new(params).unwrap());
@@ -196,7 +200,7 @@ fn amplitude_modulation_follows_its_sensitivity() {
 }
 
 /// The patch's pitch modulation depth makes vibrato after the delay, and
-/// a rack is about 12 kilobytes.
+/// a rack is about 17 kilobytes.
 #[test]
 fn pitch_modulation_waits_for_the_delay() {
     let mut rack = rack_with(|voice| {
@@ -230,5 +234,5 @@ fn pitch_modulation_waits_for_the_delay() {
     assert!(early < 1.0 && late > 100.0);
     let size = size_of::<Rack>();
     println!("a rack is {size} bytes");
-    assert!((8_000..16_000).contains(&size));
+    assert!((8_000..20_000).contains(&size));
 }
