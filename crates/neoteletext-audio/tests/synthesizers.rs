@@ -951,6 +951,16 @@ fn a_local_sounds_object_is_this_wire_vector() {
         0x0E, 0x74, 0xEC, 0x4D, // CRC-32 of the header and the body
     ];
     assert_eq!(object, expected, "{object:02X?}");
+    // RULE-85: and they are the row `object local_sound` of the wire
+    // vectors, which the server's and the browser's tests read too.
+    let row = include_str!("../../neoteletext-web/src/wire_vectors.tsv")
+        .lines()
+        .find_map(|line| line.strip_prefix("object\tlocal_sound\t"))
+        .and_then(|rest| rest.split('\t').next())
+        .expect("the table has the row");
+    let held: Vec<u8> =
+        (0..row.len()).step_by(2).map(|at| u8::from_str_radix(&row[at..at + 2], 16).expect("hexadecimal")).collect();
+    assert_eq!(object, held);
     assert_eq!((TAG_LOCAL, LOCAL_SOUND), (9, 1));
     let Record::Object(read) = parse(&object).unwrap() else { panic!("an OBJECT") };
     assert!(read.local);

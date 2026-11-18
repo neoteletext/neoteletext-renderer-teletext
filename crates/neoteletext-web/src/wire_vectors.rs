@@ -10,11 +10,14 @@ pub const TABLE: &str = include_str!("wire_vectors.tsv");
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Vector<'a> {
     /// What sort of fact it is: `version`, `close`, `input`, `refused` or
-    /// `record`.
+    /// `record`, and those of the page rule table and animation
+    /// (page-rules.md RULE-85): `rules`, `rule_event`, `page_state`,
+    /// `rules_fault`, `records` and `object`.
     pub kind: &'a str,
     /// Its name.
     pub name: &'a str,
-    /// Its value: a number, a name, or bytes in hexadecimal.
+    /// Its value: a number, a name, or bytes in hexadecimal; for `records`,
+    /// several packets' bytes with a space between.
     pub value: &'a str,
     /// What it means.
     pub meaning: &'a str,
@@ -44,7 +47,36 @@ pub fn bytes_of(hexadecimal: &str) -> Option<([u8; MOST_VECTOR_BYTES], usize)> {
     Some((bytes, hexadecimal.len() / 2))
 }
 
-/// The longest value: a packet.
-pub const MOST_VECTOR_BYTES: usize = neoteletext_core::consts::PACKET_BYTES;
+/// The room for the longest value: a `rules` row's table. The longest the
+/// table holds is the default table of page-rules.md RULE-53 with its
+/// wheel rule, 229 bytes; `every_value_fits` holds that each row fits.
+pub const MOST_VECTOR_BYTES: usize = 256;
+const _: () = assert!(MOST_VECTOR_BYTES >= neoteletext_core::consts::PACKET_BYTES);
 /// Hexadecimal.
 const HEX_RADIX: u32 = 16;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every row's bytes fit [`MOST_VECTOR_BYTES`], a `records` row's
+    /// packet by packet, so no reader of the table meets a row it cannot
+    /// hold.
+    #[test]
+    fn every_value_fits() {
+        const BYTES: [&str; 8] =
+            ["input", "refused", "record", "rules", "rule_event", "page_state", "rules_fault", "object"];
+        let mut read = 0;
+        for vector in vectors() {
+            if vector.kind == "records" {
+                assert!(vector.value.split(' ').all(|packet| bytes_of(packet).is_some()), "{}", vector.name);
+            } else if BYTES.contains(&vector.kind) {
+                assert!(bytes_of(vector.value).is_some(), "{}", vector.name);
+            } else {
+                continue;
+            }
+            read += 1;
+        }
+        assert!(read > 0);
+    }
+}

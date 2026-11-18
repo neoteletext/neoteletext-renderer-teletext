@@ -16,6 +16,9 @@ neoteletext-web = { workspace = true }
 neoteletext-formats = { workspace = true, features = ["std", "tti", "bdf"] }
 # The generated protocol document's byte examples use the input encoder.
 neoteletext-input = { workspace = true }
+# The wire vectors of the page rule table are written by its encoder
+# (page-rules.md RULE-85).
+neoteletext-rules = { workspace = true }
 # They use the audio encoder, for the audio records and their carriage.
 neoteletext-audio = { workspace = true, features = ["default", "encode", "pcm16"] }
 # Appendix A of page-rules.md is printed from every family's table of

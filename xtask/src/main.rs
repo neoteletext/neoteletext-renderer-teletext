@@ -34,6 +34,9 @@
 //!   the readable patch fields of each synthesizer family, from the
 //!   families' tables (REQ-6527; page-rules.md, RULE-29).
 //! - `check-appendix-a`: check that the document's appendix A is that.
+//! - `wire-vectors`: print the rows of neoteletext-common's
+//!   `wire-vectors.tsv` that the page rule table and animation added, from
+//!   the engine's encoders (REQ-6528; page-rules.md, RULE-85).
 
 mod appendix_a;
 mod checks;
@@ -47,6 +50,7 @@ mod misc_fixed;
 mod size;
 mod spec_examples;
 mod test_code;
+mod wire_vectors;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -75,10 +79,11 @@ fn main() -> ExitCode {
         "spec-examples" => spec_examples::write_examples(&root, &std::env::args().skip(2).collect::<Vec<_>>()),
         "appendix-a" => appendix_a::print(),
         "check-appendix-a" => appendix_a::check(),
+        "wire-vectors" => wire_vectors::print(),
         _ => Err(format!(
             "usage: cargo xtask <glyphs|corpus|check-layers|check-deps|check-constants|check-io|\
              check-noto|misc-fixed|check-misc-fixed|level25-stream|features|size|spec-examples|\
-             appendix-a|check-appendix-a> (got {command:?})"
+             appendix-a|check-appendix-a|wire-vectors> (got {command:?})"
         )),
     };
     match result {

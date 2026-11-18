@@ -12,7 +12,10 @@ use neoteletext_core::packet::Packet;
 use neoteletext_input::VERSION;
 use neoteletext_input::control::{Control, FRAGMENT_DATA, from_packet, packet_of};
 use neoteletext_input::cursor::{self, Cursor};
-use neoteletext_input::event::{Action, Device, Event, Item, KeyCode, MouseAction, Select, read_message, write};
+use neoteletext_input::event::{
+    Action, Device, Event, Item, KeyCode, MouseAction, PAGE_STATE, RULE_EVENT, RULES_FAULT, Select, read_message, write,
+};
+use neoteletext_input::rules::RuleBody;
 use neoteletext_web::consts::{PUSH_SUBPROTOCOL, close_says_stop};
 use neoteletext_web::records::denied::{self, DeniedRecord};
 use neoteletext_web::records::redirect::{self, RedirectRecord};
@@ -143,6 +146,104 @@ fn written(said: &str, id: u8) -> [u8; neoteletext_core::consts::PACKET_BYTES] {
     one.unwrap().bytes
 }
 
+/// A message of the page rule table (RULE-46 to RULE-48): it is the one
+/// item of its type, what it carries reads, and it writes back to the same
+/// bytes.
+fn rules_message(vector: &Vector<'_>, kind: u8) {
+    let message = bytes(vector.value);
+    assert_eq!(message[..2], [0xFF, kind], "{}", vector.name);
+    let mut items = 0;
+    read_message(&message, &mut |item| {
+        match (kind, &item) {
+            (RULE_EVENT, Item::Event(Event::RuleEvent(event))) => {
+                // The body is the one its name says, and an input it
+                // carries is a key as the table's own KEY row has it.
+                let carried = event.input().map(|(input, _)| said(&input));
+                match (vector.name, event.body) {
+                    ("fired", RuleBody::Fired) | ("value", RuleBody::Value { .. }) => assert_eq!(carried, None),
+                    ("input_key", RuleBody::Input(_)) => {
+                        assert_eq!(carried.as_deref(), Some("key press a text=a on=101/0001"));
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            (PAGE_STATE, Item::Event(Event::PageState(state))) => {
+                assert!(state.state().is_some_and(|state| state.table.is_some()), "{}", vector.name);
+            }
+            (RULES_FAULT, Item::Event(Event::RulesFault(fault))) => {
+                assert!(vector.meaning.contains(&format!("fault={}", fault.fault.name())), "{}", vector.name);
+            }
+            other => panic!("{other:?}"),
+        }
+        let mut out = [0; neoteletext_input::MAX_MESSAGE];
+        let length = write(&item, &mut out).unwrap();
+        assert_eq!(out[..length], message[..], "{} writes back", vector.name);
+        items += 1;
+    })
+    .unwrap_or_else(|error| panic!("{}: {error:?}", vector.name));
+    assert_eq!(items, 1, "{}", vector.name);
+}
+
+/// A RULES record's body (RULE-41): it decodes, encodes back to the same
+/// bytes, and the default table's rows are what `default_send_all` builds.
+fn rules_body(vector: &Vector<'_>) {
+    use neoteletext_rules::Table;
+    let body = bytes(vector.value);
+    let mut table = Box::new(Table::new());
+    let header = neoteletext_rules::decode(&body, &mut table).unwrap_or_else(|fault| panic!("{fault:?}"));
+    neoteletext_rules::check(&body).unwrap();
+    let mut out = [0; neoteletext_rules::limits::MAX_TABLE_BYTES];
+    let length =
+        neoteletext_rules::encode(header.page, header.generation, header.has_table.then_some(&*table), &mut out)
+            .unwrap();
+    assert_eq!(out[..length], body[..], "{} encodes back", vector.name);
+    let mut default = Box::new(Table::new());
+    match vector.name {
+        "default_send_all" => neoteletext_rules::default_send_all(false, &mut default),
+        "default_send_all_wheel" => neoteletext_rules::default_send_all(true, &mut default),
+        "no_table" => return assert!(!header.has_table),
+        other => panic!("{other}"),
+    }
+    assert!(header.has_table && *table == *default, "{}", vector.name);
+}
+
+/// The packets of one record of animation (ANIM-23): the receiver's reader
+/// takes them and gives one record, of the type the row's name begins
+/// with, when the last arrives.
+fn animation_record(vector: &Vector<'_>) {
+    let mut reader = RecordReader::new();
+    let packets: Vec<&str> = vector.value.split(' ').collect();
+    for (index, packet) in packets.iter().enumerate() {
+        let bytes: [u8; neoteletext_core::consts::PACKET_BYTES] = bytes(packet).as_slice().try_into().unwrap();
+        let read = reader.push(&Packet { bytes });
+        if index + 1 < packets.len() {
+            assert_eq!(read, Read::Nothing, "{}", vector.name);
+            continue;
+        }
+        let Read::Record(record) = read else { panic!("{}: {read:?}", vector.name) };
+        let kind = match record {
+            ChannelRecord::Animate(_) => "animate",
+            ChannelRecord::Sprites(_) => "sprites",
+            ChannelRecord::NaplpsObjects(_) => "naplps_objects",
+            ChannelRecord::Sheet(_) => "sheet",
+            ChannelRecord::Frame(_) => "frame",
+            other => panic!("{other:?}"),
+        };
+        assert!(vector.name.starts_with(kind), "{} is a {kind} record", vector.name);
+    }
+}
+
+/// A local sound's OBJECT (RULE-60): the audio profile's reader takes it
+/// as a sound of one block. Its banks and that it is local are read only
+/// by a build with its synthesizer family, so the audio crate's own test
+/// of this row holds those (`a_local_sounds_object_is_this_wire_vector`).
+fn local_object(vector: &Vector<'_>) {
+    use neoteletext_audio::record::{Record, parse};
+    let record = bytes(vector.value);
+    let Record::Object(object) = parse(&record).unwrap() else { panic!("{}", vector.name) };
+    assert_eq!((object.handle, object.generation, object.blocks), (1, 1, 1), "{}", vector.name);
+}
+
 /// DEC-1759 lesson 3: every row of every kind, and every kind is there.
 #[test]
 fn every_row_of_the_wire_vectors_holds() {
@@ -168,8 +269,29 @@ fn every_row_of_the_wire_vectors_holds() {
                 assert_eq!(record(&Packet { bytes }), meaning, "{}", vector.name);
                 assert_eq!(written(meaning, id), bytes, "{}", vector.name);
             }
+            "rules" => rules_body(&vector),
+            "rule_event" => rules_message(&vector, RULE_EVENT),
+            "page_state" => rules_message(&vector, PAGE_STATE),
+            "rules_fault" => rules_message(&vector, RULES_FAULT),
+            "records" => animation_record(&vector),
+            "object" => local_object(&vector),
             other => panic!("{other}"),
         }
     }
-    assert_eq!(kinds.into_iter().collect::<Vec<_>>(), ["close", "input", "record", "refused", "version"]);
+    assert_eq!(
+        kinds.into_iter().collect::<Vec<_>>(),
+        [
+            "close",
+            "input",
+            "object",
+            "page_state",
+            "record",
+            "records",
+            "refused",
+            "rule_event",
+            "rules",
+            "rules_fault",
+            "version"
+        ]
+    );
 }
