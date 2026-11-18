@@ -135,6 +135,26 @@ pub trait VoiceSink {
     /// in order.
     fn stream_samples(&mut self, channel: u8, sound: SoundId, pcm: &[i16]);
 
+    /// A cue mark (page-rules.md RULE-109; REQ-6614 item 3): the event
+    /// reader of the synthesizer that renders the stream of `sound` on
+    /// audio channel `channel` passed cue `number`, a MIDI data byte, which
+    /// stands at sample `position` of the stream, counted from the
+    /// stream's first sample at the stream's rate. It comes before the samples of the
+    /// block that holds it, through [`VoiceSink::stream_samples`], so the
+    /// position is at or past the samples the sink has been given.
+    ///
+    /// The receiver renders ahead of what is heard, so this is not the
+    /// moment of the cue: a sink keeps the mark with the stream and reports
+    /// the cue when the sample at `position` is heard
+    /// (`neoteletext-audio-mix`'s `Mixer::stream_cue` and
+    /// `Mixer::take_heard_cues`). A stream begun again under the same name
+    /// counts from 0 again. Across a loop of a stored sound, which plays on
+    /// in one stream (MIDI-105), the positions go on rising and each pass
+    /// marks its cues again. No mark comes for a block played through as
+    /// lost, for a stream fading out of a stop, or for a local sound, which
+    /// has no timeline. The provided method ignores it.
+    fn stream_cue(&mut self, _channel: u8, _sound: SoundId, _position: u64, _number: u8) {}
+
     /// The stream of `sound` on audio channel `channel` ends (INT-36): no
     /// more samples come. A voice playing it plays what it holds, then ends,
     /// and a sound waiting after it on the channel starts.
