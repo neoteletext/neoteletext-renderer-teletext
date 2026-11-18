@@ -396,3 +396,52 @@ path = "fuzz_targets/rules_no_unasked_send.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "rule_event"
+path = "fuzz_targets/rule_event.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "page_state"
+path = "fuzz_targets/page_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "animate_record"
+path = "fuzz_targets/animate_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sprites_record"
+path = "fuzz_targets/sprites_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "naplps_objects_record"
+path = "fuzz_targets/naplps_objects_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sheet_record"
+path = "fuzz_targets/sheet_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_records"
+path = "fuzz_targets/frame_records.rs"
+test = false
+doc = false
+bench = false
