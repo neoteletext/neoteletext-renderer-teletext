@@ -26,7 +26,7 @@
 // 99 * 32; the increment of a stage is scaled from the instrument's own
 // sample rate to the rate and block size rendered here, where the
 // original uses the instrument's increments unchanged at whatever rate it
-// runs; `stage`, `level` and `new` are added.
+// runs; `stage`, `level`, `new` and `set_outlevel` are added.
 
 //! The envelope generator of one operator.
 
@@ -214,6 +214,19 @@ impl Env {
         if self.down != down {
             self.down = down;
             self.advance(if down { 0 } else { STAGE_SUSTAIN });
+        }
+    }
+
+    /// Sets the output level of a sounding envelope, as [`Env::init`] takes
+    /// it, and aims its stage at the level that makes: an output level
+    /// changed while a key is held (`synth7.md`, S7-44). Added for synth7,
+    /// not in the original.
+    pub fn set_outlevel(&mut self, outlevel: i32) {
+        if self.outlevel != outlevel {
+            self.outlevel = outlevel;
+            if self.ix < STAGE_FINISHED {
+                self.advance(self.ix);
+            }
         }
     }
 

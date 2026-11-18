@@ -21,6 +21,11 @@ default = ["synth6581", "synth7"]
 synth6581 = []
 # synth7 (codec 13, its banks codec 19, MIDI-107; REQ-6412 items 5 and 6).
 synth7 = []
+# What the server calls in each family with no synthesis code: its message
+# tables, patch packers and checks, bank builders and checks, and trackers
+# (`neoteletext-common/docs/audio/server.md`, SRV-87 and SRV-88). Not on by
+# default.
+interface = []
 # The building blocks of the analogue synthesizers (DEC-6429): oscillators,
 # filters, envelopes, the chorus and the voice allocator. Not a codec by
 # itself, so it is not on by default.
