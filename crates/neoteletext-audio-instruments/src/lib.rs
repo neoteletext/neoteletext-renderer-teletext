@@ -22,10 +22,16 @@
 //! synth106 and synth60 (module `synth106`). Behind the feature `synthd`, not on
 //! by default either, is synthD (module `synthd`).
 //! Behind the feature `synth53`, also not on by default, is synth53 (module `synth53`).
-//! Behind the feature `synth8`, not on by default either, is synth8 (module `synth8`);
-//! behind the feature `interface` alone, its interface module
-//! (`synth8::interface`) and its patch (`synth8::patch`) without its synthesis.
+//! Behind the feature `synth8`, not on by default either, is synth8 (module `synth8`).
 //! Behind the feature `synth80`, not on by default either, is synth80 (module `synth80`).
+//!
+//! Behind the feature `interface`, also not on by default, is what the
+//! server needs of every family without its synthesis (`server.md`,
+//! SRV-87, SRV-88): `synth6581::interface`, `synth7::interface`,
+//! `synth106::interface`, `synthd::interface`, `synth53::interface`,
+//! `synth8::interface` and `synth80::interface`, with the patches, banks
+//! and tables they rest on. Each family's own feature builds its
+//! interface module too.
 //!
 //! # Whose code this is
 //!

@@ -22,8 +22,9 @@ synth6581 = []
 # Every family's interface alone, for the server (`server.md`, SRV-87,
 # SRV-88): which messages it takes, its patch's packer and check, its bank
 # image's builder and reader, and its restatement's tracker. No synthesis
-# code, no allocation, no floating point. A family whose interface module
-# is also its synthesis's own (synth106, synthD, synth8) turns it on.
+# code, no allocation, no floating point. Every family's module builds
+# under it; synth106, synthD and synth8, whose synthesis is built on their
+# interface modules, turn it on.
 interface = []
 # synth7 (codec 13, its banks codec 19, MIDI-107; REQ-6412 items 5 and 6).
 synth7 = []
