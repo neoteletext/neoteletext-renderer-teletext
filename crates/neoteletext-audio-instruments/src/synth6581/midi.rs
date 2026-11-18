@@ -80,4 +80,9 @@ impl Instrument for Midi {
             self.budget = BlockBudget::new();
         }
     }
+
+    /// The part is the voice, 0 to 2 (page-rules.md, RULE-28).
+    fn meter(&self, part: u8) -> crate::midi::Meter {
+        self.chip.meter(usize::from(part))
+    }
 }

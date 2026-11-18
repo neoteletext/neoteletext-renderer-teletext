@@ -477,6 +477,16 @@ impl Voice {
         matches!(self.amplifier, Amplifier::Closing)
     }
 
+    /// The loudness (VCA) envelope's position, as a page's rules read it
+    /// (page-rules.md, RULE-31): synth106's computed envelope or synth60's
+    /// analogue one, wherever the VCA switch stands.
+    pub fn meter(&self) -> (crate::midi::MeterStage, u8) {
+        match self.model {
+            Model::Synth106 => self.stepped.meter(),
+            Model::Synth60 => self.analogue.meter(),
+        }
+    }
+
     /// Whether the voice, its key up, has fallen silent and its envelope
     /// has come to rest. A voice is not run while it rests, so one let go
     /// with its envelope part of the way down would keep that level for

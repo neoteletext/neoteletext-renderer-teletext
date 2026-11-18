@@ -177,6 +177,20 @@ pub const TAG_SYNTH8_KEYS: u8 = 7;
 /// (MIDI-41). Required on a stored sound of those codecs; a live sound's
 /// OBJECT must not carry it.
 pub const TAG_TOTAL_BYTES: u8 = 8;
+/// Extension tag of a local sound (page-rules.md, RULE-60), one byte,
+/// [`LOCAL_SOUND`], on codecs 13 to 18, the families that play notes: the
+/// sound is an instrument the page keeps open and its rules play, announced
+/// as a stored sound of one block, its setup ([`LOCAL_BLOCKS`]). A receiver
+/// never renders it from blocks and never streams it: a play gives the sink
+/// the local start ([`crate::port::VoiceSink::local`]). On the synth6581
+/// family, which has no note messages, and on every other codec the tag
+/// means nothing and is skipped, as any unknown tag is.
+pub const TAG_LOCAL: u8 = 9;
+/// [`TAG_LOCAL`]'s one value (RULE-60: "with one value byte, 1").
+pub const LOCAL_SOUND: u8 = 1;
+/// The blocks of a local sound: one, its setup, an event list with every
+/// event at tick 0, applied in order when the instrument is made (RULE-60).
+pub const LOCAL_BLOCKS: u16 = 1;
 /// [`TAG_SYNTH8_KEYS`]: eight voices of the upper patch.
 pub const SYNTH8_KEYS_WHOLE: u8 = 0;
 /// [`TAG_SYNTH8_KEYS`]: every key plays both patches, four voices each.
@@ -248,6 +262,9 @@ pub struct Object<'a> {
     /// The total bytes of a stored event sound's blocks
     /// ([`TAG_TOTAL_BYTES`]).
     pub total: Option<u32>,
+    /// A local sound ([`TAG_LOCAL`], RULE-60): its one block is its setup,
+    /// and it is played by rules, not rendered from blocks.
+    pub local: bool,
 }
 
 impl Object<'_> {
@@ -420,6 +437,7 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
         family: None,
         keys: None,
         total: None,
+        local: false,
     };
     if let Some(codec) = codec {
         if !codec.allows_block(block_bytes) {
@@ -483,6 +501,11 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
                 [a, b, c, d] => object.total = Some(u32::from_be_bytes([*a, *b, *c, *d])),
                 _ => return Err(RecordError::BadValue("total bytes")),
             },
+            // RULE-60: only a family that plays notes has a local sound.
+            TAG_LOCAL if codec.is_some_and(Codec::has_banks) => match value {
+                [LOCAL_SOUND] => object.local = true,
+                _ => return Err(RecordError::BadValue("local")),
+            },
             _ => {}
         }
     }
@@ -509,6 +532,10 @@ fn check_synthesizer(object: &mut Object<'_>, codec: Codec) -> Result<(), Record
             (false, Some(total)) if total <= most => {}
             _ => return Err(RecordError::BadValue("total bytes")),
         }
+    }
+    // A local sound is a stored sound of one block, its setup (RULE-60).
+    if object.local && (object.samples == 0 || object.blocks != LOCAL_BLOCKS) {
+        return Err(RecordError::BadValue("local"));
     }
     // A sound that plays patches names its banks (MIDI-57).
     if codec.has_banks() && object.bank_count == 0 {

@@ -264,7 +264,7 @@ const SWITCH: u8 = 1;
 
 /// The 67 parameters of a program and their stated maxima, every row of
 /// MI pages 8 and 9 numbered 0 to 64, 86 and 87 (S53-27).
-pub const PARAMETERS: [(u8, u8); PROGRAM_PARAMETERS] = {
+pub const PROGRAM_RANGES: [(u8, u8); PROGRAM_PARAMETERS] = {
     use parameter as p;
     [
         (p::OSC_A_FREQUENCY, KNOB_TOP),
@@ -353,8 +353,8 @@ pub const PARAMETERS: [(u8, u8); PROGRAM_PARAMETERS] = {
 const MAXIMA: [Option<u8>; PARAMETER_SPAN] = {
     let mut maxima = [None; PARAMETER_SPAN];
     let mut index = 0;
-    while index < PARAMETERS.len() {
-        let (number, most) = PARAMETERS[index];
+    while index < PROGRAM_RANGES.len() {
+        let (number, most) = PROGRAM_RANGES[index];
         // S53-27: no number twice.
         assert!(maxima[number as usize].is_none());
         maxima[number as usize] = Some(most);
@@ -622,7 +622,7 @@ impl Program {
     ///
     /// The first parameter above its maximum.
     pub fn check(&self) -> Result<(), ParameterError> {
-        for &(parameter, maximum) in &PARAMETERS {
+        for &(parameter, maximum) in &PROGRAM_RANGES {
             let value = self.bytes.get(usize::from(parameter)).copied().unwrap_or(0);
             if value > maximum {
                 return Err(ParameterError { parameter, maximum, value });
@@ -1763,6 +1763,13 @@ impl Part {
         }
     }
 }
+
+// Named by its path so that it is found both where this module is a file
+// of its own and where the feature `interface` alone reads it through a
+// path from the crate root (lib.rs).
+#[path = "interface/parameters.rs"]
+mod parameters;
+pub use parameters::{PARAMETER_COUNT, PARAMETERS, program_parameter, read_parameter};
 
 // Named by its path so that it is found both where the module is a file of
 // its own and where the feature `interface` alone reads it through a path

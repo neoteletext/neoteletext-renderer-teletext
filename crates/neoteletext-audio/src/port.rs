@@ -59,6 +59,43 @@ pub struct ImaBlock<'a> {
     pub fade_out: bool,
 }
 
+/// Starting a local sound on a channel (page-rules.md, RULE-60): what the
+/// sink needs to make the family's instrument in its sound output stage.
+/// The sound's banks came just before it, through
+/// [`VoiceSink::local_bank`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LocalStart<'a> {
+    /// The sound.
+    pub sound: SoundId,
+    /// The family: the code of its codec, 13 to 18
+    /// ([`crate::Codec::code`]).
+    pub family: u8,
+    /// The variant of the family the sound plays
+    /// ([`crate::record::TAG_VARIANT`]): 0, or 1 for synth60 and synth52,
+    /// 2 for synth51.
+    pub variant: u8,
+    /// The family's option byte: synth8's key mode
+    /// ([`crate::record::SYNTH8_KEYS_WHOLE`],
+    /// [`crate::record::SYNTH8_KEYS_DUAL`] or
+    /// [`crate::record::SYNTH8_KEYS_SPLIT`]); 0 for every other family.
+    pub option: u8,
+    /// synth8's split point, a MIDI key ([`crate::record::TAG_SYNTH8_KEYS`]'
+    /// second byte); 0 for every other family.
+    pub split: u8,
+    /// 0 to 100 per cent.
+    pub gain: u8,
+    /// The ramp in and, for the sound it replaces, out; at least
+    /// [`crate::MIN_FADE_MS`].
+    pub fade_ms: u16,
+    /// While this sound plays, every other channel plays at this per cent
+    /// of its gain: one of [`crate::DUCK_PERCENT`].
+    pub duck_percent: u8,
+    /// The setup block: an event list (MIDI-23) with every event at tick 0,
+    /// at most [`crate::MOST_EVENT_BLOCK_BYTES`] bytes, which the sink
+    /// applies in order to the new instrument before any other message.
+    pub setup: &'a [u8],
+}
+
 /// What a port supplies to play sound.
 pub trait VoiceSink {
     /// How many channels the sink plays, at most [`crate::CHANNELS`]. The
@@ -155,4 +192,33 @@ pub trait VoiceSink {
     /// [`VoiceSink::concealed`] report, the sink fades out the last 5 ms it
     /// holds (REQ-AUD-013).
     fn ima_stream(&mut self, _channel: u8, _sound: SoundId, _block: ImaBlock<'_>) {}
+
+    /// Whether the sink plays local sounds (page-rules.md, RULE-60): it has
+    /// a sound output stage that holds a family's instrument and renders it
+    /// as it mixes. Where it does not, the receiver ignores a local sound's
+    /// OBJECT, as it ignores a codec it does not have. The provided answer
+    /// is no.
+    fn plays_local(&self) -> bool {
+        false
+    }
+
+    /// One bank of the local sound about to start on audio channel
+    /// `channel` (RULE-60): bank index `index`, 0 to
+    /// [`crate::MOST_BANKS`] − 1, and its whole image, at most
+    /// [`crate::MOST_BANK_BYTES`] bytes, which the sink copies. The banks
+    /// of a start come in index order, each before
+    /// [`VoiceSink::local`], which starts the instrument with the banks
+    /// given for that channel and sound since the last start.
+    fn local_bank(&mut self, _channel: u8, _sound: SoundId, _index: u8, _image: &[u8]) {}
+
+    /// Starts a local sound on audio channel `channel`, ramping out what
+    /// the channel played (RULE-60): the sink makes the family's
+    /// instrument, starts it with the banks given, applies the setup, and
+    /// from then on gives it the MIDI messages the page's rules send to the
+    /// channel. No stream begins and no samples come from the receiver.
+    /// [`VoiceSink::stop`] and [`VoiceSink::gain`] act on the channel as on
+    /// any sound; a stop releases every note and ends the instrument, and
+    /// the receiver stops the channel when the sound's page is no longer
+    /// open.
+    fn local(&mut self, _channel: u8, _start: LocalStart<'_>) {}
 }

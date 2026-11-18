@@ -126,4 +126,9 @@ impl Instrument for Midi {
     fn render(&mut self, out: &mut [i16]) {
         self.synthd.render(out);
     }
+
+    /// Every channel is the one panel (SD-2).
+    fn meter(&self, _part: u8) -> crate::midi::Meter {
+        self.synthd.meter()
+    }
 }

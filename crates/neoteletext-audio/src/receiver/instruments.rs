@@ -29,7 +29,7 @@
 //! called again at once while more are owed ([`super::Receiver::next_tick_ms`];
 //! MIDI-106, INT-35).
 
-use neoteletext_audio_instruments::midi::{Banks, Instrument, Outcome, Played, play_block};
+use neoteletext_audio_instruments::midi::{Banks, Instrument, Meter, Outcome, Played, play_block};
 #[cfg(feature = "synth7")]
 use neoteletext_audio_instruments::synth7;
 #[cfg(feature = "synth8")]
@@ -290,6 +290,19 @@ impl Lanes {
                 lane.stream = None;
             }
         }
+    }
+
+    /// The envelope position of part `part` and the voice count of the
+    /// synthesizer that renders the playing heard on audio channel
+    /// `channel` (page-rules.md, RULE-30, RULE-31), at the position
+    /// rendered; `None` where no synthesizer's playing is heard there. A
+    /// playing that is fading out of a stop gives way to the one that
+    /// replaced it.
+    pub(super) fn meter(&self, channel: u8, part: u8) -> Option<Meter> {
+        let playing = |lane: &&Lane| lane.stream.is_some_and(|stream| stream.channel == channel);
+        let lanes = self.lanes.iter().filter(playing);
+        let lane = lanes.min_by_key(|lane| lane.stream.is_some_and(|stream| stream.until_ms.is_some()))?;
+        Some(with_instrument!(&lane.synthesizer, instrument => instrument.meter(part), Meter::IDLE))
     }
 
     /// The sounds the synthesizers render, whose banks the store must keep

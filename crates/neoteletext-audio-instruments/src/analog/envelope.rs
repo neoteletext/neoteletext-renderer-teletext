@@ -116,6 +116,28 @@ pub enum Stage {
     Release,
 }
 
+/// The share of the peak within which a decaying envelope counts as holding
+/// its sustain level: one step of a meter's 255 (RULE-31). A capacitor
+/// approaches the level it is brought to and never arrives.
+const SUSTAIN_REACHED: i32 = ENVELOPE_ONE / crate::midi::METER_FULL as i32;
+
+/// An envelope's position as a page's rules read it
+/// (`neoteletext-common/docs/page-rules.md`, RULE-31): the stage, a decay
+/// that has come within a 255th of the peak of its sustain level being
+/// the sustain, and the level scaled linearly to 0 to 255 of the peak.
+#[must_use]
+pub fn meter(stage: Stage, level: i32, sustain: i32) -> (crate::midi::MeterStage, u8) {
+    use crate::midi::MeterStage;
+    let stage = match stage {
+        Stage::Rest => return (MeterStage::Idle, 0),
+        Stage::Attack => MeterStage::Attack,
+        Stage::Decay if level <= sustain.saturating_add(SUSTAIN_REACHED) => MeterStage::Sustain,
+        Stage::Decay => MeterStage::Decay,
+        Stage::Release => MeterStage::Release,
+    };
+    (stage, crate::midi::meter_level(level, ENVELOPE_ONE))
+}
+
 /// The analogue envelope: a capacitor that the attack charges towards
 /// [`ATTACK_TARGET`] until it passes the peak, that the decay then
 /// brings to the sustain level, and that the release discharges to zero,
@@ -220,6 +242,12 @@ impl RcEnvelope {
     #[must_use]
     pub const fn level(&self) -> i32 {
         self.level
+    }
+
+    /// The envelope's position as a page's rules read it ([`meter`]).
+    #[must_use]
+    pub fn meter(&self) -> (crate::midi::MeterStage, u8) {
+        meter(self.stage, self.level, self.sustain)
     }
 
     /// One sample: moves on, and gives the level.
@@ -371,6 +399,12 @@ impl SteppedEnvelope {
     #[must_use]
     pub const fn stage(&self) -> Stage {
         self.stage
+    }
+
+    /// The envelope's position as a page's rules read it ([`meter`]).
+    #[must_use]
+    pub fn meter(&self) -> (crate::midi::MeterStage, u8) {
+        meter(self.stage, self.level, self.sustain)
     }
 
     /// One sample: updates the level if an interval has passed, and gives

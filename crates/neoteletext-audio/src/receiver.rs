@@ -78,6 +78,10 @@ pub struct Statistics {
     /// Patches, in a bank or sent inline, that broke their family's rules
     /// and were replaced by the family's default (MIDI-63).
     pub patches_refused: u32,
+    /// Plays of a local sound refused (page-rules.md, RULE-60): a play
+    /// with no page, looped or waiting for the current sound, or a third
+    /// while [`crate::MOST_LOCAL_SOUNDS`] play.
+    pub local_refused: u32,
 }
 
 /// The receiver of one audio service.
@@ -113,6 +117,9 @@ pub struct Receiver<'a, const OBJECTS: usize, const SLOTS: usize> {
     /// Each channel's stored-sound play, followed for the `concealed`
     /// report (REQ-AUD-013).
     progress: [Option<loss::Progress>; CHANNELS as usize],
+    /// The local sound each channel plays at the sink, if it plays one
+    /// (RULE-60): at most [`crate::MOST_LOCAL_SOUNDS`] at once.
+    local: [Option<SoundId>; CHANNELS as usize],
 }
 
 impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> {
@@ -143,6 +150,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             instruments: instruments::Lanes::new(),
             heard: [play::Heard::Idle; CHANNELS as usize],
             progress: [None; CHANNELS as usize],
+            local: [None; CHANNELS as usize],
         }
     }
 
@@ -268,6 +276,28 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         [stall, self.next_due_ms(), rendering].into_iter().flatten().min()
     }
 
+    /// The envelope position of part `part`, its MIDI channel less one, and
+    /// the voice count of the synthesizer sound that audio channel
+    /// `channel` plays from blocks (page-rules.md, RULE-30: "of a
+    /// server-timed sound they are read from the decoder's instrument at
+    /// the position rendered", which is ahead of what is heard by the
+    /// stream's buffer). `None` where the channel plays no such sound: a
+    /// local sound's is metered where its instrument is, in the sink
+    /// (RULE-33).
+    #[cfg(any(
+        feature = "synth6581",
+        feature = "synth7",
+        feature = "synth106",
+        feature = "synthd",
+        feature = "synth53",
+        feature = "synth8",
+        feature = "synth80"
+    ))]
+    #[must_use]
+    pub fn meter(&self, channel: u8, part: u8) -> Option<crate::midi::Meter> {
+        self.instruments.meter(channel, part)
+    }
+
     /// What the receiver has met.
     #[must_use]
     pub fn statistics(&self) -> Statistics {
@@ -324,6 +354,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.channels = [Channel::default(); CHANNELS as usize];
         self.heard = [play::Heard::Idle; CHANNELS as usize];
         self.progress = [None; CHANNELS as usize];
+        self.local = [None; CHANNELS as usize];
     }
 
     /// The sink has dropped every sound and stopped every voice, as when
@@ -349,6 +380,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         }
         self.heard = [play::Heard::Idle; CHANNELS as usize];
         self.progress = [None; CHANNELS as usize];
+        self.local = [None; CHANNELS as usize];
     }
 
     /// Reads one whole record, from any carriage.
@@ -364,6 +396,12 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         };
         bump(&mut self.statistics.records);
         match record {
+            // A sink with no sound output stage for it ignores a local
+            // sound, as a receiver ignores a codec it does not have
+            // (RULE-60).
+            Record::Object(object) if object.local && object.codec.is_some() && !sink.plays_local() => {
+                bump(&mut self.statistics.unsupported);
+            }
             Record::Object(object) => {
                 let channels = self.channels;
                 #[cfg(any(
@@ -504,6 +542,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         sink.stop(index, crate::MIN_FADE_MS);
         self.stop_streams(index, crate::MIN_FADE_MS, sink);
         self.end_progress(index);
+        self.end_local(index);
     }
 
     /// Gives up channel `index`'s play waiting for its sound if it belongs to
@@ -516,13 +555,32 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         }
     }
 
+    /// A command a rule of the open page's table gives (page-rules.md,
+    /// RULE-20: the actions `play`, `stop` and `gain`), "as the audio
+    /// profile's play command does": it is carried out as a CONTROL record's
+    /// is, but belongs to no sender's sequence, so `control.sequence` is not
+    /// read and the channel's sequence is left as it was. The caller names
+    /// the page the rule belongs to in `control.page`.
+    pub fn rule_command(&mut self, control: &Control, sink: &mut dyn VoiceSink) {
+        self.perform(control, sink);
+        self.render(sink);
+        self.judge(sink);
+    }
+
     fn command(&mut self, control: &Control, sink: &mut dyn VoiceSink) {
-        let index = control.channel;
-        let Some(channel) = self.channels.get_mut(usize::from(index)) else { return };
+        let Some(channel) = self.channels.get_mut(usize::from(control.channel)) else { return };
         if !channel.accept(control.sequence) {
             bump(&mut self.statistics.stale_commands);
             return;
         }
+        self.perform(control, sink);
+    }
+
+    /// Carries out a command whose place in its channel's sequence is
+    /// settled.
+    fn perform(&mut self, control: &Control, sink: &mut dyn VoiceSink) {
+        let index = control.channel;
+        let Some(channel) = self.channels.get_mut(usize::from(index)) else { return };
         // Channels beyond the sink's are ignored (REQ-AUD-016).
         if index >= sink.channels() {
             return;
@@ -549,6 +607,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                 sink.stop(index, fade(control.fade_ms));
                 self.stop_streams(index, fade(control.fade_ms), sink);
                 self.end_progress(index);
+                self.end_local(index);
             }
             Operation::Gain => sink.gain(index, control.gain, fade(control.fade_ms)),
         }

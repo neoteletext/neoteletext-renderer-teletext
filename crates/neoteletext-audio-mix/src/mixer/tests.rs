@@ -6,6 +6,7 @@
 
 // Tests of REQ-AUD-011, REQ-AUD-014, REQ-AUD-015 and REQ-AUD-019.
 use super::*;
+use crate::sinc::TAPS_BEFORE;
 use std::vec;
 use std::vec::Vec;
 
@@ -299,4 +300,219 @@ fn a_voice_reports_where_it_is_in_its_stored_sound() {
     assert_eq!(mixer.position(1), None, "a live sound's place is in its ring");
     mixer.stop(0, 5);
     assert_eq!(mixer.position(0), None, "a stopping voice");
+}
+
+/// The output rate of the tests of the pulled voice and the peak: the rate
+/// a pulled voice is asked at, so that the resampler's filter stands on its
+/// centre tap.
+const DEVICE_RATE: u32 = PULLED_RATE_HZ;
+
+/// A sine of `amplitude` and 480 samples a period at [`DEVICE_RATE`], 100 Hz.
+fn sine(amplitude: f64, samples: u32) -> Vec<i16> {
+    (0..samples)
+        .map(|n| {
+            #[allow(clippy::cast_possible_truncation, reason = "the amplitude is within a sample's range")]
+            let value = (amplitude * (std::f64::consts::TAU * f64::from(n) / 480.0).sin()).round() as i16;
+            value
+        })
+        .collect()
+}
+
+// Verifies RULE-32 (REQ-6527): the level is linear, 255 at full scale and
+// halving with each 6 decibels.
+#[test]
+fn a_sine_at_each_listed_level_is_metered_at_it() {
+    for (amplitude, level) in
+        [(32_767.0, 255), (16_384.0, 128), (8_192.0, 64), (4_096.0, 32), (2_048.0, 16), (1_024.0, 8), (512.0, 4)]
+    {
+        let mut mixer = Mixer::new(DEVICE_RATE);
+        mixer.define((1, 1), DEVICE_RATE, 4_800);
+        mixer.samples((1, 1), 0, &sine(amplitude, 4_800));
+        mixer.set_metered(0, true);
+        mixer.start(0, start((1, 1), 100));
+        // Past the ramp in, then one period and more.
+        render(&mut mixer, 1_000);
+        mixer.take_peak(0);
+        render(&mut mixer, 800);
+        let peak = mixer.take_peak(0);
+        // The filter's centre tap is 14,734 of 16,384 with its neighbours
+        // making up the rest, so a slow sine passes within a part in 500.
+        let metered = meter_level(peak);
+        assert!(metered.abs_diff(level) <= 1, "amplitude {amplitude}: peak {peak}, level {metered}, expected {level}");
+    }
+}
+
+// Verifies RULE-32 (REQ-6527): the peak is since last asked, after the
+// voice's gain and before the master volume and the mute, and only of a
+// watched voice.
+#[test]
+fn the_peak_is_since_last_asked_after_the_gain_and_before_the_master() {
+    let mut mixer = Mixer::new(RATE);
+    constant(&mut mixer, (1, 1), 20_000, 8_000);
+    constant(&mut mixer, (2, 1), 20_000, 8_000);
+    mixer.set_metered(0, true);
+    mixer.set_master(10, true);
+    mixer.start(0, start((1, 1), 50));
+    mixer.start(1, start((2, 1), 100));
+    let out = render(&mut mixer, 400);
+    assert_eq!(out[399], 0, "muted");
+    let peak = mixer.take_peak(0);
+    assert!((9_900..=10_100).contains(&peak), "half of 20,000, the master and the mute apart: {peak}");
+    assert_eq!(mixer.take_peak(0), 0, "taken: it starts again");
+    assert_eq!(mixer.take_peak(1), 0, "voice 1 is not watched, so nothing was metered for it");
+    assert!(!mixer.is_metered(1));
+    mixer.stop(0, 5);
+    render(&mut mixer, 400);
+    mixer.take_peak(0);
+    render(&mut mixer, 100);
+    assert_eq!(mixer.take_peak(0), 0, "a silent voice has no peak");
+    assert_eq!(meter_level(PEAK_FULL_SCALE), 255);
+    assert_eq!(meter_level(127), 0);
+    assert_eq!(meter_level(128), 1);
+}
+
+/// A scripted source of a pulled voice: every sample is `value` as it
+/// stands when its block is asked for, and it counts the samples and the
+/// blocks asked for.
+struct Scripted {
+    value: i16,
+    samples: usize,
+    blocks: usize,
+    longest: usize,
+}
+
+impl Scripted {
+    fn of(value: i16) -> Self {
+        Self { value, samples: 0, blocks: 0, longest: 0 }
+    }
+}
+
+impl Pull for Scripted {
+    fn pull(&mut self, voice: usize, key: SoundKey, block: &mut [i16]) {
+        assert_eq!((voice, key), (0, (9, 1)), "the voice and the sound it plays");
+        assert!((1..=LOCAL_BLOCK_SAMPLES).contains(&block.len()), "a block of 1 to 128 samples: {}", block.len());
+        block.fill(self.value);
+        self.samples = self.samples.saturating_add(block.len());
+        self.blocks = self.blocks.saturating_add(1);
+        self.longest = self.longest.max(block.len());
+    }
+}
+
+// Verifies RULE-62 (REQ-6527): what a source renders from a message queued
+// before a device buffer sounds from the first samples of that buffer,
+// wherever the buffer before it ended; and nothing is pulled ahead of the
+// buffer in hand.
+#[test]
+fn a_pulled_voice_sounds_from_the_start_of_the_device_buffer_after_a_message() {
+    // A device buffer of 10 ms, and others that end elsewhere in a block.
+    for buffer in [480_usize, 441, 128, 100, 37, 1] {
+        let mut mixer = Mixer::new(DEVICE_RATE);
+        mixer.pulled((9, 1));
+        mixer.start(0, start((9, 1), 100));
+        let mut source = Scripted::of(0);
+        let mut rendered = 0_usize;
+        // Buffers of silence past the ramp in of 5 ms.
+        for _ in 0..480_usize.div_ceil(buffer) + 7 {
+            let mut out = vec![0; buffer];
+            mixer.render_pulling(&mut out, &mut source);
+            assert!(out.iter().all(|&value| value == 0));
+            rendered += buffer;
+            // Exactly what the buffer's samples read was pulled: the last
+            // of them and the taps the filter reads past it.
+            assert_eq!(source.samples, rendered + PULLED_LOOKAHEAD_SAMPLES, "buffer {buffer}");
+        }
+        assert!(source.blocks > 0 && source.longest <= LOCAL_BLOCK_SAMPLES);
+        // The message arrives: every block rendered from now holds the note.
+        source.value = 10_000;
+        let mut out = vec![0; 480];
+        mixer.render_pulling(&mut out, &mut source);
+        // The buffer's first sample reads the new block through the
+        // filter's last tap, which weighs nothing where the rates agree:
+        // the note is in the second, and at its level once the filter's
+        // taps are all upon it.
+        let first = out.iter().position(|&value| value != 0).unwrap();
+        assert_eq!(first, 1, "buffer {buffer}: the first sounding sample");
+        let settled = PULLED_LOOKAHEAD_SAMPLES + TAPS_BEFORE as usize + 1;
+        assert!((9_900..=10_100).contains(&out[settled]), "buffer {buffer}: {}", out[settled]);
+        assert!(first < LOCAL_BLOCK_SAMPLES, "within the first 128 samples of the buffer (RULE-62)");
+    }
+}
+
+// Verifies RULE-62 (REQ-6527): a device buffer is pulled in blocks of 128
+// samples, the last cut to what the buffer still needs, and a message that
+// arrives while a buffer is rendered waits for the next block and no
+// longer.
+#[test]
+fn a_device_buffer_is_pulled_in_blocks_of_128_samples() {
+    /// A source whose value changes after its first block of each call.
+    struct Stepping {
+        blocks: Vec<usize>,
+    }
+    impl Pull for Stepping {
+        fn pull(&mut self, _voice: usize, _key: SoundKey, block: &mut [i16]) {
+            // The second block of the run holds the note: a message that
+            // came while the first was being rendered.
+            block.fill(if self.blocks.is_empty() { 0 } else { 10_000 });
+            self.blocks.push(block.len());
+        }
+    }
+    let mut mixer = Mixer::new(DEVICE_RATE);
+    mixer.pulled((9, 1));
+    mixer.start(0, Start { fade_ms: 0, ..start((9, 1), 100) });
+    let mut source = Stepping { blocks: Vec::new() };
+    let mut out = vec![0; 480];
+    mixer.render_pulling(&mut out, &mut source);
+    // 480 samples and the filter's 8 ahead: three blocks of 128 and one of
+    // what is left.
+    assert_eq!(source.blocks, [128, 128, 128, 104]);
+    let first = out.iter().position(|&value| value != 0).unwrap();
+    assert!((LOCAL_BLOCK_SAMPLES - PULLED_LOOKAHEAD_SAMPLES..=LOCAL_BLOCK_SAMPLES).contains(&first), "{first}");
+}
+
+// Verifies RULE-62 (REQ-6527): a pulled voice is resampled to the device's
+// rate, stops and gains as any voice does, and ends when it is forgotten.
+#[test]
+fn a_pulled_voice_is_resampled_stopped_and_forgotten_as_any_voice() {
+    let mut mixer = Mixer::new(44_100);
+    mixer.pulled((9, 1));
+    mixer.start(0, start((9, 1), 50));
+    let mut source = Scripted::of(10_000);
+    let mut out = vec![0; 4_410];
+    mixer.render_pulling(&mut out, &mut source);
+    assert!((4_900..=5_100).contains(&out[4_000]), "at its gain: {}", out[4_000]);
+    // A tenth of a second at 44.1 kHz is 4,800 samples at 48 kHz, less the
+    // one step the last output sample has yet to take.
+    assert_eq!(source.samples, 4_799 + PULLED_LOOKAHEAD_SAMPLES, "pulled at 48 kHz");
+    assert_eq!(mixer.position(0), None, "a pulled voice is at no place in a stored sound");
+    mixer.gain(0, 100, 5);
+    mixer.render_pulling(&mut out, &mut source);
+    assert!((9_900..=10_100).contains(&out[4_000]), "{}", out[4_000]);
+    mixer.stop(0, 5);
+    mixer.render_pulling(&mut out, &mut source);
+    assert!(out[4_000] == 0 && !mixer.active(), "stopped");
+    let samples = source.samples;
+    mixer.render_pulling(&mut out, &mut source);
+    assert_eq!(source.samples, samples, "a stopped voice pulls nothing");
+    // Forgotten while it plays, it ends at once and is collected.
+    mixer.start(0, start((9, 1), 100));
+    mixer.render_pulling(&mut out, &mut source);
+    mixer.forget((9, 1));
+    mixer.render_pulling(&mut out, &mut source);
+    assert!(out[4_000] == 0 && !mixer.active());
+    // Without a source it is silence.
+    mixer.pulled((9, 1));
+    mixer.start(0, start((9, 1), 100));
+    assert!(render(&mut mixer, 1_000).iter().all(|&value| value == 0));
+}
+
+// Verifies RULE-62 (REQ-6527): the ring is what the mixer says, and another
+// is handed back.
+#[test]
+fn a_pulled_ring_of_the_wrong_length_is_handed_back() {
+    let mut mixer = Mixer::new(DEVICE_RATE);
+    assert_eq!(Mixer::pulled_ring(), 4 * LOCAL_BLOCK_SAMPLES);
+    assert_eq!(LOCAL_BLOCK_SAMPLES, 128);
+    assert_eq!(mixer.pulled_with((9, 1), vec![0; 100]).unwrap_err().len(), 100);
+    assert!(mixer.sounds.is_empty());
+    assert!(mixer.pulled_with((9, 1), vec![0; Mixer::pulled_ring()]).is_ok());
 }

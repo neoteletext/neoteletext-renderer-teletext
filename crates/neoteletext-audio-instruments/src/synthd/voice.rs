@@ -631,6 +631,15 @@ impl SynthD {
         self.allocator.sounding() > 0
     }
 
+    /// The loudness contour's position while the voice is not at rest,
+    /// and whether it is, as a count of 0 or 1 (page-rules.md, RULE-31).
+    #[must_use]
+    pub fn meter(&self) -> crate::midi::Meter {
+        let [_, loudness] = &self.contours;
+        let position = self.allocator.newest().map(|(_, gate)| crate::midi::Meter::keyed(loudness.meter(), gate));
+        crate::midi::Meter::of(position, self.allocator.sounding())
+    }
+
     /// Takes one MIDI 1.0 channel voice message. The instrument is one
     /// part and hears every channel alike (SD-2).
     ///

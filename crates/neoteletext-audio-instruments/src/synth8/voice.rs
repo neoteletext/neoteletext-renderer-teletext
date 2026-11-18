@@ -750,6 +750,13 @@ impl Voice {
         self.active
     }
 
+    /// The position of envelope 2, which the amplifier follows, as a
+    /// page's rules read it (page-rules.md, RULE-31).
+    pub fn meter(&self) -> (crate::midi::MeterStage, u8) {
+        let [_, second] = &self.envelopes;
+        second.meter()
+    }
+
     /// A tick: the envelopes move on, and the pitches, the pulse's
     /// width, the cutoff and the amplifier's slope are set.
     pub fn tick(&mut self, settings: &Settings, controls: Controls) {

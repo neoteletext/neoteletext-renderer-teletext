@@ -43,4 +43,9 @@ impl Instrument for Midi {
     fn render(&mut self, out: &mut [i16]) {
         self.synth80.render(out);
     }
+
+    /// Every channel is the one instrument (S80-2).
+    fn meter(&self, _part: u8) -> crate::midi::Meter {
+        self.synth80.meter()
+    }
 }

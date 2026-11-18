@@ -751,6 +751,21 @@ impl Synth53 {
         keyed.filter(|(key, voice)| key.stage != Stage::Rest && !voice.silent()).count()
     }
 
+    /// The amplifier envelope's position in the newest voice that is not
+    /// at rest and the count of voices not at rest (page-rules.md, RULE-31).
+    /// In unison the voices sound one key together, and the newest is any
+    /// of them.
+    #[must_use]
+    pub fn meter(&self) -> crate::midi::Meter {
+        let newest = self.allocator.newest().and_then(|(index, gate)| Some((self.voices.get(index)?, gate)));
+        let position = newest.map(|(voice, gate)| crate::midi::Meter::keyed(voice.meter(), gate));
+        // A voice let go is at rest once it is silent, and one given a key
+        // sounds from the next sample, when its gate alone says so.
+        let keyed = self.allocator.voices().iter().zip(&self.voices);
+        let sounding = keyed.filter(|(key, voice)| key.gate() || (key.stage != Stage::Rest && !voice.silent())).count();
+        crate::midi::Meter::of(position, sounding)
+    }
+
     /// Takes one MIDI 1.0 channel voice message. The instrument is one
     /// part and hears every channel; it has no MIDI of its own, so what
     /// each message does is this module's choice of the nearest thing

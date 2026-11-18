@@ -36,6 +36,15 @@ pub const HALF_CHANNELS: u8 = 2;
 /// The most patches a bank holds: the instrument's 64 memories, 11 to 88
 /// (S8-28, S8-29 (a); owner's manual, printed page 3).
 pub const MOST_PATCHES: usize = 64;
+
+/// A synth8 sound's key mode, as its OBJECT and a local sound's start name
+/// it (the audio profile's tag 7, S8-18): eight voices of the upper patch.
+pub const KEY_MODE_WHOLE: u8 = 0;
+/// Every key plays both patches, four voices each.
+pub const KEY_MODE_DUAL: u8 = 1;
+/// Keys below the split point play the lower patch, the others the upper,
+/// four voices each.
+pub const KEY_MODE_SPLIT: u8 = 2;
 /// The most bytes of a bank image: 64 patches of 42 bytes (S8-29 (a)).
 pub const MOST_BANK_BYTES: usize = MOST_PATCHES * PATCH_BYTES;
 const _: () = assert!(MOST_BANK_BYTES <= crate::midi::MOST_BANK_BYTES);
@@ -393,6 +402,14 @@ impl Tracker {
         }
     }
 
+    /// Half `part`'s program, 0 the upper and 1 the lower, and each panel
+    /// control's value moved since that program change, by the control's
+    /// byte of the patch; `None` for another part.
+    #[must_use]
+    pub fn half(&self, part: u8) -> Option<(u8, &[Option<u8>; PATCH_BYTES])> {
+        self.halves.get(usize::from(part)).map(|half| (half.program, &half.moved))
+    }
+
     /// The VCO bend depth the messages taken have set, in cents.
     #[must_use]
     pub const fn bend_depth_cents(&self) -> u16 {
@@ -537,3 +554,10 @@ impl Tracker {
         }
     }
 }
+
+// Named by its path so that it is found both where this module is a file
+// of its own and where the feature `interface` alone reads it through a
+// path from the crate root (lib.rs).
+#[path = "interface/parameters.rs"]
+mod parameters;
+pub use parameters::{PARAMETERS, param_of, program_patch, read_parameter};

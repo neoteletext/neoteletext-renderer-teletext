@@ -178,6 +178,15 @@ impl<const N: usize> Allocator<N> {
         self.voices.iter().filter(|voice| voice.stage != Stage::Rest).count()
     }
 
+    /// The voice most recently triggered that is not at rest, if any is,
+    /// and whether its gate is on: the one whose envelope a meter reads
+    /// (RULE-31).
+    #[must_use]
+    pub fn newest(&self) -> Option<(usize, bool)> {
+        let sounding = self.voices.iter().enumerate().filter(|(_, voice)| voice.stage != Stage::Rest);
+        sounding.max_by_key(|(_, voice)| voice.started).map(|(index, voice)| (index, voice.gate()))
+    }
+
     /// The instrument says that a released voice has fallen silent: it
     /// goes to rest. A voice that is not released, or that is not there,
     /// is left alone.

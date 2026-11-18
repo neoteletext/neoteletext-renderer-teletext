@@ -5,7 +5,7 @@
 
 use super::interface::{Effect, Tracker};
 use super::{Patch, Synth106};
-use crate::midi::{Banks, Instrument, Message, Outcome};
+use crate::midi::{Banks, Instrument, Message, Meter, Outcome};
 
 /// synth106 or synth60 as the receiver plays it.
 #[derive(Clone, Debug)]
@@ -96,5 +96,10 @@ impl Instrument for Midi {
             self.settle();
         }
         self.engine.render(out);
+    }
+
+    /// Every channel is the one part (S106-2).
+    fn meter(&self, _part: u8) -> Meter {
+        self.engine.meter()
     }
 }

@@ -117,6 +117,22 @@ impl Envelope {
         self.level
     }
 
+    /// The generator's position as a page's rules read it (page-rules.md,
+    /// RULE-31): its 8-bit counter as it stands, and the stage, the decay
+    /// that has reached the sustain level being the sustain. A released
+    /// counter at zero is idle.
+    pub(super) const fn meter(&self) -> (crate::midi::MeterStage, u8) {
+        use crate::midi::MeterStage;
+        let stage = match self.phase {
+            Phase::Attack => MeterStage::Attack,
+            Phase::DecaySustain if self.level <= self.sustain => MeterStage::Sustain,
+            Phase::DecaySustain => MeterStage::Decay,
+            Phase::Release if self.level == 0 => MeterStage::Idle,
+            Phase::Release => MeterStage::Release,
+        };
+        (stage, self.level)
+    }
+
     /// Writes the attack and decay nibbles (registers 5, 12 and 19).
     pub(super) fn write_attack_decay(&mut self, value: u8) {
         self.attack = value >> 4;

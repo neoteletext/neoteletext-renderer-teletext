@@ -40,6 +40,13 @@ pub struct Slot {
 }
 
 impl Slot {
+    /// When the voice was last given a key, on its assigner's clock: of
+    /// two of one assigner's voices, the larger is the newer.
+    #[must_use]
+    pub const fn started(&self) -> u32 {
+        self.started
+    }
+
     const REST: Self = Self { key: 0, gate: false, triggers: 0, damped: false, kept: false, started: 0 };
 }
 

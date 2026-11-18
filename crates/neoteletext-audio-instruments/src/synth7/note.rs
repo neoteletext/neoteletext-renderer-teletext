@@ -18,11 +18,12 @@
 use super::kernel::{
     self, ALGORITHMS, ATTENUATION_MAX, ATTENUATION_ONE, ATTENUATION_SILENT, Algorithm, BLOCK_SAMPLES, OPERATORS, Voice,
 };
-use super::msfa::env::{Env, Progress, STAGE_FINISHED};
+use super::msfa::env::{Env, FULL_SCALE, Progress, STAGE_FINISHED};
 use super::msfa::note::{self, LevelScaling};
 use super::msfa::pitchenv::PitchEnv;
 use super::msfa::{N, Q24_ONE, freqlut, share, share_u32};
 use super::patch::{Patch, TRANSPOSE_CENTRE};
+use crate::midi::{MeterStage, meter_level};
 
 /// The level of the parameter layer at which the kernel's attenuation is
 /// zero: 16 doublings. That layer's levels stay below it: its largest is
@@ -211,6 +212,24 @@ impl Note {
     }
 
     /// Makes the note silent at once and forgets its levels.
+    /// The position of operator 1's envelope generator, as a page's rules
+    /// read it (page-rules.md, RULE-31): the first rate is the attack, the
+    /// second and third the decay while the key is down, the third level
+    /// held the sustain, and everything after the key the release. The
+    /// level is the generator's own, which is logarithmic (a doubling in
+    /// 2^24), scaled linearly to 0 to 255 of its full scale of 15
+    /// doublings.
+    pub(crate) fn meter(&self) -> (MeterStage, u8) {
+        let Some(envelope) = self.envelopes.first() else { return (MeterStage::Idle, 0) };
+        let stage = match (envelope.down(), envelope.stage()) {
+            (true, 0) => MeterStage::Attack,
+            (true, 1 | 2) => MeterStage::Decay,
+            (true, _) => MeterStage::Sustain,
+            (false, _) => MeterStage::Release,
+        };
+        (stage, meter_level(envelope.level(), FULL_SCALE))
+    }
+
     pub(crate) fn clear(&mut self) {
         let voice = self.voice;
         *self = Self::new();

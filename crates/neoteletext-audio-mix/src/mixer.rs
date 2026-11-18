@@ -5,10 +5,15 @@
 
 use crate::ramp::{MIN_RAMP_MS, Ramp, UNITY, level, scale};
 use crate::sinc::{FILTER, ONE, PHASES, TAPS_BEFORE};
-use crate::sound::{STREAM_TARGET_MS, Sound, SoundKey};
+use crate::sound::{STREAM_TARGET_MS, Sound, SoundKey, Source};
 use alloc::vec::Vec;
 
+mod meter;
+mod pulled;
 mod stream;
+
+pub use meter::{PEAK_FULL_SCALE, PEAK_PER_LEVEL, meter_level};
+pub use pulled::{LOCAL_BLOCK_SAMPLES, PULLED_LOOKAHEAD_SAMPLES, PULLED_RATE_HZ, Pull};
 
 /// Voices, one for each channel of the audio profile.
 pub const VOICES: usize = 4;
@@ -43,6 +48,10 @@ pub struct Mixer {
     master: Ramp,
     master_percent: u8,
     muted: bool,
+    /// The voices whose peak is kept, a bit each (RULE-32).
+    metered: u8,
+    /// Each metered voice's peak since it was last asked for.
+    peaks: [u16; VOICES],
 }
 
 /// A sound on a voice.
@@ -90,6 +99,8 @@ impl Mixer {
             master: Ramp::at(UNITY),
             master_percent: 100,
             muted: false,
+            metered: 0,
+            peaks: [0; VOICES],
         }
     }
 
@@ -203,7 +214,7 @@ impl Mixer {
     pub fn position(&self, voice: usize) -> Option<u32> {
         let playing = self.voices.get(voice)?.playing.filter(|playing| !playing.stopping)?;
         let sound = self.sounds.iter().find(|sound| sound.key() == playing.key)?;
-        if sound.is_live() {
+        if sound.is_live() || sound.is_pulled() {
             return None;
         }
         u32::try_from(playing.whole.max(0)).ok()
@@ -216,13 +227,29 @@ impl Mixer {
     }
 
     /// Renders mono samples at the output rate. It never allocates or frees.
+    /// A pulled voice (RULE-62) is given silence: a port that plays one
+    /// calls [`Mixer::render_pulling`].
     pub fn render(&mut self, out: &mut [i16]) {
+        self.render_pulling(out, &mut pulled::Silence);
+    }
+
+    /// Renders mono samples at the output rate, asking `source` for each
+    /// pulled voice's samples as they are needed (RULE-62). It never
+    /// allocates or frees.
+    pub fn render_pulling(&mut self, out: &mut [i16], source: &mut dyn Pull) {
         self.trim_streams();
-        for sample in out.iter_mut() {
+        let pulling = self.sounds.iter().any(Sound::is_pulled);
+        let length = out.len();
+        for (done, sample) in out.iter_mut().enumerate() {
             self.update_ducks();
             let mut sum: i32 = 0;
             for index in 0..VOICES {
-                sum = sum.saturating_add(self.voice_sample(index));
+                if pulling {
+                    self.feed(index, length.saturating_sub(done), source);
+                }
+                let value = self.voice_sample(index);
+                self.note_peak(index, value);
+                sum = sum.saturating_add(value);
             }
             let master = self.master.advance();
             let mixed = scale(sum, master);
@@ -245,6 +272,20 @@ impl Mixer {
                 *slot = None;
                 continue;
             };
+            if sound.is_pulled() {
+                // Its samples were pulled as far as the filter reads
+                // ([`Mixer::feed`]): nothing is buffered ahead, so it never
+                // waits (RULE-62). Forgotten, it has no source and ends.
+                if sound.is_forgotten() {
+                    *slot = None;
+                    continue;
+                }
+                let value = interpolate(sound, playing.whole, playing.fraction);
+                total = total.saturating_add(scale(scale(value, gain), duck));
+                advance(&mut playing);
+                *slot = if playing.stopping && playing.gain.settled_at_zero() { None } else { Some(playing) };
+                continue;
+            }
             if sound.is_live() {
                 if !playing.primed {
                     playing.primed = sound.ahead(playing.whole) >= sound.target();
@@ -338,25 +379,32 @@ impl Mixer {
     }
 }
 
-/// A sound starting on a voice, its gain ramping in. `source` is the
-/// sound's rate and, for a live sound, the samples written so far: its
-/// voice joins [`STREAM_TARGET_MS`] behind the newest.
-fn begin(start: &Start, source: (u32, Option<i64>), output_rate: u32) -> Playing {
-    let (source_rate, written) = source;
+/// A sound starting on a voice, its gain ramping in. A live sound's voice
+/// joins [`STREAM_TARGET_MS`] behind the newest sample written; a pulled
+/// sound's voice starts at the next sample pulled, with nothing held ahead
+/// (RULE-62).
+fn begin(start: &Start, source: Source, output_rate: u32) -> Playing {
+    let (source_rate, written, joined) = match source {
+        Source::Stored(rate) => (rate, None, None),
+        Source::Live(rate, written) => {
+            let target = i64::from(rate.saturating_mul(STREAM_TARGET_MS) / 1000);
+            (rate, Some(written), Some(written.saturating_sub(target).max(0)))
+        }
+        Source::Pulled(written) => (PULLED_RATE_HZ, None, Some(written)),
+    };
     // The step is source rate / output rate, in 32.32 fixed point.
     let nominal = (u64::from(source_rate) << FRACTION_BITS).checked_div(u64::from(output_rate)).unwrap_or(0);
     let mut gain = Ramp::at(0);
     gain.to(level(start.gain), u32::from(start.fade_ms), output_rate);
-    let target = i64::from(source_rate.saturating_mul(STREAM_TARGET_MS) / 1000);
     let mut playing = Playing {
         key: start.key,
-        whole: written.map_or(0, |written| written.saturating_sub(target).max(0)),
+        whole: joined.unwrap_or(0),
         fraction: 0,
         step_whole: 0,
         step_fraction: 0,
         nominal,
         primed: written.is_none(),
-        looped: start.looped && written.is_none(),
+        looped: start.looped && joined.is_none(),
         gain,
         duck_percent: start.duck_percent,
         fade_ms: start.fade_ms,

@@ -1138,3 +1138,10 @@ impl Tracker {
 // The slider's values are a data byte's: a controller sets a slider to its
 // value unchanged (S106-23).
 const _: () = assert!(SLIDER_MAX == DATA_MAX);
+
+// Named by its path so that it is found both where this module is a file
+// of its own and where the feature `interface` alone reads it through a
+// path from the crate root (lib.rs).
+#[path = "interface/parameters.rs"]
+mod parameters;
+pub use parameters::{PARAMETERS, SYNTH60_PARAMETERS, parameters, read_parameter};

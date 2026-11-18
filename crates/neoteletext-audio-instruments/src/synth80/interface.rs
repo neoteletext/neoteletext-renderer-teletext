@@ -224,7 +224,7 @@ pub const RESTATEMENT_CHANNEL: u8 = 0;
 
 /// How the patch was last set.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Base {
+pub enum Base {
     /// Not since the sound began: program 0 of bank index 0 (MIDI-61).
     Start,
     /// By a program change, with controller 0's value then in force.
@@ -269,6 +269,19 @@ impl Tracker {
     #[must_use]
     pub fn new() -> Self {
         Self { base: Base::Start, moved: [None; CONTROLLERS], common: Common::new(CONFIG), tuning: [TUNING_CENTRE; 2] }
+    }
+
+    /// How the patch was last set.
+    #[must_use]
+    pub const fn base(&self) -> Base {
+        self.base
+    }
+
+    /// The value controller `controller` of the patch was last moved to
+    /// since the patch was set; `None` where it has not moved.
+    #[must_use]
+    pub fn moved(&self, controller: u8) -> Option<u8> {
+        self.moved.get(usize::from(controller)).copied().flatten()
     }
 
     /// Takes one message the server wrote, in order. An inline patch's 85
@@ -401,3 +414,10 @@ impl Tracker {
 
 // The pedal is restated down with 127, which is down (MIDI-87).
 const _: () = assert!(DATA_MAX >= PEDAL_DOWN);
+
+// Named by its path so that it is found both where this module is a file
+// of its own and where the feature `interface` alone reads it through a
+// path from the crate root (lib.rs).
+#[path = "interface/parameters.rs"]
+mod parameters;
+pub use parameters::{PARAMETERS, place_of_parameter, read_parameter};

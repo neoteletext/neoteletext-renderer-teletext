@@ -925,6 +925,13 @@ impl Voice {
         }
     }
 
+    /// Channel I's amplifier envelope's position, as a page's rules read
+    /// it (page-rules.md, RULE-31).
+    pub fn meter(&self) -> (crate::midi::MeterStage, u8) {
+        let [first, _] = &self.lines;
+        first.amp_envelope.meter()
+    }
+
     /// Whether the voice, its key up, has fallen silent.
     pub fn silent(&self) -> bool {
         !self.gate && self.lines.iter().all(Line::silent)

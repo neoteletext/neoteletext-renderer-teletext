@@ -190,4 +190,8 @@ impl Instrument for Midi {
     fn render(&mut self, out: &mut [i16]) {
         self.rack.render(out);
     }
+
+    fn meter(&self, part: u8) -> crate::midi::Meter {
+        self.rack.meter(part)
+    }
 }

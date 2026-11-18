@@ -18,6 +18,20 @@ neoteletext-formats = { workspace = true, features = ["std", "tti", "bdf"] }
 neoteletext-input = { workspace = true }
 # They use the audio encoder, for the audio records and their carriage.
 neoteletext-audio = { workspace = true, features = ["default", "encode", "pcm16"] }
+# Appendix A of page-rules.md is printed from every family's table of
+# readable patch fields (RULE-29). Every family is named, and not the
+# interface feature alone, which holds the tables: the workspace's
+# documentation is built with the features its members ask for together,
+# and the families' pages link to their synthesis.
+neoteletext-audio-instruments = { workspace = true, features = [
+    "synth6581",
+    "synth7",
+    "synth106",
+    "synthd",
+    "synth53",
+    "synth8",
+    "synth80",
+] }
 
 [lints]
 workspace = true

@@ -328,7 +328,7 @@ fn nrpn(part: &mut Part, number: u16, value: u16) -> Change {
 #[test]
 fn s53_22_s53_23_parameter_numbers_set_the_edit_buffer() {
     let banks = Banks::none();
-    for &(number, most) in &PARAMETERS {
+    for &(number, most) in &PROGRAM_RANGES {
         let mut part = Part::new(Variant::Synth53);
         nrpn(&mut part, u16::from(number), u16::from(most));
         assert_eq!(part.program().get(number), most);

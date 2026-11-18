@@ -570,6 +570,15 @@ impl Rack {
         self.slots.iter().filter(|slot| slot.stage != Stage::Free).count()
     }
 
+    /// The position of operator 1's envelope in the newest sounding note
+    /// of `part` (0 to 15), and the count of notes sounding on every part
+    /// (page-rules.md, RULE-31).
+    #[must_use]
+    pub fn meter(&self, part: u8) -> crate::midi::Meter {
+        let newest = self.slots.iter().filter(|slot| slot.sounding_on(part)).max_by_key(|slot| slot.started);
+        crate::midi::Meter::of(newest.map(|slot| slot.note.meter()), self.sounding_notes())
+    }
+
     /// Whether a note of `part` (0 to 15) on `key` is sounding: held by its
     /// key or the pedal, or dying away.
     #[must_use]
