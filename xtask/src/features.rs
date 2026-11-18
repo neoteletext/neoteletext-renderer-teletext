@@ -103,6 +103,15 @@ const BUILDS: &[Build] = &[
         package: "neoteletext-audio",
         features: "idl,opus,synth6581,synth7,synth106,synthd,synth53,synth8,synth80",
     },
+    // What a page's rules read of a sound played from blocks (page-rules.md
+    // RULE-30): alone it holds nothing, since no family is built; with one
+    // family; and the browser's build, every family watched.
+    Build { package: "neoteletext-audio", features: "watch" },
+    Build { package: "neoteletext-audio", features: "synth7,watch" },
+    Build {
+        package: "neoteletext-audio",
+        features: "idl,opus,synth6581,synth7,synth106,synthd,synth53,synth8,synth80,watch",
+    },
     Build { package: "neoteletext-audio-instruments", features: "" },
     Build { package: "neoteletext-audio-instruments", features: "synth6581" },
     Build { package: "neoteletext-audio-instruments", features: "synth7" },
