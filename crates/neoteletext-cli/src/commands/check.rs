@@ -41,10 +41,23 @@ pub fn check(files: &[PathBuf], descriptor: Option<&Path>, no_sandbox: bool) -> 
     use neoteletext_formats::check::{CheckOptions, Severity, check_page};
     let descriptor_json = descriptor.map(descriptor::read_descriptor).transpose()?;
     let mut opened = Vec::with_capacity(files.len());
+    let mut pictures = Vec::new();
     for file in files {
+        // PAR-7: a ReGIS or NAPLPS picture is checked as the server checks
+        // it, its bytes read before the sandbox.
+        if let Some(language) = file.to_str().and_then(crate::picture::language_of) {
+            pictures.push((file, language, super::picture::read_checked(file)?));
+            continue;
+        }
         opened.push((file, File::open(file).map_err(|error| io_failure(file, error))?));
     }
     sandbox_closed(no_sandbox)?;
+    let mut refused = 0_u32;
+    for (file, language, bytes) in &pictures {
+        if super::picture::check(*language, file, bytes)? {
+            refused = refused.saturating_add(1);
+        }
+    }
     let services: Vec<Vec<u8>> = match (descriptor, &descriptor_json) {
         (Some(path), Some(json)) => descriptor::parse_service_names(path, json)?,
         _ => Vec::new(),
@@ -102,6 +115,7 @@ pub fn check(files: &[PathBuf], descriptor: Option<&Path>, no_sandbox: bool) -> 
             report_outside_page(file, line, first_page, problem);
         }
     }
+    let errors = errors.saturating_add(refused);
     if errors > 0 { Err((exit::CHECK_ERRORS, format!("{errors} error(s)"))) } else { Ok(()) }
 }
 

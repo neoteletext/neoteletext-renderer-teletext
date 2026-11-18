@@ -64,7 +64,16 @@ pub fn render(
     image: ImageFormat,
     sequence_args: &SequenceArgs,
 ) -> Result<(), Failure> {
+    if let Some(language) = crate::picture::language_of(&options.input) {
+        return super::picture::render(language, &options.input, output, raster_args, image, options.no_sandbox);
+    }
     let selection = parse_selection(page)?;
+    // PAR-7: a `.t42` file that carries a picture for the page draws it.
+    if let Selection::Page(address, subcode) = selection
+        && let Some((language, bytes)) = super::picture::t42_picture(&options.input, address, subcode)?
+    {
+        return super::picture::render_bytes(language, &bytes, output, raster_args, image, options.no_sandbox);
+    }
     if sequence_args.frames.is_some() && selection == Selection::All {
         return Err((exit::USAGE, "--frames plays one page: name it, not `all`".to_owned()));
     }

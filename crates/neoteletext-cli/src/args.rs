@@ -196,6 +196,35 @@ pub struct RasterArgs {
     /// refused.
     #[arg(long, value_name = "HEX", requires = "font")]
     pub font_sha256: Option<String>,
+    /// For a ReGIS picture: alphabet 0 in this ReGIS font file (the text
+    /// form `regis::Font::parse` reads) instead of the VT340 font compiled
+    /// in (renderer parity PAR-7).
+    #[arg(long, value_name = "FILE")]
+    pub regis_font: Option<PathBuf>,
+    /// For a NAPLPS picture: this stroke font file instead of the one
+    /// compiled in (PAR-7).
+    #[arg(long, value_name = "FILE")]
+    pub naplps_font: Option<PathBuf>,
+}
+
+/// A picture written into a static channel's sub-page (`convert --to
+/// channel`, renderer parity PAR-8): the sub-page is `--page`'s.
+#[derive(Args, Debug, Clone, Default)]
+pub struct ChannelPictureArgs {
+    /// A ReGIS file to carry as the sub-page's picture.
+    #[arg(long, value_name = "FILE", conflicts_with = "naplps")]
+    pub regis: Option<PathBuf>,
+    /// A NAPLPS file to carry as the sub-page's picture.
+    #[arg(long, value_name = "FILE")]
+    pub naplps: Option<PathBuf>,
+    /// The picture's links: a JSON array as `regis_links` and
+    /// `naplps_links` give theirs, each `{"drawing": n, "target": "200"}`
+    /// or `{"object": n, "target": "200"}`.
+    #[arg(long, value_name = "FILE")]
+    pub links: Option<PathBuf>,
+    /// The drawing or object that is the picture's cursor, 0 for none.
+    #[arg(long, value_name = "N")]
+    pub cursor: Option<u16>,
 }
 
 /// The image sequence of `render`: a page played on the presentation
@@ -355,6 +384,8 @@ pub(crate) enum Command {
         /// Only this magazine and page, e.g. 100.
         #[arg(long)]
         page: Option<String>,
+        #[command(flatten)]
+        picture: ChannelPictureArgs,
     },
     /// Convert raw sampled video to T42 with quality statistics.
     Slice {
@@ -432,7 +463,8 @@ pub(crate) enum Command {
     },
     /// Check TTI page files for authoring problems.
     Check {
-        /// TTI files.
+        /// TTI files, or ReGIS (`.regis`) and NAPLPS (`.naplps`, `.nap`)
+        /// pictures, checked as the server checks them (PAR-7).
         files: Vec<PathBuf>,
         /// A channel's `channel.ttx`, or a service's descriptor, to resolve
         /// link targets against.
@@ -472,8 +504,13 @@ pub(crate) enum Command {
         page: String,
         /// The UTF-8 text.
         input: PathBuf,
-        /// The TTI file to write.
+        /// The TTI file to write, or with `--picture` the picture file.
         output: PathBuf,
+        /// Write a ReGIS or NAPLPS picture of the text instead of a TTI
+        /// page: 40 columns on rows 1 to 23, each line wrapped as for a
+        /// page, in `--language`'s provided set (renderer parity PAR-10).
+        #[arg(long, value_enum, conflicts_with = "set")]
+        picture: Option<crate::commands::PictureChoice>,
         /// Run without the operating-system sandbox (REQ-SEC-017).
         #[arg(long)]
         no_sandbox: bool,

@@ -20,7 +20,10 @@
 /// record frame holds no more.
 pub use neoteletext_audio::MAX_FRAMED_BODY;
 use neoteletext_audio::MAX_FRAMED_RECORD;
-use neoteletext_audio::idl::{FRAGMENT_DATA, MAX_FRAGMENTS, Reassembler, fragment, packet};
+/// The bytes of a record one packet 4/31 carries, so that a reader of a
+/// file of records can bound it by the records it may hold (PAR-8).
+pub use neoteletext_audio::idl::FRAGMENT_DATA;
+use neoteletext_audio::idl::{MAX_FRAGMENTS, Reassembler, fragment, packet};
 use neoteletext_audio::record::{RecordError, record_length, split, write};
 use neoteletext_core::packet::Packet;
 

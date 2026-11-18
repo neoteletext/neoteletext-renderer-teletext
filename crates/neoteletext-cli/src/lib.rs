@@ -32,6 +32,7 @@ mod operations;
 mod options;
 #[cfg(any(feature = "view", feature = "keyboard"))]
 mod page_rules;
+mod picture;
 mod records;
 mod rules_json;
 mod run;

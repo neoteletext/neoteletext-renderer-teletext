@@ -26,6 +26,9 @@ pub fn show(
     legacy_mosaics: bool,
     colours8: bool,
 ) -> Result<(), Failure> {
+    if let Some(language) = crate::picture::language_of(&options.input) {
+        return super::picture::show(language, &options.input, raster_args, graphics, options.no_sandbox);
+    }
     let selection = parse_selection(page)?;
     if selection == Selection::All {
         return Err((exit::USAGE, "show displays one page; use text or render for all".into()));

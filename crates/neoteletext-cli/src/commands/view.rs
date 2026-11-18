@@ -26,6 +26,10 @@ pub fn view(
     (back_key, forward_key): (Option<char>, Option<char>),
 ) -> Result<(), Failure> {
     use neoteletext_core::consts::PAGE_WIDTH;
+    // PAR-7: a picture file is shown as `show` shows it.
+    if let Some(language) = crate::picture::language_of(&options.input) {
+        return super::picture::show(language, &options.input, raster_args, graphics, options.no_sandbox);
+    }
     let remote_keys = crate::view::RemoteKeys::new(back_key, forward_key).map_err(|error| (exit::USAGE, error))?;
     let opening = input::opening(&options.input).map_err(|error| (exit::USAGE, error.to_string()))?;
     let (mut session, mut source) = input::open_live(options)?;

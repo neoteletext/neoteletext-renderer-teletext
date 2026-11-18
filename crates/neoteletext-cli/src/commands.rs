@@ -25,6 +25,7 @@ mod html;
 #[cfg(feature = "keyboard")]
 mod keyboard;
 mod list;
+mod picture;
 mod probe;
 #[cfg(feature = "keyboard")]
 mod qr;
@@ -49,6 +50,7 @@ pub use html::html;
 #[cfg(feature = "keyboard")]
 pub use keyboard::{KeyboardOptions, keyboard};
 pub use list::list;
+pub use picture::write_picture;
 pub use probe::probe;
 #[cfg(feature = "keyboard")]
 pub use qr::qr;
@@ -63,6 +65,15 @@ pub use sound::{PLAYER_PACKETS_PER_SECOND, SoundOptions, sound};
 pub use text::text;
 pub use view::view;
 pub use write_text::{TextChoice, write_text};
+
+/// The picture language of `write-text --picture` (renderer parity PAR-10).
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PictureChoice {
+    /// ReGIS.
+    Regis,
+    /// NAPLPS.
+    Naplps,
+}
 
 /// Image file formats (REQ-RND-007).
 #[derive(ValueEnum, Clone, Copy, Debug)]

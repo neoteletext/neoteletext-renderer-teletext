@@ -39,8 +39,8 @@ pub fn run() -> ExitCode {
         Command::Text { common, page, reveal, legacy_mosaics } => {
             commands::text(&common.options(), &page, reveal, legacy_mosaics)
         }
-        Command::Convert { common, output, to, page } => {
-            commands::convert(&common.options(), &output, to, page.as_deref())
+        Command::Convert { common, output, to, page, picture } => {
+            commands::convert(&common.options(), &output, to, page.as_deref(), &picture)
         }
         Command::Slice { common, output, preset, geometry } => {
             commands::slice(&common.options(), &output, &preset, &geometry)
@@ -59,7 +59,10 @@ pub fn run() -> ExitCode {
         }
         Command::Contents { common } => commands::contents(&common.options()),
         Command::Html { common, address, public } => commands::html(&common.options(), &address, &public),
-        Command::WriteText { set, language, level, page, input, output, no_sandbox } => {
+        Command::WriteText { picture: Some(picture), language, input, output, no_sandbox, .. } => {
+            commands::write_picture(picture, language.as_deref(), &input, &output, no_sandbox)
+        }
+        Command::WriteText { set, language, level, page, input, output, no_sandbox, picture: None } => {
             let choice =
                 commands::TextChoice { set: set.as_deref(), language: language.as_deref(), standard: level == "3.5" };
             commands::write_text(choice, &page, &input, &output, no_sandbox)

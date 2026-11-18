@@ -14,7 +14,14 @@ path = "src/main.rs"
 neoteletext-core = { workspace = true, features = ["default"] }
 # The program reads and writes every format, and `neottx check` runs the
 # page checker.
-neoteletext-formats = { workspace = true, features = ["default", "std"] }
+neoteletext-formats = { workspace = true, features = ["default", "std", "picture-text"] }
+# The project's own picture renderers and their fonts (DEC-6579, DEC-6760
+# item 17): `neottx` views, renders and checks ReGIS and NAPLPS pictures
+# and writes pages of text as pictures (renderer parity PAR-7 to PAR-10).
+regis.workspace = true
+regis-fonts.workspace = true
+naplps.workspace = true
+naplps-fonts.workspace = true
 neoteletext-image = { workspace = true, features = ["std", "alloc"] }
 neoteletext-app.workspace = true
 # The channel rules and the contents format of `neottx contents` (REQ-CLI-008).
