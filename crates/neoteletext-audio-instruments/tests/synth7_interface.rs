@@ -844,6 +844,216 @@ fn s7_52_a_note_starts_at_its_own_sample() {
     }
 }
 
+/// The ticks at which the S7-52 tests below place a message: samples 4,
+/// 14, 33, 240, 484 and 955 of the block, each within one of the kernel's
+/// 32-sample control steps and none on a step's boundary, and tick 20,
+/// sample 96, which is on one.
+const S7_52_TICKS: [u8; 7] = [1, 3, 7, 20, 50, 101, 199];
+
+/// The samples after a message's own within which its effect must show.
+/// A message changes what takes the kernel from its sample to the next (a
+/// phase's increment, a level's glide), so the sample at the message is
+/// already determined; the next one or two may round to the same 16 bits
+/// near a zero crossing or a peak. Before the fix the first change came at
+/// the next step's boundary, as late as 31 samples after.
+const S7_52_WITHIN: usize = 4;
+
+/// Samples rendered after each message of a test's setup, a whole number
+/// of the kernel's steps, so that a block's sample `s` is `s` modulo 32
+/// into a step, and long enough for a note to reach its sustain.
+const S7_52_SETTLE: usize = 4800;
+
+/// The first sample of a block at which a synth7 given `setup`, then
+/// `message` at `tick`, differs from one given the setup alone; `None` if
+/// none differs.
+fn s7_52_first_change(banks: &Banks<'_>, setup: &[Message<'_>], message: &Message<'_>, tick: u8) -> Option<usize> {
+    let mut with = started(banks);
+    for message in setup {
+        give(&mut with, message, banks);
+        render(&mut with, S7_52_SETTLE);
+    }
+    let mut without = with.clone();
+    let mut buffer = [0_u8; MOST_BLOCK_BYTES];
+    let mut writer = BlockWriter::new(&mut buffer);
+    writer.push(tick, message).unwrap();
+    let block = writer.bytes().to_vec();
+    let mut a = vec![0_i16; 960];
+    let mut b = vec![0_i16; 960];
+    play_block(&mut with, &block, banks, &mut a);
+    play_block(&mut without, &[], banks, &mut b);
+    a.iter().zip(&b).position(|(a, b)| a != b)
+}
+
+/// Checks S7-52 for one kind of message at every tick of [`S7_52_TICKS`]:
+/// no sample before the message's own changes, and the output changes
+/// within [`S7_52_WITHIN`] samples after it.
+fn s7_52_check(banks: &Banks<'_>, setup: &[Message<'_>], message: &Message<'_>, what: &str) {
+    for tick in S7_52_TICKS {
+        let at = sample_of_tick(tick);
+        let first = s7_52_first_change(banks, setup, message, tick);
+        let first = first.unwrap_or_else(|| panic!("{what} at tick {tick} changed no sample"));
+        assert!(
+            (at..=at + S7_52_WITHIN).contains(&first),
+            "{what} at tick {tick}, sample {at}: the first sample changed is {first}"
+        );
+    }
+}
+
+/// A function parameter change on part 0, as a message.
+fn function_change(parameter: u16, value: u8) -> [u8; 7] {
+    parameter_change(ParameterChange { channel: 0, parameter: Parameter::Function(parameter), value }).unwrap()
+}
+
+#[test]
+fn s7_52_a_note_on_over_a_sounding_voice_takes_effect_at_its_sample() {
+    // A slow release, so that the key's note still sounds when it is
+    // struck again and the new note takes over its voice.
+    let bank = build_bank(&[sine(|voice| voice.operators[0].eg_rates[3] = 30)]).unwrap();
+    let images = [bank.as_slice()];
+    let banks = Banks::new(&images);
+    let setup = [channel(status::NOTE_ON, 0, 69, 127), channel(status::NOTE_OFF, 0, 69, 0)];
+    s7_52_check(&banks, &setup, &channel(status::NOTE_ON, 0, 69, 127), "a note on over a sounding voice");
+}
+
+#[test]
+fn s7_52_a_note_off_takes_effect_at_its_sample() {
+    let banks = Banks::none();
+    let setup = [channel(status::NOTE_ON, 0, 69, 127)];
+    s7_52_check(&banks, &setup, &channel(status::NOTE_OFF, 0, 69, 0), "a note off");
+}
+
+#[test]
+fn s7_52_a_pitch_bend_takes_effect_at_its_sample() {
+    let banks = Banks::none();
+    let setup = [channel(status::NOTE_ON, 0, 69, 127)];
+    s7_52_check(&banks, &setup, &channel(status::PITCH_BEND, 0, 0x7f, 0x7f), "a pitch bend");
+}
+
+/// A sine whose carrier the low frequency oscillator attenuates by up to
+/// eight doublings, at speed 0 and without key sync, so that it stands
+/// near its bottom and the full depth acts.
+fn amplitude_modulated(change: impl FnOnce(&mut VoiceParams)) -> Patch {
+    sine(|voice| {
+        voice.lfo_speed = 0;
+        voice.lfo_key_sync = 0;
+        voice.operators[0].amp_mod_sensitivity = 3;
+        change(voice);
+    })
+}
+
+/// Function parameter 71's and its fellows' assignment to amplitude.
+const ASSIGN_AMPLITUDE: u8 = 2;
+
+#[test]
+fn s7_52_controllers_1_2_and_4_and_channel_pressure_take_effect_at_their_sample() {
+    let bank = build_bank(&[amplitude_modulated(|_| ())]).unwrap();
+    let images = [bank.as_slice()];
+    let banks = Banks::new(&images);
+    for (what, range, assign, message) in [
+        (
+            "the modulation wheel",
+            number::MODULATION_WHEEL_RANGE,
+            number::MODULATION_WHEEL_ASSIGN,
+            channel(status::CONTROL_CHANGE, 0, 1, 127),
+        ),
+        (
+            "the breath controller",
+            number::BREATH_CONTROLLER_RANGE,
+            number::BREATH_CONTROLLER_ASSIGN,
+            channel(status::CONTROL_CHANGE, 0, 2, 127),
+        ),
+        (
+            "the foot controller",
+            number::FOOT_CONTROLLER_RANGE,
+            number::FOOT_CONTROLLER_ASSIGN,
+            channel(status::CONTROL_CHANGE, 0, 4, 127),
+        ),
+        (
+            "channel pressure",
+            number::AFTER_TOUCH_RANGE,
+            number::AFTER_TOUCH_ASSIGN,
+            channel(status::CHANNEL_PRESSURE, 0, 127, 0),
+        ),
+    ] {
+        let (range, assign) = (function_change(range, 99), function_change(assign, ASSIGN_AMPLITUDE));
+        let setup = [
+            Message::SystemExclusive(after_start(&range)),
+            Message::SystemExclusive(after_start(&assign)),
+            channel(status::NOTE_ON, 0, 69, 127),
+        ];
+        s7_52_check(&banks, &setup, &message, what);
+    }
+}
+
+#[test]
+fn s7_52_volume_takes_effect_at_its_sample() {
+    let banks = Banks::none();
+    let setup = [channel(status::NOTE_ON, 0, 69, 127)];
+    s7_52_check(&banks, &setup, &channel(status::CONTROL_CHANGE, 0, 7, 0), "volume");
+}
+
+#[test]
+fn s7_52_the_sustain_pedal_lifted_takes_effect_at_its_sample() {
+    let banks = Banks::none();
+    let setup = [
+        channel(status::NOTE_ON, 0, 69, 127),
+        channel(status::CONTROL_CHANGE, 0, 64, 127),
+        channel(status::NOTE_OFF, 0, 69, 0),
+    ];
+    s7_52_check(&banks, &setup, &channel(status::CONTROL_CHANGE, 0, 64, 0), "the sustain pedal lifted");
+}
+
+#[test]
+fn s7_52_the_channel_mode_messages_take_effect_at_their_sample() {
+    let banks = Banks::none();
+    let setup = [channel(status::NOTE_ON, 0, 69, 127)];
+    s7_52_check(&banks, &setup, &channel(status::CONTROL_CHANGE, 0, 120, 0), "all sound off");
+    s7_52_check(&banks, &setup, &channel(status::CONTROL_CHANGE, 0, 123, 0), "all notes off");
+    let bank = build_bank(&[amplitude_modulated(|_| ())]).unwrap();
+    let images = [bank.as_slice()];
+    let banks = Banks::new(&images);
+    let range = function_change(number::MODULATION_WHEEL_RANGE, 99);
+    let assign = function_change(number::MODULATION_WHEEL_ASSIGN, ASSIGN_AMPLITUDE);
+    let setup = [
+        Message::SystemExclusive(after_start(&range)),
+        Message::SystemExclusive(after_start(&assign)),
+        channel(status::CONTROL_CHANGE, 0, 1, 127),
+        channel(status::NOTE_ON, 0, 69, 127),
+    ];
+    s7_52_check(&banks, &setup, &channel(status::CONTROL_CHANGE, 0, 121, 0), "reset all controllers");
+}
+
+#[test]
+fn s7_52_a_program_change_takes_effect_at_its_sample() {
+    // Program 1's oscillator is a square, which stands at its top where
+    // program 0's triangle stands near its bottom: the sounding note keeps
+    // program 0's depth, and the part's oscillator changes under it.
+    let bank = build_bank(&[
+        amplitude_modulated(|voice| voice.lfo_amp_mod_depth = 99),
+        amplitude_modulated(|voice| {
+            voice.lfo_amp_mod_depth = 99;
+            voice.lfo_wave = 3;
+        }),
+    ])
+    .unwrap();
+    let images = [bank.as_slice()];
+    let banks = Banks::new(&images);
+    let setup = [channel(status::NOTE_ON, 0, 69, 127)];
+    s7_52_check(&banks, &setup, &channel(status::PROGRAM_CHANGE, 0, 1, 0), "a program change");
+}
+
+#[test]
+fn s7_52_a_parameter_change_takes_effect_at_its_sample() {
+    let banks = Banks::none();
+    let setup = [channel(status::NOTE_ON, 0, 69, 127)];
+    // Operator 1's output level is parameter 121.
+    let level = parameter_change(ParameterChange { channel: 0, parameter: Parameter::Voice(121), value: 60 }).unwrap();
+    s7_52_check(&banks, &setup, &Message::SystemExclusive(after_start(&level)), "a voice parameter change");
+    let setup = [channel(status::PITCH_BEND, 0, 0x7f, 0x7f), channel(status::NOTE_ON, 0, 69, 127)];
+    let range = function_change(number::PITCH_BEND_RANGE, 12);
+    s7_52_check(&banks, &setup, &Message::SystemExclusive(after_start(&range)), "a function parameter change");
+}
+
 /// S7-53: a lost block releases every note and clears the RPN selection,
 /// and leaves the function parameters.
 #[test]

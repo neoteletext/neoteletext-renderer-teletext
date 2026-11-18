@@ -24,12 +24,17 @@
 // nothing can panic; the unit of rate, which `PitchEnv::init` computes in
 // floating point from the sample rate when the program starts and keeps in
 // a static variable, is a constant computed in integers for 48,000 samples
-// a second and blocks of 32; `new` is added.
+// a second and blocks of 32; `new` is added; `getsample` is
+// `getsample_for` a whole block, which advances the envelope by the share
+// of a block's increment that a part of a block takes, for synth7's
+// control steps split at a message's sample; and `progress` and
+// `set_progress` are added, to put the envelope back where it was when
+// such a step began.
 
 //! Computation of the DX7 pitch envelope.
 
-use super::env::{STAGE_FINISHED, STAGES};
-use super::{N, SAMPLE_RATE};
+use super::env::{Progress, STAGE_FINISHED, STAGES};
+use super::{N, SAMPLE_RATE, share};
 
 /// The stage an envelope holds while the key stays down.
 ///
@@ -127,15 +132,27 @@ impl PitchEnv {
 
     /// Advances the envelope by one block. Result is in Q24/octave.
     pub fn getsample(&mut self) -> i32 {
+        self.getsample_for(N)
+    }
+
+    /// As [`PitchEnv::getsample`], for `samples` of a block: the level
+    /// moves by that share of a block's increment ([`share`]); [`N`] or
+    /// more is a whole block, and 0 advances nothing. Added for synth7, not
+    /// in the original.
+    pub fn getsample_for(&mut self, samples: u32) -> i32 {
+        if samples == 0 {
+            return self.level;
+        }
         if self.ix < STAGE_SUSTAIN || (self.ix < STAGE_FINISHED && !self.down) {
+            let inc = share(self.inc, samples);
             if self.rising {
-                self.level = self.level.saturating_add(self.inc);
+                self.level = self.level.saturating_add(inc);
                 if self.level >= self.targetlevel {
                     self.level = self.targetlevel;
                     self.advance(self.ix.saturating_add(1));
                 }
             } else {
-                self.level = self.level.saturating_sub(self.inc);
+                self.level = self.level.saturating_sub(inc);
                 if self.level <= self.targetlevel {
                     self.level = self.targetlevel;
                     self.advance(self.ix.saturating_add(1));
@@ -143,6 +160,20 @@ impl PitchEnv {
             }
         }
         self.level
+    }
+
+    /// Where the envelope is on its way, as [`super::env::Env::progress`]
+    /// gives it. Added for synth7, not in the original.
+    #[must_use]
+    pub const fn progress(&self) -> Progress {
+        Progress::at(self.level, self.targetlevel, self.inc, self.ix, self.rising)
+    }
+
+    /// Puts the envelope back where [`PitchEnv::progress`] found it; its
+    /// rates, levels and key are left as they are. Added for synth7, not in
+    /// the original.
+    pub const fn set_progress(&mut self, progress: &Progress) {
+        (self.level, self.targetlevel, self.inc, self.ix, self.rising) = progress.parts();
     }
 
     /// The key goes down or up: up starts the fourth stage.

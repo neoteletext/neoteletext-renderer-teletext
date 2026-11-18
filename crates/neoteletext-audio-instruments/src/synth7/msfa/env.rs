@@ -26,11 +26,16 @@
 // 99 * 32; the increment of a stage is scaled from the instrument's own
 // sample rate to the rate and block size rendered here, where the
 // original uses the instrument's increments unchanged at whatever rate it
-// runs; `stage`, `level`, `new` and `set_outlevel` are added.
+// runs; `stage`, `level`, `new` and `set_outlevel` are added;
+// `getsample` is `getsample_for` a whole block, which advances the
+// envelope by the share of a block's increment that a part of a block
+// takes, for synth7's control steps split at a message's sample; and
+// `Progress`, `progress` and `set_progress` are added, to put an
+// envelope back where it was when such a step began.
 
 //! The envelope generator of one operator.
 
-use super::{N, SAMPLE_RATE};
+use super::{N, SAMPLE_RATE, share};
 
 /// The stages of an envelope: three while the key is down, the fourth
 /// after it is released.
@@ -122,6 +127,43 @@ pub const LEVEL_LUT: [u8; 20] = [0, 5, 9, 13, 17, 20, 23, 25, 27, 29, 31, 33, 35
 /// `28 + outlevel`.
 const LEVEL_LINEAR_OFFSET: i32 = 28;
 
+/// Where an envelope is on its way: what [`Env::getsample_for`] changes,
+/// and nothing else. Added for synth7, not in the original: synth7 puts an
+/// envelope back where it stood when a control step began, to bring it to
+/// a message's sample within the step (`synth7.md`, S7-52).
+#[derive(Clone, Copy, Debug)]
+pub struct Progress {
+    level: i32,
+    targetlevel: i32,
+    inc: i32,
+    ix: u8,
+    rising: bool,
+}
+
+impl Progress {
+    /// Where [`Env::new`] stands.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { level: 0, targetlevel: 0, inc: 0, ix: STAGE_FINISHED, rising: false }
+    }
+
+    /// The progress of the pitch envelope, which has the same five parts.
+    pub(crate) const fn at(level: i32, targetlevel: i32, inc: i32, ix: u8, rising: bool) -> Self {
+        Self { level, targetlevel, inc, ix, rising }
+    }
+
+    /// The five parts, as [`Progress::at`] takes them.
+    pub(crate) const fn parts(&self) -> (i32, i32, i32, u8, bool) {
+        (self.level, self.targetlevel, self.inc, self.ix, self.rising)
+    }
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// DX7 envelope generation.
 #[derive(Clone, Copy, Debug)]
 pub struct Env {
@@ -186,6 +228,17 @@ impl Env {
     /// Q24/doubling log format: 2^24 is one doubling, and nominal full
     /// scale is 15 doublings.
     pub fn getsample(&mut self) -> i32 {
+        self.getsample_for(N)
+    }
+
+    /// As [`Env::getsample`], for `samples` of a block: the level moves by
+    /// that share of a block's increment ([`share`]); [`N`] or more is a
+    /// whole block, and 0 advances nothing. Added for synth7, not in the
+    /// original.
+    pub fn getsample_for(&mut self, samples: u32) -> i32 {
+        if samples == 0 {
+            return self.level;
+        }
         if self.ix < STAGE_SUSTAIN || (self.ix < STAGE_FINISHED && !self.down) {
             if self.rising {
                 let jumptarget = JUMP_TARGET << 16;
@@ -193,13 +246,13 @@ impl Env {
                     self.level = jumptarget;
                 }
                 let factor = ATTACK_CEILING.saturating_sub(self.level) >> 24;
-                self.level = self.level.saturating_add(factor.saturating_mul(self.inc));
+                self.level = self.level.saturating_add(share(factor.saturating_mul(self.inc), samples));
                 if self.level >= self.targetlevel {
                     self.level = self.targetlevel;
                     self.advance(self.ix.saturating_add(1));
                 }
             } else {
-                self.level = self.level.saturating_sub(self.inc);
+                self.level = self.level.saturating_sub(share(self.inc, samples));
                 if self.level <= self.targetlevel {
                     self.level = self.targetlevel;
                     self.advance(self.ix.saturating_add(1));
@@ -232,6 +285,23 @@ impl Env {
                 self.advance(stage);
             }
         }
+    }
+
+    /// Where the envelope is on its way, for [`Env::set_progress`].
+    #[must_use]
+    pub const fn progress(&self) -> Progress {
+        Progress { level: self.level, targetlevel: self.targetlevel, inc: self.inc, ix: self.ix, rising: self.rising }
+    }
+
+    /// Puts the envelope back where [`Env::progress`] found it. Its rates,
+    /// levels, output level and key are left as they are: only a message
+    /// changes them.
+    pub const fn set_progress(&mut self, progress: &Progress) {
+        self.level = progress.level;
+        self.targetlevel = progress.targetlevel;
+        self.inc = progress.inc;
+        self.ix = progress.ix;
+        self.rising = progress.rising;
     }
 
     /// The level now, in Q24, without advancing.

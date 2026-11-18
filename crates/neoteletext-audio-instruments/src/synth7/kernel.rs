@@ -284,6 +284,10 @@ pub struct Voice {
     /// Silent since [`Voice::silence`]: the next block starts at its levels
     /// and does not glide to them.
     fresh: bool,
+    /// Aimed part way through the block ([`Voice::aim_operator`]): the next
+    /// block's glides start where the levels stand, not at the targets
+    /// they were aimed at, which they need not have reached.
+    carried: bool,
 }
 
 impl Default for Voice {
@@ -296,7 +300,7 @@ impl Voice {
     /// A silent voice.
     #[must_use]
     pub const fn new() -> Self {
-        Self { operators: [Operator::new(); OPERATORS], feedback: [0; 2], remaining: 0, fresh: true }
+        Self { operators: [Operator::new(); OPERATORS], feedback: [0; 2], remaining: 0, fresh: true, carried: false }
     }
 
     /// Makes every operator silent at once and clears the feedback
@@ -312,6 +316,14 @@ impl Voice {
         self.feedback = [0; 2];
         self.remaining = 0;
         self.fresh = true;
+        self.carried = false;
+    }
+
+    /// Whether the voice is silent since [`Voice::silence`] and has not yet
+    /// begun a block: its first levels are taken at once, not glided to.
+    #[must_use]
+    pub const fn is_fresh(&self) -> bool {
+        self.fresh
     }
 
     /// Sets every operator's phase to zero: the instrument's oscillator key
@@ -334,7 +346,13 @@ impl Voice {
             operator.increment = increment;
             let previous = operator.target;
             operator.target = attenuation.min(ATTENUATION_MAX);
-            operator.attenuation = if self.fresh { operator.target } else { previous };
+            operator.attenuation = if self.fresh {
+                operator.target
+            } else if self.carried {
+                operator.attenuation
+            } else {
+                previous
+            };
             // Both are at most 2^28, so the difference fits an i32.
             let difference = operator.target.cast_signed().wrapping_sub(operator.attenuation.cast_signed());
             // Rounded towards zero, so that the glide never passes its
@@ -344,18 +362,59 @@ impl Voice {
         }
     }
 
-    /// Starts a block of [`BLOCK_SAMPLES`] samples.
-    pub fn begin_block(&mut self) {
-        self.fresh = false;
-        self.remaining = BLOCK_SAMPLES;
+    /// Sets what the operator at `index` (0 for operator 1) does over the
+    /// rest of a block, the `samples` that [`Voice::begin_rest`] then
+    /// starts, from part way through it: for a message that arrives there
+    /// (`synth7.md`, S7-52). Its phase advances by `increment` from the
+    /// sample it has reached. Its attenuation goes on gliding as it was,
+    /// and the change of its target to `attenuation` (limited to
+    /// [`ATTENUATION_MAX`]) is glided over [`BLOCK_SAMPLES`] from here, as
+    /// a block's boundary glides it: by the block's end it has gone the
+    /// share of the change that the samples left are of a block, and the
+    /// next block's glide starts where it stands. Gliding the change over
+    /// only the samples left would step a level that the envelopes move at
+    /// once (an attack at its quickest, a key struck again) by as much as
+    /// all of it in one sample. After [`Voice::silence`] the attenuation is
+    /// `attenuation` from the start. An index of 6 or more does nothing.
+    pub fn aim_operator(&mut self, index: usize, increment: u32, attenuation: u32, samples: usize) {
+        let fresh = self.fresh;
+        let Some(operator) = self.operators.get_mut(index) else { return };
+        operator.increment = increment;
+        let target = attenuation.min(ATTENUATION_MAX);
+        if fresh {
+            operator.attenuation = target;
+            operator.target = target;
+            operator.step = 0;
+            return;
+        }
+        // Every attenuation is at most 2^28, so each difference and each
+        // product below, of at most a block's samples, fits an i32.
+        let samples = i32::try_from(samples.clamp(1, BLOCK_SAMPLES)).unwrap_or(BLOCK_SAMPLES_I32);
+        let change = target.cast_signed().wrapping_sub(operator.target.cast_signed()) / BLOCK_SAMPLES_I32;
+        let now = operator.attenuation.cast_signed();
+        let path = operator.step.saturating_add(change).saturating_mul(samples);
+        // Where the level stands at the block's end, held within the range:
+        // a glide that left it would wrap round to silence.
+        let end = now.saturating_add(path).clamp(0, ATTENUATION_MAX.cast_signed());
+        // Rounded towards zero, as in `set_operator`, so that the glide
+        // never passes its end.
+        operator.step = end.wrapping_sub(now).checked_div(samples).unwrap_or(0);
+        operator.target = target;
+        self.carried = true;
     }
 
-    /// Ends the block begun after `samples` more, at most
-    /// [`BLOCK_SAMPLES`]: for a voice started part way through its rack's
-    /// block, so that it sounds from its own sample and ends with the
-    /// others.
-    pub fn shorten_block(&mut self, samples: usize) {
-        self.remaining = self.remaining.min(samples);
+    /// Starts a block of [`BLOCK_SAMPLES`] samples.
+    pub fn begin_block(&mut self) {
+        self.carried = false;
+        self.begin_rest(BLOCK_SAMPLES);
+    }
+
+    /// Starts the last `samples` of a block, at most [`BLOCK_SAMPLES`]: for
+    /// a voice whose operators [`Voice::aim_operator`] set part way through
+    /// its rack's block, so that it ends the block with the others.
+    pub fn begin_rest(&mut self, samples: usize) {
+        self.fresh = false;
+        self.remaining = samples.min(BLOCK_SAMPLES);
     }
 
     /// Adds the voice's next samples to `out`: as many as `out` holds, but

@@ -200,7 +200,7 @@ fn amplitude_modulation_follows_its_sensitivity() {
 }
 
 /// The patch's pitch modulation depth makes vibrato after the delay, and
-/// a rack is about 17 kilobytes.
+/// a rack is about 19 kilobytes.
 #[test]
 fn pitch_modulation_waits_for_the_delay() {
     let mut rack = rack_with(|voice| {

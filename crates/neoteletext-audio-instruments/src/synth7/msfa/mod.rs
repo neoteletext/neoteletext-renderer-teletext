@@ -20,8 +20,10 @@
 // block size is kept (the memory barrier, the `min` and `max` templates and
 // the NEON detection have no use here); the block is 32 samples and not 64,
 // so that the 960 samples of an instrument block are a whole number of
-// them; and the sample rate, which the original passes to each `init`
-// function when the program starts, is a constant.
+// them; the sample rate, which the original passes to each `init`
+// function when the program starts, is a constant; and `share` and
+// `share_u32` are added, for the part of a block that synth7 advances
+// when a message splits it.
 
 //! The DX7's parameter layer: what turns a patch, a key and a velocity
 //! into the levels and frequencies of six operators as time passes.
@@ -67,3 +69,33 @@ pub const SAMPLE_RATE: u32 = crate::SAMPLE_RATE;
 /// Source: music-synthesizer-for-android `env.h`: "Result is in
 /// Q24/doubling log format".
 pub const Q24_ONE: i32 = 1 << 24;
+
+/// What an amount that a whole block advances by, `per_block`, advances by
+/// in `samples` of a block: `per_block × samples ÷ N`, rounded down, and
+/// `per_block` itself, unchanged, for [`N`] samples or more. Added for
+/// synth7, not in the original: synth7 splits a block at a message's
+/// sample (`synth7.md`, S7-52), and each part of the block advances by its
+/// share of the block's time.
+#[must_use]
+pub const fn share(per_block: i32, samples: u32) -> i32 {
+    if samples >= N {
+        return per_block;
+    }
+    // `per_block` is `whole × N + rest`, with `rest` in 0..N; with
+    // `samples` below N neither product can be larger than `per_block`.
+    let samples = samples.cast_signed();
+    let whole = per_block >> LG_N;
+    let rest = per_block & N.cast_signed().wrapping_sub(1);
+    whole.wrapping_mul(samples).wrapping_add(rest.wrapping_mul(samples) >> LG_N)
+}
+
+/// [`share`] of an unsigned amount.
+#[must_use]
+pub const fn share_u32(per_block: u32, samples: u32) -> u32 {
+    if samples >= N {
+        return per_block;
+    }
+    let whole = per_block >> LG_N;
+    let rest = per_block & (N - 1);
+    whole.wrapping_mul(samples).wrapping_add(rest.wrapping_mul(samples) >> LG_N)
+}
