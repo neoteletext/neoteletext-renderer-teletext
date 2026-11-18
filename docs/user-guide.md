@@ -322,7 +322,35 @@ It reads PNG, JPEG, GIF, BMP and WebP files of up to 64 MiB and 32,768 pixels a 
 | `--focus auto` | Crop where the picture has the most detail. |
 | `--keep-header` | Draw rows 1 to 24 only and leave row 0 to the page's header. |
 
-Options that contradict each other, such as `--hold-mosaics` at Level 3.5, are refused with the reason. The library behind it, `neoteletext-picture`, takes the picture's bytes and returns the page, so other programs can use it; `docs/spec/design/pictures.md` explains how it works.
+With `--to regis` or `--to naplps` it writes the picture as a ReGIS or NAPLPS picture instead of a page (renderer parity, REQ-6763): fitted to the language's canvas (ReGIS the VT340's 800 by 480 screen; NAPLPS the 480 by 462 teletext raster a NAPLPS page is drawn on), reduced to `--colours N` colours (2 to 16, 16 by default) and drawn as filled rectangles. ReGIS is shortened by the ReGIS renderer's minifier; both are checked by drawing them before they are written, and a picture over 262,144 bytes is refused. `--t42` and `--level` are for pages only.
+
+```sh
+target/release/neottx-picture photo.jpg photo.regis --to regis --colours 16
+target/release/neottx-picture photo.jpg photo.nap --to naplps
+```
+
+Options that contradict each other, such as `--hold-mosaics` at Level 3.5, are refused with the reason. The library's `keep_footer` option, which leaves row 24 to the page, and its `convert_raster`, which takes pixels already decoded, are what a server's mosaic fallback uses. The library behind it, `neoteletext-picture`, takes the picture's bytes and returns the page, so other programs can use it; `docs/spec/design/pictures.md` explains how it works.
+
+## Pictures: ReGIS and NAPLPS
+
+`neottx render`, `show`, `view` and `check` take ReGIS and NAPLPS pictures as well as teletext pages (renderer parity, REQ-6763):
+
+- a ReGIS file, `.regis`, of ReGIS commands with or without the device control string `ESC P p … ESC \`;
+- a NAPLPS file, `.naplps` or `.nap`;
+- a `.t42` file, such as a static channel's sub-page, whose records carry a picture for the page named.
+
+A picture is drawn as the browser draws it. ReGIS fills the VT340's 800 by 480 screen in its colour map, with numbered drawings composed; its alphabet 0 is the VT340 font compiled in, or `--regis-font FILE`. NAPLPS is drawn on the teletext raster, 480 by 500, from line 19, the border lines in the picture's screen colour, with the stroke font compiled in or `--naplps-font FILE`. Text in either language may use the 55 provided character sets, drawn in Noto Teletext, with the plain Arabic-script sets' letters joined. `show` and `view` need a terminal that shows images (kitty, Sixel or iTerm2).
+
+`neottx check` reads a picture as a NeoTeletext server reads it and prints what it finds: for ReGIS a failed commit, with its code and drawing, or a limit reached; for NAPLPS each refusal and the bytes passed over. It exits with status 4 when there is a refusal.
+
+`neottx convert --to channel --page 200/0001` carries a picture in that sub-page's file: `--regis FILE` or `--naplps FILE`, with `--links FILE`, a JSON array such as `[{"drawing": 3, "target": "300"}]` (`"object"` for a NAPLPS object), and `--cursor N`, the drawing or object that is the sub-page's cursor. A picture over 1,048,576 bytes is refused, as a server refuses to keep one.
+
+```sh
+neottx render map.regis 100 -o map.png
+neottx check map.regis weather.nap
+neottx convert pages.tti --to channel -o site --page 200/0001 --regis map.regis --links links.json
+neottx render site/200.t42 200/0001 -o map.png
+```
 
 ## Glyphs
 
@@ -388,6 +416,12 @@ A character none of these can write is refused, naming the character and its lin
 ```sh
 neottx write-text --set vietnamese --page 100 tin-tuc.txt 100.tti
 neottx write-text --language uk --page 120 novyny.txt 120.tti
+```
+
+With `--picture regis` or `--picture naplps` the text is written as a ReGIS or NAPLPS picture instead (REQ-6763): 40 columns on rows 1 to 23, each line broken at spaces as for a page, in the provided set of `--language` (Latin English when none is named) and Latin English for what that set cannot show. A character no set shows is written as `?`. ReGIS cells are 20 by 20 pixels, row `r` at y = 10 + 20 (r − 1); NAPLPS cells are 1/40 of the screen wide and one teletext row high. `--page` is still given but not used.
+
+```sh
+neottx write-text --language el --picture naplps --page 100 news.txt news.nap
 ```
 
 ## Languages

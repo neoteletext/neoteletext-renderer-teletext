@@ -77,6 +77,18 @@ The security analysis of the page rule table is section 12 of neoteletext-common
 | 15 | The default table sending more than a page needs | `default_send_all` is one function, byte-exact, a wire vector; it sends what protocol 8 sent | The operator's choice for each channel (RULE-53, the server) |
 | 16 | Events handled the moment they arrive (DEC-6635 item 1) used to do more work than a tick allows, to act sooner than a page could, or to see what it should not | Work: the events of one tick are held to `MAX_EVENTS_PER_TICK`, and their runs to `MAX_EVENT_COMMANDS_PER_TICK` commands and `MAX_EVENT_REPORTS_PER_TICK` reports, the first event of a tick aside; the rest wait in arrival order and are dropped beyond `MAX_QUEUED_EVENTS`, counted. Reads: one state, read as it stands; an event reads nothing a later event or the tick has not yet done. Outputs: a report still names an input event only by its sequence number and only from a rule that event fired. The fuzz target `rules_budget` holds the budgets and that a recorded run replays to the same outputs | The decoder handles events only for the open page, and the trusted core's own budgets on reports and sound commands still apply (RULE-52) |
 
+## Renderer parity's threats
+
+The security analysis of renderer parity is section 19 of neoteletext-common's `docs/renderer-parity.md` (branch `parity`, DEC-6638, DEC-6760). Three of its twelve threats concern the engine; the rest are the server's and the browser's to hold. Reviewed on 19 November 2026 with the engine's build of REQ-6761 to REQ-6763.
+
+| # | Threat | What in the engine answers it | Held elsewhere |
+|---|---|---|---|
+| 4 | Text parts expand into many bytes | `neoteletext_formats::picture_text`: a run is refused past `MAX_PART_CHARACTERS` (1,000) and the bytes a run writes are bounded by `MAX_REGIS_PART_BYTES` and `MAX_NAPLPS_PART_BYTES` (32,000 each), derived from the per-character bounds by asserted constants and tested with the worst run; a control or bidirectional formatting character is refused | The server's `MOST_PICTURE_PARTS` (PAR-21) |
+| 5 | A page carries its own letters for text | The encoder writes only the 55 provided sets, by the ReGIS alphabets 100 to 154 and the NAPLPS private designations of REQ-6668; the glyphs are the compiled Noto Teletext table, passed to the renderers by `neottx` (the ReGIS renderer refuses `L` into a provided alphabet, PAR-12) | The renderers (PAR-12, PAR-14) |
+| 11 | Static channel files carry oversized pictures | `neottx convert --to channel` refuses a picture over `MAX_PICTURE_STREAM_BYTES` (1,048,576), the bound the server keeps a picture to (PAR-17); `neottx` reads a picture file, and a `.t42` file for its pictures, within named bounds before its sandbox closes, and the renderers bound what drawing costs | The browser's record and renderer bounds when it reads them (PAR-36) |
+
+The renderers the engine's application crates now link, `regis` and `naplps`, are the project's own, pure Rust and without dependencies (DEC-6579); `neoteletext-formats` links them only under `picture-text`, which no microcontroller build turns on (`cargo xtask check-deps`). No finding is open.
+
 ## Status at this milestone
 
 Checked on 3 November 2026.
@@ -98,6 +110,7 @@ Checked on 3 November 2026.
 | Date | Milestone | Reviewer | Result |
 |---|---|---|---|
 | 10 October 2026 | Implementation in progress | Initial model | Gaps listed in the status table above. |
+| 19 November 2026 | Renderer parity, the engine's part (REQ-6761 to REQ-6763) | `docs/renderer-parity.md` section 19 applied | Threats 4, 5 and 11 answered as the section above says; none open. |
 | 10 October 2026 | amd64 and iTerm2 implementation complete | Implementation review | REQ-SEC-018 and REQ-SEC-024 done. Open: fuzzing, `cargo-deny`, the bill of materials, release signing, and the macOS and Windows sandboxes. |
 | 24 October 2026 | The security review of the engine and the browser after the reorganisation | NeoTeletext's security review, findings F-01 onwards | Its findings are cited by the decisions that answered them (among them E.114, E.115 and E.116). |
 | 26 October 2026 | The Opus decoder (decision E.123) | Three independent reviews (the Opus layer and tooling, CELT, SILK), fuzzing and the known Opus CVEs | No exploitable fault; three latent faults and the test gaps fixed (f5c6d9a, ce95ba6, f9d3cb6). `docs/spec/design/opus-security.md`. |

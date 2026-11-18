@@ -268,6 +268,12 @@ The page rule table (neoteletext-common's `docs/page-rules.md`, DEC-6522, in its
 
 The picture-to-page converter sits beside the page layers, as audio and input do: it writes pages, and shares only Foundation's constants with the core and the TTI reader and T42 writer with L0. `neoteletext-picture` is a sans-IO `std` library (REQ-2327): `convert` takes a picture file's bytes and an `Options` value and returns the page as TTI text, and `Page::t42` the same page as T42 packets. `decode` reads the five formats of DEC-2114 through the `image` crate within fixed bounds (REQ-2330), `raster` holds the picture and its fixed-point resampler, `fit` places it on the page and averages the sixels (REQ-2331 to REQ-2334), `quant` reduces it to starting palettes, `level1` and `enhanced` are the encoders of Levels 1 and 1.5 and of 2.5 and 3.5 (REQ-2335), and `tti` writes the page file. It opens nothing, so a program may run it in a confined process, as the browser does. `neoteletext-picture-cli` is the program `neottx-picture` (REQ-2337), which reads the file and writes the page; it is not part of `neottx` (DEC-2325 item 2).
 
+For renderer parity (REQ-6763, PAR-9 and PAR-11) `convert_raster` takes pixels already decoded, the path the server's mosaic fallback uses; the decoders are behind the default feature `decode`, so the server links the converter without them. `languages` (feature `picture-languages`, default) writes a picture as ReGIS or NAPLPS: fitted to the language's canvas with `fit`, reduced by `quant`, each row's runs merged into rectangles, ReGIS shortened by the ReGIS repository's minifier, and both checked by drawing with the project's own renderers.
+
+### Pictures in other languages — `regis`, `naplps` and the picture text encoder (REQ-6761 to REQ-6763)
+
+ReGIS and NAPLPS pictures are drawn by the project's own renderers, the `regis` and `naplps` crates of their repositories, pinned by commit (DEC-6579, DEC-6760). The engine does not draw them in its core: `neoteletext-formats::picture_text` (feature `picture-text`) writes a program's Unicode text into a picture in the 55 provided sets, choosing the sets by calling into `write_text`'s run encoder (`visual_characters`, `visual_stretches`), and `neoteletext-core::glyphs::joining` gives the renderers the joining data of the plain Arabic-script sets from the compiled glyph table. `neoteletext-input::caps` names the two capabilities, `REGIS_CAP` and `NAPLPS_CAP`. `neottx` (`neoteletext-cli`'s `picture` module and `commands/picture.rs`) draws picture files and the pictures a `.t42` file's records carry, checks them, writes them into a static channel's sub-page, and writes text as pictures.
+
 ### Cross-cutting modules — `neoteletext-core::{policy, config, trace}`
 
 | Module | Contents |
@@ -461,7 +467,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | Crate | Layers | Environment |
 |---|---|---|
 | `neoteletext-core` | Foundation, L1, L2, L3, L4, L6, L8 (core traits), cross-cutting | `no_std`, no allocation |
-| `neoteletext-formats` | L0: readers, detection, encoder | `no_std` readers; `std` writers |
+| `neoteletext-formats` | L0: readers, detection, encoder; the picture text encoder behind `picture-text`, which links the `regis` and `naplps` renderer crates | `no_std` readers; `std` writers |
 | `neoteletext-slicer` | L0: raw samples to packets | `no_std` |
 | `neoteletext-web` | L7 and L8 (web traits). Besides the core and `embedded-io`, it depends on `neoteletext-audio` (feature `idl`: the record frame and data-line carriage a channel's records share with sound) and `neoteletext-formats` (feature `tti`: the `LG` line and link target rules its LOG and LINKS records share with TTI files), as DEC-2346 decides | `no_std`, sans-IO |
 | `neoteletext-image` | L5 | Helpers `no_std`; writers `std` |
@@ -470,7 +476,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | `neoteletext-audio-instruments` | Audio: the profile's instruments (REQ-6412), synth6581, synth7 and five analogue synthesizers (synth106, synthD, synth53, synth8 and synth80), each rendered from its own input to samples; `neoteletext-audio` plays them behind its `synth6581` and `synth7` features and the feature of each synthesizer | `no_std`, no allocation, integer only |
 | `neoteletext-opus` | Audio: the Opus decoder of the audio profile (decision E.123) | `no_std`, no allocation, integer only |
 | `neoteletext-rules` | Page rules (section 3, "Page rules"): the rule table's codec, checks and evaluator, and the animation operations | `no_std`, no allocation, integer only, no dependency |
-| `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages | `std`, sans-IO |
+| `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages, and to ReGIS and NAPLPS (`picture-languages`, linking `regis`, `regis-minify` and `naplps`) | `std`, sans-IO |
 | `neoteletext-picture-cli` | L9: the program `neottx-picture` | `std` |
 | `neoteletext-transport` | L9: a client's sockets: the reader thread, the TLS pump, the blocking writes and the connection through a proxy, shared by `neoteletext-app`, `neoteletext-qrkeyboard` and the browser's fetcher (DEC-1905) | `std` |
 | `neoteletext-app` | L9: the application layer of `neottx` and any other viewer program: sessions, inputs, live mode's two processes, sandboxing | `std` |
