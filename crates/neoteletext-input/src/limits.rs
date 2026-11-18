@@ -5,8 +5,9 @@ use crate::{control, wire};
 
 /// The protocol version HELLO and WELCOME carry (DOC-1921), and the
 /// number in the push connection's subprotocol, which the wire vectors'
-/// test asserts agrees with it.
-pub const VERSION: u32 = 7;
+/// test asserts agrees with it. Version 8 adds viewer state's messages and
+/// retires cookies, and refuses 7 both ways (DEC-6471, VS-201).
+pub const VERSION: u32 = 8;
 /// The most bytes in one binary message (DOC-1918, REQ-INT-101): room
 /// for a SELECT with the longest page parameters (DEC-1715).
 pub const MAX_MESSAGE: usize = 8192;
