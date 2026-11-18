@@ -1571,3 +1571,47 @@ fn a_local_sounds_setup_holds_no_cue() {
     assert!(matches!(Sound::local(SOUND, 1, Codec::Synth7, &setup), Err(EncodeError::Setup)));
     assert!(Sound::local(SOUND, 1, Codec::Synth7, &SETUP).is_ok());
 }
+
+// Verifies RULE-112 (DEC-6599): a local sound belongs to the page, number
+// and sub-code, open when its play was carried out. The CONTROL record
+// names the number alone, so the port says when the sub-code changed: the
+// local sound ends, with its channel stopped, and does not start again by
+// itself, while a page sound that is not local plays on.
+#[test]
+fn a_local_sound_ends_when_the_ports_sub_code_changes() {
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder { local: true, ..Recorder::default() };
+    receiver.open_page(Some(PAGE), &mut sink);
+    let sound = local(SOUND, Codec::Synth7);
+    let id = SoundId { handle: SOUND, generation: 1 };
+    push(&mut receiver, &synth7_bank(), &mut sink);
+    push(&mut receiver, &sound, &mut sink);
+    let mut tune = synth7_tune(200);
+    tune.handle = SOUND + 1;
+    push(&mut receiver, &tune, &mut sink);
+    receiver.push_record(&play_on(2, 1, &sound, Some(PAGE)), &mut sink);
+    receiver.push_record(&play_on(0, 1, &tune, Some(PAGE)), &mut sink);
+    assert_eq!((receiver.local_sound(2), sink.locals.len(), sink.streams.len()), (Some(id), 1, 1));
+    sink.stops.clear();
+    receiver.end_local_sounds(&mut sink);
+    assert_eq!((receiver.local_sound(2), sink.stops.clone()), (None, vec![2]));
+    assert!(!sink.streams[0].ended, "a page sound that is not local follows the page number");
+    // It is armed no longer: nothing starts it again on this page number.
+    receiver.open_page(Some(0x102), &mut sink);
+    receiver.open_page(Some(PAGE), &mut sink);
+    assert_eq!((receiver.local_sound(2), sink.locals.len()), (None, 1));
+    // A play of a local sound still waiting for its sound is given up too.
+    let late = {
+        let mut late = local(SOUND + 2, Codec::Synth7);
+        late.banks = vec![BANK];
+        late
+    };
+    receiver.push_record(&late.object_record().unwrap(), &mut sink);
+    receiver.push_record(&play_on(3, 1, &late, Some(PAGE)), &mut sink);
+    receiver.end_local_sounds(&mut sink);
+    for record in late.data_records() {
+        receiver.push_record(&record, &mut sink);
+    }
+    assert_eq!((receiver.local_sound(3), sink.locals.len()), (None, 1));
+}
