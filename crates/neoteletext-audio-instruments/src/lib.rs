@@ -91,6 +91,14 @@ pub mod output;
 pub mod synth106;
 #[cfg(feature = "synth53")]
 pub mod synth53;
+/// synth53, synth52 and synth51's programming interface alone, without
+/// their synthesis, for the server (the feature `interface`; the server
+/// document's SRV-88).
+#[cfg(all(feature = "interface", not(feature = "synth53")))]
+pub mod synth53 {
+    #[path = "interface.rs"]
+    pub mod interface;
+}
 #[cfg(feature = "synth6581")]
 pub mod synth6581;
 #[cfg(feature = "synth7")]

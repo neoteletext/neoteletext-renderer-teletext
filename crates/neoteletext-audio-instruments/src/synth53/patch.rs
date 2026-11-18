@@ -1,38 +1,25 @@
-//! A program: the panel of the instrument as a fixed record.
+//! The panel: the instrument modelled's 24 knobs and 22 switches, the
+//! fields every voice is set from, and how a program of the adopted
+//! interface sets them (S53-34 to S53-37 of
+//! `neoteletext-common/docs/audio/synth53-synth52-synth51.md`).
 //!
-//! # The layout, and why this one
-//!
-//! The record is the instrument's own: the 24 bytes of a program in its
-//! memory, as the operation manual sets them out for whoever reads the
-//! memory through the serial interface. Each byte holds one knob in its
-//! low seven bits, the number the instrument's converter made of the
-//! knob when the program was stored, and one switch in its top bit. The
-//! last two bytes have a knob and no switch.
-//!
-//! The 2020 reissue's program dump (Sequential LLC, "Prophet-5 MIDI
-//! Implementation" 1.4, page 12: 128 bytes, one for each parameter) is a
-//! documented layout of the same controls too. It was not chosen: it
-//! carries a dozen parameters the original has not (velocity, pressure,
-//! Vintage, the count and detuning of voices in unison), and its knobs
-//! run from 0 to 120, where the instrument emulated here stores what
-//! its own converter measures, 0 to 127.
-//!
-//! Every value of every byte is a program: a knob has all 128 values of
-//! its seven bits, a switch both of its one, and the two top bits that
-//! mean nothing are not kept.
-//!
-//! Source: Sequential Circuits, "Prophet-5 Synthesizer Operation
-//! Manual" (CM1000D, February 1982, for revision 3.3), section 6-7,
-//! "Status 3: Save to tape" (pages 42 and 43 of the scan): "a file is
-//! organized as 40 24-byte programs"; "The least-significant seven bits
-//! of each byte represent a programmable potentiometer setting of 0-127
-//! steps, while the MSB represents a switch setting (1=on, 0=off)"; and
-//! the table of the 24 bytes, which [`Knob`] and [`Switch`] follow.
+//! A program travels as the 2020 instrument's 128 bytes
+//! ([`super::interface::Program`], S53-33). The panel is what the voices
+//! read: each knob the number the instrument's converter makes of it, 0 to
+//! 127, and each switch on or off. It is kept, as the instrument kept
+//! its own programs, as 24 bytes, each a knob in its low seven bits and a
+//! switch in its top bit (Sequential Circuits, "Prophet-5 Synthesizer
+//! Operation Manual", CM1000D, February 1982, section 6-7, "Status 3: Save
+//! to tape", pages 42 and 43 of the scan: "40 24-byte programs"; "The
+//! least-significant seven bits of each byte represent a programmable
+//! potentiometer setting of 0-127 steps, while the MSB represents a switch
+//! setting (1=on, 0=off)"), which [`Knob`] and [`Switch`] follow. That
+//! form is no longer carried anywhere: it is the panel's storage alone.
 
-/// Bytes of a program.
+/// Bytes of the panel's storage.
 ///
 /// Source: the operation manual, section 6-7: "40 24-byte programs".
-pub const PATCH_BYTES: usize = 24;
+const PATCH_BYTES: usize = 24;
 
 /// The largest value of a knob.
 ///
@@ -179,15 +166,15 @@ const SWITCH_BYTES: usize = 22;
 const _: () = assert!(Switch::OscBLowFrequency as usize == SWITCH_BYTES - 1);
 const _: () = assert!(Knob::OscBFine as usize == PATCH_BYTES - 1);
 
-/// One program. Every value of every field is a program the instrument
-/// can play.
+/// The panel. Every value of every field is a setting the instrument can
+/// play.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Patch {
     bytes: [u8; PATCH_BYTES],
 }
 
 impl Patch {
-    /// A plain starting sound: oscillator A's sawtooth, two octaves up
+    /// A plain starting sound, the panel of the default program (S53-30): oscillator A's sawtooth, two octaves up
     /// its knob, through an open filter that follows the keys; both
     /// envelopes at full sustain; the release switch on.
     ///
@@ -215,11 +202,11 @@ impl Patch {
         Self { bytes }
     };
 
-    /// Reads a program from its 24 bytes. Nothing is refused, for every
-    /// value of every byte is a setting of a knob and a switch; the top
-    /// bits of the last two bytes, which hold no switch, are not kept.
+    /// The panel of its 24 bytes. Every value of every byte is a setting
+    /// of a knob and a switch; the top bits of the last two bytes, which
+    /// hold no switch, are not kept.
     #[must_use]
-    pub fn from_bytes(bytes: &[u8; PATCH_BYTES]) -> Self {
+    pub(super) fn from_stored(bytes: &[u8; PATCH_BYTES]) -> Self {
         let mut kept = *bytes;
         for byte in kept.iter_mut().skip(SWITCH_BYTES) {
             *byte &= KNOB_MAX;
@@ -227,9 +214,9 @@ impl Patch {
         Self { bytes: kept }
     }
 
-    /// The program as its 24 bytes.
+    /// The panel as its 24 bytes.
     #[must_use]
-    pub const fn to_bytes(&self) -> [u8; PATCH_BYTES] {
+    pub(super) const fn stored(&self) -> [u8; PATCH_BYTES] {
         self.bytes
     }
 
@@ -277,5 +264,149 @@ impl Patch {
 impl Default for Patch {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+
+/// The knobs and the parameter of the adopted interface that sets each
+/// (S53-37; the table of section 10.2 of the family document).
+pub const KNOB_PARAMETERS: [(Knob, u8); 24] = {
+    use super::interface::parameter as p;
+    [
+        (Knob::OscAFrequency, p::OSC_A_FREQUENCY),
+        (Knob::OscBFrequency, p::OSC_B_FREQUENCY),
+        (Knob::OscBFine, p::OSC_B_FINE_TUNE),
+        (Knob::OscAPulseWidth, p::OSC_A_PULSE_WIDTH),
+        (Knob::OscBPulseWidth, p::OSC_B_PULSE_WIDTH),
+        (Knob::Glide, p::GLIDE_RATE),
+        (Knob::MixerOscA, p::OSC_A_LEVEL),
+        (Knob::MixerOscB, p::OSC_B_LEVEL),
+        (Knob::MixerNoise, p::NOISE_LEVEL),
+        (Knob::Cutoff, p::CUTOFF),
+        (Knob::Resonance, p::RESONANCE),
+        (Knob::LfoFrequency, p::LFO_FREQUENCY),
+        (Knob::SourceMix, p::LFO_SOURCE_MIX),
+        (Knob::PolyModFilterEnvelope, p::POLY_MOD_FILT_ENV_AMOUNT),
+        (Knob::PolyModOscB, p::POLY_MOD_OSC_B_AMOUNT),
+        (Knob::FilterEnvelopeAmount, p::ENV_FILTER_AMOUNT),
+        (Knob::FilterAttack, p::ATTACK_FILTER),
+        (Knob::AmplifierAttack, p::ATTACK_VCA),
+        (Knob::FilterDecay, p::DECAY_FILTER),
+        (Knob::AmplifierDecay, p::DECAY_VCA),
+        (Knob::FilterSustain, p::SUSTAIN_FILTER),
+        (Knob::AmplifierSustain, p::SUSTAIN_VCA),
+        (Knob::FilterRelease, p::RELEASE_FILTER),
+        (Knob::AmplifierRelease, p::RELEASE_VCA),
+    ]
+};
+
+/// The switches and the parameter that sets each (S53-37). The filter's
+/// keyboard switch is on at FILTER KEYBOARD TRACK's half and full
+/// (S53-41).
+pub const SWITCH_PARAMETERS: [(Switch, u8); 22] = {
+    use super::interface::parameter as p;
+    [
+        (Switch::OscASawtooth, p::OSC_A_SAW),
+        (Switch::OscAPulse, p::OSC_A_SQUARE),
+        (Switch::OscBSawtooth, p::OSC_B_SAW),
+        (Switch::OscBTriangle, p::OSC_B_TRI),
+        (Switch::OscBPulse, p::OSC_B_SQUARE),
+        (Switch::Sync, p::OSC_SYNC),
+        (Switch::OscBLowFrequency, p::OSC_B_LOW_FREQ),
+        (Switch::OscBKeyboard, p::OSC_B_KEYBOARD),
+        (Switch::FilterKeyboard, p::FILTER_KEYBOARD_TRACK),
+        (Switch::LfoSawtooth, p::LFO_SAW),
+        (Switch::LfoTriangle, p::LFO_TRI),
+        (Switch::LfoSquare, p::LFO_SQUARE),
+        (Switch::WheelFrequencyA, p::LFO_FREQ_A),
+        (Switch::WheelFrequencyB, p::LFO_FREQ_B),
+        (Switch::WheelPulseWidthA, p::LFO_FREQ_PW_A),
+        (Switch::WheelPulseWidthB, p::LFO_FREQ_PW_B),
+        (Switch::WheelFilter, p::LFO_FILTER),
+        (Switch::PolyModFrequencyA, p::POLY_MOD_FREQ_A),
+        (Switch::PolyModPulseWidthA, p::POLY_MOD_PW),
+        (Switch::PolyModFilter, p::POLY_MOD_FILTER),
+        (Switch::Release, p::RELEASE_SWITCH),
+        (Switch::Unison, p::UNISON),
+    ]
+};
+
+// S53-37: every knob and every switch is set by exactly one parameter, and
+// no parameter sets two fields.
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "worked out by the compiler: a fault here stops the build, and no program"
+)]
+const _: () = {
+    let mut knobs = [false; PATCH_BYTES];
+    let mut switches = [false; SWITCH_BYTES];
+    let mut parameters = [false; super::interface::PARAMETER_SPAN];
+    let mut index = 0;
+    while index < KNOB_PARAMETERS.len() {
+        let (knob, parameter) = KNOB_PARAMETERS[index];
+        assert!(!knobs[knob as usize] && !parameters[parameter as usize]);
+        knobs[knob as usize] = true;
+        parameters[parameter as usize] = true;
+        index += 1;
+    }
+    index = 0;
+    while index < SWITCH_PARAMETERS.len() {
+        let (switch, parameter) = SWITCH_PARAMETERS[index];
+        assert!(!switches[switch as usize] && !parameters[parameter as usize]);
+        switches[switch as usize] = true;
+        parameters[parameter as usize] = true;
+        index += 1;
+    }
+    assert!(KNOB_PARAMETERS.len() == PATCH_BYTES && SWITCH_PARAMETERS.len() == SWITCH_BYTES);
+};
+
+/// The panel's number of a knob parameter's value on a model (S53-35,
+/// S53-36): on synth53 the value itself, one value a dial step and 120 the
+/// dial's 10; on synth52 and synth51, whose converter puts the dial's 10 at
+/// 127, `floor((value × 127 + 60) ÷ 120)`. A parameter of range 0 to 127
+/// (OSC B FINE TUNE, POLY MOD FILT ENV AMOUNT) is the value on every
+/// model.
+#[must_use]
+pub fn knob_of_value(value: u8, maximum: u8, scaled: bool) -> u8 {
+    let top = super::interface::KNOB_TOP;
+    if !scaled || maximum != top {
+        return value.min(KNOB_MAX);
+    }
+    let value = u16::from(value.min(top));
+    let field =
+        value.saturating_mul(u16::from(KNOB_MAX)).saturating_add(u16::from(top / 2)).checked_div(u16::from(top));
+    field.and_then(|field| u8::try_from(field).ok()).unwrap_or(KNOB_MAX)
+}
+
+/// The parameter value a writer gives for a panel number on synth52 and
+/// synth51 (S53-36): `floor((field × 120 + 63) ÷ 127)`, which
+/// [`knob_of_value`] returns as the nearest number a parameter can
+/// express.
+#[must_use]
+pub fn value_of_knob(field: u8) -> u8 {
+    let top = super::interface::KNOB_TOP;
+    let field = u16::from(field.min(KNOB_MAX));
+    let value =
+        field.saturating_mul(u16::from(top)).saturating_add(u16::from(KNOB_MAX / 2)).checked_div(u16::from(KNOB_MAX));
+    value.and_then(|value| u8::try_from(value).ok()).unwrap_or(top)
+}
+
+impl Patch {
+    /// The panel a program sets on a model (S53-35 to S53-37): each knob
+    /// from its parameter on the model's scale, each switch on where its
+    /// parameter is not 0, every parameter byte held to its maximum first
+    /// (S53-33).
+    #[must_use]
+    pub fn of_program(program: &super::interface::Program, model: super::Model) -> Self {
+        let scaled = !matches!(model, super::Model::Synth53);
+        let mut patch = Self { bytes: [0; PATCH_BYTES] };
+        for (knob, parameter) in KNOB_PARAMETERS {
+            let maximum = super::interface::maximum(u16::from(parameter)).unwrap_or(KNOB_MAX);
+            patch.set(knob, knob_of_value(program.get(parameter), maximum, scaled));
+        }
+        for (switch, parameter) in SWITCH_PARAMETERS {
+            patch.switch(switch, program.get(parameter) != 0);
+        }
+        patch
     }
 }

@@ -27,6 +27,7 @@
     reason = "fixtures, of which each user takes a part"
 )]
 
+use neoteletext_audio_instruments::synth53::interface::{PROGRAM_BYTES, Program};
 use neoteletext_audio_instruments::synth53::patch::dial;
 use neoteletext_audio_instruments::synth53::{Knob, Model, Patch, Switch};
 
@@ -56,7 +57,7 @@ impl Sheet {
     /// the volt.
     #[must_use]
     pub fn program(&self, model: Model) -> Patch {
-        let mut patch = Patch::from_bytes(&[0; 24]);
+        let mut patch = Patch::of_program(&Program::from_bytes([0; PROGRAM_BYTES]), model);
         for &(knob, tenths) in self.knobs {
             let steps = match (knob, model) {
                 (Knob::LfoFrequency, Model::Synth53) => {

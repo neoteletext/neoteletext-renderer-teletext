@@ -248,6 +248,9 @@ pub struct Settings {
     /// and the wheel.
     cutoff: i32,
     keyboard_filter: bool,
+    /// The cutoff follows the key at half its rate: FILTER KEYBOARD TRACK
+    /// at half (S53-41).
+    half_tracking: bool,
     resonance: i32,
     /// Octaves the filter envelope's peak moves the cutoff.
     envelope_cutoff: i32,
@@ -421,6 +424,7 @@ impl Settings {
             wheel_cutoff: on(Switch::WheelFilter),
             cutoff: law.cutoff.0.saturating_add(law::semitones(steps(Knob::Cutoff))).saturating_add(tuning),
             keyboard_filter: on(Switch::FilterKeyboard),
+            half_tracking: false,
             resonance,
             envelope_cutoff: law::gain(ENVELOPE_CUTOFF, amount(Knob::FilterEnvelopeAmount)),
             filter_envelope: Times::new(
@@ -435,6 +439,15 @@ impl Settings {
             ),
             release: on(Switch::Release),
         }
+    }
+
+    /// The settings with the cutoff following the key at half the rate
+    /// the keyboard switch gives it, or at the whole (S53-41: "Half is read
+    /// as half the key's voltage, as the name says").
+    #[must_use]
+    pub const fn with_half_tracking(mut self, half: bool) -> Self {
+        self.half_tracking = half;
+        self
     }
 
     /// Whether oscillator B moves anything through Poly-Mod, which is
@@ -657,10 +670,12 @@ impl Voice {
 
         // The filter's key voltage counts from the lowest key's number.
         let key_steps = law::semitones(law.cutoff.1);
+        let tracked = key.saturating_add(key_steps);
+        let tracked = if settings.half_tracking { tracked >> 1 } else { tracked };
         let cutoff = settings
             .cutoff
             .saturating_add(self.trim_cutoff)
-            .saturating_add(through(settings.keyboard_filter, key.saturating_add(key_steps)))
+            .saturating_add(through(settings.keyboard_filter, tracked))
             .saturating_add(law::gain(settings.envelope_cutoff, envelope))
             .saturating_add(through(settings.wheel_cutoff, amplify(wheel, WHEEL_CUTOFF)))
             .saturating_add(through(settings.poly_to_cutoff, amplify(poly_envelope, POLY_MOD_CUTOFF)));

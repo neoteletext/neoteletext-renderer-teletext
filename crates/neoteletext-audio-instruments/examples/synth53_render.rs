@@ -6,12 +6,11 @@
 //!
 //! The first argument is the revision, `3` (the Curtis chips) or `2`
 //! (the SSM chips of revisions 1 and 2). The file's first track is
-//! played: its note, controller and pitch bend messages. The original
-//! instrument has no MIDI and so no message that carries a program:
-//! after the files, `patch=FILE` names a file of a program's 24 bytes
-//! (the operation manual's section 6-7), and `tail=SECONDS` how long to
-//! go on after the track (1 by default). The output is 48 kHz, 16 bits,
-//! mono.
+//! played: its note, controller and pitch bend messages. After the files,
+//! `patch=FILE` names a file holding a program as the 2020 instrument's
+//! edit buffer dump, all 157 bytes (`synth53-synth52-synth51.md`, S53-29),
+//! and `tail=SECONDS` how long to go on after the track (1 by default).
+//! The output is 48 kHz, 16 bits, mono.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -23,8 +22,8 @@
 )]
 
 use neoteletext_audio_instruments::SAMPLE_RATE;
-use neoteletext_audio_instruments::synth53::patch::PATCH_BYTES;
-use neoteletext_audio_instruments::synth53::{Model, Patch, Synth53};
+use neoteletext_audio_instruments::synth53::interface::check_patch;
+use neoteletext_audio_instruments::synth53::{Model, Synth53};
 
 /// A variable-length quantity at `at`, which it moves past it.
 fn quantity(data: &[u8], at: &mut usize) -> usize {
@@ -85,19 +84,20 @@ fn main() {
         panic!("usage: synth53_render 3|2 IN.mid OUT.wav [patch=FILE] [tail=SECONDS]");
     };
     let model = if model == "2" { Model::Synth52 } else { Model::Synth53 };
-    let (mut tail, mut patch) = (1.0, Patch::DEFAULT);
+    let (mut tail, mut program) = (1.0, None);
     for option in options {
         if let Some(file) = option.strip_prefix("patch=") {
             let bytes = std::fs::read(file).expect("the patch file is read");
-            let bytes: &[u8; PATCH_BYTES] = bytes.as_slice().try_into().expect("24 bytes");
-            patch = Patch::from_bytes(bytes);
+            program = Some(check_patch(&bytes).expect("an edit buffer dump"));
         } else {
             tail = option.strip_prefix("tail=").and_then(|text| text.parse().ok()).expect("an option");
         }
     }
     let (events, length) = read(&std::fs::read(input).expect("the MIDI file is read"));
     let mut synth53 = Synth53::new(model);
-    synth53.set_patch(&patch);
+    if let Some(program) = program {
+        synth53.set_program(&program);
+    }
     let mut samples = vec![0i16; ((length + tail + 1.0) * f64::from(SAMPLE_RATE)) as usize];
     let mut done = 0;
     for (time, bytes) in events {
