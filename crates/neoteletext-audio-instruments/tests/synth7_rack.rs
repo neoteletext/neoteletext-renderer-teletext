@@ -637,6 +637,58 @@ fn the_length_of_a_call_does_not_matter() {
     assert_eq!(got, expected);
 }
 
+/// S7-52: a score whose messages fall within the kernel's 32-sample
+/// steps, each of which splits its part's step at its own sample, renders
+/// the same samples in calls of 1, 7, 960 and 4,800 samples.
+#[test]
+fn s7_52_a_score_renders_the_same_however_the_calls_are_divided() {
+    let mut random = Random(0x5752_0052_7a11_0b0e);
+    let bank = random_bank(&mut random);
+    // Each message at its sample: notes, bends, the wheel, volume, the
+    // pedal and program changes on four parts, none on a step's boundary.
+    let mut score = Vec::new();
+    let mut at = 0_usize;
+    for index in 0..400_u32 {
+        at += 1 + random.below(90) as usize;
+        if at.is_multiple_of(32) {
+            at += 1;
+        }
+        let part = (index % 4) as u8;
+        let value = random.below(128) as u8;
+        let message = match index % 8 {
+            0 | 1 => (0x90 | part, 40 + value % 40, 1 + value % 127),
+            2 => (0x80 | part, 40 + value % 40, 0),
+            3 => (0xe0 | part, value, 127 - value),
+            4 => (0xb0 | part, 1, value),
+            5 => (0xb0 | part, 7, 64 + value / 2),
+            6 => (0xb0 | part, 64, value),
+            _ => (0xc0 | part, value % 8, 0),
+        };
+        score.push((at, message));
+    }
+    let length = at + 4800;
+    let play = |call: usize| {
+        let mut rack = Rack::new();
+        rack.set_bank(&bank);
+        let mut out = vec![0_i16; length];
+        let mut done = 0;
+        for &(at, (status, data1, data2)) in score.iter().chain(&[(length, (0xf0, 0, 0))]) {
+            while done < at {
+                let end = (done + call).min(at);
+                rack.render(&mut out[done..end]);
+                done = end;
+            }
+            rack.event(status, data1, data2);
+        }
+        out
+    };
+    let whole = play(length);
+    assert!(whole.iter().any(|&sample| sample != 0));
+    for call in [1, 7, 960, 4800] {
+        assert!(play(call) == whole, "calls of {call} samples");
+    }
+}
+
 /// Every note ends, and the rack is silent, within a time computed from
 /// the patch after all keys are released: the envelope falls from at most
 /// 16 doublings at its fourth rate, and a voice whose fourth level is not
@@ -715,13 +767,10 @@ fn random_messages_never_panic() {
     }
 }
 
-/// How fast a rack renders with sixteen notes held, each of six operators
-/// with feedback. Run it optimised:
-/// `cargo test --release ... --test synth7_rack -- --ignored --nocapture`.
-#[test]
-#[ignore = "a measurement, which prints; meaningful only in a release build"]
-fn speed_with_sixteen_notes_held() {
-    let voice = patch(|voice| {
+/// The voice of the speed measurements: algorithm 5, feedback, the
+/// oscillator modulating pitch and amplitude, every operator sounding.
+fn speed_voice() -> Patch {
+    patch(|voice| {
         voice.algorithm = 4;
         voice.feedback = 6;
         voice.lfo_pitch_mod_depth = 30;
@@ -731,8 +780,16 @@ fn speed_with_sixteen_notes_held() {
             operator.frequency_coarse = coarse;
             operator.amp_mod_sensitivity = 2;
         }
-    });
-    let mut rack = rack_with(&[voice]);
+    })
+}
+
+/// How fast a rack renders with sixteen notes held, each of six operators
+/// with feedback. Run it optimised:
+/// `cargo test --release ... --test synth7_rack -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, which prints; meaningful only in a release build"]
+fn speed_with_sixteen_notes_held() {
+    let mut rack = rack_with(&[speed_voice()]);
     for key in 0..16 {
         rack.event(0x90 | key, 40 + 3 * key, 100);
     }
@@ -750,6 +807,46 @@ fn speed_with_sixteen_notes_held() {
     println!(
         "{seconds} s of audio with 16 notes of 6 operators in {elapsed:.3} s: {:.1} times real time, {:.1} ns for each \
          operator sample",
+        f64::from(seconds) / elapsed,
+        elapsed * 1e9 / (f64::from(seconds) * 48_000.0 * 96.0)
+    );
+}
+
+/// Samples between the messages of [`speed_with_sixteen_notes_and_a_bend_every_60_samples`]:
+/// not a divisor of the kernel's 32-sample step, so that the messages fall
+/// at every fourth sample of a step in turn (S7-52).
+const SPEED_MESSAGE_SPACING: usize = 60;
+
+/// As [`speed_with_sixteen_notes_held`], with a pitch bend that changes the
+/// bend of one part every 60 samples, the parts in turn: 800 messages a
+/// second, each within a control step, which the rack must apply at its
+/// own sample (S7-52). Run it as that one is run.
+#[test]
+#[ignore = "a measurement, which prints; meaningful only in a release build"]
+fn speed_with_sixteen_notes_and_a_bend_every_60_samples() {
+    let mut rack = rack_with(&[speed_voice()]);
+    for key in 0..16 {
+        rack.event(0x90 | key, 40 + 3 * key, 100);
+    }
+    let seconds = 60_u32;
+    let mut block = [0_i16; SPEED_MESSAGE_SPACING];
+    let mut heard = 0_u64;
+    let mut messages = 0_u32;
+    let start = std::time::Instant::now();
+    for _ in 0..seconds as usize * 48_000 / SPEED_MESSAGE_SPACING {
+        let part = (messages % 16) as u8;
+        let bend = (messages / 16 % 128) as u8;
+        rack.event(0xe0 | part, 0, bend);
+        messages += 1;
+        rack.render(&mut block);
+        heard += block.iter().map(|&sample| u64::from(sample.unsigned_abs())).sum::<u64>();
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+    assert_eq!(rack.sounding_notes(), 16);
+    assert!(heard > 0);
+    println!(
+        "{seconds} s of audio with 16 notes of 6 operators and {messages} bends in {elapsed:.3} s: {:.1} times real \
+         time, {:.1} ns for each operator sample; the samples' magnitudes sum to {heard}",
         f64::from(seconds) / elapsed,
         elapsed * 1e9 / (f64::from(seconds) * 48_000.0 * 96.0)
     );

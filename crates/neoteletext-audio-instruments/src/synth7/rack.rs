@@ -21,11 +21,21 @@
 //! Envelopes, the low frequency oscillators and pitch advance once for
 //! each [`BLOCK_SAMPLES`] samples, and levels glide between. Blocks are
 //! counted across calls to [`Rack::render`], so the length of a call does
-//! not matter. A note started from silence sounds from the sample its
-//! message arrives at (`synth7.md`, S7-52): it runs the rest of the block
-//! the rack is in. Every other message takes effect at the next block: at
-//! most 0.67 milliseconds later, and at once when it arrives on a block's
-//! boundary.
+//! not matter.
+//!
+//! Every message takes effect at the sample it arrives at (`synth7.md`,
+//! S7-52). One that arrives part way through a block, and changes
+//! something, splits the control step of its part there: the part and
+//! its notes are put back as they stood when the step began and advanced
+//! by the share of a block already rendered, so that they stand at the
+//! message's sample; the message acts; and they are advanced again by the
+//! share left, each level gliding from where it stands to where the block
+//! ends. The blocks stay where they were, so the time of every envelope,
+//! glide and oscillator is kept, however many messages split a block. A
+//! message that changes nothing splits nothing and changes no sample
+//! (MIDI-97). The work of a split is one more control step of the part's
+//! notes, and the rack copies each sounding note at each block's start so
+//! that it can be put back.
 //!
 //! # Parts
 //!
@@ -38,9 +48,9 @@
 use super::functions::{ASSIGN_AMPLITUDE, ASSIGN_EG_BIAS, ASSIGN_PITCH, ControllerSetting, Functions, number};
 use super::interface::{BREATH, FOOT, PORTAMENTO_TIME, portamento_time};
 use super::kernel::{ATTENUATION_ONE, ATTENUATION_SILENT, BLOCK_SAMPLES};
-use super::msfa::Q24_ONE;
 use super::msfa::lfo::{Lfo, Waveform};
-use super::note::{Controls, FULL_DEPTH, Note};
+use super::msfa::{Q24_ONE, share_u32};
+use super::note::{Controls, Course, FULL_DEPTH, Note, Step, layer_samples};
 use super::patch::{BANK_VOICES, Bank, MAX_99, Patch};
 use super::tables::VOLUME_ATTENUATION;
 
@@ -217,10 +227,16 @@ enum Stage {
 #[derive(Clone, Copy, Debug)]
 struct Slot {
     note: Note,
+    /// What a control step changes of the note, as it stood when the
+    /// note's step began, at [`Slot::begun_at`] samples into the block,
+    /// for a message within the step to bring it to the message's sample
+    /// (S7-52).
+    begun: Course,
+    begun_at: usize,
+    /// Brought to the sample of a message within the block, and to be
+    /// advanced to the block's end before the next sample is rendered.
+    split: bool,
     stage: Stage,
-    /// Started from silence since the last block began, before it could
-    /// sound: it sounds from the next.
-    pending: bool,
     part: u8,
     key: u8,
     /// When it started, on the rack's clock of messages.
@@ -231,7 +247,17 @@ struct Slot {
 
 impl Slot {
     const fn new() -> Self {
-        Self { note: Note::new(), stage: Stage::Free, pending: false, part: 0, key: 0, started: 0, released: 0 }
+        Self {
+            note: Note::new(),
+            begun: Course::new(),
+            begun_at: 0,
+            split: false,
+            stage: Stage::Free,
+            part: 0,
+            key: 0,
+            started: 0,
+            released: 0,
+        }
     }
 
     const fn sounding_on(&self, part: u8) -> bool {
@@ -267,6 +293,14 @@ struct Part {
     /// The pitch of the key last pressed, where a glide starts (S7-27).
     last_pitch: Option<i32>,
     lfo: Lfo,
+    /// The oscillator and the volume's attenuation as they stood when the
+    /// part's control step began, at `begun_at` samples into the block
+    /// (S7-52), as [`Slot::begun`].
+    begun_lfo: Lfo,
+    begun_attenuation: u32,
+    begun_at: usize,
+    /// As [`Slot::split`].
+    split: bool,
 }
 
 impl Part {
@@ -289,6 +323,10 @@ impl Part {
             held: 0,
             last_pitch: None,
             lfo: Lfo::new(seed),
+            begun_lfo: Lfo::new(seed),
+            begun_attenuation: Self::wanted(VOLUME_DEFAULT),
+            begun_at: 0,
+            split: false,
         };
         part.load();
         part
@@ -302,16 +340,56 @@ impl Part {
         attenuation.min(ATTENUATION_SILENT)
     }
 
-    /// The volume's attenuation for the next block: [`VOLUME_STEP`]
-    /// nearer to what the controller asks, or there.
-    fn volume(&mut self) -> u32 {
+    /// The volume's attenuation `samples` of a block on: that share of
+    /// [`VOLUME_STEP`] nearer to what the controller asks, or there.
+    fn volume_for(&mut self, samples: usize) -> u32 {
         let wanted = Self::wanted(self.volume);
+        let step = share_u32(VOLUME_STEP, layer_samples(samples));
         self.attenuation = if self.attenuation < wanted {
-            self.attenuation.saturating_add(VOLUME_STEP).min(wanted)
+            self.attenuation.saturating_add(step).min(wanted)
         } else {
-            self.attenuation.saturating_sub(VOLUME_STEP).max(wanted)
+            self.attenuation.saturating_sub(step).max(wanted)
         };
         self.attenuation
+    }
+
+    /// Advances the part's oscillator and volume by `samples` of a block
+    /// and gives what its notes take for them.
+    fn controls(&mut self, samples: usize) -> Controls {
+        let (pitch_depth, amplitude_depth, bias) = self.modulation();
+        let layer = layer_samples(samples);
+        Controls {
+            lfo_value: self.lfo.getsample_for(layer),
+            lfo_delay: self.lfo.getdelay_for(layer),
+            bend: self.bend_q24(),
+            pitch_depth,
+            amplitude_depth,
+            bias,
+            glissando: self.functions.glissando(),
+            volume: self.volume_for(samples),
+        }
+    }
+
+    /// Remembers the part's oscillator and volume as they stand, at
+    /// `at` samples into the block, for [`Part::bring_to`].
+    const fn begin(&mut self, at: usize) {
+        self.begun_lfo = self.lfo;
+        self.begun_attenuation = self.attenuation;
+        self.begun_at = at;
+    }
+
+    /// Puts the part's oscillator and volume back as they stood when its
+    /// control step began and advances them to `at` samples into the block.
+    fn bring_to(&mut self, at: usize) {
+        self.lfo = self.begun_lfo;
+        self.attenuation = self.begun_attenuation;
+        let samples = at.saturating_sub(self.begun_at);
+        if samples > 0 {
+            let layer = layer_samples(samples);
+            self.lfo.getsample_for(layer);
+            self.lfo.getdelay_for(layer);
+            self.volume_for(samples);
+        }
     }
 
     /// Sets the oscillator from the part's voice.
@@ -415,7 +493,7 @@ pub enum Taken {
 
 /// Sixteen parts of the instrument sharing sixteen notes.
 ///
-/// It is about 15 kilobytes, holds no reference and allocates nothing. Two
+/// It is about 19 kilobytes, holds no reference and allocates nothing. Two
 /// racks given the same messages at the same samples give the same
 /// samples, whatever else exists and however the rendering is divided
 /// into calls.
@@ -461,6 +539,9 @@ impl Rack {
     /// bank, or [`Patch::DEFAULT`] where the bank has none.
     pub fn set_bank(&mut self, bank: &Bank) {
         self.bank = *bank;
+        for part_number in (0..PARTS).filter_map(|part| u8::try_from(part).ok()) {
+            self.split_part(part_number);
+        }
         for part in &mut self.parts {
             part.voice = *self.bank.get(usize::from(part.program)).unwrap_or(&Patch::DEFAULT);
             part.load();
@@ -588,9 +669,86 @@ impl Rack {
         self.ignored = self.ignored.saturating_add(1);
     }
 
+    /// The samples of the block already rendered, where a message that
+    /// arrives now splits its part's control step (S7-52); `None` on a
+    /// block's boundary, where the next block's step takes the message.
+    const fn elapsed(&self) -> Option<usize> {
+        if self.block_remaining == 0 { None } else { Some(BLOCK_SAMPLES.saturating_sub(self.block_remaining)) }
+    }
+
+    /// Brings part `part_number` and every note sounding on it to the
+    /// sample now, before a message changes them (S7-52). It must come
+    /// before anything changes the part's oscillator or a note, which it
+    /// puts back as they stood when the step began; [`Rack::resume`]
+    /// advances them to the block's end before the next sample.
+    fn split_part(&mut self, part_number: u8) {
+        let Some(at) = self.elapsed() else { return };
+        if let Some(part) = self.parts.get_mut(usize::from(part_number))
+            && !part.split
+        {
+            part.bring_to(at);
+            part.split = true;
+        }
+        for index in 0..NOTES {
+            if self.slots.get(index).is_some_and(|slot| slot.sounding_on(part_number)) {
+                self.split_slot(index);
+            }
+        }
+    }
+
+    /// Brings the note of slot `index` to the sample now, as
+    /// [`Rack::split_part`] does; a free slot has nothing to bring.
+    fn split_slot(&mut self, index: usize) {
+        let Some(at) = self.elapsed() else { return };
+        let Some(slot) = self.slots.get_mut(index) else { return };
+        if slot.split {
+            return;
+        }
+        if slot.stage != Stage::Free {
+            slot.note.restore(&slot.begun);
+            let samples = at.saturating_sub(slot.begun_at);
+            if samples > 0 {
+                let controls = self.controls.get(usize::from(slot.part)).copied().unwrap_or_default();
+                slot.note.control(&controls, samples, Step::Elapsed);
+            }
+        }
+        slot.split = true;
+    }
+
+    /// Advances every part and note a message split to the end of the
+    /// block, each level gliding from where it stands (S7-52).
+    fn resume(&mut self) {
+        let Some(at) = self.elapsed() else { return };
+        let rest = self.block_remaining;
+        for (part, controls) in self.parts.iter_mut().zip(&mut self.controls) {
+            if part.split {
+                part.split = false;
+                part.begin(at);
+                *controls = part.controls(rest);
+            }
+        }
+        for slot in &mut self.slots {
+            if slot.split {
+                slot.split = false;
+                if slot.stage != Stage::Free {
+                    slot.begun = slot.note.course();
+                    slot.begun_at = at;
+                    let controls = self.controls.get(usize::from(slot.part)).copied().unwrap_or_default();
+                    slot.note.control(&controls, rest, Step::Rest);
+                }
+            }
+        }
+    }
+
+    /// Whether any note of part `part_number` is in one of `stages`.
+    fn any_on(&self, part_number: u8, stages: &[Stage]) -> bool {
+        self.slots.iter().any(|slot| slot.part == part_number && stages.contains(&slot.stage))
+    }
+
     /// A key goes down on part `part_number` (S7-6, S7-25 to S7-27).
     pub fn note_on(&mut self, part_number: u8, key: u8, velocity: u8) -> Taken {
         self.clock = self.clock.saturating_add(1);
+        self.split_part(part_number);
         let Some(part) = self.parts.get(usize::from(part_number)) else { return Taken::Ignored };
         if part.functions.mono() {
             self.mono_note_on(part_number, key, velocity)
@@ -701,8 +859,8 @@ impl Rack {
     /// Starts slot `index` on `key` with `voice`, and gives the key's pitch.
     fn start_slot(&mut self, index: usize, part_number: u8, voice: &Patch, key: u8, velocity: u8) -> Option<i32> {
         let clock = self.clock;
-        let remaining = self.block_remaining;
-        let controls = self.controls.get(usize::from(part_number)).copied().unwrap_or_default();
+        // A note taken from another part is brought to this sample too.
+        self.split_slot(index);
         let slot = self.slots.get_mut(index)?;
         let continues = slot.stage != Stage::Free;
         slot.note.start(voice, key, velocity, continues);
@@ -710,22 +868,16 @@ impl Rack {
         slot.part = part_number;
         slot.key = key;
         slot.started = clock;
-        // A note that takes over a sounding voice goes on sounding to the
-        // end of this block, at the levels the voice has: left out of it,
-        // the voice would have a notch of silence. A note from silence
-        // starts at its own sample, for what is left of the block (S7-52).
-        slot.pending = false;
-        if !continues && remaining > 0 {
-            slot.note.control_partial(&controls, remaining);
-        } else if !continues {
-            slot.pending = true;
-        }
         Some(slot.note.pitch())
     }
 
     /// A key goes up on part `part_number` (S7-7, S7-26).
     pub fn note_off(&mut self, part_number: u8, key: u8) -> Taken {
         self.clock = self.clock.saturating_add(1);
+        // Only a key whose note is held changes what is heard.
+        if self.slots.iter().any(|slot| slot.part == part_number && slot.stage == Stage::Held && slot.key == key) {
+            self.split_part(part_number);
+        }
         let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         let sustain = part.sustain;
         if part.functions.mono() {
@@ -768,6 +920,9 @@ impl Rack {
 
     /// Releases the notes of a part that are in one of `stages`.
     fn release_part(&mut self, part_number: u8, stages: &[Stage]) {
+        if self.any_on(part_number, stages) {
+            self.split_part(part_number);
+        }
         let clock = self.clock;
         for slot in &mut self.slots {
             if slot.part == part_number && stages.contains(&slot.stage) {
@@ -808,6 +963,9 @@ impl Rack {
     /// All sound off on part `part_number` (S7-20 item 1): every note of the
     /// part faded to silence in 21 milliseconds.
     pub fn all_sound_off(&mut self, part_number: u8) -> Taken {
+        if self.any_on(part_number, &[Stage::Held, Stage::Sustained, Stage::Released]) {
+            self.split_part(part_number);
+        }
         let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         part.held = 0;
         let clock = self.clock;
@@ -827,6 +985,10 @@ impl Rack {
     /// switch off. The volume, the voice, the operator switch, the program
     /// and every function parameter are left.
     pub fn reset_controllers(&mut self, part_number: u8) -> Taken {
+        let Some(part) = self.parts.get(usize::from(part_number)) else { return Taken::Ignored };
+        if (part.wheel, part.breath, part.foot, part.pressure, part.bend) != (0, 0, 0, 0, 0) {
+            self.split_part(part_number);
+        }
         let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         part.wheel = 0;
         part.breath = 0;
@@ -852,6 +1014,17 @@ impl Rack {
             }
             _ => {}
         }
+        let Some(part) = self.parts.get(usize::from(part_number)) else { return Taken::Ignored };
+        let now = match controller {
+            CONTROL_MODULATION_WHEEL => Some(part.wheel),
+            BREATH => Some(part.breath),
+            FOOT => Some(part.foot),
+            CONTROL_VOLUME => Some(part.volume),
+            _ => None,
+        };
+        if now.is_some_and(|now| now != value) {
+            self.split_part(part_number);
+        }
         let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         match controller {
             CONTROL_MODULATION_WHEEL => part.wheel = value,
@@ -866,15 +1039,23 @@ impl Rack {
 
     /// Channel pressure on part `part_number` (S7-22).
     pub fn channel_pressure(&mut self, part_number: u8, pressure: u8) -> Taken {
+        let pressure = pressure.min(DATA_MAX);
+        if self.parts.get(usize::from(part_number)).is_some_and(|part| part.pressure != pressure) {
+            self.split_part(part_number);
+        }
         let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
-        part.pressure = pressure.min(DATA_MAX);
+        part.pressure = pressure;
         Taken::Applied
     }
 
     /// A pitch bend on part `part_number`, 14 bits, centre 8,192 (S7-9).
     pub fn pitch_bend(&mut self, part_number: u8, value: u16) -> Taken {
+        let bend = i32::from(value.min(crate::midi::PITCH_BEND_MAX)).saturating_sub(PITCH_BEND_CENTRE);
+        if self.parts.get(usize::from(part_number)).is_some_and(|part| part.bend != bend) {
+            self.split_part(part_number);
+        }
         let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
-        part.bend = i32::from(value.min(crate::midi::PITCH_BEND_MAX)).saturating_sub(PITCH_BEND_CENTRE);
+        part.bend = bend;
         Taken::Applied
     }
 
@@ -884,8 +1065,12 @@ impl Rack {
     /// program and voice the part already plays changes nothing that is
     /// heard (MIDI-97).
     pub fn program_change(&mut self, part_number: u8, program: u8, voice: &Patch) -> Taken {
-        let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         let voice = voice.all_operators_on();
+        // The voice sets the part's oscillator, which its notes hear.
+        if self.parts.get(usize::from(part_number)).is_some_and(|part| part.voice != voice) {
+            self.split_part(part_number);
+        }
+        let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         part.program = program;
         if part.voice != voice {
             part.voice = voice;
@@ -897,8 +1082,11 @@ impl Rack {
     /// A single-voice dump on part `part_number` (S7-40): its current voice
     /// becomes `voice`, with every operator on; the program stays.
     pub fn set_voice(&mut self, part_number: u8, voice: &Patch) -> Taken {
-        let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         let voice = voice.all_operators_on();
+        if self.parts.get(usize::from(part_number)).is_some_and(|part| part.voice != voice) {
+            self.split_part(part_number);
+        }
+        let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         if part.voice != voice {
             part.voice = voice;
             part.load();
@@ -916,6 +1104,8 @@ impl Rack {
         if voice == part.voice {
             return Taken::Applied;
         }
+        self.split_part(part_number);
+        let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         let lfo_changed = {
             let (old, new) = (part.voice.params(), voice.params());
             (old.lfo_speed, old.lfo_delay, old.lfo_key_sync, old.lfo_wave)
@@ -942,7 +1132,14 @@ impl Rack {
         let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
         let was_mono = part.functions.mono();
         let Ok(changed) = part.functions.set(number, value) else { return Taken::Ignored };
-        if changed && number == number::MONO_POLY && part.functions.mono() != was_mono {
+        if !changed {
+            return Taken::Applied;
+        }
+        // The function parameters are not among what a split puts back, so
+        // the part may be split after they change, but before its notes do.
+        self.split_part(part_number);
+        let Some(part) = self.parts.get_mut(usize::from(part_number)) else { return Taken::Ignored };
+        if number == number::MONO_POLY && part.functions.mono() != was_mono {
             part.held = 0;
             if part.functions.mono() {
                 let newest = self
@@ -974,6 +1171,11 @@ impl Rack {
     /// come (S7-53).
     pub fn release_all(&mut self) {
         self.clock = self.clock.saturating_add(1);
+        for part_number in (0..PARTS).filter_map(|part| u8::try_from(part).ok()) {
+            if self.any_on(part_number, &[Stage::Held, Stage::Sustained]) {
+                self.split_part(part_number);
+            }
+        }
         for part in &mut self.parts {
             part.sustain = false;
             part.held = 0;
@@ -992,24 +1194,19 @@ impl Rack {
     /// envelopes, and frees the notes that have ended.
     fn control(&mut self) {
         for (part, controls) in self.parts.iter_mut().zip(&mut self.controls) {
-            let (pitch_depth, amplitude_depth, bias) = part.modulation();
-            *controls = Controls {
-                lfo_value: part.lfo.getsample(),
-                lfo_delay: part.lfo.getdelay(),
-                bend: part.bend_q24(),
-                pitch_depth,
-                amplitude_depth,
-                bias,
-                glissando: part.functions.glissando(),
-                volume: part.volume(),
-            };
+            part.begin(0);
+            *controls = part.controls(BLOCK_SAMPLES);
         }
         for slot in &mut self.slots {
             if slot.stage == Stage::Free {
                 continue;
             }
-            slot.pending = false;
-            let sounds = self.controls.get(usize::from(slot.part)).is_some_and(|controls| slot.note.control(controls));
+            slot.begun = slot.note.course();
+            slot.begun_at = 0;
+            let sounds = self
+                .controls
+                .get(usize::from(slot.part))
+                .is_some_and(|controls| slot.note.control(controls, BLOCK_SAMPLES, Step::Block));
             if !sounds && slot.stage == Stage::Released {
                 slot.stage = Stage::Free;
                 slot.note.clear();
@@ -1019,8 +1216,11 @@ impl Rack {
 
     /// Renders the next `out.len()` samples: 16 bits, mono, 48,000 a
     /// second. The work of a block of 32 samples is at most that of
-    /// sixteen notes of six operators, whatever messages came.
+    /// sixteen notes of six operators, whatever messages came; each
+    /// message within a block that changes something adds a control step
+    /// of its part's notes, a few hundred operations each, and no samples.
     pub fn render(&mut self, out: &mut [i16]) {
+        self.resume();
         let mut rest = out;
         while !rest.is_empty() {
             if self.block_remaining == 0 {
@@ -1034,7 +1234,7 @@ impl Rack {
             let mut mix = [0_i32; BLOCK_SAMPLES];
             if let Some(mix) = mix.get_mut(..count) {
                 for slot in &mut self.slots {
-                    if slot.stage != Stage::Free && !slot.pending {
+                    if slot.stage != Stage::Free {
                         slot.note.render(mix);
                     }
                 }

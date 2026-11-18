@@ -16,12 +16,12 @@
 //!   `msfa::freqlut::lookup`, whose table is for 48,000 samples a second.
 
 use super::kernel::{
-    self, ALGORITHMS, ATTENUATION_MAX, ATTENUATION_ONE, ATTENUATION_SILENT, Algorithm, OPERATORS, Voice,
+    self, ALGORITHMS, ATTENUATION_MAX, ATTENUATION_ONE, ATTENUATION_SILENT, Algorithm, BLOCK_SAMPLES, OPERATORS, Voice,
 };
-use super::msfa::env::{Env, STAGE_FINISHED};
+use super::msfa::env::{Env, Progress, STAGE_FINISHED};
 use super::msfa::note::{self, LevelScaling};
 use super::msfa::pitchenv::PitchEnv;
-use super::msfa::{Q24_ONE, freqlut};
+use super::msfa::{N, Q24_ONE, freqlut, share, share_u32};
 use super::patch::{Patch, TRANSPOSE_CENTRE};
 
 /// The level of the parameter layer at which the kernel's attenuation is
@@ -79,6 +79,27 @@ const DEPTH_SHIFT: u32 = 24;
 /// by (S7-27).
 const SEMITONE: i32 = Q24_ONE / 12;
 
+/// How a control step sets the note's voice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    /// A whole block, from its boundary: each level glides from the last
+    /// step's target to this one's.
+    Block,
+    /// The rest of a block, from a message part way through it (S7-52):
+    /// each level glides from where it stands to this step's target.
+    Rest,
+    /// The part of a block already rendered, brought up to the message's
+    /// sample: the envelopes and glides advance, and the voice, which has
+    /// sounded those samples, is left as it is.
+    Elapsed,
+}
+
+/// `samples` of a block as the parameter layer counts them; a whole block
+/// at most.
+pub(crate) fn layer_samples(samples: usize) -> u32 {
+    u32::try_from(samples.min(BLOCK_SAMPLES)).unwrap_or(N)
+}
+
 /// What the part gives each of its notes for a block.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Controls {
@@ -101,6 +122,33 @@ pub(crate) struct Controls {
     pub glissando: bool,
     /// The attenuation of the part's volume, in the kernel's units.
     pub volume: u32,
+}
+
+/// What of a note a control step changes, and nothing else: as it stood
+/// when a step began, for a message within the step to bring the note to
+/// its own sample (S7-52). Everything else of a note changes only by a
+/// message, and a message brings the note to its sample before it acts.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Course {
+    envelopes: [Progress; OPERATORS],
+    pitch_envelope: Progress,
+    glide: i32,
+    fade: u32,
+    fade_step: u32,
+    silent: bool,
+}
+
+impl Course {
+    pub(crate) const fn new() -> Self {
+        Self {
+            envelopes: [Progress::new(); OPERATORS],
+            pitch_envelope: Progress::new(),
+            glide: 0,
+            fade: 0,
+            fade_step: 0,
+            silent: true,
+        }
+    }
 }
 
 /// One note.
@@ -308,13 +356,32 @@ impl Note {
         }
     }
 
-    /// Runs [`Note::control`] for a note started part way through the
-    /// rack's block, and sounds it for the `samples` left of that block,
-    /// so that it starts at its own sample (S7-52).
-    pub(crate) fn control_partial(&mut self, controls: &Controls, samples: usize) -> bool {
-        let sounds = self.control(controls);
-        self.voice.shorten_block(samples);
-        sounds
+    /// What of the note a control step changes, as it stands.
+    pub(crate) fn course(&self) -> Course {
+        Course {
+            envelopes: self.envelopes.map(|envelope| envelope.progress()),
+            pitch_envelope: self.pitch_envelope.progress(),
+            glide: self.glide,
+            fade: self.fade,
+            fade_step: self.fade_step,
+            silent: self.silent,
+        }
+    }
+
+    /// Puts back what a control step changes as it was in `begun`, the
+    /// note's [`Note::course`] when the rack's control step began, for a
+    /// message part way through the step to bring the note to the
+    /// message's sample (S7-52). The voice has sounded the samples since,
+    /// and keeps its phases and levels.
+    pub(crate) fn restore(&mut self, begun: &Course) {
+        for (envelope, progress) in self.envelopes.iter_mut().zip(&begun.envelopes) {
+            envelope.set_progress(progress);
+        }
+        self.pitch_envelope.set_progress(&begun.pitch_envelope);
+        self.glide = begun.glide;
+        self.fade = begun.fade;
+        self.fade_step = begun.fade_step;
+        self.silent = begun.silent;
     }
 
     /// The key goes up: every envelope starts its last stage.
@@ -340,11 +407,18 @@ impl Note {
         ALGORITHMS.get(usize::from(self.algorithm)).unwrap_or(&ALGORITHMS[0])
     }
 
-    /// Advances the envelopes by one block and sets the voice for it.
-    /// Returns whether the note still sounds: false once it is released and
-    /// its carriers are silent for the whole block, after which it need not
-    /// be rendered again.
-    pub(crate) fn control(&mut self, controls: &Controls) -> bool {
+    /// Advances the envelopes by `samples` of a block (their share of a
+    /// block's movement, and a whole block's for [`BLOCK_SAMPLES`]) and
+    /// sets the voice for them as `step` says. Returns whether the note
+    /// still sounds: false once it is released and its carriers are silent
+    /// for the whole step, after which it need not be rendered again.
+    pub(crate) fn control(&mut self, controls: &Controls, samples: usize, step: Step) -> bool {
+        // A note from silence starts at its envelopes' levels a whole block
+        // on, wherever in the block it starts, as one started on a block's
+        // boundary does (`Voice::silence`): advanced by only the samples
+        // left, its first levels would be far below them, and the next
+        // block's glide up to them would step the signal.
+        let layer = if step == Step::Rest && self.voice.is_fresh() { N } else { layer_samples(samples) };
         let algorithm = self.algorithm();
         let delay = controls.lfo_delay.clamp(0, Q24_ONE).cast_unsigned();
 
@@ -358,15 +432,16 @@ impl Note {
             .saturating_add(controls.pitch_depth << DEPTH_SHIFT)
             .min(full);
         // S7-27: the glide, in semitones for a glissando, towards the key.
+        let glide_step = share(self.glide_step, layer);
         self.glide = if self.glide > 0 {
-            self.glide.saturating_sub(self.glide_step).max(0)
+            self.glide.saturating_sub(glide_step).max(0)
         } else {
-            self.glide.saturating_add(self.glide_step).min(0)
+            self.glide.saturating_add(glide_step).min(0)
         };
         let glide = if controls.glissando { (self.glide / SEMITONE).saturating_mul(SEMITONE) } else { self.glide };
         let pitch = self
             .pitch_envelope
-            .getsample()
+            .getsample_for(layer)
             .saturating_add(note::lfo_pitch_mod(depth, self.pitch_mod_sens, controls.lfo_value))
             .saturating_add(controls.bend)
             .saturating_add(glide);
@@ -390,12 +465,12 @@ impl Note {
         {
             self.fade_step = REST_FADE_STEP;
         }
-        self.fade = self.fade.saturating_add(self.fade_step).min(ATTENUATION_MAX);
+        self.fade = self.fade.saturating_add(share_u32(self.fade_step, layer)).min(ATTENUATION_MAX);
 
         let mut silent = true;
         let operators = self.envelopes.iter_mut().zip(&self.base_pitch).zip(&self.amp_mod_sensitivity);
         for (index, ((envelope, &base_pitch), &sensitivity)) in operators.enumerate() {
-            let level = envelope.getsample();
+            let level = envelope.getsample_for(layer);
             let mut attenuation = LEVEL_CEILING.saturating_sub(level).max(0).cast_unsigned();
             let on = operator_on(self.operators_on, index);
             if algorithm.is_carrier(index) {
@@ -411,9 +486,22 @@ impl Note {
             if !on {
                 attenuation = ATTENUATION_MAX;
             }
-            self.voice.set_operator(index, freqlut::lookup(base_pitch.saturating_add(pitch)), attenuation);
+            match step {
+                Step::Block => {
+                    self.voice.set_operator(index, freqlut::lookup(base_pitch.saturating_add(pitch)), attenuation);
+                }
+                Step::Rest => {
+                    let increment = freqlut::lookup(base_pitch.saturating_add(pitch));
+                    self.voice.aim_operator(index, increment, attenuation, samples);
+                }
+                Step::Elapsed => {}
+            }
         }
-        self.voice.begin_block();
+        match step {
+            Step::Block => self.voice.begin_block(),
+            Step::Rest => self.voice.begin_rest(samples),
+            Step::Elapsed => {}
+        }
         let ended = self.released && silent && self.silent;
         self.silent = silent;
         !ended

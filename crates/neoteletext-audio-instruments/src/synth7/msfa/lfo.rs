@@ -26,11 +26,17 @@
 // bytes of a patch; the sine waveform comes from the sound kernel's
 // log-sine and exponent tables, not from the original's sine table; the
 // state of the sample-and-hold waveform, which the original leaves
-// uninitialised, is given to `new`; an unknown waveform cannot be set.
+// uninitialised, is given to `new`; an unknown waveform cannot be set;
+// `getsample` and `getdelay` are `getsample_for` and `getdelay_for` a
+// whole block, which advance the phase and the delay by the share of a
+// block's increment that a part of a block takes, for synth7's control
+// steps split at a message's sample; and the end of the delay is found
+// from the addition's overflow, which is what the original's comparison
+// with `delayinc_` finds.
 
 //! Low frequency oscillator, compatible with DX7.
 
-use super::{N, Q24_ONE, SAMPLE_RATE};
+use super::{N, Q24_ONE, SAMPLE_RATE, share_u32};
 use crate::synth7::kernel;
 
 /// What a rate of 1 adds to the phase in one block, a whole turn being
@@ -150,7 +156,15 @@ impl Lfo {
 
     /// Advances the oscillator by one block. Result is 0..1 in Q24.
     pub fn getsample(&mut self) -> i32 {
-        self.phase = self.phase.wrapping_add(self.delta);
+        self.getsample_for(N)
+    }
+
+    /// As [`Lfo::getsample`], for `samples` of a block: the phase moves by
+    /// that share of a block's increment ([`share_u32`]); [`N`] or more is
+    /// a whole block. Added for synth7, not in the original.
+    pub fn getsample_for(&mut self, samples: u32) -> i32 {
+        let delta = share_u32(self.delta, samples);
+        self.phase = self.phase.wrapping_add(delta);
         let phase = self.phase;
         let value = match self.waveform {
             Waveform::Triangle => {
@@ -167,7 +181,8 @@ impl Lfo {
                 return (Q24_ONE >> 1).saturating_add(sine);
             }
             Waveform::SampleAndHold => {
-                if phase < self.delta {
+                // The phase passed a whole turn.
+                if phase < delta {
                     self.randstate = self.randstate.wrapping_mul(RANDOM_MULTIPLIER).wrapping_add(RANDOM_INCREMENT);
                 }
                 let x = u32::from(self.randstate ^ 0x80);
@@ -180,9 +195,23 @@ impl Lfo {
     /// Advances the delay by one block: how much of the oscillator's depth
     /// has faded in since the key went down. Result is 0..1 in Q24.
     pub fn getdelay(&mut self) -> i32 {
+        self.getdelay_for(N)
+    }
+
+    /// As [`Lfo::getdelay`], for `samples` of a block: the delay moves by
+    /// that share of a block's increment ([`share_u32`]); [`N`] or more is
+    /// a whole block. Added for synth7, not in the original.
+    pub fn getdelay_for(&mut self, samples: u32) -> i32 {
         let delta = if self.delaystate < HALF { self.delayinc } else { self.delayinc2 };
-        let d = self.delaystate.wrapping_add(delta);
-        if d < self.delayinc {
+        // No delay (`u32::MAX`) is over in any share of a block, however
+        // short, as it is in a whole one.
+        let delta = if delta == u32::MAX { delta } else { share_u32(delta, samples) };
+        // The original asks whether the sum is below `delayinc_`. Each
+        // increment is below half the range, or is all of it, and the state
+        // is at least half the range when the second is added, so that is
+        // so exactly when the addition overflows: the delay is over.
+        let (d, over) = self.delaystate.overflowing_add(delta);
+        if over {
             return Q24_ONE;
         }
         self.delaystate = d;
