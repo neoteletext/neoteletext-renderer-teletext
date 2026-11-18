@@ -41,6 +41,10 @@ const STATE_AT: u32 = 9_120;
 const OBJECT: u16 = 10;
 /// The NAPLPS object of its vector, an example value.
 const NAPLPS_OBJECT: u16 = 301;
+/// The label of the NAPLPS object of its vectors, an example value.
+const NAPLPS_LABEL: &str = "Play";
+/// The title of the NAPLPS picture of its vector, an example value.
+const NAPLPS_TITLE: &str = "Jukebox";
 /// The identifier of the atomic frame's vectors, an example value.
 const FRAME: u16 = 7;
 /// The identifier of the state query's vector, as RULE-38's example has.
@@ -382,6 +386,24 @@ fn records(rows: &mut Vec<Row>) -> Result<(), String> {
         name: "naplps_objects",
         value: packets(|out| naplps_objects::encode((page, sub, 1), &[object], SERVICE, RECORD_ID, out))?,
         meaning: "page 101 sub 0001 generation 1: macro object 301 at (100,50) 64 by 32, frame macro 2/0, pressed look 2/1",
+    });
+    // TODO-6657 (DEC-6638 items 3 and 6): the same object with a label,
+    // and the picture's title; then the object redefined alone.
+    let labelled = [naplps_objects::LabelledObject { object, label: NAPLPS_LABEL }];
+    let whole = naplps_objects::Contents::Whole { objects: &labelled, title: Some(NAPLPS_TITLE) };
+    rows.push(Row {
+        kind: "records",
+        name: "naplps_objects_labelled",
+        value: packets(|out| naplps_objects::encode_contents((page, sub, 1), &whole, SERVICE, RECORD_ID, out))?,
+        meaning: "page 101 sub 0001 generation 1: macro object 301 as naplps_objects, labelled Play, the picture titled Jukebox",
+    });
+    let moved = naplps_objects::NaplpsObject { x: 200, ..object };
+    let one = naplps_objects::Contents::One(naplps_objects::LabelledObject { object: moved, label: NAPLPS_LABEL });
+    rows.push(Row {
+        kind: "records",
+        name: "naplps_objects_one",
+        value: packets(|out| naplps_objects::encode_contents((page, sub, 1), &one, SERVICE, RECORD_ID, out))?,
+        meaning: "page 101 sub 0001 generation 1: object 301 alone redefined at (200,50), labelled Play; the other objects and the title kept",
     });
     let bytes = sheet::SheetRecord {
         page,
