@@ -25,7 +25,7 @@ use neoteletext_input::rules::{FaultCode, PageStateEvent, RuleBody, RuleEvent, R
 use neoteletext_rules::clock::Clock;
 use neoteletext_rules::command::{TYPE_RUN, TYPE_SEQUENCE, TYPE_TIMER};
 use neoteletext_rules::evaluator::{
-    Counters, Input, InputEvent, KeyAction, KeyIdentity, Report, Reported, SoundState, TargetState,
+    Counters, Event as Handled, Input, InputEvent, KeyAction, KeyIdentity, Report, Reported, SoundState, TargetState,
 };
 use neoteletext_rules::limits::{MAX_POINTER_OBJECTS, MAX_STATE_BYTES};
 use neoteletext_rules::state::PageState;
@@ -329,8 +329,13 @@ impl PageRules {
                 self.queried_us = Some(now_us);
                 match self.open.as_mut() {
                     Some(open) => {
-                        open.evaluator.query(query.identifier);
-                        open.pending = true;
+                        // A query is an event, answered at once (RULE-47).
+                        let _ = open.evaluator.handle(Handled::Query(query.identifier), &mut self.world);
+                        open.pending = open.evaluator.waiting() > 0;
+                        let generation = open.generation;
+                        if let Some(on) = self.on {
+                            self.collect(on, generation);
+                        }
                     }
                     None => self.query_without_table = Some(query.identifier),
                 }
@@ -350,18 +355,21 @@ impl PageRules {
     }
 
     /// Takes a command the server sent directly (RULE-114): the open
-    /// page's evaluator applies it at step 5 of its next tick. For a page
+    /// page's evaluator applies it at once (DEC-6635 item 1). For a page
     /// with no table, or one that is not the open page, it is dropped and
     /// counted (RULE-50).
     fn command(&mut self, command: &CommandRecord<'_>) {
-        let ours = self.on.map(page_of) == Some((command.page.mpp(), command.subcode.value()));
-        match self.open.as_mut().filter(|_| ours) {
-            Some(open) => {
+        let on = self.on.filter(|on| page_of(*on) == (command.page.mpp(), command.subcode.value()));
+        match (self.open.as_mut(), on) {
+            (Some(open), Some(on)) => {
                 // What the evaluator refuses it counts itself.
-                let _ = open.evaluator.push_command(command.kind, command.body);
-                open.pending = true;
+                let _ =
+                    open.evaluator.handle(Handled::Command { kind: command.kind, body: command.body }, &mut self.world);
+                open.pending = open.evaluator.waiting() > 0;
+                let generation = open.generation;
+                self.collect(on, generation);
             }
-            None => self.count(FaultCode::CommandsSkipped, 1),
+            _ => self.count(FaultCode::CommandsSkipped, 1),
         }
     }
 
@@ -488,9 +496,14 @@ impl PageRules {
             self.ring.pop_front();
         }
         self.ring.push_back((self.sequence, bytes.to_vec()));
-        // A full queue drops the event and counts it (RULE-5).
-        let _ = open.evaluator.push(InputEvent { sequence: self.sequence, input });
-        open.pending = true;
+        // It acts at once (DEC-6635 item 1); a full queue drops it and
+        // counts it.
+        let _ = open.evaluator.handle(Handled::Input(InputEvent { sequence: self.sequence, input }), &mut self.world);
+        open.pending = open.evaluator.waiting() > 0;
+        let generation = open.generation;
+        if let Some(on) = self.on {
+            self.collect(on, generation);
+        }
     }
 
     /// Evaluates each tick due at `now_us` (RULE-4) and gives `out` what
@@ -501,12 +514,10 @@ impl PageRules {
         if let Some(mut open) = self.open.take() {
             let due = open.clock.wake(now_us.saturating_sub(open.opened_us));
             for _ in 0..due {
-                // RULE-5 step 2: no input belongs to page tick 0, so what
-                // waits then still waits after it.
-                let first = open.evaluator.page_tick() == 0;
                 open.evaluator.tick(&mut self.world);
                 self.collect(on, open.generation);
-                open.pending = first;
+                // What waited for a tick's budget waits no more.
+                open.pending = false;
             }
             self.count_from(&mut open);
             self.flush_faults(on, open.generation, now_us);
@@ -587,12 +598,8 @@ impl PageRules {
         let before = core::mem::replace(&mut open.reported, now);
         self.count(FaultCode::EventsDropped, now.events_dropped.saturating_sub(before.events_dropped));
         self.count(FaultCode::CommandsSkipped, now.skipped.saturating_sub(before.skipped));
-        // RULE-48, code 10: an armed run not armed, and a command the
-        // server sent or a cue dropped at a full queue.
-        let full = |counters: &Counters| {
-            counters.not_armed.saturating_add(counters.commands_dropped).saturating_add(counters.cues_dropped)
-        };
-        self.count(FaultCode::QueueFull, full(&now).saturating_sub(full(&before)));
+        // RULE-48, code 10: a sequence start beyond `MAX_START_TICKS`.
+        self.count(FaultCode::QueueFull, now.starts_skipped.saturating_sub(before.starts_skipped));
     }
 
     /// Reports each fault counted, at most once a second for each code

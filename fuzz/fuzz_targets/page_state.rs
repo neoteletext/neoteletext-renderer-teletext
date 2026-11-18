@@ -7,7 +7,7 @@
 use libfuzzer_sys::fuzz_target;
 use neoteletext_input::MAX_MESSAGE;
 use neoteletext_input::event::{Event, Item, read, write};
-use neoteletext_rules::limits::{MAX_ARMED_RUNS, MAX_SEQUENCES, MAX_STATE_BYTES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES};
+use neoteletext_rules::limits::{MAX_SEQUENCES, MAX_STATE_BYTES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES};
 use neoteletext_rules::state::{MAX_PAYLOAD_BYTES, decode, encode};
 
 fuzz_target!(|data: &[u8]| {
@@ -16,7 +16,7 @@ fuzz_target!(|data: &[u8]| {
         assert!(data.len() <= MAX_PAYLOAD_BYTES);
         if let Some(table) = &state.table {
             assert!(table.generation != 0);
-            assert!(table.sequences.len() <= MAX_SEQUENCES && usize::from(table.armed) <= MAX_ARMED_RUNS);
+            assert!(table.sequences.len() <= MAX_SEQUENCES);
             assert!(table.targets.len() <= MAX_TABLE_TARGETS && table.values.len() <= MAX_TABLE_VALUES);
         }
         let mut out = [0_u8; MAX_PAYLOAD_BYTES];

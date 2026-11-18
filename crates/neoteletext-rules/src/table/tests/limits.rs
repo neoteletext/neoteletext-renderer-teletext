@@ -3,13 +3,13 @@
 //! and one over is refused whole with that limit's name.
 
 use super::*;
-use crate::command::RunMode;
+use crate::command::StartMode;
 use crate::limits::{
     MAX_AND_OR_CHILDREN, MAX_COMMAND_BINDINGS, MAX_COMMAND_BYTES, MAX_CONDITION_DEPTH, MAX_CONDITION_NODES,
-    MAX_CONDITION_TERMS, MAX_CUE, MAX_DOUBLE_TICKS, MAX_GROUP_COMMANDS, MAX_GROUP_DEPTH, MAX_GROUPS, MAX_GROUPS_BYTES,
-    MAX_HOLD_TICKS, MAX_KEYS_PER_TRIGGER, MAX_RECTS, MAX_ROWS, MAX_RULE_ROWS, MAX_RULES, MAX_RUN_COMMANDS,
-    MAX_SEQUENCE_REPEAT, MAX_SEQUENCE_STEPS, MAX_SEQUENCE_TICKS, MAX_SEQUENCES, MAX_SET_MEMBERS, MAX_TABLE_TARGETS,
-    MAX_TABLE_VALUES, MAX_TIMER_TICKS, MAX_TRIGGERS_PER_RULE, MAX_WATCHED, value_of,
+    MAX_CONDITION_TERMS, MAX_CUE, MAX_GROUP_COMMANDS, MAX_GROUP_DEPTH, MAX_GROUPS, MAX_GROUPS_BYTES,
+    MAX_KEYS_PER_TRIGGER, MAX_RECTS, MAX_ROWS, MAX_RULE_ROWS, MAX_RULES, MAX_RUN_COMMANDS, MAX_SEQUENCE_REPEAT,
+    MAX_SEQUENCE_STEPS, MAX_SEQUENCE_TICKS, MAX_SEQUENCES, MAX_SET_MEMBERS, MAX_TABLE_TARGETS, MAX_TABLE_VALUES,
+    MAX_TIMER_TICKS, MAX_TRIGGERS_PER_RULE, MAX_WATCHED, value_of,
 };
 use crate::testing::Built;
 
@@ -60,7 +60,7 @@ fn the_tables_lists_are_held_to_their_limits() {
             table.rects.push(Rect { x: 0, y: 0, width: 1, height: 1 }).unwrap();
         }
         for _ in 0..MAX_ROWS {
-            table.rows.push([1, 2, 3, 4]).unwrap();
+            table.rows.push(4).unwrap();
         }
         for _ in 0..MAX_RULES {
             table.rules.push(Rule::new(Trigger::Open, 0)).unwrap();
@@ -87,7 +87,7 @@ fn the_tables_lists_are_held_to_their_limits() {
     }
     let mut more = full.clone();
     assert!(more.rects.push(Rect { x: 0, y: 0, width: 1, height: 1 }).is_err());
-    assert!(more.rows.push([0; 4]).is_err());
+    assert!(more.rows.push(0).is_err());
     assert!(more.rules.push(Rule::new(Trigger::Open, 0)).is_err());
     assert!(more.sequences.push(Sequence::new(1, 1)).is_err());
     assert_eq!(more.push_group(&[]).err(), Some(Fault::Range("group with no command")));
@@ -212,7 +212,7 @@ fn a_groups_commands_bytes_and_bindings_are_held_to_their_limits() {
 /// `MAX_RUN_COMMANDS` commands is accepted and one more refused.
 #[test]
 fn nesting_is_held_to_its_depth_its_size_and_no_ring() {
-    let run = |group: u8| built(Command::Run { group, mode: RunMode::Now });
+    let run = |group: u8| built(Command::Run { group });
     let leaf = built(Command::Timer { start: true, timer: 0 });
     // A chain: group `n` runs group `n + 1`, and the last runs nothing.
     let chain = |length: usize| {
@@ -244,10 +244,14 @@ fn nesting_is_held_to_its_depth_its_size_and_no_ring() {
     group(&mut three, &[run(2)]);
     group(&mut three, &[leaf.clone(), run(0)]);
     assert_eq!(checked(&three), Err(Fault::Ring));
-    // A `RUN` that arms a run is no nesting: a group may arm itself.
-    let mut arms = table();
-    group(&mut arms, &[built(Command::Run { group: 0, mode: RunMode::After(1) })]);
-    assert_eq!(checked(&arms), Ok(()));
+    // A sequence's start is no nesting: a group may start a sequence
+    // whose step runs that group.
+    let mut starts = table();
+    let started = group(&mut starts, &[built(Command::Sequence { start: true, sequence: 0, mode: StartMode::Next })]);
+    let mut again = Sequence::new(1, 1);
+    again.steps.push(Step { offset: 0, group: started }).unwrap();
+    starts.sequences.push(again).unwrap();
+    assert_eq!(checked(&starts), Ok(()));
 
     // The size of a run: a group of 32 commands, three of which run a
     // group of 32, applies 32 + 3 × 32 commands.
@@ -297,31 +301,9 @@ fn triggers_are_held_to_their_limits() {
     // then its count of keys.
     assert_eq!(with_byte(&sixteen, rule_at + 3 + 4, count_of(MAX_KEYS_PER_TRIGGER + 1)), over("MAX_KEYS_PER_TRIGGER"));
 
-    let target = TriggerTarget::PAGE;
-    let any = KeyMatch::any();
-    let timed: [Timed<'_>; 6] = [
+    let timed: [Timed<'_>; 2] = [
         (&|ticks| Trigger::Every { timer: 0, ticks }, MAX_TIMER_TICKS, "MAX_TIMER_TICKS"),
         (&|ticks| Trigger::After { timer: 255, ticks }, MAX_TIMER_TICKS, "MAX_TIMER_TICKS"),
-        (
-            &|ticks| Trigger::Held { keys: any, ticks: u16::try_from(ticks).unwrap() },
-            u32::from(MAX_HOLD_TICKS),
-            "MAX_HOLD_TICKS",
-        ),
-        (
-            &|ticks| Trigger::PressHeld { target, button: 0, ticks: u16::try_from(ticks).unwrap() },
-            u32::from(MAX_HOLD_TICKS),
-            "MAX_HOLD_TICKS",
-        ),
-        (
-            &|ticks| Trigger::Double { keys: any, ticks: u16::try_from(ticks).unwrap() },
-            u32::from(MAX_DOUBLE_TICKS),
-            "MAX_DOUBLE_TICKS",
-        ),
-        (
-            &|ticks| Trigger::DoublePress { target, button: 0, ticks: u16::try_from(ticks).unwrap() },
-            u32::from(MAX_DOUBLE_TICKS),
-            "MAX_DOUBLE_TICKS",
-        ),
     ];
     for (trigger, limit, name) in timed {
         assert_eq!(checked(&of(&[trigger(limit)])), Ok(()), "{name}");
@@ -340,7 +322,7 @@ fn triggers_are_held_to_their_limits() {
     let rowed = |extra: bool| {
         with(&|table| {
             for _ in 0..MAX_ROWS {
-                table.rows.push([0; 4]).unwrap();
+                table.rows.push(0).unwrap();
             }
             let mut rule = Rule::new(Trigger::Open, 0);
             rule.rows = Some(RowRun { first: 0, count: count_of(MAX_ROWS) });

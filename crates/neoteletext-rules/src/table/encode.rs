@@ -1,9 +1,9 @@
 //! Encoding a table's image (RULE-41 to RULE-45). What is written is
 //! checked and read back, so nothing is written that a receiver refuses.
 
-use super::decode::{KEY_REPEAT, MOVE_HELD, RULE_ROWS, decode};
+use super::decode::{KEY_BY_ROW, KEY_REPEAT, MOVE_HELD, RULE_ROWS, decode};
 use super::{
-    FIRST_PARAMETER, FROM_ROW, Fault, KeyMatch, NO_PARAMETER, Node, Rule, Table, Target, Trigger, TriggerTarget,
+    FROM_ROW, Fault, KeyMatch, NO_PARAMETER, Node, ROW_PARAMETER, Rule, Table, Target, Trigger, TriggerTarget,
     node_code,
 };
 use crate::command::BodyCheck;
@@ -32,9 +32,7 @@ pub fn encode(table: &Table, body_check: BodyCheck, out: &mut [u8]) -> Result<us
         }
     }
     for row in table.rows.iter() {
-        for parameter in row {
-            writer.i32(*parameter)?;
-        }
+        writer.i32(*row)?;
     }
     for rule in table.rules.iter() {
         write_rule(rule, &mut writer)?;
@@ -68,14 +66,11 @@ fn write_trigger_target(target: TriggerTarget, writer: &mut Writer<'_>) -> Resul
     writer.u16(target.number)
 }
 
-fn write_keys(keys: &KeyMatch, ticks: Option<u16>, writer: &mut Writer<'_>) -> Result<(), Fault> {
+fn write_keys(keys: &KeyMatch, writer: &mut Writer<'_>) -> Result<(), Fault> {
     writer.bytes(&[keys.mods_mask, keys.mods_value])?;
-    if let Some(ticks) = ticks {
-        writer.u16(ticks)?;
-    }
     writer.u8(u8::try_from(keys.keys.len()).map_err(|_| Fault::Limit("MAX_KEYS_PER_TRIGGER"))?)?;
     for key in keys.keys.iter() {
-        writer.u8(key.kind.code() | if key.from_row { FROM_ROW } else { 0 })?;
+        writer.u8(key.kind.code())?;
         writer.u32(key.code)?;
     }
     Ok(())
@@ -85,25 +80,16 @@ fn write_trigger(trigger: &Trigger, writer: &mut Writer<'_>) -> Result<(), Fault
     writer.u8(trigger.code())?;
     match trigger {
         Trigger::Key { keys, repeat } => {
-            writer.u8(if *repeat { KEY_REPEAT } else { 0 })?;
-            write_keys(keys, None, writer)
+            writer.u8(if *repeat { KEY_REPEAT } else { 0 } | if keys.by_row { KEY_BY_ROW } else { 0 })?;
+            write_keys(keys, writer)
         }
         Trigger::KeyUp { keys } => {
-            writer.u8(0)?;
-            write_keys(keys, None, writer)
-        }
-        Trigger::Held { keys, ticks } | Trigger::Double { keys, ticks } => {
-            writer.u8(0)?;
-            write_keys(keys, Some(*ticks), writer)
+            writer.u8(if keys.by_row { KEY_BY_ROW } else { 0 })?;
+            write_keys(keys, writer)
         }
         Trigger::Press { target, button } | Trigger::Release { target, button } => {
             write_trigger_target(*target, writer)?;
             writer.u8(*button)
-        }
-        Trigger::PressHeld { target, button, ticks } | Trigger::DoublePress { target, button, ticks } => {
-            write_trigger_target(*target, writer)?;
-            writer.u8(*button)?;
-            writer.u16(*ticks)
         }
         Trigger::Enter { target } | Trigger::Leave { target } | Trigger::Wheel { target } => {
             write_trigger_target(*target, writer)
@@ -126,12 +112,12 @@ fn write_node(node: &Node, writer: &mut Writer<'_>) -> Result<(), Fault> {
         Node::And(children) => writer.bytes(&[node_code::AND, *children]),
         Node::Or(children) => writer.bytes(&[node_code::OR, *children]),
         Node::Not => writer.u8(node_code::NOT),
-        Node::Compare { value, operator, constant, parameter } => {
+        Node::Compare { value, operator, constant, plus_p } => {
             writer.u8(node_code::COMPARE)?;
             value.write(writer)?;
             writer.u8(operator.code())?;
             writer.i32(*constant)?;
-            writer.u8(parameter.map_or(NO_PARAMETER, |parameter| FIRST_PARAMETER | parameter))
+            writer.u8(if *plus_p { ROW_PARAMETER } else { NO_PARAMETER })
         }
         Node::InRange { value, low, high } => {
             writer.u8(node_code::IN_RANGE)?;

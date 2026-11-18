@@ -11,17 +11,18 @@
 
 use crate::animate::code as operation;
 use crate::command::{VariableOperation, midi_status};
-use crate::limits::{PAGE_TIMER, ROW_PARAMETERS, TIMERS, VARIABLES};
+use crate::limits::{PAGE_TIMER, TIMERS, VARIABLES};
 use crate::table::{
     CLASS_BEND, CLASS_CONTROLLER, CLASS_ENVELOPE_LEVEL, CLASS_ENVELOPE_STAGE, CLASS_FIELD, CLASS_NOTE, CLASS_NOTES,
-    CLASS_PROGRAM, CLASS_VELOCITY, CLASS_VOICES, FIRED_CUE, FIRED_KEY, FIRED_P0, FIRED_ROW, FIRED_TARGET, POINTER_OVER,
-    POINTER_X, POINTER_Y, SEQUENCE_PASSES, SEQUENCE_POSITION, SEQUENCE_RUNNING, SOUND_GAIN, SOUND_HANDLE, SOUND_LEVEL,
-    SOUND_LOCAL, SOUND_PLAYING, TARGET_CYCLING, TARGET_EXISTS, TARGET_FRAME, TARGET_INSIDE, TARGET_LAYER, TARGET_LOOK,
-    TARGET_ORDER, TARGET_SHOWN, TARGET_X, TARGET_Y, TIMER_ELAPSED, TIMER_RUNNING, trigger_code,
+    CLASS_PROGRAM, CLASS_VELOCITY, CLASS_VOICES, FIRED_CUE, FIRED_KEY, FIRED_P, FIRED_ROW, FIRED_TARGET, POINTER_OVER,
+    POINTER_X, POINTER_Y, SEQUENCE_PASSES, SEQUENCE_POSITION, SEQUENCE_RUNNING, SEQUENCE_WAITING, SOUND_GAIN,
+    SOUND_HANDLE, SOUND_LEVEL, SOUND_LOCAL, SOUND_PLAYING, TARGET_CYCLING, TARGET_EXISTS, TARGET_FRAME, TARGET_INSIDE,
+    TARGET_LAYER, TARGET_LOOK, TARGET_ORDER, TARGET_SHOWN, TARGET_X, TARGET_Y, TIMER_ELAPSED, TIMER_PHASE,
+    TIMER_RUNNING, trigger_code,
 };
 
 /// A trigger's `event` (RULE-35) and its code (RULE-9).
-pub const TRIGGERS: [(&str, u8); 21] = [
+pub const TRIGGERS: [(&str, u8); 17] = [
     ("key", trigger_code::KEY),
     ("key_up", trigger_code::KEY_UP),
     ("press", trigger_code::PRESS),
@@ -38,10 +39,6 @@ pub const TRIGGERS: [(&str, u8); 21] = [
     ("wheel", trigger_code::WHEEL),
     ("focus", trigger_code::FOCUS),
     ("blur", trigger_code::BLUR),
-    ("held", trigger_code::HELD),
-    ("double", trigger_code::DOUBLE),
-    ("press_held", trigger_code::PRESS_HELD),
-    ("double_press", trigger_code::DOUBLE_PRESS),
     ("cue", trigger_code::CUE),
 ];
 
@@ -92,7 +89,8 @@ pub const LOOKS: [(&str, u8); 4] = [("normal", 0), ("hover", 1), ("pressed", 2),
 pub const POINTER_PROPERTIES: [(&str, u16); 3] = [("over", POINTER_OVER), ("x", POINTER_X), ("y", POINTER_Y)];
 
 /// A `timer` value's `property` (RULE-25).
-pub const TIMER_PROPERTIES: [(&str, u16); 2] = [("running", TIMER_RUNNING), ("elapsed", TIMER_ELAPSED)];
+pub const TIMER_PROPERTIES: [(&str, u16); 3] =
+    [("running", TIMER_RUNNING), ("elapsed", TIMER_ELAPSED), ("phase", TIMER_PHASE)];
 
 /// A `target` value's `property` (RULE-26).
 pub const TARGET_PROPERTIES: [(&str, u16); 10] = [
@@ -134,20 +132,16 @@ pub const SYNTH_PROPERTIES: [(&str, u8); 10] = [
 /// A `fired` value's `property` (RULE-116). The first four are also the
 /// values of the firing an amount may name (RULE-106), by the low nibble
 /// of the source byte.
-pub const FIRED_PROPERTIES: [(&str, u16); 8] = [
-    ("key", FIRED_KEY),
-    ("target", FIRED_TARGET),
-    ("row", FIRED_ROW),
-    ("cue", FIRED_CUE),
-    ("p0", FIRED_P0),
-    ("p1", FIRED_P0 + 1),
-    ("p2", FIRED_P0 + 2),
-    ("p3", FIRED_P0 + 3),
-];
+pub const FIRED_PROPERTIES: [(&str, u16); 5] =
+    [("key", FIRED_KEY), ("target", FIRED_TARGET), ("row", FIRED_ROW), ("cue", FIRED_CUE), ("p", FIRED_P)];
 
 /// A `sequence` value's `property` (RULE-117).
-pub const SEQUENCE_PROPERTIES: [(&str, u16); 3] =
-    [("running", SEQUENCE_RUNNING), ("passes", SEQUENCE_PASSES), ("position", SEQUENCE_POSITION)];
+pub const SEQUENCE_PROPERTIES: [(&str, u16); 4] = [
+    ("running", SEQUENCE_RUNNING),
+    ("passes", SEQUENCE_PASSES),
+    ("position", SEQUENCE_POSITION),
+    ("waiting", SEQUENCE_WAITING),
+];
 
 /// The designators of the sixteen variables (RULE-14), `v0` first.
 pub const VARIABLE_NAMES: [&str; VARIABLES] =
@@ -159,8 +153,8 @@ pub const TIMER_NAMES: [&str; TIMERS] = ["t0", "t1", "t2", "t3", "t4", "t5", "t6
 /// The designator of the page timer (RULE-15).
 pub const PAGE_TIMER_NAME: &str = "page";
 
-/// The designators of a row's parameters (RULE-105), `p0` first.
-pub const PARAMETER_NAMES: [&str; ROW_PARAMETERS] = ["p0", "p1", "p2", "p3"];
+/// The designator of a row's one parameter (RULE-105, DEC-6635 item 8).
+pub const PARAMETER_NAME: &str = "p";
 
 /// The code `name` has in `table`.
 #[must_use]
@@ -192,10 +186,10 @@ pub fn timer(name: &str) -> Option<u8> {
     if name == PAGE_TIMER_NAME { Some(PAGE_TIMER) } else { place(&TIMER_NAMES, name) }
 }
 
-/// The index of the row parameter designated `name`, `p0` to `p3`.
+/// Whether `name` designates the row parameter, `p`.
 #[must_use]
-pub fn parameter(name: &str) -> Option<u8> {
-    place(&PARAMETER_NAMES, name)
+pub fn is_parameter(name: &str) -> bool {
+    name == PARAMETER_NAME
 }
 
 #[cfg(test)]
@@ -229,7 +223,8 @@ mod tests {
         assert_eq!(code(&TRIGGERS, "enable"), None);
         assert_eq!((variable("v0"), variable("v15"), variable("v16")), (Some(0), Some(15), None));
         assert_eq!((timer("t7"), timer("page"), timer("t8")), (Some(7), Some(PAGE_TIMER), None));
-        assert_eq!((parameter("p3"), parameter("p4")), (Some(3), None));
+        assert!(is_parameter("p") && !is_parameter("p0"), "one row parameter (DEC-6635 item 8)");
+        assert_eq!(code(&TRIGGERS, "held"), None, "withdrawn (DEC-6635 item 7)");
         for (operation, (_, held)) in VariableOperation::ALL.into_iter().zip(VARIABLE_OPERATIONS) {
             assert_eq!(operation.code(), held);
         }

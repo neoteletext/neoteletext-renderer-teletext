@@ -15,7 +15,7 @@ use crate::bounded::Bounded;
 use crate::command::{Binding, BodyCheck};
 use crate::limits::{
     ANY_BUTTON, MAX_CONDITION_NODES, MAX_GROUP_COMMANDS, MAX_GROUPS, MAX_GROUPS_BYTES, MAX_KEYS_PER_TRIGGER, MAX_RECTS,
-    MAX_ROWS, MAX_RULES, MAX_SEQUENCE_STEPS, MAX_SEQUENCES, MAX_SET_MEMBERS, MAX_TRIGGERS_PER_RULE, ROW_PARAMETERS,
+    MAX_ROWS, MAX_RULES, MAX_SEQUENCE_STEPS, MAX_SEQUENCES, MAX_SET_MEMBERS, MAX_TRIGGERS_PER_RULE,
 };
 
 mod checks;
@@ -34,12 +34,12 @@ pub use index::{
 };
 pub use value::{
     CLASS_BEND, CLASS_CONTROLLER, CLASS_ENVELOPE_LEVEL, CLASS_ENVELOPE_STAGE, CLASS_FIELD, CLASS_NOTE, CLASS_NOTES,
-    CLASS_PROGRAM, CLASS_VELOCITY, CLASS_VOICES, FIRED_CUE, FIRED_KEY, FIRED_P0, FIRED_P3, FIRED_ROW, FIRED_TARGET,
-    INPUT_BUTTON, INPUT_CHARACTER, INPUT_KEYS_DOWN, INPUT_NAMED, INPUT_PHYSICAL, INPUT_POINTER, POINTER_OVER,
-    POINTER_X, POINTER_Y, SEQUENCE_PASSES, SEQUENCE_POSITION, SEQUENCE_RUNNING, SOUND_GAIN, SOUND_HANDLE, SOUND_LEVEL,
+    CLASS_PROGRAM, CLASS_VELOCITY, CLASS_VOICES, FIRED_CUE, FIRED_KEY, FIRED_P, FIRED_ROW, FIRED_TARGET, INPUT_BUTTON,
+    INPUT_CHARACTER, INPUT_KEYS_DOWN, INPUT_NAMED, INPUT_PHYSICAL, INPUT_POINTER, POINTER_OVER, POINTER_X, POINTER_Y,
+    SEQUENCE_PASSES, SEQUENCE_POSITION, SEQUENCE_RUNNING, SEQUENCE_WAITING, SOUND_GAIN, SOUND_HANDLE, SOUND_LEVEL,
     SOUND_LOCAL, SOUND_PLAYING, SPACE_FIRED, SPACE_INPUT, SPACE_SEQUENCE, SPACE_SOUND, SPACE_SYNTH, SPACE_TARGET,
     SPACE_TIMER, SPACE_VARIABLE, TARGET_CYCLING, TARGET_EXISTS, TARGET_FRAME, TARGET_INSIDE, TARGET_LAYER, TARGET_LOOK,
-    TARGET_ORDER, TARGET_SHOWN, TARGET_X, TARGET_Y, TIMER_ELAPSED, TIMER_RUNNING, VALUE_BYTES, Value,
+    TARGET_ORDER, TARGET_SHOWN, TARGET_X, TARGET_Y, TIMER_ELAPSED, TIMER_PHASE, TIMER_RUNNING, VALUE_BYTES, Value,
 };
 
 /// The bytes of the image's header (RULE-41).
@@ -48,17 +48,17 @@ pub const HEADER_BYTES: usize = 12;
 pub const TARGET_BYTES: usize = 3;
 /// The bytes of a rectangle in the image (RULE-42).
 pub const RECT_BYTES: usize = 8;
-/// The bytes of a binding row in the image (RULE-42).
-pub const ROW_BYTES: usize = ROW_PARAMETERS * 4;
-/// The bit of a key's or a target's kind byte that says its code or
-/// number is a row parameter's index (RULE-43).
+/// The bytes of a binding row in the image (RULE-42): its one parameter
+/// `p`, a signed 32-bit integer (DEC-6635 item 8).
+pub const ROW_BYTES: usize = 4;
+/// The bit of a target's kind byte that says its number is a signed
+/// 16-bit constant to which the row's `p` is added (RULE-43).
 pub const FROM_ROW: u8 = 0x80;
 /// The parameter byte of a compare node that adds no parameter (RULE-44).
 pub const NO_PARAMETER: u8 = 0;
-/// The parameter byte of a compare node that adds `p0` (RULE-44); `p1` to
-/// `p3` follow it. They are the binding sources of the same parameters
-/// (RULE-106).
-pub const FIRST_PARAMETER: u8 = 0x20;
+/// The parameter byte of a compare node that adds the row's `p`
+/// (RULE-44), which is also the binding source of `p` (RULE-106).
+pub const ROW_PARAMETER: u8 = 0x20;
 
 /// Trigger codes (RULE-9), the trigger's byte in the image.
 pub mod trigger_code {
@@ -94,14 +94,8 @@ pub mod trigger_code {
     pub const FOCUS: u8 = 15;
     /// `blur`.
     pub const BLUR: u8 = 16;
-    /// `held`.
-    pub const HELD: u8 = 17;
-    /// `double`.
-    pub const DOUBLE: u8 = 18;
-    /// `press_held`.
-    pub const PRESS_HELD: u8 = 19;
-    /// `double_press`.
-    pub const DOUBLE_PRESS: u8 = 20;
+    // 17 to 20, `held`, `double`, `press_held` and `double_press`, are
+    // withdrawn by DEC-6635 item 7 and never reused.
     /// `cue`.
     pub const CUE: u8 = 21;
 }
@@ -175,11 +169,11 @@ pub struct Rect {
     pub height: u16,
 }
 
-/// A binding row (RULE-105): the four constants `p0` to `p3`.
-pub type Row = [i32; ROW_PARAMETERS];
+/// A binding row (RULE-105): its one parameter, `p` (DEC-6635 item 8).
+pub type Row = i32;
 
-/// The parameters in force where no row is (RULE-105): all 0.
-pub const NO_ROW: Row = [0; ROW_PARAMETERS];
+/// The parameter in force where no row is (RULE-105): 0.
+pub const NO_ROW: Row = 0;
 
 /// The kind of a target (RULE-12), its byte in a record.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -273,16 +267,16 @@ impl Target {
 }
 
 /// A trigger's target (RULE-12, RULE-105): a target, or in a rule that
-/// names rows a kind whose number each row gives.
+/// names rows a kind whose number is a constant plus each row's `p`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TriggerTarget {
     /// What kind of thing.
     pub kind: TargetKind,
-    /// The number; or, with `from_row`, the index 0 to 3 of the row
-    /// parameter that holds it.
+    /// The number; or, with `from_row`, the bits of a signed 16-bit
+    /// constant to which the row's `p` is added.
     pub number: u16,
-    /// Whether the number is a row parameter's (RULE-43: bit 7 of the
-    /// kind byte).
+    /// Whether the number is a constant plus the row's `p` (RULE-43: bit 7
+    /// of the kind byte).
     pub from_row: bool,
 }
 
@@ -296,21 +290,27 @@ impl TriggerTarget {
         Self { kind: target.kind, number: target.number, from_row: false }
     }
 
-    /// A target of `kind` whose number is row parameter `parameter`.
+    /// A target of `kind` whose number is `constant` plus the row's `p`.
     #[must_use]
-    pub const fn row(kind: TargetKind, parameter: u8) -> Self {
-        Self { kind, number: parameter as u16, from_row: true }
+    pub const fn row(kind: TargetKind, constant: i16) -> Self {
+        Self { kind, number: constant.cast_unsigned(), from_row: true }
     }
 
-    /// The target for one row (RULE-105), or `None` when the row's
-    /// parameter is no number of the kind, which [`decode`] refuses.
+    /// The constant a row's `p` is added to, with `from_row`.
+    #[must_use]
+    pub const fn constant(&self) -> i16 {
+        self.number.cast_signed()
+    }
+
+    /// The target for one row (RULE-105), or `None` when the constant
+    /// plus the row's `p` is no number of the kind, which [`decode`]
+    /// refuses.
     #[must_use]
     pub fn resolve(&self, row: &Row) -> Option<Target> {
         if !self.from_row {
             return Some(Target { kind: self.kind, number: self.number });
         }
-        let parameter = row.get(usize::from(self.number)).copied()?;
-        let number = u16::try_from(parameter).ok()?;
+        let number = u16::try_from(i32::from(self.constant()).saturating_add(*row)).ok()?;
         Some(Target { kind: self.kind, number })
     }
 }
@@ -349,43 +349,22 @@ impl KeyKind {
     }
 }
 
-/// One key of a key set (RULE-10, RULE-105).
+/// One key of a key set (RULE-10).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Key {
     /// How it is named.
     pub kind: KeyKind,
     /// A Unicode scalar value for a character or a physical key; a
     /// functional code for a named key, which the caller that knows the
-    /// input protocol's table checks (RULE-56). With `from_row`, the index
-    /// 0 to 3 of the row parameter that holds the code.
+    /// input protocol's table checks (RULE-56).
     pub code: u32,
-    /// Whether the code is a row parameter's (RULE-43: bit 7 of the kind
-    /// byte).
-    pub from_row: bool,
 }
 
 impl Key {
     /// A key written in the table.
     #[must_use]
     pub const fn of(kind: KeyKind, code: u32) -> Self {
-        Self { kind, code, from_row: false }
-    }
-
-    /// A key of `kind` whose code is row parameter `parameter`.
-    #[must_use]
-    pub const fn row(kind: KeyKind, parameter: u8) -> Self {
-        Self { kind, code: parameter as u32, from_row: true }
-    }
-
-    /// The key for one row (RULE-105): its kind and code, or `None` when
-    /// the row's parameter is no code, which [`decode`] refuses.
-    #[must_use]
-    pub fn resolve(&self, row: &Row) -> Option<(KeyKind, u32)> {
-        if !self.from_row {
-            return Some((self.kind, self.code));
-        }
-        let parameter = usize::try_from(self.code).ok().and_then(|index| row.get(index)).copied()?;
-        Some((self.kind, u32::try_from(parameter).ok()?))
+        Self { kind, code }
     }
 }
 
@@ -412,13 +391,24 @@ pub struct KeyMatch {
     /// What they must be: the trigger matches when
     /// `(mods AND mask) = value`.
     pub mods_value: u8,
+    /// One key a row (RULE-10, RULE-105): in a rule that names rows, the
+    /// row at place `r` among the rule's rows matches the key at place `r`
+    /// and no other. The set then holds exactly as many keys as the rule
+    /// names rows.
+    pub by_row: bool,
 }
 
 impl KeyMatch {
     /// Any key, whatever the modifiers.
     #[must_use]
     pub const fn any() -> Self {
-        Self { keys: any_key(), mods_mask: 0, mods_value: 0 }
+        Self { keys: any_key(), mods_mask: 0, mods_value: 0, by_row: false }
+    }
+
+    /// One key a row (RULE-105): the row at place `r` matches `keys[r]`.
+    #[must_use]
+    pub fn by_row(keys: &[Key]) -> Self {
+        Self { by_row: true, ..Self::of(keys) }
     }
 
     /// The keys given, whatever the modifiers. Keys beyond the limit are
@@ -429,7 +419,7 @@ impl KeyMatch {
         for key in keys {
             let _ = set.push(*key);
         }
-        Self { keys: set, mods_mask: 0, mods_value: 0 }
+        Self { keys: set, mods_mask: 0, mods_value: 0, by_row: false }
     }
 }
 
@@ -510,42 +500,6 @@ pub enum Trigger {
     Focus,
     /// The page loses the keyboard.
     Blur,
-    /// A key of the set has been down for exactly `ticks` ticks
-    /// (RULE-108).
-    Held {
-        /// The keys and modifiers, as they were at the press.
-        keys: KeyMatch,
-        /// 1 to `MAX_HOLD_TICKS`.
-        ticks: u16,
-    },
-    /// A key of the set is pressed at most `ticks` ticks after its
-    /// previous press (RULE-108).
-    Double {
-        /// The keys and modifiers.
-        keys: KeyMatch,
-        /// 1 to `MAX_DOUBLE_TICKS`.
-        ticks: u16,
-    },
-    /// A button that went down inside the target has been down for
-    /// exactly `ticks` ticks (RULE-108).
-    PressHeld {
-        /// Where it went down.
-        target: TriggerTarget,
-        /// 0, 1, 2, or 255 for any.
-        button: u8,
-        /// 1 to `MAX_HOLD_TICKS`.
-        ticks: u16,
-    },
-    /// A button goes down inside the target at most `ticks` ticks after
-    /// its previous press there (RULE-108).
-    DoublePress {
-        /// Where.
-        target: TriggerTarget,
-        /// 0, 1, 2, or 255 for any.
-        button: u8,
-        /// 1 to `MAX_DOUBLE_TICKS`.
-        ticks: u16,
-    },
     /// A cue of the sound playing on an audio channel is heard
     /// (RULE-109).
     Cue {
@@ -577,10 +531,6 @@ impl Trigger {
             Self::Wheel { .. } => trigger_code::WHEEL,
             Self::Focus => trigger_code::FOCUS,
             Self::Blur => trigger_code::BLUR,
-            Self::Held { .. } => trigger_code::HELD,
-            Self::Double { .. } => trigger_code::DOUBLE,
-            Self::PressHeld { .. } => trigger_code::PRESS_HELD,
-            Self::DoublePress { .. } => trigger_code::DOUBLE_PRESS,
             Self::Cue { .. } => trigger_code::CUE,
         }
     }
@@ -594,9 +544,7 @@ impl Trigger {
             | Self::Enter { target }
             | Self::Leave { target }
             | Self::Move { target, .. }
-            | Self::Wheel { target }
-            | Self::PressHeld { target, .. }
-            | Self::DoublePress { target, .. } => Some(*target),
+            | Self::Wheel { target } => Some(*target),
             _ => None,
         }
     }
@@ -605,28 +553,18 @@ impl Trigger {
     #[must_use]
     pub const fn keys(&self) -> Option<&KeyMatch> {
         match self {
-            Self::Key { keys, .. } | Self::KeyUp { keys } | Self::Held { keys, .. } | Self::Double { keys, .. } => {
-                Some(keys)
-            }
+            Self::Key { keys, .. } | Self::KeyUp { keys } => Some(keys),
             _ => None,
         }
     }
 
-    /// Whether an input event can make the trigger occur (RULE-96): these
-    /// are decided on the event's arrival. `held` and `press_held` belong
-    /// to step 4 of the tick and are not.
+    /// Whether an input event can make the trigger occur: the rest are
+    /// driven by time or by a cue (DEC-6635 item 2).
     #[must_use]
     pub const fn is_input(&self) -> bool {
         !matches!(
             self,
-            Self::Open
-                | Self::Close
-                | Self::Becomes
-                | Self::Every { .. }
-                | Self::After { .. }
-                | Self::Held { .. }
-                | Self::PressHeld { .. }
-                | Self::Cue { .. }
+            Self::Open | Self::Close | Self::Becomes | Self::Every { .. } | Self::After { .. } | Self::Cue { .. }
         )
     }
 }
@@ -711,9 +649,9 @@ pub enum Node {
         operator: Operator,
         /// With what.
         constant: i32,
-        /// The row parameter, 0 to 3, added to the constant with
-        /// saturation (RULE-105), in a rule that names rows.
-        parameter: Option<u8>,
+        /// Whether the row's `p` is added to the constant with saturation
+        /// (RULE-105), in a rule that names rows.
+        plus_p: bool,
     },
     /// True when `low ≤ value ≤ high`.
     InRange {
@@ -743,7 +681,7 @@ impl Node {
     /// A value compared with a constant, with no row parameter.
     #[must_use]
     pub const fn compare(value: Value, operator: Operator, constant: i32) -> Self {
-        Self::Compare { value, operator, constant, parameter: None }
+        Self::Compare { value, operator, constant, plus_p: false }
     }
 
     /// The value a term reads, if it reads one.
@@ -949,6 +887,14 @@ impl Table {
     #[must_use]
     pub fn run_commands(&self, group: u8) -> usize {
         checks::run_commands(&self.groups, group)
+    }
+
+    /// The `REPORT` commands one run of `group` applies, with every group
+    /// it runs in place: a constant of a checked table (RULE-5's budget).
+    /// 0 for a group the table does not have.
+    #[must_use]
+    pub fn run_reports(&self, group: u8) -> usize {
+        checks::run_reports(&self.groups, group, 0)
     }
 }
 

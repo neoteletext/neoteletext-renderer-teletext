@@ -16,7 +16,7 @@ use std::vec::Vec;
 
 use super::*;
 use crate::animate::{Operation, OperationKind};
-use crate::command::{Binding, Command, Operand, RunMode, Source, TYPE_REPORT, VariableOperation, field};
+use crate::command::{Binding, Command, Operand, Source, StartMode, TYPE_REPORT, VariableOperation, field};
 use crate::limits::{MAX_TABLE_BYTES, PAGE_TIMER};
 use crate::testing::{PAGE, SUB, animated, body_check, built, control, group};
 
@@ -44,15 +44,15 @@ pub(super) fn everything() -> Box<Table> {
     let mut table = Box::new(Table::new(PAGE, SUB));
     table.rects.push(Rect { x: 40, y: 300, width: 200, height: 100 }).unwrap();
     table.rects.push(Rect { x: 0, y: 0, width: 1, height: 1 }).unwrap();
-    table.rows.push(['a' as i32, 60, 101, 0]).unwrap();
-    table.rows.push(['s' as i32, 62, 103, 1]).unwrap();
+    table.rows.push(60).unwrap();
+    table.rows.push(62).unwrap();
     let note = group(
         &mut table,
         &[
             built(Command::LocalMidi { channel: 0, status: 0x90, data1: 0, data2: 100 })
-                .bound(Binding::of(field::MIDI_DATA1, Source::Parameter(1))),
-            animated(&[Operation { target: Target::object(1), kind: OperationKind::Look(2) }])
-                .bound(Binding::of_operation(0, field::TARGET, Source::Parameter(2))),
+                .bound(Binding::of(field::MIDI_DATA1, Source::Parameter)),
+            animated(&[Operation { target: Target::object(41), kind: OperationKind::Look(2) }])
+                .bound(Binding::of_operation(0, field::TARGET, Source::Parameter)),
             control(1, 3, 0, 50, 100).bound(Binding::of(field::CONTROL_GAIN, Source::Variable(4))),
         ],
     );
@@ -66,9 +66,10 @@ pub(super) fn everything() -> Box<Table> {
             }),
             built(Command::Timer { start: true, timer: 3 }),
             built(Command::Report { value: Some(Value::variable(5)) }),
-            built(Command::Run { group: 0, mode: RunMode::Now }),
-            built(Command::Run { group: 0, mode: RunMode::Beat { timer: 3, ticks: 8 } }),
-            built(Command::Sequence { start: true, sequence: 0 }),
+            built(Command::Run { group: 0 }),
+            built(Command::Sequence { start: true, sequence: 0, mode: StartMode::Beat { timer: 3, ticks: 8 } }),
+            built(Command::Sequence { start: true, sequence: 0, mode: StartMode::At(90) }),
+            built(Command::Sequence { start: false, sequence: 255, mode: StartMode::Next }),
         ],
     );
     let report = report_group(&mut table);
@@ -82,6 +83,7 @@ pub(super) fn everything() -> Box<Table> {
         },
         mods_mask: 1,
         mods_value: 1,
+        by_row: false,
     };
     let object = TriggerTarget::of(Target::object(301));
     let triggers = [
@@ -100,26 +102,19 @@ pub(super) fn everything() -> Box<Table> {
         Trigger::Wheel { target: object },
         Trigger::Focus,
         Trigger::Blur,
-        Trigger::Held { keys, ticks: 3600 },
-        Trigger::Double { keys: KeyMatch::any(), ticks: 120 },
-        Trigger::PressHeld { target: object, button: 255, ticks: 30 },
-        Trigger::DoublePress { target: object, button: 1, ticks: 12 },
         Trigger::Cue { channel: 3, number: 255 },
     ];
     for trigger in triggers {
         table.rules.push(Rule::new(trigger, report)).unwrap();
     }
-    // Several triggers and rows: a key or a press, each from its row.
-    let mut both =
-        Rule::new(Trigger::Key { keys: KeyMatch::of(&[Key::row(KeyKind::Physical, 0)]), repeat: false }, note);
-    both.triggers.push(Trigger::Press { target: TriggerTarget::row(TargetKind::Object, 2), button: 0 }).unwrap();
+    // Several triggers and rows: a key of each row by place, or a press on
+    // drawing 41 plus the row's `p`.
+    let by_row = KeyMatch::by_row(&[Key::of(KeyKind::Physical, 'a' as u32), Key::of(KeyKind::Physical, 's' as u32)]);
+    let mut both = Rule::new(Trigger::Key { keys: by_row, repeat: false }, note);
+    both.triggers.push(Trigger::Press { target: TriggerTarget::row(TargetKind::Object, 41), button: 0 }).unwrap();
     both.rows = Some(RowRun { first: 0, count: 2 });
-    both.condition = condition(&[Node::Compare {
-        value: Value::variable(0),
-        operator: Operator::Less,
-        constant: 10,
-        parameter: Some(3),
-    }]);
+    both.condition =
+        condition(&[Node::Compare { value: Value::variable(0), operator: Operator::Less, constant: 10, plus_p: true }]);
     table.rules.push(both).unwrap();
     // `becomes`, with a condition of every node.
     let mut becomes = Rule::new(Trigger::Becomes, housekeeping);
@@ -156,7 +151,7 @@ fn a_table_round_trips() {
     assert_eq!(*decoded(&bytes).unwrap(), *table);
     assert_eq!(image(&decoded(&bytes).unwrap()), bytes);
     let groups = u16::try_from(table.groups.as_bytes().len()).unwrap().to_be_bytes();
-    assert_eq!(bytes[..HEADER_BYTES], [2, 0, 2, 2, 22, 3, 1, 0, groups[0], groups[1], 0, 0]);
+    assert_eq!(bytes[..HEADER_BYTES], [2, 0, 2, 2, 18, 3, 1, 0, groups[0], groups[1], 0, 0]);
     assert_eq!(check(&bytes, PAGE, SUB, body_check), Ok(()));
     // The same image for another page is another table's: its commands
     // name this page, so it is refused there (RULE-119).
@@ -171,7 +166,8 @@ fn a_table_round_trips() {
         index.interest,
         INTEREST_KEYS | INTEREST_TEXT | INTEREST_POINTER_BUTTONS | INTEREST_MOVES | INTEREST_WHEEL | INTEREST_FOCUS
     );
-    assert_eq!(table.run_commands(1), 6 + 3);
+    assert_eq!(table.run_commands(1), 7 + 3);
+    assert_eq!((table.run_reports(1), table.run_reports(2)), (1, 1), "its own report; the RUN of group 0 holds none");
 }
 
 /// RULE-42, RULE-43, RULE-45 (REQ-6526): the bytes of a rectangle, a
@@ -181,15 +177,15 @@ fn a_table_round_trips() {
 fn the_parts_are_their_bytes() {
     let mut table = Table::new(PAGE, SUB);
     table.rects.push(Rect { x: 40, y: 300, width: 200, height: 100 }).unwrap();
-    table.rows.push([97, -1, 301, 0]).unwrap();
+    table.rows.push(61).unwrap();
     let note = group(
         &mut table,
         &[built(Command::LocalMidi { channel: 0, status: 0x90, data1: 0, data2: 100 })
-            .bound(Binding::of(field::MIDI_DATA1, Source::Parameter(1)))],
+            .bound(Binding::of(field::MIDI_DATA1, Source::Parameter))],
     );
-    let mut rule =
-        Rule::new(Trigger::Key { keys: KeyMatch::of(&[Key::row(KeyKind::Physical, 0)]), repeat: true }, note);
-    rule.triggers.push(Trigger::Press { target: TriggerTarget::row(TargetKind::Object, 2), button: 0 }).unwrap();
+    let keys = KeyMatch::by_row(&[Key::of(KeyKind::Physical, 'a' as u32)]);
+    let mut rule = Rule::new(Trigger::Key { keys, repeat: true }, note);
+    rule.triggers.push(Trigger::Press { target: TriggerTarget::row(TargetKind::Object, -20), button: 0 }).unwrap();
     rule.rows = Some(RowRun { first: 0, count: 1 });
     table.rules.push(rule).unwrap();
     let mut sequence = Sequence::new(12, 2);
@@ -200,20 +196,21 @@ fn the_parts_are_their_bytes() {
         &[2, 0, 1, 1, 1, 1, 1, 0, 0, 16, 0, 0][..],
         // The rectangle.
         &[0, 40, 0x01, 0x2C, 0, 200, 0, 100],
-        // The row.
-        &[0, 0, 0, 97, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0x01, 0x2D, 0, 0, 0, 0],
+        // The row: its one parameter `p`, 61 (DEC-6635 item 8).
+        &[0, 0, 0, 61],
         // The rule: it names rows; group 0; row 0, one row; two triggers.
         &[1, 0, 0, 1, 2],
-        // `key`: repeat; no modifiers; one key, physical from parameter 0.
-        &[1, 1, 0, 0, 1, 0x83, 0, 0, 0, 0],
-        // `press`: an object from parameter 2; button 0.
-        &[3, 0x82, 0, 2, 0],
+        // `key`: repeat and one key a row (bit 1); no modifiers; one
+        // physical key, `a`.
+        &[1, 3, 0, 0, 1, 3, 0, 0, 0, 97],
+        // `press`: an object, -20 plus the row's `p`; button 0.
+        &[3, 0x82, 0xFF, 0xEC, 0],
         // No condition.
         &[0],
         // The group: one command; type 28, one binding, eight bytes.
         &[1, 28, 1, 0, 8, 0x01, 0x01, 0x00, 0x01, 0, 0x90, 0, 100],
-        // The binding: item 0, data 1, parameter `p1`.
-        &[0, 1, 0x21],
+        // The binding: item 0, data 1, the row's `p`.
+        &[0, 1, 0x20],
         // The sequence: two passes, one step, twelve ticks; offset 4,
         // group 0.
         &[2, 1, 0, 0, 0, 12, 0, 0, 0, 4, 0],
@@ -285,7 +282,7 @@ fn a_corrupted_image_is_refused_whole_or_is_another_table() {
 fn shapes_and_reserved_bits_are_refused() {
     let base = || {
         let mut table = Box::new(Table::new(PAGE, SUB));
-        table.rows.push([97, 60, 5, 0]).unwrap();
+        table.rows.push(60).unwrap();
         report_group(&mut table);
         table
     };
@@ -327,14 +324,26 @@ fn shapes_and_reserved_bits_are_refused() {
     // A row parameter in a rule without rows: a key, a target, a
     // comparison.
     let without_rows = Some(Fault::Shape("row parameter in a rule without rows"));
-    let by_row = Trigger::Key { keys: KeyMatch::of(&[Key::row(KeyKind::Character, 0)]), repeat: false };
+    let by_row = Trigger::Key { keys: KeyMatch::by_row(&[Key::of(KeyKind::Character, 'a' as u32)]), repeat: false };
     assert_eq!(
         refused(&|table| {
             table.rules.push(rule(by_row)).unwrap();
         }),
-        without_rows
+        Some(Fault::Shape("one key a row in a rule without rows"))
     );
-    let press_row = Trigger::Press { target: TriggerTarget::row(TargetKind::Object, 2), button: 0 };
+    // One key a row, and not one key for each row (RULE-105).
+    let two = Trigger::KeyUp {
+        keys: KeyMatch::by_row(&[Key::of(KeyKind::Character, 'a' as u32), Key::of(KeyKind::Character, 'b' as u32)]),
+    };
+    assert_eq!(
+        refused(&|table| {
+            let mut ruled = rule(two);
+            ruled.rows = Some(RowRun { first: 0, count: 1 });
+            table.rules.push(ruled).unwrap();
+        }),
+        Some(Fault::Shape("one key a row, and not one key for each row"))
+    );
+    let press_row = Trigger::Press { target: TriggerTarget::row(TargetKind::Object, 41), button: 0 };
     assert_eq!(
         refused(&|table| {
             table.rules.push(rule(press_row)).unwrap();
@@ -348,7 +357,7 @@ fn shapes_and_reserved_bits_are_refused() {
                 value: Value::variable(0),
                 operator: Operator::Equal,
                 constant: 0,
-                parameter: Some(0),
+                plus_p: true,
             }]);
             table.rules.push(compared).unwrap();
         }),
@@ -388,9 +397,14 @@ fn shapes_and_reserved_bits_are_refused() {
     assert_eq!(with(rule_at + 2, 0), Some(Fault::Shape("rule without a trigger")));
     // `move`: its code, its target of three bytes, its flags.
     assert_eq!(with(rule_at + 7, 2), Some(Fault::Reserved("move flags")));
-    assert_eq!(with(rule_at + 9, 2), Some(Fault::Reserved("key flags")));
+    assert_eq!(with(rule_at + 9, 4), Some(Fault::Reserved("key flags")));
     assert_eq!(with(rule_at + 14, 1), Some(Fault::Reserved("key_up flags")));
     assert_eq!(with(rule_at + 3, 22), Some(Fault::Range("trigger kind")));
+    // `held`, `double`, `press_held` and `double_press` are withdrawn
+    // (DEC-6635 item 7), their codes never reused.
+    for withdrawn in 17..=20 {
+        assert_eq!(with(rule_at + 3, withdrawn), Some(Fault::Range("trigger kind")), "{withdrawn}");
+    }
     assert_eq!(with(rule_at + 4, 4), Some(Fault::Range("target kind")));
     assert_eq!(with(rule_at + 4, 0x81), Some(Fault::Shape("row parameter in a rule without rows")));
 }

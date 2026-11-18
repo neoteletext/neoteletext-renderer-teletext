@@ -2,11 +2,9 @@
 //! from the fuzzer's bytes (RULE-83): the same bytes give the same
 //! answers, so two runs can be compared.
 
-use neoteletext_rules::command::{
-    self, Command, Operand, RunMode, TYPE_CONTROL, TYPE_LOCAL_MIDI, VariableOperation,
-};
+use neoteletext_rules::command::{self, Command, Operand, StartMode, TYPE_CONTROL, TYPE_LOCAL_MIDI, VariableOperation};
 use neoteletext_rules::evaluator::{
-    Bounds, Counters, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, SoundState, TargetState,
+    Bounds, Counters, Event, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, SoundState, TargetState,
     World,
 };
 use neoteletext_rules::limits::{MAX_COMMAND_BYTES, MAX_POINTER_OBJECTS, VARIABLES};
@@ -32,13 +30,6 @@ pub enum Given {
     Report(Report),
     Cycles(u32),
     State(Box<PageState>),
-}
-
-impl Given {
-    /// Whether this is a sound command (RULE-96).
-    pub fn is_sound(&self) -> bool {
-        matches!(self, Self::Command(kind, ..) if command::is_sound(*kind))
-    }
 }
 
 /// A world whose every answer is a function of the fuzzer's bytes and the
@@ -119,9 +110,7 @@ impl World for FuzzWorld<'_> {
     }
 
     // An answer is a function of how many commands of its own sort came
-    // before, not of everything given: a sound command given on an
-    // event's arrival (RULE-96) is given before the tick's other commands
-    // and reports, and must be answered the same.
+    // before, so that two runs of one script are answered alike.
     fn command(&mut self, kind: u8, body: &[u8], tick: u32) -> bool {
         assert!(body.len() <= MAX_COMMAND_BYTES && !body.is_empty());
         assert!(command::is_allowed(kind) && !(command::TYPE_VARIABLE..=command::TYPE_SEQUENCE).contains(&kind));
@@ -148,29 +137,6 @@ impl World for FuzzWorld<'_> {
     }
 }
 
-/// How a script's events are given to the evaluator.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Way {
-    /// By `Evaluator::push`, to be decided at the tick.
-    AtTheTick,
-    /// By `Evaluator::push_now`, decided on arrival (RULE-96).
-    OnArrival,
-    /// The odd-numbered events one way and the even the other.
-    Mixed,
-}
-
-impl Way {
-    /// Gives `event` this way.
-    pub fn give(self, evaluator: &mut Evaluator, event: InputEvent, world: &mut dyn World) -> bool {
-        let now = match self {
-            Self::AtTheTick => false,
-            Self::OnArrival => true,
-            Self::Mixed => event.sequence.is_multiple_of(2),
-        };
-        if now { evaluator.push_now(event, world) } else { evaluator.push(event) }
-    }
-}
-
 /// One step of a script.
 #[derive(Clone, Copy)]
 pub enum Step {
@@ -182,29 +148,10 @@ pub enum Step {
     Cue(u8, u8),
     /// A command the server sent directly.
     Command(Command),
+    /// A state query (RULE-47).
+    Query(u32),
     /// A tick to evaluate.
     Tick,
-}
-
-/// The script with each interval's metered reports, cues and commands
-/// before its events, in their order. A tick's snapshot is taken at the
-/// interval's first arrival (RULE-7), so only a script in this form has
-/// the same result whichever way its events are given.
-pub fn settled(steps: &[Step]) -> Vec<Step> {
-    let mut out = Vec::with_capacity(steps.len());
-    let mut events = Vec::new();
-    for step in steps {
-        match step {
-            Step::Event(_) => events.push(*step),
-            Step::Metered(_) | Step::Cue(..) | Step::Command(_) => out.push(*step),
-            Step::Tick => {
-                out.append(&mut events);
-                out.push(Step::Tick);
-            }
-        }
-    }
-    out.append(&mut events);
-    out
 }
 
 /// A command the server sends directly, from six of the fuzzer's bytes.
@@ -224,10 +171,15 @@ fn server_command(field: &dyn Fn(usize) -> u8) -> Command {
         5 => Command::Timer { start: field(1) & 1 == 0, timer: field(2) % 8 },
         6 => Command::Report { value: Some(Value::variable(variable)) },
         7 => Command::Report { value: None },
-        8 => Command::Run { group: field(1) % 64, mode: RunMode::Now },
-        9 => Command::Run { group: field(1) % 64, mode: RunMode::After(u32::from(field(2) % 8) + 1) },
-        10 => Command::Run { group: field(1) % 64, mode: RunMode::Beat { timer: field(2) % 8, ticks: 4 } },
-        _ => Command::Sequence { start: field(1) & 1 == 0, sequence: field(2) % 8 },
+        8 => Command::Run { group: field(1) % 64 },
+        9 => Command::Sequence { start: true, sequence: field(1) % 8, mode: StartMode::At(u32::from(field(2))) },
+        10 => Command::Sequence {
+            start: true,
+            sequence: field(1) % 8,
+            mode: StartMode::Beat { timer: if field(2) & 8 == 0 { field(2) % 8 } else { 255 }, ticks: 4 },
+        },
+        _ if field(1) & 1 == 0 => Command::Sequence { start: true, sequence: field(2) % 8, mode: StartMode::Next },
+        _ => Command::Sequence { start: false, sequence: field(2) % 8, mode: StartMode::Next },
     }
 }
 
@@ -310,40 +262,46 @@ pub fn evaluator_of(table: &Table) -> Box<Evaluator> {
     Box::new(Evaluator::new(table, GENERATION, body_check).expect("a decoded table is evaluated"))
 }
 
-/// What one tick and the interval before it gave the world: the sound
-/// commands in order, everything else in order, and the counters and the
-/// variables after.
-pub type Interval = (Vec<Given>, Vec<Given>, Counters, [i32; VARIABLES]);
+/// What one tick and the interval before it gave the world, in order,
+/// and the counters and the variables after.
+pub type Interval = (Vec<Given>, Counters, [i32; VARIABLES]);
 
-/// Gives the evaluator one step that is not a tick.
-pub fn give(evaluator: &mut Evaluator, world: &mut FuzzWorld<'_>, step: &Step, way: Way) {
+/// Gives the evaluator one step that is not a tick: each event is
+/// handled at once or waits (DEC-6635 items 1 and 4); a metered report is
+/// a change to the world between handlings.
+pub fn give(evaluator: &mut Evaluator, world: &mut FuzzWorld<'_>, step: &Step) {
     match step {
         Step::Event(event) => {
-            way.give(evaluator, *event, world);
+            evaluator.handle(Event::Input(*event), world);
         }
         Step::Metered(values) => evaluator.set_metered(values),
         Step::Cue(channel, number) => {
-            evaluator.push_cue(*channel, *number);
+            evaluator.handle(Event::Cue { channel: *channel, number: *number }, world);
         }
         Step::Command(command) => {
             let mut body = [0_u8; command::MAX_BODY_BYTES];
             if let Ok(length) = command::encode(command, PAGE, SUB, &mut body) {
-                evaluator.push_command(command.kind(), &body[..length]);
+                evaluator.handle(Event::Command { kind: command.kind(), body: &body[..length] }, world);
             }
+        }
+        Step::Query(identifier) => {
+            evaluator.handle(Event::Query(*identifier), world);
         }
         Step::Tick => {}
     }
 }
 
-/// Runs the script once, its events given `way`, and gives what the world
-/// was given tick by tick. `each` is given the evaluator and what the
-/// tick just run gave the world.
+/// Runs the script once and gives what the world was given, interval by
+/// interval, each ending with its tick. `each` is given the evaluator and
+/// what the interval and the tick just run gave the world. `record` is
+/// given each step that is not a tick with how many tick steps had run
+/// when it was given (DEC-6635 item 5).
 pub fn run(
     table: &Table,
     seed: &[u8],
     steps: &[Step],
-    way: Way,
     each: &mut dyn FnMut(&Evaluator, &[Given]),
+    record: &mut dyn FnMut(u32, Step),
 ) -> Vec<Interval> {
     let mut evaluator = evaluator_of(table);
     let mut world = FuzzWorld::new(seed);
@@ -351,7 +309,8 @@ pub fn run(
     let mut intervals = Vec::new();
     for step in steps {
         if !matches!(step, Step::Tick) {
-            give(&mut evaluator, &mut world, step, way);
+            record(evaluator.counters().ticks, *step);
+            give(&mut evaluator, &mut world, step);
             continue;
         }
         if ticks >= MAX_TICKS {
@@ -359,18 +318,18 @@ pub fn run(
         }
         ticks += 1;
         if ticks.is_multiple_of(5) {
-            evaluator.query(u32::try_from(ticks).unwrap_or(0));
+            let query = Step::Query(u32::try_from(ticks).unwrap_or(0));
+            record(evaluator.counters().ticks, query);
+            give(&mut evaluator, &mut world, &query);
         }
         evaluator.tick(&mut world);
         each(&evaluator, &world.given[before..]);
-        let (sounds, others) = world.given[before..].iter().cloned().partition(Given::is_sound);
-        intervals.push((sounds, others, *evaluator.counters(), *evaluator.variables()));
+        intervals.push((world.given[before..].to_vec(), *evaluator.counters(), *evaluator.variables()));
         before = world.given.len();
     }
     evaluator.close(&mut world);
     evaluator.tick(&mut world);
     each(&evaluator, &world.given[before..]);
-    let (sounds, others) = world.given[before..].iter().cloned().partition(Given::is_sound);
-    intervals.push((sounds, others, *evaluator.counters(), *evaluator.variables()));
+    intervals.push((world.given[before..].to_vec(), *evaluator.counters(), *evaluator.variables()));
     intervals
 }

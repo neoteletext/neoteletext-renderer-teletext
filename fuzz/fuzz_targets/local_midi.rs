@@ -72,7 +72,8 @@ fn play_cue(local: &mut Local, banks: &Banks<'_>, time: u8, number: u8, pcm: &mu
         assert!(cues.is_empty() && played.passed_over >= 1);
     } else {
         assert!(time <= LAST_TICK);
-        assert_eq!(cues, [PlayedCue { number, sample: sample_of_tick(time) as u16 }]);
+        let sample = u16::try_from(sample_of_tick(time)).expect("a tick of one byte is within a block");
+        assert_eq!(cues, [PlayedCue { number, sample }]);
         assert_eq!(played.events, 1, "the note after the cue is given to the instrument");
     }
 }

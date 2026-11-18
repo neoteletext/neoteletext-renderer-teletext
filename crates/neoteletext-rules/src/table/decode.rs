@@ -2,7 +2,7 @@
 //! refused whole (RULE-70).
 
 use super::{
-    Condition, FIRST_PARAMETER, FROM_ROW, Fault, HEADER_BYTES, Key, KeyKind, KeyMatch, NO_PARAMETER, Node, Operator,
+    Condition, FROM_ROW, Fault, HEADER_BYTES, Key, KeyKind, KeyMatch, NO_PARAMETER, Node, Operator, ROW_PARAMETER,
     Rect, RowRun, Rule, Sequence, SetMembers, Step, Table, Target, TargetKind, Trigger, TriggerTarget, Triggers, Value,
     any_key, no_condition, node_code, trigger_code,
 };
@@ -10,7 +10,7 @@ use crate::bounded::Bounded;
 use crate::command::BodyCheck;
 use crate::limits::{
     FORMAT, MAX_CONDITION_NODES, MAX_GROUPS, MAX_KEYS_PER_TRIGGER, MAX_RECTS, MAX_ROWS, MAX_RULES, MAX_SEQUENCE_STEPS,
-    MAX_SEQUENCES, MAX_SET_MEMBERS, MAX_TABLE_BYTES, MAX_TRIGGERS_PER_RULE, ROW_PARAMETERS,
+    MAX_SEQUENCES, MAX_SET_MEMBERS, MAX_TABLE_BYTES, MAX_TRIGGERS_PER_RULE,
 };
 use crate::wire::Reader;
 
@@ -18,6 +18,8 @@ use crate::wire::Reader;
 pub(super) const RULE_ROWS: u8 = 1;
 /// Bit 0 of a `key` trigger's flags: `repeat` (RULE-43).
 pub(super) const KEY_REPEAT: u8 = 1;
+/// Bit 1 of a `key` or `key_up` trigger's flags: `by_row` (RULE-43).
+pub(super) const KEY_BY_ROW: u8 = 2;
 /// Bit 0 of a `move` trigger's flags: `held` (RULE-43).
 pub(super) const MOVE_HELD: u8 = 1;
 
@@ -82,11 +84,7 @@ fn decode_into(image: &[u8], table: &mut Table) -> Result<(), Fault> {
         table.rects.push(rect).map_err(|_| Fault::Limit("MAX_RECTS"))?;
     }
     for _ in 0..rows {
-        let mut row = [0_i32; ROW_PARAMETERS];
-        for parameter in &mut row {
-            *parameter = reader.i32()?;
-        }
-        table.rows.push(row).map_err(|_| Fault::Limit("MAX_ROWS"))?;
+        table.rows.push(reader.i32()?).map_err(|_| Fault::Limit("MAX_ROWS"))?;
     }
     for _ in 0..rules {
         let rule = read_rule(&mut reader)?;
@@ -118,7 +116,7 @@ fn read_target(reader: &mut Reader<'_>) -> Result<Target, Fault> {
 }
 
 /// Reads a trigger's target: bit 7 of its kind byte says its number is a
-/// row parameter's index (RULE-43).
+/// signed constant to which the row's `p` is added (RULE-43).
 fn read_trigger_target(reader: &mut Reader<'_>) -> Result<TriggerTarget, Fault> {
     let byte = reader.u8()?;
     let kind = TargetKind::from_code(byte & !FROM_ROW).ok_or(Fault::Range("target kind"))?;
@@ -144,19 +142,18 @@ fn read_rule(reader: &mut Reader<'_>) -> Result<Rule, Fault> {
     Ok(Rule { group, rows, triggers, condition })
 }
 
-/// Reads a key trigger's modifiers, and after `between` its keys.
-fn read_keys(reader: &mut Reader<'_>, ticks: bool) -> Result<(KeyMatch, u16), Fault> {
+/// Reads a key trigger's modifiers and its keys. A key's kind byte with
+/// bit 7 set, the second form's key from a row, is refused (RULE-43).
+fn read_keys(reader: &mut Reader<'_>, by_row: bool) -> Result<KeyMatch, Fault> {
     let (mods_mask, mods_value) = (reader.u8()?, reader.u8()?);
-    let ticks = if ticks { reader.u16()? } else { 0 };
     let key_count = count(reader, MAX_KEYS_PER_TRIGGER, "MAX_KEYS_PER_TRIGGER")?;
     let mut keys = any_key();
     for _ in 0..key_count {
-        let byte = reader.u8()?;
-        let kind = KeyKind::from_code(byte & !FROM_ROW).ok_or(Fault::Range("key kind"))?;
-        let key = Key { kind, code: reader.u32()?, from_row: byte & FROM_ROW != 0 };
+        let kind = KeyKind::from_code(reader.u8()?).ok_or(Fault::Range("key kind"))?;
+        let key = Key { kind, code: reader.u32()? };
         keys.push(key).map_err(|_| Fault::Limit("MAX_KEYS_PER_TRIGGER"))?;
     }
-    Ok((KeyMatch { keys, mods_mask, mods_value }, ticks))
+    Ok(KeyMatch { keys, mods_mask, mods_value, by_row })
 }
 
 fn read_trigger(reader: &mut Reader<'_>) -> Result<Trigger, Fault> {
@@ -165,31 +162,18 @@ fn read_trigger(reader: &mut Reader<'_>) -> Result<Trigger, Fault> {
     };
     Ok(match reader.u8()? {
         trigger_code::KEY => {
-            let repeat = flag(reader.u8()?, KEY_REPEAT, "key flags")?;
-            Trigger::Key { keys: read_keys(reader, false)?.0, repeat }
+            let flags = reader.u8()?;
+            if flags & !(KEY_REPEAT | KEY_BY_ROW) != 0 {
+                return Err(Fault::Reserved("key flags"));
+            }
+            Trigger::Key { keys: read_keys(reader, flags & KEY_BY_ROW != 0)?, repeat: flags & KEY_REPEAT != 0 }
         }
         trigger_code::KEY_UP => {
-            reserved(reader, "key_up flags")?;
-            Trigger::KeyUp { keys: read_keys(reader, false)?.0 }
-        }
-        trigger_code::HELD => {
-            reserved(reader, "held flags")?;
-            let (keys, ticks) = read_keys(reader, true)?;
-            Trigger::Held { keys, ticks }
-        }
-        trigger_code::DOUBLE => {
-            reserved(reader, "double flags")?;
-            let (keys, ticks) = read_keys(reader, true)?;
-            Trigger::Double { keys, ticks }
+            let by_row = flag(reader.u8()?, KEY_BY_ROW, "key_up flags")?;
+            Trigger::KeyUp { keys: read_keys(reader, by_row)? }
         }
         trigger_code::PRESS => Trigger::Press { target: read_trigger_target(reader)?, button: reader.u8()? },
         trigger_code::RELEASE => Trigger::Release { target: read_trigger_target(reader)?, button: reader.u8()? },
-        trigger_code::PRESS_HELD => {
-            Trigger::PressHeld { target: read_trigger_target(reader)?, button: reader.u8()?, ticks: reader.u16()? }
-        }
-        trigger_code::DOUBLE_PRESS => {
-            Trigger::DoublePress { target: read_trigger_target(reader)?, button: reader.u8()?, ticks: reader.u16()? }
-        }
         trigger_code::ENTER => Trigger::Enter { target: read_trigger_target(reader)? },
         trigger_code::LEAVE => Trigger::Leave { target: read_trigger_target(reader)? },
         trigger_code::WHEEL => Trigger::Wheel { target: read_trigger_target(reader)? },
@@ -219,14 +203,12 @@ fn read_node(reader: &mut Reader<'_>) -> Result<Node, Fault> {
             let value = Value::read(reader)?;
             let operator = Operator::from_code(reader.u8()?).ok_or(Fault::Range("operator"))?;
             let constant = reader.i32()?;
-            let parameter = match reader.u8()? {
-                NO_PARAMETER => None,
-                byte => {
-                    let index = byte.checked_sub(FIRST_PARAMETER).filter(|index| usize::from(*index) < ROW_PARAMETERS);
-                    Some(index.ok_or(Fault::Range("comparison's row parameter"))?)
-                }
+            let plus_p = match reader.u8()? {
+                NO_PARAMETER => false,
+                ROW_PARAMETER => true,
+                _ => return Err(Fault::Range("comparison's row parameter")),
             };
-            Node::Compare { value, operator, constant, parameter }
+            Node::Compare { value, operator, constant, plus_p }
         }
         node_code::IN_RANGE => Node::InRange { value: Value::read(reader)?, low: reader.i32()?, high: reader.i32()? },
         node_code::IN_SET => {

@@ -53,7 +53,6 @@ fuzz_target!(|data: &[u8]| {
             assert!(command::is_allowed(command.kind), "type {} in a group", command.kind);
             assert!((1..=MAX_COMMAND_BYTES).contains(&command.body.len()));
             assert!(command.binding_count() <= MAX_COMMAND_BINDINGS);
-            assert_eq!(command.sound, command::is_sound(command.kind));
         }
     }
     for sequence in table.sequences.iter() {

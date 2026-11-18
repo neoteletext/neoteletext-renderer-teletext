@@ -12,9 +12,8 @@ fn full() -> PageState {
     let mut table = TableState::new(3, 9120);
     table.variables = [4, -1, i32::MAX, i32::MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7];
     table.timers[0] = TimerState { running: true, elapsed: 18 };
-    table.sequences.push(SequenceState { running: true, passes: 3, position: 12 }).unwrap();
-    table.sequences.push(SequenceState::default()).unwrap();
-    table.armed = 1;
+    table.sequences.push(SequenceState { running: true, passes: 3, position: 12, waiting: false }).unwrap();
+    table.sequences.push(SequenceState { waiting: true, ..SequenceState::default() }).unwrap();
     table
         .targets
         .push(TargetReport {
@@ -50,14 +49,15 @@ fn a_state_is_its_bytes() {
     assert_eq!(bytes[14..18], [0xFF; 4]);
     let timers = 10 + 16 * 4;
     assert_eq!(bytes[timers..timers + 5], [1, 0, 0, 0, 18]);
-    // The sequences with their count, then the armed runs.
+    // The sequences with their count, the second waiting (bit 1), and no
+    // count of armed runs after them (DEC-6635 item 6).
     let sequences = timers + 8 * TIMER_BYTES;
     assert_eq!(bytes[sequences..sequences + 10], [2, 1, 0, 0, 0, 3, 0, 0, 0, 12]);
-    let armed = sequences + 1 + 2 * SEQUENCE_BYTES;
-    assert_eq!(bytes[armed], 1);
+    assert_eq!(bytes[sequences + 1 + SEQUENCE_BYTES], 2);
+    let targets = sequences + 1 + 2 * SEQUENCE_BYTES;
     // One target of twelve bytes, one value of twelve.
-    assert_eq!(bytes[armed + 1..armed + 14], [1, 2, 0x01, 0x2D, 3, 0, 2, 0x02, 0xBC, 0xFE, 0x84, 2, 0xFF]);
-    assert_eq!(bytes[armed + 14..], [1, 5, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 41]);
+    assert_eq!(bytes[targets..targets + 13], [1, 2, 0x01, 0x2D, 3, 0, 2, 0x02, 0xBC, 0xFE, 0x84, 2, 0xFF]);
+    assert_eq!(bytes[targets + 13..], [1, 5, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 41]);
     assert_eq!(TARGET_BYTES, 12);
     // Cut short anywhere, it is refused; a byte more is trailing.
     for cut in 0..length {
@@ -88,9 +88,8 @@ fn no_table_is_ten_bytes() {
 fn a_state_is_bounded() {
     let mut table = TableState::new(1, 0);
     for _ in 0..MAX_SEQUENCES {
-        table.sequences.push(SequenceState { running: true, passes: u32::MAX, position: 1 }).unwrap();
+        table.sequences.push(SequenceState { running: true, passes: u32::MAX, position: 1, waiting: false }).unwrap();
     }
-    table.armed = u8::try_from(MAX_ARMED_RUNS).unwrap();
     for number in 1..=u16::try_from(MAX_TABLE_TARGETS).unwrap() {
         let report = TargetReport { target: Target::object(number), ..full().table.unwrap().targets[0] };
         table.targets.push(report).unwrap();
@@ -112,7 +111,7 @@ fn a_state_is_bounded() {
     };
     let timers = 10 + 16 * 4;
     let sequences = timers + 8 * TIMER_BYTES;
-    let armed = sequences + 1 + 2 * SEQUENCE_BYTES;
+    let targets = sequences + 1 + 2 * SEQUENCE_BYTES;
     let refused = |at: usize, byte: u8| {
         let mut bytes = good.clone();
         bytes[at] = byte;
@@ -121,12 +120,11 @@ fn a_state_is_bounded() {
     assert_eq!(refused(timers, 2), Err(Fault::Reserved("timer flags")));
     assert_eq!(refused(timers + 5 + 4, 1), Err(Fault::Range("elapsed while stopped")));
     assert_eq!(refused(sequences, 9), Err(Fault::Limit("MAX_SEQUENCES")));
-    assert_eq!(refused(sequences + 1, 3), Err(Fault::Reserved("sequence flags")));
-    assert_eq!(refused(armed, 17), Err(Fault::Limit("MAX_ARMED_RUNS")));
-    assert_eq!(refused(armed + 1, 65), Err(Fault::Limit("MAX_TABLE_TARGETS")));
-    assert_eq!(refused(armed + 2, 3), Err(Fault::Range("target")));
-    assert_eq!(refused(armed + 5, 8), Err(Fault::Reserved("target flags")));
-    assert_eq!(refused(armed + 6, 4), Err(Fault::Range("target")));
-    assert_eq!(refused(armed + 14, 65), Err(Fault::Limit("MAX_TABLE_VALUES")));
-    assert_eq!(refused(armed + 15, 9), Err(Fault::Range("value's space")));
+    assert_eq!(refused(sequences + 1, 4), Err(Fault::Reserved("sequence flags")));
+    assert_eq!(refused(targets, 65), Err(Fault::Limit("MAX_TABLE_TARGETS")));
+    assert_eq!(refused(targets + 1, 3), Err(Fault::Range("target")));
+    assert_eq!(refused(targets + 4, 8), Err(Fault::Reserved("target flags")));
+    assert_eq!(refused(targets + 5, 4), Err(Fault::Range("target")));
+    assert_eq!(refused(targets + 13, 65), Err(Fault::Limit("MAX_TABLE_VALUES")));
+    assert_eq!(refused(targets + 14, 9), Err(Fault::Range("value's space")));
 }

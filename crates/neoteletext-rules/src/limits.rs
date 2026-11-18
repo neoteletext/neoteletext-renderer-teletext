@@ -35,8 +35,6 @@ pub const MAX_SEQUENCE_STEPS: usize = 64;
 pub const MAX_SEQUENCE_REPEAT: u8 = 255;
 /// Timers a page, exactly, `t0` to `t7`, beside the page timer (RULE-15).
 pub const TIMERS: usize = 8;
-/// Runs armed and waiting, by the server or for a timer's beat (RULE-102).
-pub const MAX_ARMED_RUNS: usize = 16;
 /// Variables a page, exactly, `v0` to `v15`, each a saturating 32-bit
 /// signed integer (RULE-14).
 pub const VARIABLES: usize = 16;
@@ -56,8 +54,6 @@ pub const MAX_AND_OR_CHILDREN: usize = 8;
 pub const MAX_TRIGGERS_PER_RULE: usize = 4;
 /// Keys in one trigger's key set (RULE-10).
 pub const MAX_KEYS_PER_TRIGGER: usize = 16;
-/// Parameters in a binding row, exactly, `p0` to `p3` (RULE-105).
-pub const ROW_PARAMETERS: usize = 4;
 /// The sum, over a page's rules, of the rows each names, a rule without
 /// rows counting one: the most firings one event can cause (RULE-43).
 pub const MAX_RULE_ROWS: usize = 128;
@@ -67,25 +63,27 @@ pub const MAX_COMMAND_BINDINGS: usize = 8;
 pub const MAX_RECTS: usize = 16;
 /// A sequence's length in ticks: one hour (RULE-103).
 pub const MAX_SEQUENCE_TICKS: u32 = 216_000;
-/// `ticks` of `every`, `after` and a beat: one hour (RULE-9, RULE-102).
+/// `ticks` of `every` and `after`, the period of a timer's phase and of a
+/// sequence's `beat` start: one hour (RULE-9, RULE-25, RULE-103).
 pub const MAX_TIMER_TICKS: u32 = 216_000;
-/// How far ahead, in ticks, a run may be armed: one hour (RULE-102).
-pub const MAX_ARM_TICKS: u32 = 216_000;
-/// `ticks` of `held` and `press_held`: one minute (RULE-9).
-pub const MAX_HOLD_TICKS: u16 = 3600;
-/// `ticks` of `double` and `double_press`: two seconds (RULE-9).
-pub const MAX_DOUBLE_TICKS: u16 = 120;
-/// Presses remembered for `double` and `double_press` (RULE-108).
-pub const MAX_RECENT_PRESSES: usize = 16;
+/// How far after the present tick a sequence's start `at` a page tick may
+/// be: one hour (RULE-103).
+pub const MAX_START_TICKS: u32 = 216_000;
 /// The highest cue number (RULE-109).
 pub const MAX_CUE: u8 = 127;
-/// Cues acted on in one tick (RULE-5 step 9).
-pub const MAX_CUES_PER_TICK: usize = 8;
-/// Commands the server sent directly, waiting for a tick (RULE-5 step 5).
-pub const MAX_QUEUED_COMMANDS: usize = 64;
-/// Input events handled in one tick (RULE-5 step 3).
+/// Events handled in one tick: input events, the server's records the
+/// evaluator carries out, cues and state queries together (a per-tick
+/// budget, RULE-5).
 pub const MAX_EVENTS_PER_TICK: usize = 16;
-/// Input events waiting (RULE-5 step 3).
+/// Commands applied by the runs of the events handled in one tick (a
+/// per-tick budget, RULE-5): `MAX_EVENTS_PER_TICK × MAX_RUN_COMMANDS`,
+/// asserted below.
+pub const MAX_EVENT_COMMANDS_PER_TICK: usize = 2048;
+/// `REPORT` commands applied by the runs of the events handled in one tick
+/// (a per-tick budget, RULE-5): `2 × MAX_EVENTS_PER_TICK`, asserted below,
+/// so that every event of a full tick may report its firing and one value.
+pub const MAX_EVENT_REPORTS_PER_TICK: usize = 32;
+/// Events waiting for a later tick, in arrival order (RULE-5).
 pub const MAX_QUEUED_EVENTS: usize = 64;
 /// Keys tracked as down (RULE-8).
 pub const MAX_KEYS_DOWN: usize = 16;
@@ -117,7 +115,7 @@ pub const TICKS_PER_SECOND: u32 = 60;
 
 /// The limits of RULE-57's table, each by its constant's name with its
 /// value, in the table's order (REQ-6608).
-pub const RULE_57: [(&str, u32); 47] = [
+pub const RULE_57: [(&str, u32); 42] = [
     ("MAX_GROUP_COMMANDS", MAX_GROUP_COMMANDS as u32),
     ("MAX_GROUPS", MAX_GROUPS as u32),
     ("MAX_GROUP_DEPTH", MAX_GROUP_DEPTH as u32),
@@ -130,7 +128,6 @@ pub const RULE_57: [(&str, u32); 47] = [
     ("MAX_SEQUENCE_STEPS", MAX_SEQUENCE_STEPS as u32),
     ("MAX_SEQUENCE_REPEAT", MAX_SEQUENCE_REPEAT as u32),
     ("TIMERS", TIMERS as u32),
-    ("MAX_ARMED_RUNS", MAX_ARMED_RUNS as u32),
     ("VARIABLES", VARIABLES as u32),
     ("MAX_CONDITION_TERMS", MAX_CONDITION_TERMS as u32),
     ("MAX_CONDITION_DEPTH", MAX_CONDITION_DEPTH as u32),
@@ -139,20 +136,16 @@ pub const RULE_57: [(&str, u32); 47] = [
     ("MAX_AND_OR_CHILDREN", MAX_AND_OR_CHILDREN as u32),
     ("MAX_TRIGGERS_PER_RULE", MAX_TRIGGERS_PER_RULE as u32),
     ("MAX_KEYS_PER_TRIGGER", MAX_KEYS_PER_TRIGGER as u32),
-    ("ROW_PARAMETERS", ROW_PARAMETERS as u32),
     ("MAX_RULE_ROWS", MAX_RULE_ROWS as u32),
     ("MAX_COMMAND_BINDINGS", MAX_COMMAND_BINDINGS as u32),
     ("MAX_RECTS", MAX_RECTS as u32),
     ("MAX_SEQUENCE_TICKS", MAX_SEQUENCE_TICKS),
     ("MAX_TIMER_TICKS", MAX_TIMER_TICKS),
-    ("MAX_ARM_TICKS", MAX_ARM_TICKS),
-    ("MAX_HOLD_TICKS", MAX_HOLD_TICKS as u32),
-    ("MAX_DOUBLE_TICKS", MAX_DOUBLE_TICKS as u32),
-    ("MAX_RECENT_PRESSES", MAX_RECENT_PRESSES as u32),
+    ("MAX_START_TICKS", MAX_START_TICKS),
     ("MAX_CUE", MAX_CUE as u32),
-    ("MAX_CUES_PER_TICK", MAX_CUES_PER_TICK as u32),
-    ("MAX_QUEUED_COMMANDS", MAX_QUEUED_COMMANDS as u32),
     ("MAX_EVENTS_PER_TICK", MAX_EVENTS_PER_TICK as u32),
+    ("MAX_EVENT_COMMANDS_PER_TICK", MAX_EVENT_COMMANDS_PER_TICK as u32),
+    ("MAX_EVENT_REPORTS_PER_TICK", MAX_EVENT_REPORTS_PER_TICK as u32),
     ("MAX_QUEUED_EVENTS", MAX_QUEUED_EVENTS as u32),
     ("MAX_KEYS_DOWN", MAX_KEYS_DOWN as u32),
     ("MAX_POINTER_OBJECTS", MAX_POINTER_OBJECTS as u32),
@@ -277,6 +270,11 @@ pub const STAMP_BYTES: usize = 4;
 
 // RULE-41, RULE-57: a fragment's data fills the frame's largest body.
 const _: () = assert!(MAX_TABLE_FRAGMENT == MAX_FRAMED_BODY - RULES_RECORD_FIXED);
+// RULE-57: the per-tick budgets of commands and reports are derived.
+const _: () = assert!(
+    MAX_EVENT_COMMANDS_PER_TICK == MAX_EVENTS_PER_TICK * MAX_RUN_COMMANDS
+        && MAX_EVENT_REPORTS_PER_TICK == 2 * MAX_EVENTS_PER_TICK
+);
 // RULE-47, RULE-57: the answer at its fullest fits its bound, with the
 // stamp the input protocol writes before it.
 const _: () = assert!(STAMP_BYTES + crate::state::MAX_PAYLOAD_BYTES <= MAX_STATE_BYTES);
@@ -300,7 +298,7 @@ mod tests {
     /// table's, line by line.
     #[test]
     fn the_constants_are_rule_57s() {
-        let table: [(&str, u32); 48] = [
+        let table: [(&str, u32); 43] = [
             ("MAX_GROUP_COMMANDS", 32),
             ("MAX_GROUPS", 64),
             ("MAX_GROUP_DEPTH", 4),
@@ -313,7 +311,6 @@ mod tests {
             ("MAX_SEQUENCE_STEPS", 64),
             ("MAX_SEQUENCE_REPEAT", 255),
             ("TIMERS", 8),
-            ("MAX_ARMED_RUNS", 16),
             ("VARIABLES", 16),
             ("MAX_CONDITION_TERMS", 8),
             ("MAX_CONDITION_DEPTH", 3),
@@ -322,20 +319,16 @@ mod tests {
             ("MAX_AND_OR_CHILDREN", 8),
             ("MAX_TRIGGERS_PER_RULE", 4),
             ("MAX_KEYS_PER_TRIGGER", 16),
-            ("ROW_PARAMETERS", 4),
             ("MAX_RULE_ROWS", 128),
             ("MAX_COMMAND_BINDINGS", 8),
             ("MAX_RECTS", 16),
             ("MAX_SEQUENCE_TICKS", 216_000),
             ("MAX_TIMER_TICKS", 216_000),
-            ("MAX_ARM_TICKS", 216_000),
-            ("MAX_HOLD_TICKS", 3600),
-            ("MAX_DOUBLE_TICKS", 120),
-            ("MAX_RECENT_PRESSES", 16),
+            ("MAX_START_TICKS", 216_000),
             ("MAX_CUE", 127),
-            ("MAX_CUES_PER_TICK", 8),
-            ("MAX_QUEUED_COMMANDS", 64),
             ("MAX_EVENTS_PER_TICK", 16),
+            ("MAX_EVENT_COMMANDS_PER_TICK", 2048),
+            ("MAX_EVENT_REPORTS_PER_TICK", 32),
             ("MAX_QUEUED_EVENTS", 64),
             ("MAX_KEYS_DOWN", 16),
             ("MAX_POINTER_OBJECTS", 16),
@@ -355,6 +348,9 @@ mod tests {
         }
         assert_eq!(table.len(), RULE_57.len() + 1, "every line of RULE-57 is listed once");
         assert_eq!(value_of("MAX_ACTIONS_PER_TICK"), None, "the first form's work cap is withdrawn");
+        for withdrawn in ["MAX_ARMED_RUNS", "MAX_ARM_TICKS", "MAX_HOLD_TICKS", "MAX_DOUBLE_TICKS", "ROW_PARAMETERS"] {
+            assert_eq!(value_of(withdrawn), None, "{withdrawn} is withdrawn (DEC-6635)");
+        }
     }
 
     /// RULE-57 (REQ-6608): the two derived figures follow from their
@@ -367,7 +363,7 @@ mod tests {
         let values = MAX_TABLE_VALUES * (crate::table::VALUE_BYTES + 4);
         let sequences = MAX_SEQUENCES * crate::state::SEQUENCE_BYTES;
         let fixed = 4 + 2 + 4 + VARIABLES * 4 + TIMERS * crate::state::TIMER_BYTES;
-        let fullest = fixed + 1 + sequences + 1 + 1 + targets + 1 + values;
+        let fullest = fixed + 1 + sequences + 1 + targets + 1 + values;
         assert_eq!(crate::state::MAX_PAYLOAD_BYTES, fullest);
         assert!(STAMP_BYTES + fullest <= MAX_STATE_BYTES);
     }

@@ -338,18 +338,16 @@ fn a_key_is_stamped_with_the_page_drawn() {
     typing.tell_selection(&mut source, 0x200, 0x3F7F, 0);
     source.0.clear();
     press(&mut typing, &mut source, 'a', KeyEventKind::Press);
-    assert_eq!(source.0, [] as [Vec<u8>; 0], "a key waits for the tick that evaluates it");
+    assert_eq!(source.0, [] as [Vec<u8>; 0], "what a key's rule reports is written at the viewer's next turn");
     typing.tick(&mut source, turn_us(1), 17);
-    // The table's page tick 1: the focus the page was told of when its
-    // table opened, which no page tick 0 takes (RULE-5 step 2), then the
-    // key.
-    assert_eq!(source.0.len(), 2);
+    // The key alone: the focus the page was told of when its table opened
+    // waited for page tick 0 and was sent with it (DEC-6635 item 1).
+    assert_eq!(source.0.len(), 1);
     assert!(source.0.iter().all(|message| message[..2] == [0xFF, neoteletext_input::event::RULE_EVENT]));
-    assert_eq!(source.0[1][3..6], [0x80, 0x02, 0x00], "page 100 is still on screen");
+    assert_eq!(source.0[0][3..6], [0x80, 0x02, 0x00], "page 100 is still on screen");
     let key = vec![0xFF, 0x01, 0x80, 0x02, 0x00, 0x10, b'a', 1, b'a'];
-    // Rule 10 is `focus` and rule 0 `keys`, which carries the key as it
-    // was typed.
-    assert_eq!(rule_events(&source.0), [(ON, 10, vec![0xFF, 0x05]), (ON, 0, key)]);
+    // Rule 0 is `keys`, which carries the key as it was typed.
+    assert_eq!(rule_events(&source.0), [(ON, 0, key)]);
 }
 
 /// REQ-6523, page-rules.md RULE-50 and RULE-53: a page with no rule table
@@ -394,9 +392,9 @@ fn a_page_whose_table_opens_is_told_the_focus() {
     typing.tick(&mut source, 0, 0);
     assert_eq!(source.0, [] as [Vec<u8>; 0], "nothing is drawn, so no table is open");
     typing.set_drawn(Some(ON));
+    // The focus waits for the table's page tick 0, after its `open`
+    // rules, and goes with it (DEC-6635 item 1).
     typing.tick(&mut source, turn_us(1), 0);
-    assert_eq!(source.0, [] as [Vec<u8>; 0], "no input belongs to the table's page tick 0 (RULE-5 step 2)");
-    typing.tick(&mut source, turn_us(2), 0);
     // Rule 10 of the default table is `focus`.
     assert_eq!(rule_events(&source.0), [(ON, 10, vec![0xFF, 0x05])]);
 }

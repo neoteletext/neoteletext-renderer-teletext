@@ -8,8 +8,7 @@
 use crate::Fault;
 use crate::bounded::Bounded;
 use crate::limits::{
-    MAX_ARMED_RUNS, MAX_CONTROL, MAX_FRAME, MAX_LAYER, MAX_LOOK, MAX_SEQUENCES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES,
-    TIMERS, VARIABLES,
+    MAX_CONTROL, MAX_FRAME, MAX_LAYER, MAX_LOOK, MAX_SEQUENCES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES, TIMERS, VARIABLES,
 };
 use crate::table::{TARGET_BYTES as TARGET_NAME_BYTES, Target, TargetKind, VALUE_BYTES, Value};
 use crate::wire::{Reader, Writer};
@@ -24,8 +23,7 @@ pub const TIMER_BYTES: usize = 1 + 4;
 pub const SEQUENCE_BYTES: usize = 1 + 4 + 4;
 /// The most bytes of the payload after the stamp: the identifier, the
 /// generation, the tick, the sixteen variables, the eight timers, and the
-/// sequences, the count of armed runs, the targets and the values, each
-/// list with its count byte.
+/// sequences, the targets and the values, each list with its count byte.
 pub const MAX_PAYLOAD_BYTES: usize = 4
     + 2
     + 4
@@ -33,7 +31,6 @@ pub const MAX_PAYLOAD_BYTES: usize = 4
     + TIMERS * TIMER_BYTES
     + 1
     + MAX_SEQUENCES * SEQUENCE_BYTES
-    + 1
     + 1
     + MAX_TABLE_TARGETS * TARGET_BYTES
     + 1
@@ -43,6 +40,9 @@ const EXISTS: u8 = 1;
 const SHOWN: u8 = 1 << 1;
 const CYCLING: u8 = 1 << 2;
 const RUNNING: u8 = 1;
+/// Bit 1 of a sequence's flags: a start waits for its start tick
+/// (RULE-47, RULE-103).
+const WAITING: u8 = 1 << 1;
 
 /// A timer in a state answer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -62,6 +62,8 @@ pub struct SequenceState {
     pub passes: u32,
     /// Its position in ticks within the pass; 0 while stopped.
     pub position: u32,
+    /// Whether a start waits for its start tick (RULE-103).
+    pub waiting: bool,
 }
 
 /// A control or an object in a state answer.
@@ -102,8 +104,6 @@ pub struct TableState {
     pub timers: [TimerState; TIMERS],
     /// The table's sequences, in number order.
     pub sequences: Bounded<SequenceState, MAX_SEQUENCES>,
-    /// The armed runs waiting, 0 to `MAX_ARMED_RUNS`.
-    pub armed: u8,
     /// Each control and object the table names by a constant, in the
     /// order first named.
     pub targets: Bounded<TargetReport, MAX_TABLE_TARGETS>,
@@ -122,8 +122,7 @@ impl TableState {
             tick,
             variables: [0; VARIABLES],
             timers: [TimerState { running: false, elapsed: 0 }; TIMERS],
-            sequences: Bounded::new(SequenceState { running: false, passes: 0, position: 0 }),
-            armed: 0,
+            sequences: Bounded::new(SequenceState { running: false, passes: 0, position: 0, waiting: false }),
             targets: Bounded::new(TargetReport {
                 target: Target::NONE,
                 exists: false,
@@ -187,11 +186,10 @@ fn write_table(table: &TableState, writer: &mut Writer<'_>) -> Result<(), Fault>
     }
     write_count(table.sequences.len(), writer)?;
     for sequence in table.sequences.iter() {
-        writer.u8(if sequence.running { RUNNING } else { 0 })?;
+        writer.u8(if sequence.running { RUNNING } else { 0 } | if sequence.waiting { WAITING } else { 0 })?;
         writer.u32(sequence.passes)?;
         writer.u32(sequence.position)?;
     }
-    writer.u8(table.armed)?;
     write_count(table.targets.len(), writer)?;
     for report in table.targets.iter() {
         let flags = (if report.exists { EXISTS } else { 0 })
@@ -253,19 +251,20 @@ pub fn decode(bytes: &[u8]) -> Result<PageState, Fault> {
         }
     }
     for _ in 0..count(&mut reader, MAX_SEQUENCES, "MAX_SEQUENCES")? {
+        let flags = reader.u8()?;
+        if flags & !(RUNNING | WAITING) != 0 {
+            return Err(Fault::Reserved("sequence flags"));
+        }
         let sequence = SequenceState {
-            running: running(&mut reader, "sequence flags")?,
+            running: flags & RUNNING != 0,
             passes: reader.u32()?,
             position: reader.u32()?,
+            waiting: flags & WAITING != 0,
         };
         if !sequence.running && sequence.position != 0 {
             return Err(Fault::Range("position while stopped"));
         }
         table.sequences.push(sequence).map_err(|_| Fault::Limit("MAX_SEQUENCES"))?;
-    }
-    table.armed = reader.u8()?;
-    if usize::from(table.armed) > MAX_ARMED_RUNS {
-        return Err(Fault::Limit("MAX_ARMED_RUNS"));
     }
     for _ in 0..count(&mut reader, MAX_TABLE_TARGETS, "MAX_TABLE_TARGETS")? {
         table.targets.push(read_target(&mut reader)?).map_err(|_| Fault::Limit("MAX_TABLE_TARGETS"))?;

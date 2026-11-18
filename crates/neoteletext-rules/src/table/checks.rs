@@ -5,12 +5,12 @@
 use super::{
     Fault, Groups, Index, Key, KeyKind, KeyMatch, Node, Rule, Table, Target, TargetKind, Trigger, TriggerTarget,
 };
-use crate::command::{self, Binding, BodyCheck, Command, Context, RunMode, TYPE_RUN};
+use crate::command::{self, Binding, BodyCheck, Command, Context, TYPE_RUN};
 use crate::limits::{
     ANY_BUTTON, ANY_CUE, AUDIO_CHANNELS, FIRST_PAGE, LAST_PAGE, LAST_SUBCODE, MAX_AND_OR_CHILDREN, MAX_BUTTON,
-    MAX_COMMAND_BINDINGS, MAX_CONDITION_DEPTH, MAX_CONDITION_TERMS, MAX_CONTROL, MAX_CUE, MAX_DOUBLE_TICKS,
-    MAX_GROUP_DEPTH, MAX_GROUPS, MAX_HOLD_TICKS, MAX_RULE_ROWS, MAX_RUN_COMMANDS, MAX_SEQUENCE_TICKS, MAX_TIMER_TICKS,
-    MIN_AND_OR_CHILDREN, PAGE_TIMER, ROW_PARAMETERS, SUBCODE_MASK, TIMERS,
+    MAX_COMMAND_BINDINGS, MAX_CONDITION_DEPTH, MAX_CONDITION_TERMS, MAX_CONTROL, MAX_CUE, MAX_GROUP_DEPTH, MAX_GROUPS,
+    MAX_RULE_ROWS, MAX_RUN_COMMANDS, MAX_SEQUENCE_TICKS, MAX_TIMER_TICKS, MIN_AND_OR_CHILDREN, PAGE_TIMER,
+    SUBCODE_MASK, TIMERS,
 };
 use crate::table::NO_BINDING;
 
@@ -92,7 +92,7 @@ fn check_target(target: Target, rects: usize, used: Use) -> Result<(), Fault> {
     if in_range { Ok(()) } else { Err(Fault::Range("target")) }
 }
 
-/// The rows a rule names, each with its parameters.
+/// The rows a rule names, each its parameter `p`.
 fn rows_of<'a>(table: &'a Table, rule: &Rule) -> impl Iterator<Item = super::Row> + 'a {
     let count = rule.rows.map_or(0, |rows| usize::from(rows.count));
     let first = rule.rows.map_or(0, |rows| usize::from(rows.first));
@@ -100,7 +100,7 @@ fn rows_of<'a>(table: &'a Table, rule: &Rule) -> impl Iterator<Item = super::Row
 }
 
 /// Checks a trigger's target (RULE-12, RULE-43, RULE-105): written in the
-/// table, or a parameter that is a valid number for every row.
+/// table, or a constant that with every row's `p` is a valid number.
 fn check_trigger_target(target: TriggerTarget, table: &Table, rule: &Rule) -> Result<(), Fault> {
     if !target.from_row {
         return check_target(Target { kind: target.kind, number: target.number }, table.rects.len(), Use::Trigger);
@@ -108,7 +108,7 @@ fn check_trigger_target(target: TriggerTarget, table: &Table, rule: &Rule) -> Re
     if rule.rows.is_none() {
         return Err(Fault::Shape("row parameter in a rule without rows"));
     }
-    if usize::from(target.number) >= ROW_PARAMETERS || target.kind == TargetKind::Page {
+    if target.kind == TargetKind::Page {
         return Err(Fault::Range("target's row parameter"));
     }
     for row in rows_of(table, rule) {
@@ -129,27 +129,21 @@ fn is_key_code(kind: KeyKind, code: u32) -> bool {
     kind == KeyKind::Named || char::from_u32(code).is_some()
 }
 
-/// Checks a key (RULE-10, RULE-43, RULE-105).
-fn check_key(key: Key, table: &Table, rule: &Rule) -> Result<(), Fault> {
-    if !key.from_row {
-        return if is_key_code(key.kind, key.code) { Ok(()) } else { Err(Fault::Range("key")) };
-    }
-    if rule.rows.is_none() {
-        return Err(Fault::Shape("row parameter in a rule without rows"));
-    }
-    if usize::try_from(key.code).map_or(true, |index| index >= ROW_PARAMETERS) {
-        return Err(Fault::Range("key's row parameter"));
-    }
-    for row in rows_of(table, rule) {
-        if !key.resolve(&row).is_some_and(|(kind, code)| is_key_code(kind, code)) {
-            return Err(Fault::Range("row's parameter as a key's code"));
-        }
-    }
-    Ok(())
+/// Checks a key (RULE-10, RULE-43).
+fn check_key(key: Key) -> Result<(), Fault> {
+    if is_key_code(key.kind, key.code) { Ok(()) } else { Err(Fault::Range("key")) }
 }
 
-fn check_keys(keys: &KeyMatch, table: &Table, rule: &Rule) -> Result<(), Fault> {
-    keys.keys.iter().try_for_each(|key| check_key(*key, table, rule))
+/// Checks a key set (RULE-10, RULE-105): one key a row only in a rule
+/// that names rows, with exactly as many keys as it names rows.
+fn check_keys(keys: &KeyMatch, rule: &Rule) -> Result<(), Fault> {
+    if keys.by_row {
+        let Some(rows) = rule.rows else { return Err(Fault::Shape("one key a row in a rule without rows")) };
+        if keys.keys.len() != usize::from(rows.count) {
+            return Err(Fault::Shape("one key a row, and not one key for each row"));
+        }
+    }
+    keys.keys.iter().try_for_each(|key| check_key(*key))
 }
 
 fn check_button(button: u8) -> Result<(), Fault> {
@@ -162,23 +156,13 @@ fn check_ticks(ticks: u32, limit: u32, name: &'static str) -> Result<(), Fault> 
 
 fn check_trigger(trigger: &Trigger, table: &Table, rule: &Rule) -> Result<(), Fault> {
     if let Some(keys) = trigger.keys() {
-        check_keys(keys, table, rule)?;
+        check_keys(keys, rule)?;
     }
     if let Some(target) = trigger.target() {
         check_trigger_target(target, table, rule)?;
     }
     match *trigger {
         Trigger::Press { button, .. } | Trigger::Release { button, .. } => check_button(button),
-        Trigger::PressHeld { button, ticks, .. } => {
-            check_button(button)?;
-            check_ticks(u32::from(ticks), u32::from(MAX_HOLD_TICKS), "MAX_HOLD_TICKS")
-        }
-        Trigger::DoublePress { button, ticks, .. } => {
-            check_button(button)?;
-            check_ticks(u32::from(ticks), u32::from(MAX_DOUBLE_TICKS), "MAX_DOUBLE_TICKS")
-        }
-        Trigger::Held { ticks, .. } => check_ticks(u32::from(ticks), u32::from(MAX_HOLD_TICKS), "MAX_HOLD_TICKS"),
-        Trigger::Double { ticks, .. } => check_ticks(u32::from(ticks), u32::from(MAX_DOUBLE_TICKS), "MAX_DOUBLE_TICKS"),
         Trigger::Every { timer, ticks } | Trigger::After { timer, ticks } => {
             if usize::from(timer) >= TIMERS && timer != PAGE_TIMER {
                 return Err(Fault::Range("trigger's timer"));
@@ -211,14 +195,8 @@ fn check_node(node: &Node, table: &Table, rule: &Rule) -> Result<(), Fault> {
                 Ok(())
             }
         }
-        Node::Compare { parameter: Some(parameter), .. } => {
-            if rule.rows.is_none() {
-                Err(Fault::Shape("row parameter in a rule without rows"))
-            } else if usize::from(*parameter) >= ROW_PARAMETERS {
-                Err(Fault::Range("comparison's row parameter"))
-            } else {
-                Ok(())
-            }
+        Node::Compare { plus_p: true, .. } if rule.rows.is_none() => {
+            Err(Fault::Shape("row parameter in a rule without rows"))
         }
         Node::InRange { low, high, .. } if low > high => Err(Fault::Range("range")),
         Node::InSet { members, .. } if members.is_empty() => Err(Fault::Range("empty set")),
@@ -267,14 +245,13 @@ struct Nest {
     height: u8,
 }
 
-/// The group a command runs in place, if it is a `RUN` with the mode
-/// "now" (RULE-102).
+/// The group a command runs in place, if it is a `RUN` (RULE-102).
 fn runs_now(kind: u8, body: &[u8]) -> Option<u8> {
     if kind != TYPE_RUN {
         return None;
     }
     match command::decode(kind, body) {
-        Ok((_, _, Command::Run { group, mode: RunMode::Now })) => Some(group),
+        Ok((_, _, Command::Run { group })) => Some(group),
         _ => None,
     }
 }
@@ -325,6 +302,22 @@ pub(super) fn run_commands(groups: &Groups, group: u8) -> usize {
     let mut known = [Nest { total: 0, height: 0 }; MAX_GROUPS];
     let mut path = crate::Bounded::new(0);
     nest(groups, group, &mut path, &mut known).map_or(0, |found| usize::from(found.total))
+}
+
+/// The `REPORT` commands one run of `group` applies, with every group it
+/// runs in place (RULE-5's budget): a constant of a checked table, whose
+/// nesting has no ring and is at most `MAX_GROUP_DEPTH` deep.
+pub(super) fn run_reports(groups: &Groups, group: u8, depth: usize) -> usize {
+    if depth >= MAX_GROUP_DEPTH {
+        return 0;
+    }
+    groups
+        .commands(usize::from(group))
+        .map(|command| match runs_now(command.kind, command.body) {
+            Some(inner) => run_reports(groups, inner, depth.saturating_add(1)),
+            None => usize::from(command.kind == command::TYPE_REPORT),
+        })
+        .fold(0_usize, usize::saturating_add)
 }
 
 /// Checks every command of every group, then how the groups nest.

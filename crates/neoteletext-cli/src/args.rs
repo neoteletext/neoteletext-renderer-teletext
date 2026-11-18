@@ -325,12 +325,6 @@ pub(crate) enum Command {
         /// unit of an object's position.
         #[arg(long, value_enum, default_value = "teletext")]
         picture: crate::commands::Picture,
-        /// Give each key and pointer input to the evaluator the moment it
-        /// arrives, as a receiver does (page-rules.md RULE-96): the sound
-        /// commands of the groups it fires are written first among its
-        /// tick's lines, and every line is otherwise the same.
-        #[arg(long)]
-        on_arrival: bool,
         /// Run without the operating-system sandbox (REQ-SEC-017).
         #[arg(long)]
         no_sandbox: bool,

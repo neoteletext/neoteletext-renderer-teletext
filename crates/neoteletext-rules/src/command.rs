@@ -12,13 +12,13 @@
 
 use crate::animate;
 use crate::limits::{
-    ALL_SEQUENCES, ALL_VARIABLES, AUDIO_CHANNELS, FIRST_PAGE, LAST_PAGE, LAST_SUBCODE, MAX_ARM_TICKS,
-    MAX_COMMAND_BINDINGS, MAX_COMMAND_BYTES, MAX_CONTROL, MAX_CYCLE_PERIOD, MAX_FADE_MS, MAX_FRAME, MAX_GAIN,
-    MAX_GROUPS, MAX_LOOK, MAX_MIDI_DATA, MAX_PITCH_BEND, MAX_SEQUENCES, MAX_TIMER_TICKS, MIDI_DATA_BITS, PAGE_TIMER,
-    ROW_PARAMETERS, SUBCODE_MASK, TIMERS, VARIABLES,
+    ALL_SEQUENCES, ALL_VARIABLES, AUDIO_CHANNELS, FIRST_PAGE, LAST_PAGE, LAST_SUBCODE, MAX_COMMAND_BINDINGS,
+    MAX_COMMAND_BYTES, MAX_CONTROL, MAX_CYCLE_PERIOD, MAX_FADE_MS, MAX_FRAME, MAX_GAIN, MAX_GROUPS, MAX_LOOK,
+    MAX_MIDI_DATA, MAX_PITCH_BEND, MAX_SEQUENCES, MAX_TIMER_TICKS, MIDI_DATA_BITS, PAGE_TIMER, SUBCODE_MASK, TIMERS,
+    VARIABLES,
 };
 use crate::table::{
-    FIRED_P3, FIRED_TARGET, FIRST_PARAMETER, Fault, SPACE_FIRED, SPACE_SEQUENCE, TargetKind, VALUE_BYTES, Value,
+    FIRED_P, FIRED_ROW, FIRED_TARGET, Fault, ROW_PARAMETER, SPACE_FIRED, SPACE_SEQUENCE, TargetKind, VALUE_BYTES, Value,
 };
 use crate::wire::{Reader, Writer};
 
@@ -58,10 +58,12 @@ pub const MAX_VARIABLE_BYTES: usize = VARIABLE_FIXED + VALUE_BYTES;
 pub const TIMER_BYTES: usize = PAGE_BYTES + 1 + 1;
 /// The bytes of a `REPORT` body (RULE-22).
 pub const REPORT_BYTES: usize = PAGE_BYTES + 1 + VALUE_BYTES;
-/// The bytes of a `RUN` body (RULE-102).
-pub const RUN_BYTES: usize = PAGE_BYTES + 1 + 1 + 1 + 4;
-/// The bytes of a `SEQUENCE` body (RULE-103).
-pub const SEQUENCE_BYTES: usize = PAGE_BYTES + 1 + 1;
+/// The bytes of a `RUN` body (RULE-102): the page, the sub-code and the
+/// group.
+pub const RUN_BYTES: usize = PAGE_BYTES + 1;
+/// The bytes of a `SEQUENCE` body (RULE-103): the page, the sub-code, the
+/// operation, the sequence, the start mode, the timer and `ticks`.
+pub const SEQUENCE_BYTES: usize = PAGE_BYTES + 1 + 1 + 1 + 1 + 4;
 /// The most bytes of a body of types 28 to 33.
 pub const MAX_BODY_BYTES: usize = MAX_VARIABLE_BYTES;
 /// The bytes of a binding in a command frame (RULE-45).
@@ -301,17 +303,19 @@ impl Operand {
     }
 }
 
-/// When a `RUN` command runs its group (RULE-102).
+/// When a `SEQUENCE` start makes the sequence begin (RULE-103): its start
+/// tick `S`, for a start applied in a handling of tick `t`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RunMode {
-    /// In place: mode 0.
-    Now,
-    /// Armed for a page tick: mode 1.
+pub enum StartMode {
+    /// The first tick step after the handling, `t + 1`: mode 0.
+    Next,
+    /// A page tick: mode 1. One earlier than `t + 1` has passed, and the
+    /// start is at `t + 1`, counted late; one more than `MAX_START_TICKS`
+    /// after `t` is not started, and is counted as skipped.
     At(u32),
-    /// Armed for so many ticks after the tick it is applied in, 1 to
-    /// `MAX_ARM_TICKS`: mode 2.
-    After(u32),
-    /// Armed for a timer's next beat: mode 3.
+    /// The named timer's next expiry of a period (RULE-15): the first tick
+    /// from `t + 1` on at which an `every` of that period on it would be
+    /// due; `t + 1` while it is stopped. Mode 2.
     Beat {
         /// The timer, 0 to 7, or 255 for the page timer.
         timer: u8,
@@ -358,12 +362,10 @@ pub enum Command {
         /// The value reported.
         value: Option<Value>,
     },
-    /// `RUN` (RULE-102): runs a group now, or arms a run.
+    /// `RUN` (RULE-102): runs a group now, in place.
     Run {
         /// The group.
         group: u8,
-        /// When.
-        mode: RunMode,
     },
     /// `SEQUENCE` (RULE-103): starts or stops a sequence.
     Sequence {
@@ -371,6 +373,8 @@ pub enum Command {
         start: bool,
         /// The sequence, 0 to 7; 255 for every sequence, with stop only.
         sequence: u8,
+        /// When a start begins; [`StartMode::Next`] with stop.
+        mode: StartMode,
     },
 }
 
@@ -395,11 +399,10 @@ const STOP: u8 = 2;
 /// The `what` bytes of `REPORT` (RULE-22).
 const WHAT_FIRING: u8 = 0;
 const WHAT_VALUE: u8 = 1;
-/// The mode bytes of `RUN` (RULE-102).
-const MODE_NOW: u8 = 0;
+/// The start mode bytes of `SEQUENCE` (RULE-103).
+const MODE_NEXT: u8 = 0;
 const MODE_AT: u8 = 1;
-const MODE_AFTER: u8 = 2;
-const MODE_BEAT: u8 = 3;
+const MODE_BEAT: u8 = 2;
 
 /// Reads the page and the sub-code a body begins with (RULE-112).
 pub(crate) fn read_page(reader: &mut Reader<'_>) -> Result<(u16, u16), Fault> {
@@ -483,15 +486,7 @@ pub fn decode(kind: u8, body: &[u8]) -> Result<(u16, u16, Command), Fault> {
             }
         }
         TYPE_RUN => read_run(&mut reader)?,
-        TYPE_SEQUENCE => {
-            let start = read_start(&mut reader)?;
-            let sequence = reader.u8()?;
-            let named = usize::from(sequence) < MAX_SEQUENCES || (sequence == ALL_SEQUENCES && !start);
-            if !named {
-                return Err(Fault::Range("sequence"));
-            }
-            Command::Sequence { start, sequence }
-        }
+        TYPE_SEQUENCE => read_sequence(&mut reader)?,
         _ => return Err(Fault::Command("not a record of types 28 to 33")),
     };
     if reader.finished() { Ok((page, sub, command)) } else { Err(Fault::Trailing) }
@@ -529,7 +524,7 @@ fn read_variable(reader: &mut Reader<'_>) -> Result<Command, Fault> {
         }
         operand_kind::FIRED => {
             let (constant, property) = (reader.i32()?, reader.u8()?);
-            if u16::from(property) > FIRED_P3 {
+            if u16::from(property) > FIRED_P {
                 return Err(Fault::Range("operand's fired property"));
             }
             Operand::Fired { constant, property }
@@ -556,28 +551,37 @@ fn read_run(reader: &mut Reader<'_>) -> Result<Command, Fault> {
     if usize::from(group) >= MAX_GROUPS {
         return Err(Fault::Limit("MAX_GROUPS"));
     }
+    Ok(Command::Run { group })
+}
+
+fn read_sequence(reader: &mut Reader<'_>) -> Result<Command, Fault> {
+    let start = read_start(reader)?;
+    let sequence = reader.u8()?;
+    let named = usize::from(sequence) < MAX_SEQUENCES || (sequence == ALL_SEQUENCES && !start);
+    if !named {
+        return Err(Fault::Range("sequence"));
+    }
     let (mode, timer, ticks) = (reader.u8()?, reader.u8()?, reader.u32()?);
-    if mode != MODE_BEAT && timer != 0 {
-        return Err(Fault::Reserved("run's timer"));
+    if (!start || mode != MODE_BEAT) && timer != 0 {
+        return Err(Fault::Reserved("sequence's timer"));
     }
     let mode = match mode {
-        MODE_NOW if ticks == 0 => RunMode::Now,
-        MODE_NOW => return Err(Fault::Reserved("run's ticks")),
-        MODE_AT => RunMode::At(ticks),
-        MODE_AFTER if (1..=MAX_ARM_TICKS).contains(&ticks) => RunMode::After(ticks),
-        MODE_AFTER => return Err(Fault::Limit("MAX_ARM_TICKS")),
+        MODE_NEXT if ticks == 0 => StartMode::Next,
+        MODE_NEXT => return Err(Fault::Reserved("sequence's ticks")),
+        _ if !start => return Err(Fault::Reserved("a stop's start mode")),
+        MODE_AT => StartMode::At(ticks),
         MODE_BEAT => {
             if usize::from(timer) >= TIMERS && timer != PAGE_TIMER {
-                return Err(Fault::Range("run's timer"));
+                return Err(Fault::Range("sequence's timer"));
             }
             if !(1..=MAX_TIMER_TICKS).contains(&ticks) {
                 return Err(Fault::Limit("MAX_TIMER_TICKS"));
             }
-            RunMode::Beat { timer, ticks }
+            StartMode::Beat { timer, ticks }
         }
-        _ => return Err(Fault::Range("run's mode")),
+        _ => return Err(Fault::Range("sequence's start mode")),
     };
-    Ok(Command::Run { group, mode })
+    Ok(Command::Sequence { start, sequence, mode })
 }
 
 /// Writes the body of `command` for the page `page` and `sub` at the
@@ -622,17 +626,16 @@ pub fn encode(command: &Command, page: u16, sub: u16, out: &mut [u8]) -> Result<
             writer.u8(WHAT_VALUE)?;
             value.write(&mut writer)?;
         }
-        Command::Run { group, mode } => {
+        Command::Run { group } => writer.u8(group)?,
+        Command::Sequence { start: on, sequence, mode } => {
             let (code, timer, ticks) = match mode {
-                RunMode::Now => (MODE_NOW, 0, 0),
-                RunMode::At(tick) => (MODE_AT, 0, tick),
-                RunMode::After(ticks) => (MODE_AFTER, 0, ticks),
-                RunMode::Beat { timer, ticks } => (MODE_BEAT, timer, ticks),
+                StartMode::Next => (MODE_NEXT, 0, 0),
+                StartMode::At(tick) => (MODE_AT, 0, tick),
+                StartMode::Beat { timer, ticks } => (MODE_BEAT, timer, ticks),
             };
-            writer.bytes(&[group, code, timer])?;
+            writer.bytes(&[start(on), sequence, code, timer])?;
             writer.u32(ticks)?;
         }
-        Command::Sequence { start: on, sequence } => writer.bytes(&[start(on), sequence])?,
     }
     let length = writer.used();
     let back = decode(command.kind(), out.get(..length).ok_or(Fault::Full)?)?;
@@ -657,8 +660,9 @@ pub struct Binding {
 pub enum Source {
     /// A variable `v0` to `v15`: `0x10` to `0x1F`.
     Variable(u8),
-    /// A row parameter `p0` to `p3`: `0x20` to `0x23`.
-    Parameter(u8),
+    /// The row parameter `p`: `0x20` (DEC-6635 item 8; `0x21` to `0x23`,
+    /// the second form's `p1` to `p3`, are withdrawn and refused).
+    Parameter,
     /// A value of the firing, the key, the target, the row or the cue:
     /// `0x30` to `0x33`.
     Fired(u8),
@@ -678,7 +682,7 @@ impl Source {
     pub const fn code(self) -> u8 {
         match self {
             Self::Variable(variable) => SOURCE_VARIABLE | variable,
-            Self::Parameter(parameter) => FIRST_PARAMETER | parameter,
+            Self::Parameter => ROW_PARAMETER,
             Self::Fired(property) => SOURCE_FIRED | property,
         }
     }
@@ -690,8 +694,8 @@ impl Source {
         if let Some(variable) = within(SOURCE_VARIABLE, VARIABLES) {
             return Some(Self::Variable(variable));
         }
-        if let Some(parameter) = within(FIRST_PARAMETER, ROW_PARAMETERS) {
-            return Some(Self::Parameter(parameter));
+        if code == ROW_PARAMETER {
+            return Some(Self::Parameter);
         }
         within(SOURCE_FIRED, usize::from(FIRED_SOURCES)).map(Self::Fired)
     }
@@ -873,10 +877,12 @@ pub fn check_bindings(kind: u8, body: &[u8], bindings: &[Binding]) -> Result<(),
         let place = place_of(kind, body, *binding)?;
         let source = Source::from_code(binding.source).ok_or(Fault::Binding("source"))?;
         // A target's number is an identity: a variable choosing it would
-        // be a computed address (RULE-1).
-        let identity = matches!(source, Source::Parameter(_)) || source == Source::Fired(FIRED_TARGET_SOURCE);
+        // be a computed address (RULE-1). A row's `p`, the firing's row
+        // and the firing's target are constants of the table or the
+        // viewer's own event (RULE-105, RULE-106).
+        let identity = matches!(source, Source::Parameter | Source::Fired(FIRED_TARGET_SOURCE | FIRED_ROW_SOURCE));
         if place.form == Form::Target && !identity {
-            return Err(Fault::Binding("a target's number takes a row parameter or the firing's target"));
+            return Err(Fault::Binding("a target's number takes the row's p, the firing's row or its target"));
         }
         let twice =
             bindings.iter().take(index).any(|earlier| (earlier.item, earlier.field) == (binding.item, binding.field));
@@ -889,6 +895,8 @@ pub fn check_bindings(kind: u8, body: &[u8], bindings: &[Binding]) -> Result<(),
 
 /// The firing's target as a binding's source (RULE-106: `0x31`).
 const FIRED_TARGET_SOURCE: u8 = FIRED_TARGET as u8;
+/// The firing's row as a binding's source (RULE-106: `0x32`).
+const FIRED_ROW_SOURCE: u8 = FIRED_ROW as u8;
 
 /// What became of a command when its bindings were applied.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

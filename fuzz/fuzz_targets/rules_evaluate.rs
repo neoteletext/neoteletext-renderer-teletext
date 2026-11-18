@@ -15,8 +15,8 @@ mod rules_world;
 
 use libfuzzer_sys::fuzz_target;
 use neoteletext_rules::evaluator::{Counters, Reported};
-use neoteletext_rules::limits::{MAX_GROUP_COMMANDS, MAX_QUEUED_COMMANDS, MAX_RUN_COMMANDS};
-use rules_world::{Given, Step, Way, run, script, split, table_of};
+use neoteletext_rules::limits::{MAX_GROUP_COMMANDS, MAX_RUN_COMMANDS};
+use rules_world::{Given, Step, run, script, split, table_of};
 
 fuzz_target!(|data: &[u8]| {
     let Some((image, rest)) = split(data) else { return };
@@ -30,7 +30,7 @@ fuzz_target!(|data: &[u8]| {
         .max()
         .unwrap_or(0);
     assert!(most <= MAX_RUN_COMMANDS);
-    for way in [Way::AtTheTick, Way::OnArrival, Way::Mixed] {
+    {
         let mut before = Counters::default();
         let mut each = |evaluator: &neoteletext_rules::Evaluator, tick: &[Given]| {
             let now = *evaluator.counters();
@@ -38,9 +38,11 @@ fuzz_target!(|data: &[u8]| {
             // server sent; a run applies no more than its group holds.
             let groups = usize::try_from(now.groups - before.groups).expect("a count");
             let commands = usize::try_from(now.commands - before.commands).expect("a count");
-            assert!(commands <= groups * MAX_GROUP_COMMANDS + MAX_QUEUED_COMMANDS, "{commands} commands, {groups} groups");
+            // A record of the server's is one command more, and an event.
+            let events = usize::try_from(now.events_handled - before.events_handled).expect("a count");
+            assert!(commands <= groups * MAX_GROUP_COMMANDS + events, "{commands} commands, {groups} groups");
             let fired = usize::try_from(now.fired - before.fired).expect("a count");
-            assert!(commands <= (groups.max(fired)) * most.max(1) + MAX_QUEUED_COMMANDS);
+            assert!(commands <= (groups.max(fired)) * most.max(1) + events);
             before = now;
             for given in tick {
                 if let Given::Report(report) = given
@@ -51,7 +53,11 @@ fuzz_target!(|data: &[u8]| {
                 }
             }
         };
-        let first = run(&table, rest, &steps, way, &mut each);
-        assert_eq!(first, run(&table, rest, &steps, way, &mut |_, _| {}), "the same script, the same outputs: {way:?}");
+        let first = run(&table, rest, &steps, &mut each, &mut |_, _| {});
+        assert_eq!(
+            first,
+            run(&table, rest, &steps, &mut |_, _| {}, &mut |_, _| {}),
+            "the same script, the same outputs"
+        );
     }
 });

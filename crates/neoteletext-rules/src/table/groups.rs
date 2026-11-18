@@ -8,7 +8,7 @@
 
 use super::Fault;
 use crate::bounded::Bounded;
-use crate::command::{BINDING_BYTES, Binding, is_sound};
+use crate::command::{BINDING_BYTES, Binding};
 use crate::limits::{MAX_COMMAND_BINDINGS, MAX_COMMAND_BYTES, MAX_GROUP_COMMANDS, MAX_GROUPS, MAX_GROUPS_BYTES};
 use crate::wire::{Reader, Writer};
 
@@ -35,10 +35,6 @@ pub struct CommandRef<'a> {
     pub kind: u8,
     /// The record's body.
     pub body: &'a [u8],
-    /// Whether it is a sound command, delivered on an input's arrival
-    /// (RULE-96): `CONTROL` or `LOCAL_MIDI`. It follows from the type the
-    /// table was decoded with, never from anything at run time.
-    pub sound: bool,
     bindings: &'a [u8],
 }
 
@@ -139,7 +135,7 @@ impl Groups {
         let length = usize::from(reader.u16().ok()?);
         let body = reader.take(length).ok()?;
         let bindings = reader.take(bindings.saturating_mul(BINDING_BYTES)).ok()?;
-        Some((CommandRef { kind, body, sound: is_sound(kind), bindings }, at.saturating_add(reader.used())))
+        Some((CommandRef { kind, body, bindings }, at.saturating_add(reader.used())))
     }
 
     /// Command `place` of group `group`, if there is one.

@@ -23,7 +23,7 @@ use neoteletext_audio_instruments::midi::family;
 use neoteletext_audio_instruments::watch::fields as family_fields;
 use neoteletext_rules::animate::{Operation, OperationKind, RECORD_FIXED, code as operation, length_of, write_record};
 use neoteletext_rules::command::{
-    self, Binding, Command, Operand, RunMode, Source, VariableOperation, field, midi_status,
+    self, Binding, Command, Operand, Source, StartMode, VariableOperation, field, midi_status,
 };
 use neoteletext_rules::limits::{
     ALL_SEQUENCES, ALL_VARIABLES, ANY_BUTTON, ANY_CUE, KEEP_LAYER, MAX_COMMAND_BINDINGS, MAX_COMMAND_BYTES,
@@ -168,15 +168,15 @@ fn hexadecimal(json: Option<&Json>, digits: usize, path: &str) -> Read<u16> {
     u16::from_str_radix(written, HEX).map_err(|_| format!("{path} is {digits} hexadecimal digits"))
 }
 
-/// A row parameter's designator, `p0` to `p3`.
-fn parameter(json: Option<&Json>, path: &str) -> Read<u8> {
-    designator(&names::PARAMETER_NAMES, json, path)
+/// The row parameter's designator, `p` (DEC-6635 item 8).
+fn parameter(json: Option<&Json>, path: &str) -> Read<()> {
+    let name = text(json, path)?;
+    if names::is_parameter(name) { Ok(()) } else { Err(format!("{path}: a row has one parameter, `p`, not `{name}`")) }
 }
 
 /// A key's code, as a key set or a row writes it (RULE-10, RULE-35):
-/// `{"char":"a"}`, `{"name":"Enter"}` or `{"physical":"a"}`, the inner
-/// value a `{"row":"pN"}` where `rows` allows it.
-fn key(json: &Json, rows: bool, path: &str) -> Read<Key> {
+/// `{"char":"a"}`, `{"name":"Enter"}` or `{"physical":"a"}`.
+fn key(json: &Json, path: &str) -> Read<Key> {
     let fields = object(json, path)?;
     let (kind, inner) = match (fields.get("char"), fields.get("name"), fields.get("physical")) {
         (Some(inner), None, None) => (KeyKind::Character, inner),
@@ -184,12 +184,6 @@ fn key(json: &Json, rows: bool, path: &str) -> Read<Key> {
         (None, None, Some(inner)) => (KeyKind::Physical, inner),
         _ => return Err(format!("{path} is one of char, name and physical")),
     };
-    if let Some(row) = inner.as_object() {
-        if !rows {
-            return Err(format!("{path}: a row parameter in a rule without rows"));
-        }
-        return Ok(Key::row(kind, parameter(row.get("row"), path)?));
-    }
     let written = text(Some(inner), path)?;
     let code = match kind {
         KeyKind::Named => {
@@ -215,15 +209,20 @@ fn row_value(json: Option<&Json>, path: &str) -> Read<i32> {
     match json {
         None => Ok(0),
         Some(Json::Object(_)) => {
-            let key = key(json.unwrap_or(&Json::Null), false, path)?;
+            let key = key(json.unwrap_or(&Json::Null), path)?;
             i32::try_from(key.code).map_err(|_| format!("{path} is a key whose code fits"))
         }
         Some(_) => bounded(json, i64::from(i32::MIN), i64::from(i32::MAX), path),
     }
 }
 
-/// A key set: `"any"` or a list of keys.
+/// A key set: `"any"` or a list of keys; with `by_row`, one key a row of
+/// the rule's rows (RULE-105), which only a rule with rows may have.
 fn keys(fields: &Map<String, Json>, rows: bool, path: &str) -> Read<KeyMatch> {
+    let by_row = boolean(fields.get("by_row"), false, &format!("{path}.by_row"))?;
+    if by_row && !rows {
+        return Err(format!("{path}: by_row in a rule without rows (invalid_rules)"));
+    }
     let mut matched = match fields.get("keys") {
         Some(Json::String(any)) if any == "any" => KeyMatch::any(),
         given => {
@@ -233,9 +232,9 @@ fn keys(fields: &Map<String, Json>, rows: bool, path: &str) -> Read<KeyMatch> {
             }
             let mut set = Vec::with_capacity(given.len());
             for (index, each) in given.iter().enumerate() {
-                set.push(key(each, rows, &format!("{path}.keys[{index}]"))?);
+                set.push(key(each, &format!("{path}.keys[{index}]"))?);
             }
-            KeyMatch::of(&set)
+            if by_row { KeyMatch::by_row(&set) } else { KeyMatch::of(&set) }
         }
     };
     if let Some(mods) = fields.get("mods") {
@@ -249,7 +248,8 @@ fn keys(fields: &Map<String, Json>, rows: bool, path: &str) -> Read<KeyMatch> {
 impl Names<'_> {
     /// A target (RULE-12, RULE-35): `"page"`, `{"control":n}`,
     /// `{"object":n}`, `{"rect":"name"}`; in a pointer trigger `"any"`,
-    /// and in a rule with rows `{"row":"pN"}`.
+    /// and in a rule with rows `{"plus":k,"row":"p"}`, `k` a signed 16-bit
+    /// constant to which each row's `p` is added.
     fn trigger_target(&self, json: Option<&Json>, any: bool, rows: bool, path: &str) -> Read<TriggerTarget> {
         let json = json.ok_or_else(|| format!("{path} names a target"))?;
         if json.as_str() == Some("page") {
@@ -275,7 +275,12 @@ impl Names<'_> {
             if !rows {
                 return Err(format!("{path}: a row parameter in a rule without rows"));
             }
-            return Ok(TriggerTarget::row(kind, parameter(row.get("row"), path)?));
+            parameter(row.get("row"), path)?;
+            let plus = match row.get("plus") {
+                None => 0,
+                given => bounded::<i16>(given, i64::from(i16::MIN), i64::from(i16::MAX), &format!("{path}.plus"))?,
+            };
+            return Ok(TriggerTarget::row(kind, plus));
         }
         let number = bounded(Some(inner), 1, i64::from(u16::MAX), path)?;
         Ok(TriggerTarget::of(Target { kind, number }))
@@ -297,10 +302,9 @@ impl Names<'_> {
 
     /// One trigger of `on` (RULE-35's table).
     fn trigger(&self, json: &Json, rows: bool, path: &str) -> Read<Trigger> {
-        use neoteletext_rules::limits::{MAX_CUE, MAX_DOUBLE_TICKS, MAX_HOLD_TICKS, MAX_TIMER_TICKS};
+        use neoteletext_rules::limits::{MAX_CUE, MAX_TIMER_TICKS};
         let fields = object(json, path)?;
         let event = text(fields.get("event"), &format!("{path}.event"))?;
-        let ticks16 = |most: u16| bounded::<u16>(fields.get("ticks"), 1, i64::from(most), &format!("{path}.ticks"));
         let target = |any| self.trigger_target(fields.get("target"), any, rows, &format!("{path}.target"));
         let button = || Self::button(fields.get("button"), &format!("{path}.button"));
         Ok(match event {
@@ -308,16 +312,8 @@ impl Names<'_> {
                 Trigger::Key { keys: keys(fields, rows, path)?, repeat: boolean(fields.get("repeat"), false, path)? }
             }
             "key_up" => Trigger::KeyUp { keys: keys(fields, rows, path)? },
-            "held" => Trigger::Held { keys: keys(fields, rows, path)?, ticks: ticks16(MAX_HOLD_TICKS)? },
-            "double" => Trigger::Double { keys: keys(fields, rows, path)?, ticks: ticks16(MAX_DOUBLE_TICKS)? },
             "press" => Trigger::Press { target: target(true)?, button: button()? },
             "release" => Trigger::Release { target: target(true)?, button: button()? },
-            "press_held" => {
-                Trigger::PressHeld { target: target(true)?, button: button()?, ticks: ticks16(MAX_HOLD_TICKS)? }
-            }
-            "double_press" => {
-                Trigger::DoublePress { target: target(true)?, button: button()?, ticks: ticks16(MAX_DOUBLE_TICKS)? }
-            }
             "enter" => Trigger::Enter { target: target(true)? },
             "leave" => Trigger::Leave { target: target(true)? },
             "wheel" => Trigger::Wheel { target: target(true)? },
@@ -355,7 +351,7 @@ impl Names<'_> {
         Ok(match of {
             "variable" => Value::variable(designator(&names::VARIABLE_NAMES, fields.get("variable"), path)?),
             "key" => {
-                let key = key(fields.get("key").unwrap_or(&Json::Null), false, &format!("{path}.key"))?;
+                let key = key(fields.get("key").unwrap_or(&Json::Null), &format!("{path}.key"))?;
                 Value::key(key.kind.code(), key.code)
             }
             "button" => {
@@ -363,7 +359,25 @@ impl Names<'_> {
             }
             "pointer" => Value::pointer(property(&names::POINTER_PROPERTIES)?),
             "keys_down" => Value::keys_down(),
-            "timer" => Value::timer(timer(fields.get("timer"), None, path)?, property(&names::TIMER_PROPERTIES)?),
+            "timer" => {
+                let named = timer(fields.get("timer"), None, path)?;
+                let held = property(&names::TIMER_PROPERTIES)?;
+                if held == neoteletext_rules::table::TIMER_PHASE {
+                    // RULE-25: a phase names its period.
+                    let period = fields
+                        .get("period")
+                        .ok_or_else(|| format!("{path}: a phase without a period (invalid_rules)"))?;
+                    let period = bounded(
+                        Some(period),
+                        1,
+                        i64::from(neoteletext_rules::limits::MAX_TIMER_TICKS),
+                        &format!("{path}.period"),
+                    )?;
+                    Value::timer_phase(named, period)
+                } else {
+                    Value::timer(named, held)
+                }
+            }
             "target" => {
                 let target = self.target(fields.get("target"), &format!("{path}.target"))?;
                 Value::target(target.kind, target.number, property(&names::TARGET_PROPERTIES)?)
@@ -452,7 +466,7 @@ impl Names<'_> {
         }
         let operator = word(&names::OPERATORS, fields.get("op"), &format!("{path}.op"))?;
         let operator = Operator::from_code(operator).ok_or_else(|| format!("{path}.op is not an operator"))?;
-        let (constant, parameter) = match fields.get("value") {
+        let (constant, plus_p) = match fields.get("value") {
             Some(Json::Object(added)) => {
                 if !rows {
                     return Err(format!("{path}: a row parameter in a rule without rows"));
@@ -461,11 +475,12 @@ impl Names<'_> {
                     None => 0,
                     given => whole(given, path)?,
                 };
-                (plus, Some(parameter(added.get("row"), path)?))
+                parameter(added.get("row"), path)?;
+                (plus, true)
             }
-            given => (whole(given, &format!("{path}.value"))?, None),
+            given => (whole(given, &format!("{path}.value"))?, false),
         };
-        out.push(Node::Compare { value, operator, constant, parameter });
+        out.push(Node::Compare { value, operator, constant, plus_p });
         Ok(())
     }
 }
@@ -481,7 +496,7 @@ fn midi_number(json: Option<&Json>, path: &str) -> Read<u16> {
 }
 
 /// A field that may be an amount in a group (RULE-106, RULE-35): an
-/// integer, or `{"plus":k,"variable":"vN"}`, `{"plus":k,"row":"pN"}` or
+/// integer, or `{"plus":k,"variable":"vN"}`, `{"plus":k,"row":"p"}` or
 /// `{"plus":k,"fired":"key"}`. Gives the constant and the binding's source.
 fn amount(json: Option<&Json>, least: i64, greatest: i64, path: &str) -> Read<(i64, Option<Source>)> {
     let Some(Json::Object(fields)) = json else {
@@ -494,7 +509,8 @@ fn amount(json: Option<&Json>, least: i64, greatest: i64, path: &str) -> Read<(i
     let source = if let Some(variable) = fields.get("variable") {
         Source::Variable(designator(&names::VARIABLE_NAMES, Some(variable), path)?)
     } else if let Some(row) = fields.get("row") {
-        Source::Parameter(parameter(Some(row), path)?)
+        parameter(Some(row), path)?;
+        Source::Parameter
     } else if let Some(fired) = fields.get("fired") {
         let property = word(&names::FIRED_PROPERTIES, Some(fired), path)?;
         let first_four =
@@ -748,7 +764,7 @@ impl Names<'_> {
 
     /// `variable`, `timer`, `report`, `run` and `sequence` (RULE-114).
     fn housekeeping(&self, kind: &str, fields: &Map<String, Json>, path: &str) -> Read<Command> {
-        use neoteletext_rules::limits::{MAX_ARM_TICKS, MAX_TIMER_TICKS};
+        use neoteletext_rules::limits::MAX_TIMER_TICKS;
         let start = |path: &str| -> Read<bool> {
             match text(fields.get("op"), path)? {
                 "start" => Ok(true),
@@ -769,23 +785,30 @@ impl Names<'_> {
                 },
             },
             "run" => {
-                let group = place(&self.groups, text(fields.get("group"), &format!("{path}.group"))?, "group")?;
+                // DEC-6635 item 6: `run` has no `at`.
+                if fields.contains_key("at") {
+                    return Err(format!("{path}.at: a run has no `at` (unknown_field)"));
+                }
+                Command::Run {
+                    group: place(&self.groups, text(fields.get("group"), &format!("{path}.group"))?, "group")?,
+                }
+            }
+            _ => {
+                let start = start(&format!("{path}.op"))?;
+                let sequence = match fields.get("sequence") {
+                    None | Some(Json::Null) if !start => ALL_SEQUENCES,
+                    given => place(&self.sequences, text(given, &format!("{path}.sequence"))?, "sequence")?,
+                };
                 let mode = match fields.get("at") {
-                    None | Some(Json::Null) => RunMode::Now,
+                    None | Some(Json::Null) => StartMode::Next,
+                    Some(_) if !start => return Err(format!("{path}.at: a stop has no `at` (invalid_rules)")),
                     Some(at) => {
                         let at = object(at, &format!("{path}.at"))?;
                         if let Some(tick) = at.get("tick") {
-                            RunMode::At(bounded(Some(tick), 0, i64::from(u32::MAX), &format!("{path}.at.tick"))?)
-                        } else if let Some(after) = at.get("after") {
-                            RunMode::After(bounded(
-                                Some(after),
-                                1,
-                                i64::from(MAX_ARM_TICKS),
-                                &format!("{path}.at.after"),
-                            )?)
+                            StartMode::At(bounded(Some(tick), 0, i64::from(u32::MAX), &format!("{path}.at.tick"))?)
                         } else if let Some(beat) = at.get("beat") {
                             let beat = object(beat, &format!("{path}.at.beat"))?;
-                            RunMode::Beat {
+                            StartMode::Beat {
                                 timer: timer(beat.get("timer"), Some(PAGE_TIMER), &format!("{path}.at.beat.timer"))?,
                                 ticks: bounded(
                                     beat.get("ticks"),
@@ -795,19 +818,11 @@ impl Names<'_> {
                                 )?,
                             }
                         } else {
-                            return Err(format!("{path}.at is null, tick, after or beat"));
+                            return Err(format!("{path}.at is null, a tick or a beat"));
                         }
                     }
                 };
-                Command::Run { group, mode }
-            }
-            _ => {
-                let start = start(&format!("{path}.op"))?;
-                let sequence = match fields.get("sequence") {
-                    None | Some(Json::Null) if !start => ALL_SEQUENCES,
-                    given => place(&self.sequences, text(given, &format!("{path}.sequence"))?, "sequence")?,
-                };
-                Command::Sequence { start, sequence }
+                Command::Sequence { start, sequence, mode }
             }
         })
     }
@@ -935,11 +950,9 @@ fn read_rows<'a>(table_fields: &'a Map<String, Json>, table: &mut Table) -> Read
         let count = u8::try_from(rows.len()).map_err(|_| format!("{path}: too many rows"))?;
         for (index, row) in rows.iter().enumerate() {
             let path = format!("{path}[{index}]");
-            let fields = object(row, &path)?;
-            let mut held: Row = [0; neoteletext_rules::limits::ROW_PARAMETERS];
-            for (slot, designator) in held.iter_mut().zip(names::PARAMETER_NAMES) {
-                *slot = row_value(fields.get(designator), &format!("{path}.{designator}"))?;
-            }
+            // DEC-6635 item 8: a row is its one parameter, `p`: an integer,
+            // or a key standing for its code.
+            let held: Row = row_value(Some(row), &path)?;
             table.rows.push(held).map_err(|_| format!("{path}: too many rows (rules_over_limit, MAX_ROWS)"))?;
         }
         row_sets.push((name.as_str(), first, count));
@@ -957,7 +970,7 @@ fn wanted_group(names: &Names<'_>, rule: &Json, path: &str) -> Read<Result<Vec<B
             if !echoed {
                 return Ok(Err(usize::from(group)));
             }
-            let run = Command::Run { group, mode: RunMode::Now };
+            let run = Command::Run { group };
             let mut body = vec![0_u8; command::RUN_BYTES];
             let length = command::encode(&run, names.page, names.sub, &mut body)
                 .map_err(|fault| format!("{path}: {fault:?}"))?;

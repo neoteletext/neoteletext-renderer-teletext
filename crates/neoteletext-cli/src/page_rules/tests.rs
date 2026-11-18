@@ -103,20 +103,19 @@ fn a_page_with_no_table_sends_nothing() {
     assert_eq!(ticked(&mut rules, 2 * A_TICK_US), []);
 }
 
-/// RULE-46, RULE-5 (REQ-6528): a key reaches the channel inside the
-/// `RULE_EVENT` of the rule whose group reported it, byte for byte as the
-/// viewer made it, and only once the tick that evaluates it has run. A
-/// key that arrives before page tick 0 has run belongs to page tick 1.
+/// RULE-46, DEC-6635 item 1 (REQ-6528): a key reaches the channel inside
+/// the `RULE_EVENT` of the rule whose group reported it, byte for byte as
+/// the viewer made it. A key that arrives before page tick 0 waits for it,
+/// so that the `open` rules come first, and belongs to it; a key after it
+/// is reported at once, stamped with the coming tick.
 #[test]
 fn a_key_goes_inside_the_rule_event_of_the_rule_that_asked() {
     let mut rules = PageRules::new();
     give(&mut rules, ON, 1, Some(&send_all(ON)), 0);
     assert!(rules.show(Some(ON), 0));
     rules.input(&press('a'));
-    assert!(rules.wait(0).is_some(), "the key waits for its tick");
-    assert_eq!(ticked(&mut rules, 0), [], "no input belongs to page tick 0");
-    assert!(rules.wait(0).is_some(), "the key still waits");
-    let out = ticked(&mut rules, A_TICK_US);
+    assert!(rules.wait(0).is_some(), "the key waits for page tick 0");
+    let out = ticked(&mut rules, 0);
     let key = bytes_of(&press('a'));
     // Rule 0 of the default table is `keys` (RULE-53); it has no rows.
     let expected = Outgoing::Rule {
@@ -124,9 +123,9 @@ fn a_key_goes_inside_the_rule_event_of_the_rule_that_asked() {
         generation: 1,
         rule: 0,
         row: NO_RULE,
-        tick: 1,
+        tick: 0,
         target: Target::NONE,
-        body: Body::Input(key),
+        body: Body::Input(key.clone()),
     };
     assert_eq!(out, core::slice::from_ref(&expected));
     // As the input stream has it: a server's reader takes the message and
@@ -139,9 +138,15 @@ fn a_key_goes_inside_the_rule_event_of_the_rule_that_asked() {
         read.push((event.rule, event.row, event.tick, event.input().map(|(item, _)| item == press('a'))));
     })
     .unwrap();
-    assert_eq!(read, [(0, NO_RULE, 1, Some(true))]);
+    assert_eq!(read, [(0, NO_RULE, 0, Some(true))]);
+    assert_eq!(ticked(&mut rules, A_TICK_US), [], "the key is reported once");
+    rules.input(&press('a'));
+    let Outgoing::Rule { on, generation, rule, row, target, body, .. } = expected else { panic!() };
+    let again = Outgoing::Rule { on, generation, rule, row, tick: 1, target, body };
+    let mut out = Vec::new();
+    rules.tick(A_TICK_US, &mut out);
+    assert_eq!(out, [again], "at once, before the tick it belongs to is due");
     assert_eq!(rules.wait(2 * A_TICK_US), None, "the default table has nothing time alone fires");
-    assert_eq!(ticked(&mut rules, 2 * A_TICK_US), [], "the key is reported once");
 }
 
 /// RULE-53: text and the focus are sent by their rules of the default
@@ -165,7 +170,7 @@ fn the_default_table_sends_text_focus_and_releases() {
     let sent: Vec<(u8, Vec<u8>)> = ticked(&mut rules, A_TICK_US)
         .into_iter()
         .map(|outgoing| match outgoing {
-            Outgoing::Rule { rule, tick: 1, body: Body::Input(bytes), .. } => (rule, bytes),
+            Outgoing::Rule { rule, tick: 0, body: Body::Input(bytes), .. } => (rule, bytes),
             other => panic!("{other:?}"),
         })
         .collect();
@@ -202,14 +207,15 @@ fn a_later_table_replaces_the_table() {
             other => panic!("{other:?}"),
         }
     };
-    assert_eq!(count(&mut rules, A_TICK_US), (1, 1, 1));
-    assert_eq!(count(&mut rules, 2 * A_TICK_US), (1, 2, 2));
+    // Each key belongs to the present tick, the last tick step run.
+    assert_eq!(count(&mut rules, A_TICK_US), (1, 0, 1));
+    assert_eq!(count(&mut rules, 2 * A_TICK_US), (1, 1, 2));
     // The same table again, at the next generation: the count starts
-    // again, at the new table's page tick 1.
+    // again, after the new table's page tick 0.
     give(&mut rules, ON, 2, Some(&table), 3 * A_TICK_US);
     assert!(rules.is_open());
     assert_eq!(ticked(&mut rules, 3 * A_TICK_US), []);
-    assert_eq!(count(&mut rules, 4 * A_TICK_US), (2, 1, 1));
+    assert_eq!(count(&mut rules, 4 * A_TICK_US), (2, 0, 1));
     give(&mut rules, ON, 3, None, 5 * A_TICK_US);
     assert!(!rules.is_open());
     rules.input(&press('c'));
@@ -335,7 +341,7 @@ fn a_state_query_is_answered_once_a_second() {
     let mut rules = opened();
     rules.record(&query(Stamp { page: 0x200, sub: ON.sub }, 9), A_TICK_US);
     rules.record(&query(Stamp { page: ON.page, sub: 2 }, 9), A_TICK_US);
-    assert_eq!(rules.wait(A_TICK_US), Some(0), "only the tick after page tick 0 is owed");
+    assert_eq!(rules.wait(A_TICK_US), None, "a query of a page that is not open owes no tick");
     assert_eq!(ticked(&mut rules, A_TICK_US), [], "a query of a page that is not open is ignored");
     rules.record(&query(ON, 42), 2 * A_TICK_US);
     rules.record(&query(ON, 43), 2 * A_TICK_US);
@@ -343,7 +349,7 @@ fn a_state_query_is_answered_once_a_second() {
     let [Outgoing::State { on: ON, body }, Outgoing::Fault(fault)] = out.as_slice() else { panic!("{out:?}") };
     let state = neoteletext_rules::state::decode(body).unwrap();
     let table = state.table.unwrap();
-    assert_eq!((state.identifier, table.generation, table.tick), (42, 1, 2));
+    assert_eq!((state.identifier, table.generation, table.tick), (42, 1, 1), "handled in tick 1, at once");
     assert_eq!(table.variables, [0; 16]);
     assert_eq!(*fault, RulesFault { on: ON, generation: 1, fault: FaultCode::QueryDropped, count: 1 });
 
@@ -406,7 +412,7 @@ fn a_command_the_server_sends_is_applied_to_the_open_page() {
     }
     let out = ticked(&mut rules, A_TICK_US);
     // A run no rule made: rule 255.
-    let [Outgoing::Rule { rule: NO_RULE, row: NO_RULE, tick: 1, body: Body::Value { reading: 9, .. }, .. }] =
+    let [Outgoing::Rule { rule: NO_RULE, row: NO_RULE, tick: 0, body: Body::Value { reading: 9, .. }, .. }] =
         out.as_slice()
     else {
         panic!("{out:?}")

@@ -1,13 +1,12 @@
-//! The input state (RULE-8, RULE-108): which keys and buttons are down
-//! and since which tick, where the pointer is, which targets it is inside
-//! and the recent presses. It follows the events, one by one, and no
-//! command can change it.
+//! The input state (RULE-8): which keys and buttons are down, where the
+//! pointer is and which targets it is inside. It follows the events, one
+//! by one, and no command can change it.
 
 use crate::bounded::Bounded;
-use crate::limits::{MAX_BUTTON, MAX_KEYS_DOWN, MAX_POINTER_OBJECTS, MAX_RECENT_PRESSES, MAX_RECTS};
+use crate::limits::{MAX_BUTTON, MAX_KEYS_DOWN, MAX_POINTER_OBJECTS, MAX_RECTS};
 use crate::table::{
     INPUT_BUTTON, INPUT_CHARACTER, INPUT_KEYS_DOWN, INPUT_NAMED, INPUT_PHYSICAL, INPUT_POINTER, KeyKind, KeyMatch,
-    POINTER_OVER, POINTER_X, POINTER_Y, Rect, Row, SPACE_INPUT, Target, TargetKind, Value,
+    POINTER_OVER, POINTER_X, POINTER_Y, Rect, SPACE_INPUT, Target, TargetKind, Value,
 };
 
 /// What a key event says happened.
@@ -198,45 +197,19 @@ impl Transition {
         Self { entered: Inside::NOTHING, left: Inside::NOTHING, moved: false, released: Inside::NOTHING };
 }
 
-/// A key that is down (RULE-108).
+/// A key that is down (RULE-8).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct KeyDown {
     pub(super) key: KeyIdentity,
     pub(super) base: Option<u32>,
-    /// The modifiers as they were at the press.
-    pub(super) mods: u8,
-    /// The page tick of the event that put it down.
-    pub(super) tick: u32,
-    /// Its place among everything that went down.
-    pub(super) order: u32,
 }
 
-/// A pointer button (RULE-108).
+/// A pointer button (RULE-8).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct ButtonDown {
     pub(super) down: bool,
-    /// What its press was inside.
+    /// What its press was inside, which its release fires on (RULE-9).
     pub(super) inside: Inside,
-    /// The page tick of the press.
-    pub(super) tick: u32,
-    /// Its place among everything that went down.
-    pub(super) order: u32,
-}
-
-/// What was pressed, for a double press (RULE-108).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Pressed {
-    Key(KeyIdentity),
-    /// A button, and what the press was inside.
-    Button(u8, Inside),
-}
-
-/// A press kept for `double` and `double_press` (RULE-108).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct Recent {
-    pub(super) what: Pressed,
-    /// The page tick of the press.
-    pub(super) tick: u32,
 }
 
 /// What a value of the input state reads (RULE-24, RULE-26): the keys
@@ -257,9 +230,6 @@ pub(super) struct Seen {
 pub(super) struct InputState {
     pub(super) seen: Seen,
     pub(super) pressed: [ButtonDown; MAX_BUTTON as usize + 1],
-    pub(super) recent: Bounded<Recent, MAX_RECENT_PRESSES>,
-    /// How many keys and buttons have gone down.
-    order: u32,
 }
 
 /// Whether a key of `kind` and `code` names the key of an event
@@ -275,20 +245,20 @@ pub(super) fn key_names(kind: KeyKind, code: u32, identity: KeyIdentity, base: O
 }
 
 /// Whether a key trigger's set and modifiers match a key (RULE-9,
-/// RULE-10), with `row`'s parameters standing for the keys the rows give
-/// (RULE-105).
-pub(super) fn keys_match(keys: &KeyMatch, row: &Row, identity: KeyIdentity, base: Option<u32>, mods: u8) -> bool {
-    let named = keys.keys.is_empty()
-        || keys
-            .keys
-            .iter()
-            .any(|key| key.resolve(row).is_some_and(|(kind, code)| key_names(kind, code, identity, base)));
+/// RULE-10): any member of the set, or with `by_row` the member at the
+/// place of the row being matched among the rule's rows (RULE-105).
+pub(super) fn keys_match(keys: &KeyMatch, place: usize, identity: KeyIdentity, base: Option<u32>, mods: u8) -> bool {
+    let names_it = |key: &crate::table::Key| key_names(key.kind, key.code, identity, base);
+    let named = if keys.by_row {
+        keys.keys.get(place).is_some_and(names_it)
+    } else {
+        keys.keys.is_empty() || keys.keys.iter().any(names_it)
+    };
     named && mods & keys.mods_mask == keys.mods_value
 }
 
-const NO_BUTTON: ButtonDown = ButtonDown { down: false, inside: Inside::NOTHING, tick: 0, order: 0 };
-const NO_KEY: KeyDown = KeyDown { key: KeyIdentity::Character(0), base: None, mods: 0, tick: 0, order: 0 };
-const NO_RECENT: Recent = Recent { what: Pressed::Key(KeyIdentity::Character(0)), tick: 0 };
+const NO_BUTTON: ButtonDown = ButtonDown { down: false, inside: Inside::NOTHING };
+const NO_KEY: KeyDown = KeyDown { key: KeyIdentity::Character(0), base: None };
 
 impl Seen {
     pub(super) const fn new() -> Self {
@@ -298,30 +268,18 @@ impl Seen {
 
 impl InputState {
     pub(super) const fn new() -> Self {
-        Self {
-            seen: Seen::new(),
-            pressed: [NO_BUTTON; MAX_BUTTON as usize + 1],
-            recent: Bounded::new(NO_RECENT),
-            order: 0,
-        }
+        Self { seen: Seen::new(), pressed: [NO_BUTTON; MAX_BUTTON as usize + 1] }
     }
 
-    fn next_order(&mut self) -> u32 {
-        self.order = self.order.saturating_add(1);
-        self.order
-    }
-
-    /// Follows a key event of page tick `tick`. A press beyond
-    /// `MAX_KEYS_DOWN` is not tracked (RULE-8); an automatic repeat does
-    /// not restart a hold (RULE-108).
-    pub(super) fn key(&mut self, action: KeyAction, key: KeyIdentity, base: Option<u32>, mods: u8, tick: u32) {
+    /// Follows a key event. A press beyond `MAX_KEYS_DOWN` is not tracked
+    /// (RULE-8).
+    pub(super) fn key(&mut self, action: KeyAction, key: KeyIdentity, base: Option<u32>) {
         let held = self.seen.keys.iter().position(|down| down.key == key);
         match (action, held) {
             (KeyAction::Press, None) => {
-                let order = self.next_order();
                 // One press over the limit finds no room, and is not down
                 // for conditions.
-                let _ = self.seen.keys.push(KeyDown { key, base, mods, tick, order });
+                let _ = self.seen.keys.push(KeyDown { key, base });
             }
             (KeyAction::Release, Some(place)) => {
                 let mut kept = Bounded::new(NO_KEY);
@@ -338,25 +296,17 @@ impl InputState {
     /// Follows a pointer event at a position: what the pointer entered
     /// and left, whether it moved, and for a release what the press was
     /// inside.
-    pub(super) fn pointer(
-        &mut self,
-        action: PointerAction,
-        button: u8,
-        now: Inside,
-        (x, y): (u16, u16),
-        tick: u32,
-    ) -> Transition {
+    pub(super) fn pointer(&mut self, action: PointerAction, button: u8, now: Inside, (x, y): (u16, u16)) -> Transition {
         let was = self.seen.inside;
         let moved = action == PointerAction::Move && (!self.seen.over || (self.seen.x, self.seen.y) != (x, y));
         (self.seen.over, self.seen.x, self.seen.y, self.seen.inside) = (true, x, y, now);
         let mut released = Inside::NOTHING;
         if button <= MAX_BUTTON && matches!(action, PointerAction::Press | PointerAction::Release) {
             let bit = 1_u8.checked_shl(u32::from(button)).unwrap_or(0);
-            let order = if action == PointerAction::Press { self.next_order() } else { 0 };
             if let Some(slot) = self.pressed.get_mut(usize::from(button)) {
                 if action == PointerAction::Press {
                     self.seen.buttons |= bit;
-                    *slot = ButtonDown { down: true, inside: now, tick, order };
+                    *slot = ButtonDown { down: true, inside: now };
                 } else {
                     self.seen.buttons &= !bit;
                     released = core::mem::replace(slot, NO_BUTTON).inside;
@@ -371,31 +321,6 @@ impl InputState {
         let was = self.seen.inside;
         (self.seen.over, self.seen.x, self.seen.y, self.seen.inside) = (false, 0, 0, Inside::NOTHING);
         Transition { entered: Inside::NOTHING, left: was, moved: false, released: Inside::NOTHING }
-    }
-
-    /// The most recent kept press that `same` says is of the same key or
-    /// button: its place and its tick (RULE-108).
-    pub(super) fn last_press(&self, same: impl Fn(&Pressed) -> bool) -> Option<(usize, u32)> {
-        let place = self.recent.iter().rposition(|recent| same(&recent.what))?;
-        self.recent.get(place).map(|recent| (place, recent.tick))
-    }
-
-    /// Forgets the kept press at `place`.
-    pub(super) fn forget_press(&mut self, place: usize) {
-        let mut kept = Bounded::new(NO_RECENT);
-        for (_, recent) in self.recent.iter().enumerate().filter(|(at, _)| *at != place) {
-            let _ = kept.push(*recent);
-        }
-        self.recent = kept;
-    }
-
-    /// Keeps a press, the oldest forgotten for it when the list is full
-    /// (RULE-108).
-    pub(super) fn keep_press(&mut self, what: Pressed, tick: u32) {
-        if self.recent.len() >= MAX_RECENT_PRESSES {
-            self.forget_press(0);
-        }
-        let _ = self.recent.push(Recent { what, tick });
     }
 
     /// The declared rectangles a pixel is within: bit `n` for rectangle

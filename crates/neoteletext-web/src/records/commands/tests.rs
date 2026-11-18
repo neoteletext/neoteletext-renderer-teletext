@@ -11,7 +11,7 @@ use super::*;
 use crate::records::{ChannelRecord, Read, RecordReader};
 use neoteletext_audio::record::{Control, Operation};
 use neoteletext_rules::command::{
-    Binding, CONTROL_FADE_AT, CONTROL_GAIN_AT, Operand, RunMode, Source, VariableOperation, apply_bindings, field,
+    Binding, CONTROL_FADE_AT, CONTROL_GAIN_AT, Operand, Source, StartMode, VariableOperation, apply_bindings, field,
 };
 use neoteletext_rules::limits::MAX_COMMAND_BYTES;
 use neoteletext_rules::table::{Framed, Rule, Table, Trigger, Value};
@@ -40,8 +40,8 @@ fn each_command_record_reaches_a_receiver() {
         },
         Command::Timer { start: true, timer: 0 },
         Command::Report { value: Some(Value::variable(0)) },
-        Command::Run { group: 3, mode: RunMode::After(30) },
-        Command::Sequence { start: false, sequence: 255 },
+        Command::Run { group: 3 },
+        Command::Sequence { start: true, sequence: 2, mode: StartMode::Beat { timer: 255, ticks: 30 } },
     ];
     for (command, kind) in commands.into_iter().zip(TYPE_LOCAL_MIDI..=TYPE_SEQUENCE) {
         assert_eq!(command.kind(), kind);
@@ -157,7 +157,7 @@ fn the_body_check_is_the_records_own_readers() {
 fn a_bound_control_is_read_with_its_amounts() {
     let body = control_body(&play());
     let bindings =
-        [Binding::of(field::CONTROL_GAIN, Source::Variable(0)), Binding::of(field::CONTROL_FADE, Source::Parameter(1))];
+        [Binding::of(field::CONTROL_GAIN, Source::Variable(0)), Binding::of(field::CONTROL_FADE, Source::Parameter)];
     let mut out = [0_u8; MAX_COMMAND_BYTES];
     let bound = apply_bindings(
         TYPE_CONTROL,

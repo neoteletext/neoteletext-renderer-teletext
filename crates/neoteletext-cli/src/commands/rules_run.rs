@@ -29,10 +29,9 @@
 //! (RULE-114). Nothing here reads a clock: page tick `n` is the `n`th
 //! turn of the loop.
 //!
-//! With `--on-arrival` each key and pointer input is given to the
-//! evaluator as a receiver gives one the moment it arrives (page-rules.md
-//! RULE-96): the sound commands of the groups it fires are written first
-//! among its tick's lines, and every line is otherwise the same.
+//! Each input is given to the evaluator in the order of the lines, after
+//! the tick step of the tick it names, and acts at once as it does in a
+//! receiver (DEC-6635 item 1): its lines come after that tick step's own.
 
 use super::{io_failure, sandbox_closed};
 use crate::operations::to_core;
@@ -47,7 +46,7 @@ use neoteletext_rules::command::{
     self, Command, MAX_BODY_BYTES, TYPE_ANIMATE, TYPE_CONTROL, TYPE_LOCAL_MIDI, TYPE_NAPLPS_OBJECTS, TYPE_SPRITES,
 };
 use neoteletext_rules::evaluator::{
-    Bounds, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, Reported, SoundState, TargetState,
+    Bounds, Event, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, Reported, SoundState, TargetState,
 };
 use neoteletext_rules::limits::{
     AUDIO_CHANNELS, MAX_BUTTON, MAX_CUE, MAX_GAIN, MAX_POINTER_OBJECTS, MAX_WATCHED, NO_RULE,
@@ -507,15 +506,8 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Failure> {
 const GENERATION: u16 = neoteletext_rules::limits::FIRST_GENERATION;
 
 /// Evaluates `ticks` ticks of `table` against `inputs`, and gives the
-/// lines to write. With `on_arrival`, each event is given by
-/// `Evaluator::push_now` (RULE-96) and not left for the tick.
-fn evaluate(
-    table: &Table,
-    inputs: &[(u32, Given)],
-    ticks: u32,
-    picture: Picture,
-    on_arrival: bool,
-) -> Result<Vec<String>, String> {
+/// lines to write.
+fn evaluate(table: &Table, inputs: &[(u32, Given)], ticks: u32, picture: Picture) -> Result<Vec<String>, String> {
     let mut evaluator = Box::new(Evaluator::new(table, GENERATION, body_check).map_err(|fault| format!("{fault:?}"))?);
     let watch: Vec<(u8, u8)> = evaluator.index().watch.iter().map(|slot| (slot.channel, slot.kind)).collect();
     let mut metered = [0u8; MAX_WATCHED];
@@ -536,13 +528,13 @@ fn evaluate(
         Some(comment) => format!("# {tick} {comment}"),
         None => line,
     };
-    let mut events: Vec<InputEvent> = Vec::new();
+    let mut events: Vec<Input> = Vec::new();
     for tick in 0..ticks {
+        // DEC-6635: the lines of tick `t` are given after tick step `t`,
+        // and before tick step `t + 1`, each acting at once.
+        evaluator.tick(&mut run);
         while let Some((_, given)) = pending.next_if(|(due, _)| *due <= tick) {
-            let mut push = |input: Input| {
-                sequence = sequence.saturating_add(1);
-                events.push(InputEvent { sequence, input });
-            };
+            let mut push = |input: Input| events.push(input);
             match *given {
                 Given::Key { down, key, base } => {
                     let action = if down { KeyAction::Press } else { KeyAction::Release };
@@ -570,12 +562,13 @@ fn evaluate(
                     evaluator.set_metered(&metered);
                 }
                 Given::Cue { channel, number } => {
-                    // One over the tick's cues is dropped and counted.
-                    let _ = evaluator.push_cue(channel, number);
+                    // A cue over a full queue is dropped and counted.
+                    let _ = evaluator.handle(Event::Cue { channel, number }, &mut run);
                 }
                 Given::Command { kind, body, length } => {
                     // What the evaluator refuses or drops it counts.
-                    let _ = evaluator.push_command(kind, body.get(..length).unwrap_or(&[]));
+                    let body = body.get(..length).unwrap_or(&[]);
+                    let _ = evaluator.handle(Event::Command { kind, body }, &mut run);
                 }
                 Given::Rectangle { object, bounds } => {
                     if let Some((_, held)) = run.rectangles.iter_mut().find(|(number, _)| *number == object) {
@@ -587,14 +580,14 @@ fn evaluate(
                     }
                 }
             }
+            // A key's or the pointer's events act at once, in order
+            // (DEC-6635 item 1); one over a full queue is dropped and
+            // counted.
+            for input in events.drain(..) {
+                sequence = sequence.saturating_add(1);
+                let _ = evaluator.handle(Event::Input(InputEvent { sequence, input }), &mut run);
+            }
         }
-        // The tick's levels and rectangles are in place before its
-        // first event either way, so both ways read the same snapshot
-        // (RULE-7).
-        for event in events.drain(..) {
-            let _ = if on_arrival { evaluator.push_now(event, &mut run) } else { evaluator.push(event) };
-        }
-        evaluator.tick(&mut run);
         lines.extend(run.out.drain(..).map(|line| of_tick(tick, line)));
     }
     let counters = evaluator.counters();
@@ -616,7 +609,6 @@ pub fn rules_run(
     page: &str,
     frames: Option<u32>,
     picture: Picture,
-    on_arrival: bool,
     no_sandbox: bool,
 ) -> Result<(), Failure> {
     // The page an image is for: a page alone is its sub-code 0000.
@@ -642,7 +634,7 @@ pub fn rules_run(
     let ticks = frames.unwrap_or_else(|| last.saturating_add(2)).min(MAX_SEQUENCE_TICKS);
     let named = |why| (exit::INPUT, format!("{}: {why}", table.display()));
     let loaded = load_table(&table_file, page, sub).map_err(named)?;
-    let lines = evaluate(&loaded, &given, ticks, picture, on_arrival).map_err(named)?;
+    let lines = evaluate(&loaded, &given, ticks, picture).map_err(named)?;
     let mut out = std::io::stdout().lock();
     for line in lines {
         writeln!(out, "{line}").map_err(|error| (exit::INPUT, error.to_string()))?;

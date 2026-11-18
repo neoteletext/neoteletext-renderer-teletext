@@ -407,8 +407,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "rules_arrival"
-path = "fuzz_targets/rules_arrival.rs"
+name = "rules_budget"
+path = "fuzz_targets/rules_budget.rs"
 test = false
 doc = false
 bench = false

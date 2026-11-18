@@ -226,11 +226,9 @@ impl Index {
 /// The class of input a trigger needs (RULE-52 item 1).
 const fn trigger_interest(trigger: &Trigger) -> u8 {
     match trigger {
-        Trigger::Key { .. } | Trigger::KeyUp { .. } | Trigger::Held { .. } | Trigger::Double { .. } => INTEREST_KEYS,
+        Trigger::Key { .. } | Trigger::KeyUp { .. } => INTEREST_KEYS,
         Trigger::Text => INTEREST_TEXT,
-        Trigger::Press { .. } | Trigger::Release { .. } | Trigger::PressHeld { .. } | Trigger::DoublePress { .. } => {
-            INTEREST_POINTER_BUTTONS
-        }
+        Trigger::Press { .. } | Trigger::Release { .. } => INTEREST_POINTER_BUTTONS,
         Trigger::Enter { .. } | Trigger::Leave { .. } | Trigger::Move { .. } => INTEREST_MOVES,
         Trigger::Wheel { .. } => INTEREST_WHEEL,
         Trigger::Focus | Trigger::Blur => INTEREST_FOCUS,

@@ -15,7 +15,7 @@ use neoteletext_input::MAX_MESSAGE;
 use neoteletext_input::event::{Action, Event, Item, Key, KeyCode, Stamp, write};
 use neoteletext_input::rules::{FaultCode, PageStateEvent, RuleBody, RuleEvent, RulesFault};
 use neoteletext_rules::animate::{Operation, OperationKind};
-use neoteletext_rules::command::{Command, MAX_BODY_BYTES, Operand, RunMode, VariableOperation};
+use neoteletext_rules::command::{Command, MAX_BODY_BYTES, Operand, StartMode, VariableOperation};
 use neoteletext_rules::limits::{MAX_STATE_BYTES, MAX_TABLE_BYTES, NO_RULE};
 use neoteletext_rules::state::{PageState, SequenceState, TableState, TimerState};
 use neoteletext_rules::table::{SOUND_LEVEL, Table, Target, Value, default_send_all};
@@ -136,7 +136,7 @@ fn command_bodies(rows: &mut Vec<Row>) -> Result<(), String> {
     let constant = Operand::Constant(4);
     let plus_variable = Operand::Variable { constant: 1, variable: 1 };
     let plus_fired = Operand::Fired { constant: 0, property: 0 };
-    let all: [(&'static str, Command, &'static str); 27] = [
+    let all: [(&'static str, Command, &'static str); 30] = [
         ("variable_set_constant", variable(Set, constant), "set v0 to 4"),
         ("variable_set_variable", variable(Set, plus_variable), "set v0 to 1 plus v1"),
         ("variable_set_fired", variable(Set, plus_fired), "set v0 to 0 plus the firing's key"),
@@ -168,10 +168,33 @@ fn command_bodies(rows: &mut Vec<Row>) -> Result<(), String> {
             "clear all sixteen variables",
         ),
         ("report_firing", Command::Report { value: None }, "report the firing"),
-        ("run_now", Command::Run { group: 1, mode: RunMode::Now }, "run group 1 now"),
-        ("run_at", Command::Run { group: 1, mode: RunMode::At(5400) }, "arm a run of group 1 for page tick 5400"),
-        ("run_after", Command::Run { group: 1, mode: RunMode::After(30) }, "arm a run of group 1 for 30 ticks after"),
-        ("sequence_stop_all", Command::Sequence { start: false, sequence: 255 }, "stop every sequence"),
+        ("run", Command::Run { group: 1 }, "run group 1 now, in place"),
+        (
+            "sequence_start_next",
+            Command::Sequence { start: true, sequence: 0, mode: StartMode::Next },
+            "start sequence 0 at the next tick step",
+        ),
+        (
+            "sequence_start_at",
+            Command::Sequence { start: true, sequence: 0, mode: StartMode::At(5400) },
+            "start sequence 0 at page tick 5400",
+        ),
+        (
+            "sequence_start_beat",
+            Command::Sequence { start: true, sequence: 0, mode: StartMode::Beat { timer: 0, ticks: 30 } },
+            "start sequence 0 at the next expiry of 30 ticks of t0",
+        ),
+        (
+            "sequence_start_beat_page",
+            Command::Sequence { start: true, sequence: 1, mode: StartMode::Beat { timer: 255, ticks: 8 } },
+            "start sequence 1 at the next expiry of 8 ticks of the page timer",
+        ),
+        ("sequence_stop", Command::Sequence { start: false, sequence: 0, mode: StartMode::Next }, "stop sequence 0"),
+        (
+            "sequence_stop_all",
+            Command::Sequence { start: false, sequence: 255, mode: StartMode::Next },
+            "stop every sequence",
+        ),
     ];
     for (name, command, meaning) in all {
         let mut out = [0_u8; MAX_BODY_BYTES];
@@ -244,8 +267,8 @@ fn messages(rows: &mut Vec<Row>) -> Result<(), String> {
     let mut table = TableState::new(1, STATE_AT);
     table.variables[0] = 5;
     table.timers[0] = TimerState { running: true, elapsed: 18 };
-    table.sequences.push(SequenceState { running: true, passes: 3, position: 12 }).map_err(|_| full)?;
-    table.armed = 1;
+    table.sequences.push(SequenceState { running: true, passes: 3, position: 12, waiting: false }).map_err(|_| full)?;
+    table.sequences.push(SequenceState { waiting: true, ..SequenceState::default() }).map_err(|_| full)?;
     table.values.push((Value::sound(0, SOUND_LEVEL), 41)).map_err(|_| full)?;
     let mut body = [0_u8; MAX_STATE_BYTES];
     let length = neoteletext_rules::state::encode(&PageState { identifier: QUERY, table: Some(table) }, &mut body)
@@ -255,7 +278,7 @@ fn messages(rows: &mut Vec<Row>) -> Result<(), String> {
         kind: "page_state",
         name: "answer",
         value: message(&Item::Event(Event::PageState(PageStateEvent { on, body })))?,
-        meaning: "identifier=42 generation=1 tick=9120 v0=5 t0=running 18 sequences=[running passes 3 position 12] armed=1 targets=[] values=[sound 0 level = 41] on=101/0001",
+        meaning: "identifier=42 generation=1 tick=9120 v0=5 t0=running 18 sequences=[running passes 3 position 12, waiting] targets=[] values=[sound 0 level = 41] on=101/0001",
     });
     let fault = RulesFault { on, generation: 3, fault: FaultCode::EvaluationLate, count: 12 };
     rows.push(Row {
@@ -301,12 +324,12 @@ fn rule_records(rows: &mut Vec<Row>) -> Result<(), String> {
         ("variable", variable(VariableOperation::Set, Operand::Constant(4)), "page 101 sub 0001: set v0 to 4"),
         ("timer", Command::Timer { start: true, timer: 0 }, "page 101 sub 0001: start t0"),
         ("report", Command::Report { value: Some(Value::variable(0)) }, "page 101 sub 0001: report variable v0"),
+        ("run", Command::Run { group: 1 }, "page 101 sub 0001: run group 1"),
         (
-            "run",
-            Command::Run { group: 1, mode: RunMode::Beat { timer: 0, ticks: 30 } },
-            "page 101 sub 0001: arm a run of group 1 for the next beat of 30 ticks of t0",
+            "sequence",
+            Command::Sequence { start: true, sequence: 0, mode: StartMode::At(5400) },
+            "page 101 sub 0001: start sequence 0 at page tick 5400",
         ),
-        ("sequence", Command::Sequence { start: true, sequence: 0 }, "page 101 sub 0001: start sequence 0"),
     ];
     for (name, command, meaning) in each {
         let value = packets(|out| commands::encode(&command, page, sub, SERVICE, RECORD_ID, out))?;

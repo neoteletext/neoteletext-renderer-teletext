@@ -1,8 +1,8 @@
 //! The triggers (REQ-6526, REQ-6613; RULE-9 to RULE-15, RULE-105,
-//! RULE-107 to RULE-109, RULE-116).
+//! RULE-107, RULE-109, RULE-116; DEC-6635).
 
 use super::*;
-use crate::limits::{MAX_CUES_PER_TICK, MAX_KEYS_DOWN, MAX_POINTER_OBJECTS, MAX_RECENT_PRESSES};
+use crate::limits::{MAX_KEYS_DOWN, MAX_POINTER_OBJECTS};
 use crate::table::{INPUT_PHYSICAL, Rect, RowRun, SOUND_LEVEL};
 
 /// A table with rectangle 0 at (10, 10), 20 by 20, and one group that
@@ -26,7 +26,7 @@ fn fires(triggers: &[Trigger], inputs: &[Input]) -> usize {
     let mut world = Script::default();
     evaluator.tick(&mut world);
     for (input, sequence) in inputs.iter().zip(1..) {
-        evaluator.push(InputEvent { sequence, input: *input });
+        evaluator.handle(Event::Input(InputEvent { sequence, input: *input }), &mut world);
     }
     evaluator.tick(&mut world);
     world.reports().len()
@@ -149,7 +149,7 @@ fn keys_are_named_three_ways() {
     let mut world = Script::default();
     evaluator.tick(&mut world);
     for (input, sequence) in [Input::Text, french('a', 'q'), Input::Text].into_iter().zip(1..) {
-        evaluator.push(InputEvent { sequence, input });
+        evaluator.handle(Event::Input(InputEvent { sequence, input }), &mut world);
     }
     evaluator.tick(&mut world);
     assert_eq!(world.reports().len(), 1, "text after the key went down, not before");
@@ -165,7 +165,7 @@ fn any_fires_once_for_each_thing_and_names_it() {
         let mut world = Script { under: under.to_vec(), ..Script::default() };
         evaluator.tick(&mut world);
         let input = Input::Pointer { action: PointerAction::Press, button: 0, x: 15, y: 15, control };
-        evaluator.push(InputEvent { sequence: 1, input });
+        evaluator.handle(Event::Input(InputEvent { sequence: 1, input }), &mut world);
         evaluator.tick(&mut world);
         world.reports().iter().map(|report| report.target).collect::<Vec<Target>>()
     };
@@ -206,14 +206,14 @@ fn becomes_fires_on_the_edge() {
     assert_eq!(fired_at(&table, &[0, 200, 210, 128, 50, 127, 130, 255]), [(1, NO_RULE), (6, NO_RULE)]);
     assert_eq!(fired_at(&table, &[200, 200, 0, 200]), [(0, NO_RULE), (3, NO_RULE)], "true at opening fires at tick 0");
 
-    // Eight rows: the threshold is 0 plus each row's `p0`.
+    // Eight rows: the threshold is 0 plus each row's `p`.
     let mut table = empty();
     let report = group(&mut table, &[built(Command::Report { value: None })]);
     for threshold in (1..=8).map(|row| row * 30) {
-        table.rows.push([threshold, 0, 0, 0]).unwrap();
+        table.rows.push(threshold).unwrap();
     }
     let meter = rule(&mut table, Trigger::Becomes, report);
-    let over = Node::Compare { value: level, operator: Operator::GreaterOrEqual, constant: 0, parameter: Some(0) };
+    let over = Node::Compare { value: level, operator: Operator::GreaterOrEqual, constant: 0, plus_p: true };
     table.rules.as_mut_slice()[meter].condition = condition(&[over]);
     table.rules.as_mut_slice()[meter].rows = Some(RowRun { first: 0, count: 8 });
     assert_eq!(
@@ -248,20 +248,20 @@ fn timers_fire_after_and_every() {
             .collect()
     };
     evaluator.tick(&mut world);
-    evaluator.push(press_key(1, 's'));
-    // The start is applied in tick 1; the timer runs since tick 2.
+    evaluator.handle(Event::Input(press_key(1, 's')), &mut world);
+    // Started before tick 1 is evaluated: the timer runs from tick 1.
     run(&mut evaluator, &mut world, 3);
-    evaluator.push(press_key(2, 's'));
-    // Restarted in tick 4: it runs since tick 5, and fires at tick 8.
+    evaluator.handle(Event::Input(press_key(2, 's')), &mut world);
+    // Restarted before tick 4: it runs from tick 4, and fires at tick 7.
     run(&mut evaluator, &mut world, 6);
-    assert_eq!(fired(&world, 1), [8], "the first start was replaced before its third tick");
-    evaluator.push(press_key(3, 's'));
+    assert_eq!(fired(&world, 1), [7], "the first start was replaced before its third tick");
+    evaluator.handle(Event::Input(press_key(3, 's')), &mut world);
     evaluator.tick(&mut world);
-    evaluator.push(press_key(4, 'x'));
+    evaluator.handle(Event::Input(press_key(4, 'x')), &mut world);
     run(&mut evaluator, &mut world, 85);
-    assert_eq!(fired(&world, 1), [8], "stopped before it fired");
+    assert_eq!(fired(&world, 1), [7], "stopped before it fired");
     assert_eq!(fired(&world, 30), [30, 60, 90]);
-    assert_eq!(evaluator.page_tick(), 96);
+    assert_eq!(evaluator.page_tick(), 95, "the tick of the last tick step run");
 }
 
 /// RULE-105, RULE-116 (REQ-6613): binding rows. Thirteen rows fire the
@@ -272,17 +272,19 @@ fn timers_fire_after_and_every() {
 fn a_rule_with_rows_is_matched_once_for_each_row() {
     let mut table = empty();
     let keys = "awsedftgyhujk";
-    for (key, number) in keys.chars().zip(0..) {
-        table.rows.push([key as i32, 60 + number, 100 + number, 0]).unwrap();
+    for number in 0..13 {
+        table.rows.push(60 + number).unwrap();
     }
-    let by_row = Binding::of(command::field::MIDI_DATA1, Source::Parameter(1));
+    let by_row = Binding::of(command::field::MIDI_DATA1, Source::Parameter);
     let on = group(&mut table, &[note(0).bound(by_row), built(Command::Report { value: None })]);
     let off_note = built(Command::LocalMidi { channel: 0, status: 0x80, data1: 0, data2: 64 }).bound(by_row);
     let off = group(&mut table, &[off_note]);
     let rows = Some(RowRun { first: 0, count: 13 });
-    let by_key = KeyMatch::of(&[Key::row(KeyKind::Physical, 0)]);
+    let row_keys: Vec<Key> = keys.chars().map(|key| Key::of(KeyKind::Physical, key as u32)).collect();
+    let by_key = KeyMatch::by_row(&row_keys);
     let down = rule(&mut table, Trigger::Key { keys: by_key, repeat: false }, on);
-    let object = TriggerTarget::row(TargetKind::Object, 2);
+    // Drawing 40 plus the row's `p`: 100 to 112.
+    let object = TriggerTarget::row(TargetKind::Object, 40);
     table.rules.as_mut_slice()[down].triggers.push(Trigger::Press { target: object, button: 0 }).unwrap();
     table.rules.as_mut_slice()[down].rows = rows;
     let up = rule(&mut table, Trigger::KeyUp { keys: by_key }, off);
@@ -291,9 +293,9 @@ fn a_rule_with_rows_is_matched_once_for_each_row() {
     let mut world = Script { under: std::vec![105], ..Script::default() };
     evaluator.tick(&mut world);
     for (key, sequence) in keys.chars().zip(1..) {
-        evaluator.push(press_key(sequence, key));
+        evaluator.handle(Event::Input(press_key(sequence, key)), &mut world);
     }
-    evaluator.push(press_key(50, 'z'));
+    evaluator.handle(Event::Input(press_key(50, 'z')), &mut world);
     evaluator.tick(&mut world);
     assert_eq!(notes(&world), (60..73).collect::<Vec<u8>>(), "each key its own note, and `z` none");
     let rows: Vec<(u8, u8)> = world.reports().iter().map(|report| (report.rule, report.row)).collect();
@@ -301,8 +303,8 @@ fn a_rule_with_rows_is_matched_once_for_each_row() {
     world.log.clear();
     // The other rule shares the rows; and a press on object 105, which
     // is row 5's `p2`, plays row 5's note.
-    evaluator.push(key(60, KeyAction::Release, 'e'));
-    evaluator.push(pointer(61, PointerAction::Press, 0, 1, 1));
+    evaluator.handle(Event::Input(key(60, KeyAction::Release, 'e')), &mut world);
+    evaluator.handle(Event::Input(pointer(61, PointerAction::Press, 0, 1, 1)), &mut world);
     evaluator.tick(&mut world);
     let played: Vec<(u8, u8)> = world.commands().iter().map(|(_, body)| (body[5], body[6])).collect();
     assert_eq!(played, [(0x80, 63), (0x90, 65)]);
@@ -310,120 +312,23 @@ fn a_rule_with_rows_is_matched_once_for_each_row() {
     assert_eq!(world.reports()[0].row, 5);
 }
 
-/// RULE-108 (REQ-6613): a key held 30 ticks fires `held 30` at the
-/// thirtieth tick and not when released at the twenty-ninth; an automatic
-/// repeat does not restart the count; and a button held inside a target
-/// fires `press_held`.
+/// RULE-8, RULE-57 (REQ-6608): `MAX_KEYS_DOWN` keys are tracked as
+/// down, and one more is not down for conditions though its `key` rule
+/// fires.
 #[test]
-fn held_fires_once_after_its_ticks() {
-    let held = Trigger::Held { keys: keys_of("a"), ticks: 30 };
-    let press_held = Trigger::PressHeld { target: RECT, button: 0, ticks: 5 };
-    let ticks_of = |release_after: Option<u32>| {
-        let mut evaluator = evaluator(&reporting(&[held, press_held]));
-        let mut world = Script::default();
-        evaluator.tick(&mut world);
-        // Down in tick 1.
-        evaluator.push(press_key(1, 'a'));
-        evaluator.push(pointer(2, PointerAction::Press, 0, 15, 15));
-        for tick in 1..40 {
-            if Some(tick) == release_after {
-                evaluator.push(key(3, KeyAction::Release, 'a'));
-                evaluator.push(pointer(4, PointerAction::Release, 0, 15, 15));
-            }
-            if tick == 10 {
-                evaluator.push(key(5, KeyAction::Repeat, 'a'));
-            }
-            evaluator.tick(&mut world);
-        }
-        world.reports().iter().map(|report| (report.tick, report.what, report.target)).collect::<Vec<_>>()
-    };
-    let fired = Reported::Fired;
-    assert_eq!(ticks_of(None), [(6, fired, Target::NONE), (31, fired, Target::NONE)], "a hold carries no event");
-    assert_eq!(ticks_of(Some(30)), [(6, fired, Target::NONE)], "released at the twenty-ninth tick down");
-    assert_eq!(ticks_of(Some(5)), [], "the button released at its fourth");
-    assert_eq!(ticks_of(Some(32)).len(), 2);
-}
-
-/// RULE-108 (REQ-6613): two presses 10 ticks apart fire `double 12`
-/// once, and three fire it once; presses of different keys never pair; a
-/// press later than the ticks is a single; the plain `key` rule fires on
-/// every press; and `double_press` pairs the same button inside the same
-/// target.
-#[test]
-fn double_pairs_two_presses_of_one_key() {
-    let double = Trigger::Double { keys: KeyMatch::any(), ticks: 12 };
-    let doubles = |presses: &[(u32, char)]| {
-        let mut table = reporting(&[double]);
-        let plain = mark(&mut table, 1);
-        rule(&mut table, Trigger::Key { keys: KeyMatch::any(), repeat: false }, plain);
-        let mut evaluator = evaluator(&table);
-        let mut world = Script::default();
-        evaluator.tick(&mut world);
-        for tick in 1..60 {
-            for (_, key) in presses.iter().filter(|(at, _)| *at == tick) {
-                evaluator.push(press_key(tick, *key));
-                evaluator.push(key_event(tick, KeyAction::Repeat, *key));
-                evaluator.push(key_event(tick, KeyAction::Release, *key));
-            }
-            evaluator.tick(&mut world);
-        }
-        let doubled: Vec<u32> =
-            world.reports().iter().filter(|report| report.rule == 0).map(|report| report.tick).collect();
-        (doubled, readings(&world).len())
-    };
-    assert_eq!(doubles(&[(1, 'a'), (11, 'a')]), (std::vec![11], 2));
-    assert_eq!(doubles(&[(1, 'a'), (11, 'a'), (21, 'a')]), (std::vec![11], 3), "one double and a single");
-    assert_eq!(doubles(&[(1, 'a'), (11, 'a'), (21, 'a'), (31, 'a')]), (std::vec![11, 31], 4));
-    assert_eq!(doubles(&[(1, 'a'), (11, 'b'), (14, 'a')]), (std::vec![], 3), "13 ticks apart; another key between");
-    assert_eq!(doubles(&[(1, 'a'), (5, 'b'), (13, 'a'), (17, 'b')]), (std::vec![13, 17], 4));
-    assert_eq!(doubles(&[(3, 'a'), (3, 'a')]), (std::vec![3], 2), "two presses in one tick");
-
-    let double_press = Trigger::DoublePress { target: RECT, button: 0, ticks: 12 };
-    let pressed = |places: &[(u32, u8, (u16, u16))]| {
-        let mut evaluator = evaluator(&reporting(&[double_press]));
-        let mut world = Script::default();
-        evaluator.tick(&mut world);
-        for tick in 1..30 {
-            for (_, button, (x, y)) in places.iter().filter(|(at, ..)| *at == tick) {
-                evaluator.push(pointer(tick, PointerAction::Press, *button, *x, *y));
-                evaluator.push(pointer(tick, PointerAction::Release, *button, *x, *y));
-            }
-            evaluator.tick(&mut world);
-        }
-        world.reports().iter().map(|report| (report.tick, report.target)).collect::<Vec<_>>()
-    };
-    assert_eq!(pressed(&[(1, 0, INSIDE), (9, 0, (20, 20))]), [(9, Target::rect(0))]);
-    assert_eq!(pressed(&[(1, 0, OUTSIDE), (9, 0, INSIDE)]), [], "the first press was outside the target");
-    assert_eq!(pressed(&[(1, 0, INSIDE), (9, 1, INSIDE)]), [], "another button");
-    assert_eq!(pressed(&[(1, 0, INSIDE), (14, 0, INSIDE)]), [], "13 ticks apart");
-}
-
-fn key_event(sequence: u32, action: KeyAction, character: char) -> InputEvent {
-    key(sequence, action, character)
-}
-
-/// RULE-108, RULE-8, RULE-57 (REQ-6608): `MAX_KEYS_DOWN` keys are tracked
-/// as down, and one more is not down for conditions though its `key` rule
-/// fires; `MAX_RECENT_PRESSES` presses are remembered for a double, the
-/// oldest forgotten for one more.
-#[test]
-fn keys_down_and_recent_presses_are_held_to_their_limits() {
+fn keys_down_are_held_to_their_limit() {
     let mut table = reporting(&[Trigger::Key { keys: KeyMatch::any(), repeat: false }]);
     let count = group(&mut table, &[built(Command::Report { value: Some(Value::keys_down()) })]);
     rule(&mut table, Trigger::Text, count);
-    let doubled = mark(&mut table, 2);
-    rule(&mut table, Trigger::Double { keys: KeyMatch::any(), ticks: 100 }, doubled);
     let mut evaluator = evaluator(&table);
     let mut world = Script::default();
     evaluator.tick(&mut world);
     let keys: Vec<char> = ('a'..='z').take(MAX_KEYS_DOWN + 1).collect();
-    for (sequence, key) in (1..).zip(keys.iter().take(MAX_KEYS_DOWN)) {
-        evaluator.push(press_key(sequence, *key));
+    for (sequence, key) in (1..).zip(keys.iter()) {
+        evaluator.handle(Event::Input(press_key(sequence, *key)), &mut world);
+        evaluator.tick(&mut world);
     }
-    evaluator.tick(&mut world);
-    evaluator.push(press_key(40, keys[MAX_KEYS_DOWN]));
-    evaluator.push(InputEvent { sequence: 41, input: Input::Text });
-    evaluator.tick(&mut world);
+    evaluator.handle(Event::Input(InputEvent { sequence: 41, input: Input::Text }), &mut world);
     assert_eq!(
         world.reports().iter().filter(|report| report.rule == 0).count(),
         MAX_KEYS_DOWN + 1,
@@ -431,26 +336,13 @@ fn keys_down_and_recent_presses_are_held_to_their_limits() {
     );
     let down = i32::try_from(MAX_KEYS_DOWN).unwrap();
     assert_eq!(readings(&world), [down], "one over the limit is not down");
-    // One press more than are remembered was kept in turn, so the first
-    // is forgotten: a second press of the second key is a double, and one
-    // of the first a single.
-    assert_eq!(MAX_RECENT_PRESSES, MAX_KEYS_DOWN);
-    world.log.clear();
-    for (sequence, key) in (50..).zip([keys[1], keys[0]]) {
-        evaluator.push(key_event(sequence, KeyAction::Release, key));
-        evaluator.push(press_key(sequence + 10, key));
-    }
-    evaluator.tick(&mut world);
-    assert_eq!(readings(&world), [2], "only the second key's press pairs");
-    assert_eq!(world.reports().iter().filter(|report| report.rule == 0).count(), 2);
 }
 
-/// RULE-109, RULE-116 (REQ-6613): a cue fires the `cue` rules of its
-/// audio channel that name its number or any, with the number as the
-/// firing's `cue`; at most `MAX_CUES_PER_TICK` are acted on in a tick,
-/// the rest dropped and counted.
+/// RULE-109, RULE-116 (REQ-6613): a cue fires, at once, the `cue` rules
+/// of its audio channel that name its number or any, with the number as
+/// the firing's `cue`; a cue over a full queue is dropped and counted.
 #[test]
-fn a_cue_fires_its_rules_at_the_next_tick() {
+fn a_cue_fires_its_rules() {
     let mut table = empty();
     let read = group(
         &mut table,
@@ -469,19 +361,18 @@ fn a_cue_fires_its_rules_at_the_next_tick() {
     let mut evaluator = evaluator(&table);
     let mut world = Script::default();
     evaluator.tick(&mut world);
-    assert!(evaluator.push_cue(1, 3));
-    assert!(evaluator.push_cue(0, 7), "another audio channel's");
-    assert!(evaluator.push_cue(1, 7));
-    evaluator.tick(&mut world);
+    assert!(evaluator.handle(Event::Cue { channel: 1, number: 3 }, &mut world));
+    assert!(evaluator.handle(Event::Cue { channel: 0, number: 7 }, &mut world), "another audio channel's");
+    assert!(evaluator.handle(Event::Cue { channel: 1, number: 7 }, &mut world));
     assert_eq!(readings(&world), [103, 107, 7]);
-    world.log.clear();
-    for number in 0..u8::try_from(MAX_CUES_PER_TICK).unwrap() {
-        assert!(evaluator.push_cue(1, number));
+    // Before page tick 0 cues wait, with the events, in a queue that holds
+    // `MAX_QUEUED_EVENTS`.
+    let mut waiting = super::evaluator(&table);
+    for _ in 0..MAX_QUEUED_EVENTS {
+        assert!(waiting.handle(Event::Cue { channel: 1, number: 1 }, &mut world));
     }
-    assert!(!evaluator.push_cue(1, 99));
-    evaluator.tick(&mut world);
-    assert_eq!(readings(&world).len(), MAX_CUES_PER_TICK + 1, "eight cues, one of them number 7");
-    assert_eq!((evaluator.counters().cues, evaluator.counters().cues_dropped), (11, 1));
+    assert!(!waiting.handle(Event::Cue { channel: 1, number: 1 }, &mut world));
+    assert_eq!(waiting.counters().events_dropped, 1);
 }
 
 /// RULE-116 (REQ-6612): the values of the firing, in a condition and in
@@ -490,8 +381,8 @@ fn a_cue_fires_its_rules_at_the_next_tick() {
 #[test]
 fn the_firings_values_are_read_in_conditions_and_commands() {
     let mut table = empty();
-    table.rows.push([0, 0, 0, 40]).unwrap();
-    table.rows.push([0, 0, 0, 41]).unwrap();
+    table.rows.push(40).unwrap();
+    table.rows.push(41).unwrap();
     let fired = |variable: u8, property: u8| {
         built(Command::Variable {
             operation: VariableOperation::Set,
@@ -499,8 +390,8 @@ fn the_firings_values_are_read_in_conditions_and_commands() {
             operand: Operand::Fired { constant: 0, property },
         })
     };
-    let inner = group(&mut table, &[fired(4, 0), fired(5, 2), fired(6, 7), fired(7, 1)]);
-    let outer = group(&mut table, &[built(Command::Run { group: inner, mode: RunMode::Now })]);
+    let inner = group(&mut table, &[fired(4, 0), fired(5, 2), fired(6, 4), fired(7, 1)]);
+    let outer = group(&mut table, &[built(Command::Run { group: inner })]);
     let keyed = rule(&mut table, Trigger::Key { keys: KeyMatch::any(), repeat: false }, outer);
     table.rules.as_mut_slice()[keyed].rows = Some(RowRun { first: 0, count: 2 });
     // Only the key `b`, and only the second row.
@@ -514,12 +405,43 @@ fn the_firings_values_are_read_in_conditions_and_commands() {
     let mut evaluator = evaluator(&table);
     let mut world = Script { under: std::vec![5, 9], ..Script::default() };
     evaluator.tick(&mut world);
-    evaluator.push(press_key(1, 'a'));
-    evaluator.push(press_key(2, 'b'));
+    evaluator.handle(Event::Input(press_key(1, 'a')), &mut world);
+    evaluator.handle(Event::Input(press_key(2, 'b')), &mut world);
     evaluator.tick(&mut world);
     assert_eq!(evaluator.variables()[4..8], ['b' as i32, 1, 41, 0], "the key, the row, `p3`, and no target");
     assert_eq!(evaluator.counters().fired, 1);
-    evaluator.push(pointer(3, PointerAction::Press, 0, 1, 1));
+    evaluator.handle(Event::Input(pointer(3, PointerAction::Press, 0, 1, 1)), &mut world);
     evaluator.tick(&mut world);
     assert_eq!(evaluator.variables()[4..8], [0, 0, 0, 9], "object 9 alone, with no key, row or parameter");
+}
+
+/// RULE-25 (REQ-6613, DEC-6635 item 6): a timer's phase in a period. On a
+/// timer started in tick 3, so running from tick 4, the phase in a period
+/// of 8 reads 0 at ticks 12 and 20 and 7 at tick 19, and 0 while stopped
+/// and before its start tick.
+#[test]
+fn a_timers_phase_counts_within_its_period() {
+    let mut table = empty();
+    let phase = Value::timer_phase(0, 8);
+    let reads = group(&mut table, &[built(Command::Report { value: Some(phase) })]);
+    rule(&mut table, Trigger::Every { timer: PAGE_TIMER, ticks: 1 }, reads);
+    let mut evaluator = evaluator(&table);
+    let mut world = Script::default();
+    run(&mut evaluator, &mut world, 4);
+    send(&mut evaluator, &mut world, Command::Timer { start: true, timer: 0 });
+    run(&mut evaluator, &mut world, 17);
+    let at: Vec<(u32, i32)> = world
+        .reports()
+        .iter()
+        .filter_map(|report| match report.what {
+            Reported::Value { reading, .. } => Some((report.tick, reading)),
+            _ => None,
+        })
+        .collect();
+    let phase_at = |tick: u32| at.iter().find(|(held, _)| *held == tick).map(|(_, reading)| *reading);
+    assert_eq!(
+        (phase_at(3), phase_at(4), phase_at(12), phase_at(19), phase_at(20)),
+        (Some(0), Some(0), Some(0), Some(7), Some(0))
+    );
+    assert_eq!(phase_at(5), Some(1));
 }

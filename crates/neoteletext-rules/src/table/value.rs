@@ -5,7 +5,7 @@
 use super::{Fault, TargetKind};
 use crate::limits::{
     AUDIO_CHANNELS, FIRST_FAMILY, LAST_FAMILY, MAX_BUTTON, MAX_CONTROL, MAX_MIDI_NUMBER, MAX_PARAMETER, MAX_PART,
-    MAX_SYNTH_CLASS, MAX_VARIANT, PAGE_TIMER, TIMERS, VARIABLES,
+    MAX_SYNTH_CLASS, MAX_TIMER_TICKS, MAX_VARIANT, PAGE_TIMER, TIMERS, VARIABLES,
 };
 use crate::wire::{Reader, Writer};
 
@@ -37,10 +37,10 @@ pub const FIRED_TARGET: u16 = 1;
 pub const FIRED_ROW: u16 = 2;
 /// Space 7, `a`: the number of the cue that fired the rule.
 pub const FIRED_CUE: u16 = 3;
-/// Space 7, `a`: row parameter `p0`; `p1` to `p3` follow it.
-pub const FIRED_P0: u16 = 4;
-/// Space 7, `a`: row parameter `p3`, the last property.
-pub const FIRED_P3: u16 = 7;
+/// Space 7, `a`: the row parameter `p` in force, the last property
+/// (DEC-6635 item 8: the second form's `p1` to `p3`, 5 to 7, are
+/// withdrawn and never reused).
+pub const FIRED_P: u16 = 4;
 
 /// Space 8, `b`: whether the sequence is running.
 pub const SEQUENCE_RUNNING: u16 = 0;
@@ -48,6 +48,8 @@ pub const SEQUENCE_RUNNING: u16 = 0;
 pub const SEQUENCE_PASSES: u16 = 1;
 /// Space 8, `b`: its position in ticks within the pass.
 pub const SEQUENCE_POSITION: u16 = 2;
+/// Space 8, `b`: whether a start waits for its start tick (RULE-103).
+pub const SEQUENCE_WAITING: u16 = 3;
 
 /// Space 2, `a`: a character key's state (RULE-24).
 pub const INPUT_CHARACTER: u8 = 1;
@@ -73,6 +75,9 @@ pub const POINTER_Y: u16 = 2;
 pub const TIMER_RUNNING: u16 = 0;
 /// Space 3, `b`: the ticks since the timer started.
 pub const TIMER_ELAPSED: u16 = 1;
+/// Space 3, `b`: where the timer stands in a period (RULE-25), the period
+/// in `c` (high 16 bits) and `d` (low).
+pub const TIMER_PHASE: u16 = 2;
 
 /// Space 4, `c`: the target exists (RULE-26).
 pub const TARGET_EXISTS: u16 = 0;
@@ -197,6 +202,28 @@ impl Value {
         Self { space: SPACE_TIMER, a: timer, b: property, c: 0, d: 0 }
     }
 
+    /// A timer's phase in a period of `period` ticks (RULE-25): 0 at the
+    /// start tick and at each tick an `every period` on it is due.
+    #[must_use]
+    pub const fn timer_phase(timer: u8, period: u32) -> Self {
+        let [high_1, high_0, low_1, low_0] = period.to_be_bytes();
+        Self {
+            space: SPACE_TIMER,
+            a: timer,
+            b: TIMER_PHASE,
+            c: u16::from_be_bytes([high_1, high_0]),
+            d: u16::from_be_bytes([low_1, low_0]),
+        }
+    }
+
+    /// A phase's period (RULE-25): `c` and `d` together.
+    #[must_use]
+    pub const fn period(&self) -> u32 {
+        let [high_1, high_0] = self.c.to_be_bytes();
+        let [low_1, low_0] = self.d.to_be_bytes();
+        u32::from_be_bytes([high_1, high_0, low_1, low_0])
+    }
+
     /// A control's or an object's property (RULE-26), one of
     /// [`TARGET_EXISTS`] to [`TARGET_INSIDE`].
     #[must_use]
@@ -226,7 +253,7 @@ impl Value {
     }
 
     /// A value of the firing (RULE-116): `property` 0 the key, 1 the
-    /// target, 2 the row, 3 the cue, 4 to 7 the row parameters.
+    /// target, 2 the row, 3 the cue, 4 the row parameter `p`.
     #[must_use]
     pub const fn fired(property: u16) -> Self {
         Self { space: SPACE_FIRED, a: property as u8, b: 0, c: 0, d: 0 }
@@ -305,9 +332,11 @@ impl Value {
             }
             SPACE_INPUT => self.check_input(),
             SPACE_TIMER => {
-                unused(&[self.c, self.d])?;
-                if self.b > TIMER_ELAPSED {
-                    return Err(Fault::Range("timer property"));
+                match self.b {
+                    TIMER_RUNNING | TIMER_ELAPSED => unused(&[self.c, self.d])?,
+                    TIMER_PHASE if (1..=MAX_TIMER_TICKS).contains(&self.period()) => {}
+                    TIMER_PHASE => return Err(Fault::Range("timer phase's period")),
+                    _ => return Err(Fault::Range("timer property")),
                 }
                 if usize::from(self.a) < TIMERS || self.a == PAGE_TIMER {
                     Ok(())
@@ -335,11 +364,11 @@ impl Value {
             SPACE_SYNTH => self.check_synth(),
             SPACE_FIRED => {
                 unused(&[self.b, self.c, self.d])?;
-                if u16::from(self.a) <= FIRED_P3 { Ok(()) } else { Err(Fault::Range("fired property")) }
+                if u16::from(self.a) <= FIRED_P { Ok(()) } else { Err(Fault::Range("fired property")) }
             }
             SPACE_SEQUENCE => {
                 unused(&[self.c, self.d])?;
-                if self.b > SEQUENCE_POSITION {
+                if self.b > SEQUENCE_WAITING {
                     return Err(Fault::Range("sequence property"));
                 }
                 if usize::from(self.a) < sequences { Ok(()) } else { Err(Fault::Reference("value's sequence")) }

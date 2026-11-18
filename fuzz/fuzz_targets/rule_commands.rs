@@ -33,13 +33,14 @@ fuzz_target!(|data: &[u8]| {
     let count = usize::from(count) % (MAX_COMMAND_BINDINGS + 2);
     let Some((bound, body)) = rest.split_at_checked(count * 3) else { return };
     let bindings: Vec<Binding> =
-        bound.chunks_exact(3).map(|bytes| Binding { item: bytes[0], field: bytes[1], source: bytes[2] }).collect();
+        bound.as_chunks::<3>().0.iter().map(|&[item, field, source]| Binding { item, field, source }).collect();
     if body.is_empty() || body.len() > MAX_COMMAND_BYTES {
         return;
     }
     // The table the command is in is the page its own body names: a
     // CONTROL names a page number alone, in its last field.
-    let word = |at: usize| u16::from_be_bytes([body.get(at).copied().unwrap_or(0), body.get(at + 1).copied().unwrap_or(0)]);
+    let word =
+        |at: usize| u16::from_be_bytes([body.get(at).copied().unwrap_or(0), body.get(at + 1).copied().unwrap_or(0)]);
     let (page, sub) =
         if kind == command::TYPE_CONTROL { (word(body.len().saturating_sub(2)), 1) } else { (word(0), word(2)) };
     let context = Context { page, sub, groups: 64, sequences: 8 };
@@ -52,7 +53,7 @@ fuzz_target!(|data: &[u8]| {
         let mut out = [0_u8; MAX_COMMAND_BYTES];
         let resolve = |source: Source| match source {
             Source::Variable(_) => value,
-            Source::Parameter(parameter) => value.wrapping_add(i32::from(parameter)),
+            Source::Parameter => value.wrapping_add(1),
             Source::Fired(_) => value.wrapping_neg(),
         };
         let applied = apply_bindings(kind, body, &bindings, &resolve, &mut out);

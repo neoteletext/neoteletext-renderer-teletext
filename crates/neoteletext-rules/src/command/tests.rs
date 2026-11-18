@@ -28,7 +28,7 @@ const CONTEXT: Context = Context { page: PAGE, sub: SUB, groups: 2, sequences: 1
 #[test]
 fn each_record_is_its_bytes() {
     let page = [0x01, 0x01, 0x00, 0x01];
-    let cases: [(Command, &[u8]); 9] = [
+    let cases: [(Command, &[u8]); 10] = [
         (Command::LocalMidi { channel: 2, status: 0x91, data1: 60, data2: 100 }, &[2, 0x91, 60, 100]),
         (
             Command::Variable { operation: VariableOperation::Set, variable: 3, operand: Operand::Constant(-2) },
@@ -38,9 +38,13 @@ fn each_record_is_its_bytes() {
         (Command::Timer { start: false, timer: 0 }, &[2, 0]),
         (Command::Report { value: None }, &[0, 0, 0, 0, 0, 0, 0, 0, 0]),
         (Command::Report { value: Some(Value::sound(1, SOUND_LEVEL)) }, &[1, 5, 1, 0, 1, 0, 0, 0, 0]),
-        (Command::Run { group: 5, mode: RunMode::Beat { timer: 255, ticks: 30 } }, &[5, 3, 255, 0, 0, 0, 30]),
-        (Command::Sequence { start: true, sequence: 2 }, &[1, 2]),
-        (Command::Sequence { start: false, sequence: 255 }, &[2, 255]),
+        (Command::Run { group: 5 }, &[5]),
+        (
+            Command::Sequence { start: true, sequence: 2, mode: StartMode::Beat { timer: 255, ticks: 30 } },
+            &[1, 2, 2, 255, 0, 0, 0, 30],
+        ),
+        (Command::Sequence { start: true, sequence: 1, mode: StartMode::At(5400) }, &[1, 1, 1, 0, 0, 0, 0x15, 0x18]),
+        (Command::Sequence { start: false, sequence: 255, mode: StartMode::Next }, &[2, 255, 0, 0, 0, 0, 0, 0]),
     ];
     for (command, rest) in cases {
         let expected: Vec<u8> = page.iter().chain(rest).copied().collect();
@@ -55,7 +59,7 @@ fn each_record_is_its_bytes() {
     }
     assert_eq!(
         [LOCAL_MIDI_BYTES, TIMER_BYTES, REPORT_BYTES, RUN_BYTES, SEQUENCE_BYTES, MAX_VARIABLE_BYTES],
-        [8, 6, 13, 11, 6, 15]
+        [8, 6, 13, 5, 12, 15]
     );
     assert_eq!(decode(27, &[1, 1, 0, 1, 1, 0]), Err(Fault::Command("not a record of types 28 to 33")));
     // RULE-112: the page and the sub-code are held to their ranges.
@@ -96,7 +100,7 @@ fn variable_pairs_operations_with_their_operand_kinds() {
         Operand::None,
         Operand::Constant(i32::MIN),
         Operand::Variable { constant: i32::MAX, variable: 15 },
-        Operand::Fired { constant: -1, property: 7 },
+        Operand::Fired { constant: -1, property: 4 },
         Operand::Value(Value::variable(2)),
         Operand::Range { low: -3, high: 3 },
     ];
@@ -143,34 +147,48 @@ fn variable_pairs_operations_with_their_operand_kinds() {
     assert_eq!(decode(TYPE_VARIABLE, &long), Err(Fault::Trailing));
 }
 
-/// RULE-102, RULE-100, RULE-103, RULE-22 (REQ-6612): each mode of `RUN`
-/// with its bounds, and the bounds of the other three records.
+/// RULE-102, RULE-100, RULE-103, RULE-22 (REQ-6612, DEC-6635 item 6):
+/// `RUN` is a group alone, of 5 bytes; each start mode of `SEQUENCE` with
+/// its bounds; and the bounds of the other two records.
 #[test]
 fn the_housekeeping_records_are_bounded() {
-    let run = |group, mode| {
+    let run = |group| {
         let mut out = [0_u8; RUN_BYTES];
-        encode(&Command::Run { group, mode }, PAGE, SUB, &mut out)
+        encode(&Command::Run { group }, PAGE, SUB, &mut out)
     };
-    assert!(run(63, RunMode::Now).is_ok());
-    assert_eq!(run(64, RunMode::Now), Err(Fault::Limit("MAX_GROUPS")));
-    assert!(run(0, RunMode::At(u32::MAX)).is_ok());
-    assert!(run(0, RunMode::After(MAX_ARM_TICKS)).is_ok());
-    assert_eq!(run(0, RunMode::After(0)), Err(Fault::Limit("MAX_ARM_TICKS")));
-    assert_eq!(run(0, RunMode::After(MAX_ARM_TICKS + 1)), Err(Fault::Limit("MAX_ARM_TICKS")));
-    assert!(run(0, RunMode::Beat { timer: 7, ticks: MAX_TIMER_TICKS }).is_ok());
-    assert_eq!(run(0, RunMode::Beat { timer: 8, ticks: 1 }), Err(Fault::Range("run's timer")));
-    assert_eq!(run(0, RunMode::Beat { timer: 0, ticks: 0 }), Err(Fault::Limit("MAX_TIMER_TICKS")));
+    assert_eq!(run(63), Ok(RUN_BYTES));
+    assert_eq!(RUN_BYTES, 5);
+    assert_eq!(run(64), Err(Fault::Limit("MAX_GROUPS")));
     let body = |tail: &[u8]| [&[0x01, 0x01, 0x00, 0x01][..], tail].concat();
-    assert_eq!(decode(TYPE_RUN, &body(&[0, 0, 1, 0, 0, 0, 0])), Err(Fault::Reserved("run's timer")));
-    assert_eq!(decode(TYPE_RUN, &body(&[0, 0, 0, 0, 0, 0, 1])), Err(Fault::Reserved("run's ticks")));
-    assert_eq!(decode(TYPE_RUN, &body(&[0, 4, 0, 0, 0, 0, 0])), Err(Fault::Range("run's mode")));
+    // The second form's modes, timer and ticks are gone.
+    assert_eq!(decode(TYPE_RUN, &body(&[0, 0, 0, 0, 0, 0, 0])), Err(Fault::Trailing));
+    let sequence = |start, mode| {
+        let mut out = [0_u8; SEQUENCE_BYTES];
+        encode(&Command::Sequence { start, sequence: 0, mode }, PAGE, SUB, &mut out)
+    };
+    assert_eq!(SEQUENCE_BYTES, 12);
+    assert_eq!(sequence(true, StartMode::Next), Ok(SEQUENCE_BYTES));
+    assert!(sequence(true, StartMode::At(u32::MAX)).is_ok());
+    assert!(sequence(true, StartMode::Beat { timer: 7, ticks: MAX_TIMER_TICKS }).is_ok());
+    assert!(sequence(true, StartMode::Beat { timer: 255, ticks: 1 }).is_ok());
+    assert_eq!(sequence(true, StartMode::Beat { timer: 8, ticks: 1 }), Err(Fault::Range("sequence's timer")));
+    assert_eq!(sequence(true, StartMode::Beat { timer: 0, ticks: 0 }), Err(Fault::Limit("MAX_TIMER_TICKS")));
+    assert_eq!(
+        sequence(true, StartMode::Beat { timer: 0, ticks: MAX_TIMER_TICKS + 1 }),
+        Err(Fault::Limit("MAX_TIMER_TICKS"))
+    );
+    assert_eq!(sequence(false, StartMode::At(5)), Err(Fault::Reserved("a stop's start mode")));
+    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 0, 0, 0, 0, 0, 0, 1])), Err(Fault::Reserved("sequence's ticks")));
+    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 0, 1, 3, 0, 0, 0, 1])), Err(Fault::Reserved("sequence's timer")));
+    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 0, 3, 0, 0, 0, 0, 0])), Err(Fault::Range("sequence's start mode")));
+    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 0])), Err(Fault::Short), "the second form's 6 bytes");
     // The page timer cannot be named by `TIMER`.
     assert_eq!(decode(TYPE_TIMER, &body(&[1, 8])), Err(Fault::Range("timer")));
     assert_eq!(decode(TYPE_TIMER, &body(&[1, 255])), Err(Fault::Range("timer")));
     assert_eq!(decode(TYPE_TIMER, &body(&[3, 0])), Err(Fault::Range("start or stop")));
     // Every sequence is named with stop only.
-    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 255])), Err(Fault::Range("sequence")));
-    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 8])), Err(Fault::Range("sequence")));
+    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 255, 0, 0, 0, 0, 0, 0])), Err(Fault::Range("sequence")));
+    assert_eq!(decode(TYPE_SEQUENCE, &body(&[1, 8, 0, 0, 0, 0, 0, 0])), Err(Fault::Range("sequence")));
     assert_eq!(decode(TYPE_REPORT, &body(&[0, 1, 0, 0, 0, 0, 0, 0, 0])), Err(Fault::Reserved("report's value")));
     assert_eq!(decode(TYPE_REPORT, &body(&[2, 0, 0, 0, 0, 0, 0, 0, 0])), Err(Fault::Range("report's what")));
     assert_eq!(decode(TYPE_REPORT, &body(&[1, 1, 16, 0, 0, 0, 0, 0, 0])), Err(Fault::Range("value's variable")));
@@ -196,8 +214,8 @@ fn a_group_holds_only_the_allowed_records() {
         built(Command::Variable { operation: VariableOperation::Inc, variable: 0, operand: Operand::None }),
         built(Command::Timer { start: true, timer: 0 }),
         built(Command::Report { value: None }),
-        built(Command::Run { group: 1, mode: RunMode::Now }),
-        built(Command::Sequence { start: true, sequence: 0 }),
+        built(Command::Run { group: 1 }),
+        built(Command::Sequence { start: true, sequence: 0, mode: StartMode::Next }),
     ];
     for command in &allowed {
         assert_eq!(check_built(command), Ok(()), "type {}", command.kind);
@@ -245,11 +263,11 @@ fn a_command_names_its_tables_page() {
     midi.body[1] = 2;
     assert_eq!(check_built(&midi), Err(Fault::Command("names another page")));
 
-    let run = built(Command::Run { group: 2, mode: RunMode::After(5) });
+    let run = built(Command::Run { group: 2 });
     assert_eq!(check_built(&run), Err(Fault::Reference("run's group")));
-    let sequence = built(Command::Sequence { start: false, sequence: 1 });
+    let sequence = built(Command::Sequence { start: false, sequence: 1, mode: StartMode::Next });
     assert_eq!(check_built(&sequence), Err(Fault::Reference("sequence")));
-    assert_eq!(check_built(&built(Command::Sequence { start: false, sequence: 255 })), Ok(()));
+    assert_eq!(check_built(&built(Command::Sequence { start: false, sequence: 255, mode: StartMode::Next })), Ok(()));
     let reads = built(Command::Report { value: Some(Value::sequence(1, 0)) });
     assert_eq!(check_built(&reads), Err(Fault::Reference("value's sequence")));
 }
@@ -339,7 +357,7 @@ fn each_bound_field_takes_the_sum_held_to_its_range() {
             30,
         ),
         (
-            operation(OperationKind::Show).bound(Binding::of_operation(0, field::TARGET, Source::Parameter(0))),
+            operation(OperationKind::Show).bound(Binding::of_operation(0, field::TARGET, Source::Parameter)),
             8,
             2,
             1,
@@ -388,12 +406,16 @@ fn a_bound_target_number_is_an_identity() {
         Operation { target: Target::control(1), kind: OperationKind::Look(2) },
         Operation { target: Target::object(7), kind: OperationKind::Show },
     ]);
-    let by_row = two.clone().bound(Binding::of_operation(0, field::TARGET, Source::Parameter(2)));
+    let by_row = two.clone().bound(Binding::of_operation(0, field::TARGET, Source::Parameter));
     assert_eq!(check_built(&by_row), Ok(()));
     let by_target = two.clone().bound(Binding::of_operation(1, field::TARGET, Source::Fired(1)));
     assert_eq!(check_built(&by_target), Ok(()));
-    let refusal = Err(Fault::Binding("a target's number takes a row parameter or the firing's target"));
-    for source in [Source::Variable(0), Source::Fired(0), Source::Fired(2), Source::Fired(3)] {
+    // The firing's row may give a target's number too (DEC-6635 item 8:
+    // the meter's segment `301 + row`).
+    let by_place = two.clone().bound(Binding::of_operation(1, field::TARGET, Source::Fired(2)));
+    assert_eq!(check_built(&by_place), Ok(()));
+    let refusal = Err(Fault::Binding("a target's number takes the row's p, the firing's row or its target"));
+    for source in [Source::Variable(0), Source::Fired(0), Source::Fired(3)] {
         let by_other = two.clone().bound(Binding::of_operation(0, field::TARGET, source));
         assert_eq!(check_built(&by_other), refusal, "{source:?}");
     }
@@ -407,7 +429,7 @@ fn a_bound_target_number_is_an_identity() {
     assert_eq!((body[4], skipped), (1, 1));
     // The only operation left out leaves nothing to apply.
     let one = animated(&[Operation { target: Target::object(7), kind: OperationKind::Show }])
-        .bound(Binding::of_operation(0, field::TARGET, Source::Parameter(0)));
+        .bound(Binding::of_operation(0, field::TARGET, Source::Parameter));
     assert_eq!(resolved(&one, -7), (Vec::new(), 1));
     assert_eq!(resolved(&one, 65_528).0[8..], [0xFF, 0xFF]);
     assert_eq!(resolved(&one, 65_529), (Vec::new(), 1));
@@ -438,7 +460,7 @@ fn bindings_outside_the_table_are_refused() {
     refused(midi(0x90).bound(Binding { item: 0, field: 1, source: 0x24 }), "source");
     refused(midi(0x90).bound(Binding { item: 0, field: 1, source: 0x34 }), "source");
     refused(midi(0x90).bound(Binding { item: 0, field: 1, source: 0x0F }), "source");
-    let twice = midi(0x90).bound(Binding::of(1, variable)).bound(Binding::of(1, Source::Parameter(1)));
+    let twice = midi(0x90).bound(Binding::of(1, variable)).bound(Binding::of(1, Source::Parameter));
     refused(twice, "field bound twice");
     refused(control(0, 1, 5, 80, 0).bound(Binding::of(3, variable)), "record or field that takes none");
     let takes_none = "record or field that takes none";
@@ -446,14 +468,14 @@ fn bindings_outside_the_table_are_refused() {
         Command::Variable { operation: VariableOperation::Inc, variable: 0, operand: Operand::None },
         Command::Timer { start: true, timer: 0 },
         Command::Report { value: None },
-        Command::Run { group: 0, mode: RunMode::Now },
-        Command::Sequence { start: true, sequence: 0 },
+        Command::Run { group: 0 },
+        Command::Sequence { start: true, sequence: 0, mode: StartMode::Next },
     ] {
         refused(built(command).bound(Binding::of(1, variable)), takes_none);
     }
     let show = animated(&[Operation { target: Target::object(7), kind: OperationKind::Show }]);
     refused(
-        show.clone().bound(Binding::of_operation(1, field::TARGET, Source::Parameter(0))),
+        show.clone().bound(Binding::of_operation(1, field::TARGET, Source::Parameter)),
         "item beyond the operations",
     );
     refused(show.clone().bound(Binding::of_operation(0, field::X, variable)), "field of this operation");
@@ -465,6 +487,9 @@ fn bindings_outside_the_table_are_refused() {
         assert_eq!(Source::from_code(code).map(Source::code), Source::from_code(code).map(|_| code));
     }
     assert_eq!(Source::from_code(0x1F), Some(Source::Variable(15)));
-    assert_eq!(Source::from_code(0x23), Some(Source::Parameter(3)));
+    assert_eq!(Source::from_code(0x20), Some(Source::Parameter));
+    for withdrawn in 0x21..=0x23 {
+        assert_eq!(Source::from_code(withdrawn), None, "the second form's p1 to p3 (DEC-6635 item 8)");
+    }
     assert_eq!(Source::from_code(0x33), Some(Source::Fired(3)));
 }
