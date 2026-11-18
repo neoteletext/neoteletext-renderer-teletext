@@ -87,6 +87,8 @@ const LIBRARY_CRATES: &[&str] = &[
     "neoteletext-audio-instruments",
     "neoteletext-opus",
     "neoteletext-input",
+    // The page rule table (page-rules.md RULE-56).
+    "neoteletext-rules",
     // The picture converter (DEC-2325 item 1, REQ-2327).
     "neoteletext-picture",
 ];

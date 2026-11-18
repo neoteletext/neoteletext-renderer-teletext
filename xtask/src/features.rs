@@ -126,6 +126,9 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-audio-mix", features: "" },
     Build { package: "neoteletext-input", features: "" },
     Build { package: "neoteletext-input", features: "error-trait" },
+    // The page rule table (page-rules.md RULE-56).
+    Build { package: "neoteletext-rules", features: "" },
+    Build { package: "neoteletext-rules", features: "error-trait" },
     Build { package: "neoteletext-transport", features: "" },
     Build { package: "neoteletext-qrkeyboard", features: "" },
     // The picture converter and its program (DEC-2325), which have no
