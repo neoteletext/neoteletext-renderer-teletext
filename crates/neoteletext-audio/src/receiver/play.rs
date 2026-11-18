@@ -14,7 +14,7 @@ use super::instruments::Begun;
 use super::loss::Progress;
 use super::{MS_PER_SECOND, Receiver, duration_ms};
 use crate::control::Play;
-use crate::port::{Start, VoiceSink};
+use crate::port::{LocalStart, Start, VoiceSink};
 use crate::store::{Entry, LiveEdge};
 use crate::{CHANNELS, PROGRESSIVE_BUFFER_MS};
 
@@ -47,6 +47,13 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             channel.waiting = Some(play);
             return;
         };
+        // A local sound is never rendered from its block nor streamed: the
+        // sink is given its local start (RULE-60).
+        if entry.local {
+            self.start_local(index, play, &entry, sink);
+            return;
+        }
+        self.end_local(index);
         let start_ms = self.start_ms(index, play);
         // A synthesizer's playing is a stream of its own, rendered as it
         // plays (INT-33, INT-37). It needs a lane (INT-32): without one the
@@ -110,6 +117,84 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             self.send_sound(&entry, sink);
         }
         sink.start(index, start_of(play));
+    }
+
+    /// Starts a local sound on channel `index` (page-rules.md, RULE-60):
+    /// the sink is given the sound's banks and then its local start, with
+    /// the setup block, in place of a stream. The play is refused and
+    /// counted when it names no page (a local sound belongs to a page, and
+    /// ends when that page is no longer open), when it is looped or waits
+    /// for the current sound (it has no end to loop at or to follow), or
+    /// when [`crate::MOST_LOCAL_SOUNDS`] already play on other channels.
+    fn start_local(&mut self, index: u8, play: Play, entry: &Entry, sink: &mut dyn VoiceSink) {
+        let others =
+            self.local.iter().zip(0..CHANNELS).filter(|&(sound, channel)| sound.is_some() && channel != index).count();
+        if play.page.is_none() || play.looped || play.after_current || others >= crate::MOST_LOCAL_SOUNDS {
+            if let Some(channel) = self.channels.get_mut(usize::from(index)) {
+                channel.waiting = None;
+            }
+            self.statistics.local_refused = self.statistics.local_refused.saturating_add(1);
+            return;
+        }
+        if self.store.block(entry.sound, 0).is_none() {
+            return;
+        }
+        self.stop_streams(index, play.fade_ms, sink);
+        // The setup is the sound's one block, which has arrived: a play
+        // waits until its sound is whole.
+        let Some(setup) = self.store.block(entry.sound, 0) else { return };
+        for (bank, &handle) in (0_u8..).zip(entry.banks()) {
+            // Each is held whole, or the play would still wait
+            // (`Receiver::bank_ready`).
+            if let Some(image) = self.store.image(handle) {
+                sink.local_bank(index, entry.sound, bank, image);
+            }
+        }
+        let [option, split] = entry.keys;
+        let synth8 = entry.codec == crate::Codec::Synth8;
+        sink.local(
+            index,
+            LocalStart {
+                sound: entry.sound,
+                family: entry.codec.code(),
+                // The variant tag is the setting of the two families that
+                // have one (`record::TAG_VARIANT`); the others' is 0.
+                variant: if entry.codec.variants() > 1 { entry.setting } else { 0 },
+                option: if synth8 { option } else { 0 },
+                split: if synth8 { split } else { 0 },
+                gain: play.gain,
+                fade_ms: play.fade_ms,
+                duck_percent: play.duck_percent,
+                setup,
+            },
+        );
+        if let Some(channel) = self.channels.get_mut(usize::from(index)) {
+            channel.waiting = None;
+            channel.playing_page = play.page;
+            channel.playing = Some(play);
+        }
+        // It plays until it is stopped, and none of its blocks is awaited.
+        self.end_progress(index);
+        if let Some(heard) = self.heard.get_mut(usize::from(index)) {
+            *heard = Heard::Unknown;
+        }
+        if let Some(local) = self.local.get_mut(usize::from(index)) {
+            *local = Some(entry.sound);
+        }
+    }
+
+    /// Channel `index` plays a local sound no longer (RULE-60).
+    pub(super) fn end_local(&mut self, index: u8) {
+        if let Some(local) = self.local.get_mut(usize::from(index)) {
+            *local = None;
+        }
+    }
+
+    /// The local sound channel `index` plays at the sink, if it plays one
+    /// (RULE-60), for a port that gives its rules' MIDI messages to it.
+    #[must_use]
+    pub fn local_sound(&self, index: u8) -> Option<crate::port::SoundId> {
+        self.local.get(usize::from(index)).copied().flatten()
     }
 
     /// When a play on channel `index` starting now is first heard, by the

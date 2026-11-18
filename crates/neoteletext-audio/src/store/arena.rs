@@ -25,6 +25,7 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
             banks: object.banks,
             bank_count: object.bank_count,
             total: object.total.unwrap_or(0),
+            local: object.local,
             received: 0,
             conflict: false,
             at_sink: false,
@@ -53,7 +54,8 @@ impl<const OBJECTS: usize> Store<'_, OBJECTS> {
                         && existing.setting == fresh.setting
                         && existing.keys == fresh.keys
                         && existing.banks() == fresh.banks()
-                        && existing.total == fresh.total;
+                        && existing.total == fresh.total
+                        && existing.local == fresh.local;
                     return if same { Defined::Repeat } else { Defined::Conflict };
                 }
                 if !crate::serial_newer(object.generation, existing.sound.generation) {

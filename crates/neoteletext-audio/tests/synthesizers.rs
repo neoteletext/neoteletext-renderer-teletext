@@ -24,9 +24,11 @@
 )]
 
 use neoteletext_audio::encode::{BlocksError, Command, EncodeError, Sound, TimedEvent, event_blocks, frame};
-use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
+use neoteletext_audio::port::{LocalStart, SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
-use neoteletext_audio::record::{Record, TYPE_OBJECT, parse};
+use neoteletext_audio::record::{
+    Control, LOCAL_SOUND, Operation, Record, RecordError, SYNTH8_KEYS_SPLIT, TAG_LOCAL, TYPE_OBJECT, parse,
+};
 use neoteletext_audio::{
     Codec, INSTRUMENT_BLOCK_SAMPLES, INSTRUMENT_LEAD_MAX_BLOCKS, INSTRUMENT_LEAD_MIN_BLOCKS, INSTRUMENT_RATE,
     MOST_EVENT_BLOCK_BYTES,
@@ -61,6 +63,16 @@ struct Recorder {
     streams: Vec<Streamed>,
     starts: Vec<(u8, SoundId)>,
     concealed: Vec<u16>,
+    /// Whether the sink plays local sounds (RULE-60).
+    local: bool,
+    /// The banks of local sounds given: channel, sound, bank index, image.
+    local_banks: Vec<(u8, SoundId, u8, Vec<u8>)>,
+    /// The local starts given: channel, the start with no setup, the setup.
+    locals: Vec<(u8, LocalStart<'static>, Vec<u8>)>,
+    /// The channels stopped, in order.
+    stops: Vec<u8>,
+    /// The gains set: channel and gain.
+    gains: Vec<(u8, u8)>,
 }
 
 impl Recorder {
@@ -105,10 +117,23 @@ impl VoiceSink for Recorder {
     fn start(&mut self, channel: u8, start: Start) {
         self.starts.push((channel, start.sound));
     }
-    fn stop(&mut self, _channel: u8, _fade_ms: u16) {}
-    fn gain(&mut self, _channel: u8, _gain: u8, _fade_ms: u16) {}
+    fn stop(&mut self, channel: u8, _fade_ms: u16) {
+        self.stops.push(channel);
+    }
+    fn gain(&mut self, channel: u8, gain: u8, _fade_ms: u16) {
+        self.gains.push((channel, gain));
+    }
     fn concealed(&mut self, _sound: SoundId, block: u16, _samples: u32) {
         self.concealed.push(block);
+    }
+    fn plays_local(&self) -> bool {
+        self.local
+    }
+    fn local_bank(&mut self, channel: u8, sound: SoundId, index: u8, image: &[u8]) {
+        self.local_banks.push((channel, sound, index, image.to_vec()));
+    }
+    fn local(&mut self, channel: u8, start: LocalStart<'_>) {
+        self.locals.push((channel, LocalStart { setup: &[], ..start }, start.setup.to_vec()));
     }
 }
 
@@ -869,4 +894,311 @@ fn a_looped_sound_plays_on_in_one_stream() {
     let end = run(&mut receiver, &mut sink, at, FOREVER_MS);
     assert!(sink.streams[0].ended);
     assert_eq!(end, at + 100);
+}
+
+/// The page the tests' local sounds belong to.
+const PAGE: u16 = 0x101;
+/// A local sound's setup: a program change to program 1 on channel 1, then
+/// controller 7 at 100, both at tick 0.
+const SETUP: [u8; 7] = [0x00, 0xC0, 0x01, 0x00, 0xB0, 0x07, 100];
+
+/// A local sound of `codec` with handle `handle`, naming the bank [`BANK`].
+fn local(handle: u8, codec: Codec) -> Sound {
+    let mut sound = Sound::local(handle, 1, codec, &SETUP).unwrap();
+    sound.banks = vec![BANK];
+    sound
+}
+
+/// A play of `sound` on `channel` that belongs to `page`.
+fn play_on(channel: u8, sequence: u16, sound: &Sound, page: Option<u16>) -> Vec<u8> {
+    Command {
+        channel,
+        sequence,
+        operation: 1,
+        handle: sound.handle,
+        generation: sound.generation,
+        gain: 80,
+        fade_ms: 5,
+        flags: 0,
+        duck: 0,
+        page,
+    }
+    .record()
+}
+
+// Verifies RULE-60 (REQ-6527): the OBJECT of the local sound RULE-61's
+// example announces is these bytes (the wire vector RULE-85 names), and
+// reads back as a stored sound of one block marked local.
+#[test]
+fn a_local_sounds_object_is_this_wire_vector() {
+    // RULE-61: {"kind":"synth106_local","handle":1,"generation":1,"banks":[2],
+    // "setup":[{"event":"program_change","channel":1,"program":0,"time_us":0}]}.
+    let setup = [0x00, 0xC0, 0x00];
+    let mut sound = Sound::local(1, 1, Codec::Synth106, &setup).unwrap();
+    sound.banks = vec![2];
+    let object = sound.object_record().unwrap();
+    let expected = [
+        0x02, 0x01, 0x00, 0x1D, // profile version 2, OBJECT, a body of 29 bytes
+        0x01, 0x00, 0x01, // handle 1, generation 1
+        0x00, 0x00, 0x00, 0x01, // id 1
+        0x0E, 0x07, // codec 14, the synth106 family; rate code 7, 48,000 Hz
+        0x00, 0x03, // block bytes: the setup's 3
+        0x00, 0x00, 0x03, 0xC0, // samples: one block of 960
+        0x00, 0x01, // blocks: 1
+        0x04, 0x01, 0x02, // TAG_BANKS: bank handle 2
+        0x08, 0x04, 0x00, 0x00, 0x00, 0x03, // TAG_TOTAL_BYTES: 3
+        0x09, 0x01, 0x01, // TAG_LOCAL: 1
+        0x0E, 0x74, 0xEC, 0x4D, // CRC-32 of the header and the body
+    ];
+    assert_eq!(object, expected, "{object:02X?}");
+    assert_eq!((TAG_LOCAL, LOCAL_SOUND), (9, 1));
+    let Record::Object(read) = parse(&object).unwrap() else { panic!("an OBJECT") };
+    assert!(read.local);
+    assert_eq!((read.blocks, read.samples, read.block_bytes, read.total), (1, 960, 3, Some(3)));
+    assert_eq!((read.codec, read.banks()), (Some(Codec::Synth106), &[2][..]));
+    // Its one DATA record carries the setup: offset 0, one block of 3 bytes.
+    let data = sound.data_records();
+    assert_eq!(data.len(), 1);
+    let Record::Data(read) = parse(&data[0]).unwrap() else { panic!("a DATA") };
+    assert_eq!(read.blocks, [0, 0, 0, 0, 0, 3, 0x00, 0xC0, 0x00]);
+}
+
+// Verifies RULE-60 (REQ-6527): what the tag refuses and where it means
+// nothing.
+#[test]
+fn the_local_tag_is_one_byte_of_one_on_a_stored_sound_of_one_block() {
+    let object = |codec: Codec, tags: &[u8], blocks: u16| {
+        let total = 3 * u32::from(blocks);
+        let mut body = vec![4, 0, 1, 0, 0, 0, 4, codec.code(), 7, 0, 3];
+        body.extend_from_slice(&(960 * u32::from(blocks)).to_be_bytes());
+        body.extend_from_slice(&blocks.to_be_bytes());
+        if blocks != 0 {
+            body.extend_from_slice(&[8, 4]);
+            body.extend_from_slice(&total.to_be_bytes());
+        }
+        body.extend_from_slice(tags);
+        match parse(&frame(TYPE_OBJECT, &body)) {
+            Ok(Record::Object(object)) => Ok(object.local),
+            Ok(_) => panic!("an OBJECT"),
+            Err(error) => Err(error),
+        }
+    };
+    let bad = Err(RecordError::BadValue("local"));
+    for codec in [Codec::Synth7, Codec::Synth106, Codec::SynthD, Codec::Synth53, Codec::Synth8, Codec::Synth80] {
+        assert_eq!(object(codec, &[4, 1, 9, TAG_LOCAL, 1, 1], 1), Ok(true), "{codec:?}");
+        assert_eq!(object(codec, &[4, 1, 9], 1), Ok(false));
+        assert_eq!(object(codec, &[4, 1, 9, TAG_LOCAL, 1, 0], 1), bad, "a value other than 1");
+        assert_eq!(object(codec, &[4, 1, 9, TAG_LOCAL, 1, 2], 1), bad);
+        assert_eq!(object(codec, &[4, 1, 9, TAG_LOCAL, 2, 1, 1], 1), bad, "two bytes");
+        assert_eq!(object(codec, &[4, 1, 9, TAG_LOCAL, 0], 1), bad, "no byte");
+        assert_eq!(object(codec, &[4, 1, 9, TAG_LOCAL, 1, 1], 2), bad, "two blocks");
+        assert_eq!(object(codec, &[4, 1, 9, TAG_LOCAL, 1, 1], 0), bad, "a live sound");
+    }
+    // The synth6581 family has no notes and so no local sound: the tag is
+    // skipped there, as any unknown tag is.
+    assert_eq!(object(Codec::Synth6581, &[TAG_LOCAL, 1, 1], 1), Ok(false));
+    assert_eq!(object(Codec::Synth6581, &[TAG_LOCAL, 1, 7], 1), Ok(false));
+    // The encoder writes none for it, nor a setup with an event after tick 0.
+    assert_eq!(Sound::local(1, 1, Codec::Synth6581, &[]).unwrap_err(), EncodeError::Encoder);
+    assert_eq!(Sound::local(1, 1, Codec::Opus, &[]).unwrap_err(), EncodeError::Encoder);
+    assert_eq!(Sound::local(1, 1, Codec::Synth7, &[0x01, 0x90, 60, 100]).unwrap_err(), EncodeError::Setup);
+    assert_eq!(
+        Sound::local(1, 1, Codec::Synth7, &[0x00, 0x90, 60, 100, 0x00, 0x80, 60, 0]).map(|sound| sound.local),
+        Ok(true)
+    );
+    assert!(matches!(Sound::local(1, 1, Codec::Synth7, &[0x00, 0x90, 60]), Err(EncodeError::Block { index: 0, .. })));
+}
+
+// Verifies RULE-60 (REQ-6527): a play of a local sound of each family gives
+// the sink its banks and its local start, with the family, the variant, the
+// option and the setup, in place of a stream; stop and gain act on its
+// channel as on any sound; and it ends when its page is no longer open.
+#[test]
+fn a_local_sound_of_each_family_is_handed_to_the_sink_and_never_streamed() {
+    for family in families() {
+        let mut arena = vec![0_u8; 128 * 1024];
+        let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+        let mut sink = Recorder { local: true, ..Recorder::default() };
+        let image = (family.image)(&[&family.plain, &family.dull]);
+        let mut sound = local(SOUND, family.codec);
+        sound.banks = vec![BANK, BANK + 1];
+        let (variant, option, split) = match family.codec {
+            Codec::Synth106 => (1, 0, 0),
+            Codec::Synth53 => (2, 0, 0),
+            Codec::Synth8 => (0, SYNTH8_KEYS_SPLIT, 60),
+            _ => (0, 0, 0),
+        };
+        if variant != 0 {
+            sound.variant = Some(variant);
+        }
+        if family.codec == Codec::Synth8 {
+            sound.keys = Some([option, split]);
+        }
+        receiver.open_page(Some(PAGE), &mut sink);
+        push(&mut receiver, &sound, &mut sink);
+        receiver.push_record(&play_on(2, 1, &sound, Some(PAGE)), &mut sink);
+        push(&mut receiver, &bank(BANK, family.codec, &image), &mut sink);
+        assert!(sink.locals.is_empty(), "{:?}: it waits for its banks, as any sound of its family", family.codec);
+        push(&mut receiver, &bank(BANK + 1, family.codec, &[image.clone(), image.clone()].concat()), &mut sink);
+        let id = SoundId { handle: SOUND, generation: 1 };
+        let start = LocalStart {
+            sound: id,
+            family: family.codec.code(),
+            variant,
+            option,
+            split,
+            gain: 80,
+            fade_ms: 5,
+            duck_percent: 100,
+            setup: &[],
+        };
+        assert_eq!(sink.locals, vec![(2, start, SETUP.to_vec())], "{:?}", family.codec);
+        assert_eq!(
+            sink.local_banks,
+            vec![(2, id, 0, image.clone()), (2, id, 1, [image.clone(), image.clone()].concat())],
+            "{:?}: its banks, index 0 first, before its start",
+            family.codec
+        );
+        assert_eq!(receiver.local_sound(2), Some(id));
+        // Nothing is rendered, streamed, defined or started as a stream.
+        run(&mut receiver, &mut sink, 0, 50 * BLOCK_MS);
+        assert!(sink.streams.is_empty() && sink.starts.is_empty() && sink.defined.is_empty() && sink.samples == 0);
+        assert_eq!(receiver.next_tick_ms(), None, "a local sound asks for no tick");
+        // Gain and stop act on its channel.
+        let command = |operation, sequence| {
+            Command {
+                channel: 2,
+                sequence,
+                operation,
+                handle: 0,
+                generation: 0,
+                gain: 40,
+                fade_ms: 5,
+                flags: 0,
+                duck: 0,
+                page: None,
+            }
+            .record()
+        };
+        receiver.push_record(&command(3, 2), &mut sink);
+        assert_eq!(sink.gains, vec![(2, 40)]);
+        sink.stops.clear();
+        receiver.push_record(&command(2, 3), &mut sink);
+        assert_eq!((sink.stops.clone(), receiver.local_sound(2)), (vec![2], None));
+        // Played again, it ends when its page is no longer the open page.
+        receiver.push_record(&play_on(2, 4, &sound, Some(PAGE)), &mut sink);
+        assert_eq!((sink.locals.len(), receiver.local_sound(2)), (2, Some(id)));
+        sink.stops.clear();
+        receiver.open_page(Some(0x102), &mut sink);
+        assert_eq!((sink.stops.clone(), receiver.local_sound(2)), (vec![2], None));
+        // And starts again when the page is opened again: it is armed.
+        receiver.open_page(Some(PAGE), &mut sink);
+        assert_eq!((sink.locals.len(), receiver.local_sound(2)), (3, Some(id)));
+        assert_eq!(receiver.statistics().local_refused, 0);
+    }
+}
+
+// Verifies RULE-60 (REQ-6527): at most two local sounds play at once, a
+// third play is refused and counted; so is a play with no page, a looped
+// one and one that waits for the current sound.
+#[test]
+fn a_third_local_sound_and_a_play_with_no_page_are_refused_and_counted() {
+    let family = &families()[1];
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder { local: true, ..Recorder::default() };
+    receiver.open_page(Some(PAGE), &mut sink);
+    push(&mut receiver, &bank(BANK, family.codec, &(family.image)(&[&family.plain])), &mut sink);
+    let sounds = [local(1, family.codec), local(2, family.codec), local(3, family.codec)];
+    for sound in &sounds {
+        push(&mut receiver, sound, &mut sink);
+    }
+    assert_eq!(neoteletext_audio::MOST_LOCAL_SOUNDS, 2);
+    receiver.push_record(&play_on(0, 1, &sounds[0], None), &mut sink);
+    assert_eq!((sink.locals.len(), receiver.statistics().local_refused), (0, 1), "a local sound belongs to a page");
+    for (flags, sequence) in [(2, 2), (4, 3)] {
+        let play = Command {
+            channel: 0,
+            sequence,
+            operation: 1,
+            handle: 1,
+            generation: 1,
+            gain: 100,
+            fade_ms: 5,
+            flags,
+            duck: 0,
+            page: Some(PAGE),
+        };
+        receiver.push_record(&play.record(), &mut sink);
+    }
+    assert_eq!((sink.locals.len(), receiver.statistics().local_refused), (0, 3), "looped, and after the current");
+    receiver.push_record(&play_on(0, 4, &sounds[0], Some(PAGE)), &mut sink);
+    receiver.push_record(&play_on(1, 1, &sounds[1], Some(PAGE)), &mut sink);
+    receiver.push_record(&play_on(2, 1, &sounds[2], Some(PAGE)), &mut sink);
+    assert_eq!(sink.locals.iter().map(|(channel, ..)| *channel).collect::<Vec<_>>(), [0, 1]);
+    assert_eq!(receiver.statistics().local_refused, 4, "the third");
+    assert_eq!(receiver.local_sound(2), None);
+    // A local sound replacing one on its own channel is no third.
+    receiver.push_record(&play_on(1, 2, &sounds[2], Some(PAGE)), &mut sink);
+    assert_eq!((sink.locals.len(), receiver.local_sound(1)), (3, Some(SoundId { handle: 3, generation: 1 })));
+    // One stopped makes room.
+    receiver.rule_command(
+        &Control {
+            channel: 0,
+            sequence: 0,
+            operation: Operation::Stop,
+            handle: 0,
+            generation: 0,
+            gain: 0,
+            fade_ms: 5,
+            flags: 0,
+            duck: 0,
+            page: Some(PAGE),
+        },
+        &mut sink,
+    );
+    assert_eq!(receiver.local_sound(0), None);
+    // A rule's play starts it as the server's does, whatever its sequence.
+    receiver.rule_command(
+        &Control {
+            channel: 3,
+            sequence: 0,
+            operation: Operation::Play,
+            handle: 2,
+            generation: 1,
+            gain: 100,
+            fade_ms: 5,
+            flags: 0,
+            duck: 0,
+            page: Some(PAGE),
+        },
+        &mut sink,
+    );
+    assert_eq!((sink.locals.len(), receiver.local_sound(3)), (4, Some(SoundId { handle: 2, generation: 1 })));
+    assert_eq!(receiver.statistics().local_refused, 4);
+    // A stream on a local sound's channel takes the channel from it.
+    let tune = sound(family.codec, note_block(&[]), 3, &[BANK]);
+    let tune = Sound { handle: 7, ..tune };
+    push(&mut receiver, &tune, &mut sink);
+    receiver.push_record(&play_on(3, 1, &tune, None), &mut sink);
+    assert_eq!((receiver.local_sound(3), sink.starts.len()), (None, 1));
+}
+
+// Verifies RULE-60 (REQ-6527): a sink with no sound output stage for local
+// sounds has their OBJECT ignored, as a codec the receiver does not have.
+#[test]
+fn a_sink_that_plays_no_local_sound_ignores_its_object() {
+    let family = &families()[0];
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder::default();
+    receiver.open_page(Some(PAGE), &mut sink);
+    push(&mut receiver, &bank(BANK, family.codec, &(family.image)(&[&family.plain])), &mut sink);
+    let sound = local(SOUND, family.codec);
+    push(&mut receiver, &sound, &mut sink);
+    receiver.push_record(&play_on(0, 1, &sound, Some(PAGE)), &mut sink);
+    run(&mut receiver, &mut sink, 0, 10 * BLOCK_MS);
+    assert!(sink.locals.is_empty() && sink.streams.is_empty() && sink.starts.is_empty());
+    assert_eq!(receiver.statistics().unsupported, 1);
+    assert!(receiver.store().entry(SOUND).is_none());
 }

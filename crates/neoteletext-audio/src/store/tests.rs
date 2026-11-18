@@ -29,6 +29,7 @@ fn object(handle: u8, generation: u16, samples: u32) -> Object<'static> {
         family: None,
         keys: None,
         total: None,
+        local: false,
     }
 }
 

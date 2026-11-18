@@ -64,6 +64,9 @@ pub struct Sound {
     /// A synth8 sound's key mode and split point
     /// ([`crate::record::TAG_SYNTH8_KEYS`]).
     pub keys: Option<[u8; 2]>,
+    /// A local sound ([`crate::record::TAG_LOCAL`], RULE-60);
+    /// [`Sound::local`] sets it.
+    pub local: bool,
 }
 
 /// Why a sound could not be written.
@@ -97,6 +100,9 @@ pub enum EncodeError {
     /// A sound of a family with banks that names none or more than
     /// [`MOST_BANKS`], or a sound without banks that names one (MIDI-57).
     Banks,
+    /// A local sound's setup with an event after tick 0 (RULE-60: "every
+    /// event at tick 0").
+    Setup,
 }
 
 impl Sound {
@@ -149,6 +155,7 @@ impl Sound {
             variant: None,
             family: None,
             keys: None,
+            local: false,
         })
     }
 
@@ -183,6 +190,7 @@ impl Sound {
             variant: None,
             family: None,
             keys: None,
+            local: false,
         })
     }
 
@@ -232,6 +240,7 @@ impl Sound {
             variant: None,
             family: None,
             keys: None,
+            local: false,
         })
     }
 
@@ -286,7 +295,34 @@ impl Sound {
             variant: None,
             family: None,
             keys: None,
+            local: false,
         })
+    }
+
+    /// A local sound (page-rules.md, RULE-60) of `codec`, a family that
+    /// plays notes (codes 13 to 18): a stored sound of one block, its
+    /// `setup`, an event list of at most [`MOST_EVENT_BLOCK_BYTES`] bytes
+    /// with every event at tick 0, announced with
+    /// [`crate::record::TAG_LOCAL`]. Its banks, variant and keyboard are set
+    /// afterwards, as [`Sound::events`]' are.
+    ///
+    /// # Errors
+    /// A codec that has no local sound ([`EncodeError::Encoder`]), a setup
+    /// the receiver's reader would not wholly act on
+    /// ([`EncodeError::Block`]), or an event of it after tick 0
+    /// ([`EncodeError::Setup`]).
+    pub fn local(handle: u8, generation: u16, codec: Codec, setup: &[u8]) -> Result<Self, EncodeError> {
+        if !codec.has_banks() {
+            return Err(EncodeError::Encoder);
+        }
+        let mut sound = Self::events(handle, generation, codec, &[setup])?;
+        let late = crate::midi::block::Events::new(setup)
+            .any(|read| matches!(read, crate::midi::block::Read::Event(event) if event.time != 0));
+        if late {
+            return Err(EncodeError::Setup);
+        }
+        sound.local = true;
+        Ok(sound)
     }
 
     /// A live sound of an event codec (MIDI-20), announced with no blocks
@@ -335,6 +371,7 @@ impl Sound {
             variant: None,
             family: Some(family),
             keys: None,
+            local: false,
         })
     }
 
@@ -473,6 +510,9 @@ impl Sound {
             let total = u32::try_from(total).map_err(|_| EncodeError::Total)?;
             body.extend_from_slice(&[crate::record::TAG_TOTAL_BYTES, 4]);
             body.extend_from_slice(&total.to_be_bytes());
+        }
+        if self.local {
+            body.extend_from_slice(&[crate::record::TAG_LOCAL, 1, crate::record::LOCAL_SOUND]);
         }
         Ok(frame(TYPE_OBJECT, &body))
     }

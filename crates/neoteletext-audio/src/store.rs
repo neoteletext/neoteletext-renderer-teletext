@@ -18,6 +18,10 @@ mod arena;
 mod live;
 
 /// A stored sound's definition and state.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is a fact of its own about the sound, set by a different record or call: local and live by its OBJECT, the conflict by its DATA, at the sink by its play"
+)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Entry {
     /// Its handle and generation.
@@ -51,6 +55,9 @@ pub struct Entry {
     /// The total bytes of a stored event sound's blocks
     /// ([`crate::record::TAG_TOTAL_BYTES`]); 0 for every other sound.
     pub total: u32,
+    /// A local sound ([`crate::record::TAG_LOCAL`], RULE-60): its one
+    /// block is its setup, and a play gives the sink its local start.
+    pub local: bool,
     /// Blocks received so far.
     pub received: u16,
     /// A block arrived twice with different bytes: the sound is not played

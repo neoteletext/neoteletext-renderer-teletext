@@ -65,6 +65,13 @@ pub const OPUS_DECODERS: usize = 2;
 /// 2026). With every instrument the four are 136,032 bytes.
 pub const INSTRUMENT_LANES: usize = CHANNELS as usize;
 
+/// The most local sounds (page-rules.md, RULE-60) that play at once in a
+/// view: a play of a third is refused and counted. Each is an instrument
+/// the receiver's sound output stage renders on its audio thread, so their
+/// number bounds that thread's work.
+pub const MOST_LOCAL_SOUNDS: usize = 2;
+const _: () = assert!(MOST_LOCAL_SOUNDS <= CHANNELS as usize);
+
 /// The least lead, in blocks of 20 ms, a playing synthesizer sound's stream
 /// is kept rendered ahead of what is heard (integration.md, INT-34): 40 ms,
 /// the progressive start's buffer ([`PROGRESSIVE_BUFFER_MS`]). NeoTeletext's
