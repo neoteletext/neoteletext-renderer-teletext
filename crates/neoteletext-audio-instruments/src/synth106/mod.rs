@@ -89,6 +89,7 @@
 //! - **Velocity is ignored**, as both instruments ignore it.
 
 pub mod law;
+pub mod midi;
 pub mod patch;
 mod voice;
 

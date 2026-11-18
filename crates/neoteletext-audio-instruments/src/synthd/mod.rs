@@ -95,6 +95,7 @@
 //!   A-440 tone and no external control input.
 
 pub mod law;
+pub mod midi;
 pub mod patch;
 
 use crate::analog::allocator::{Allocator, HELD_KEYS, Mode, Priority, Stage as KeyStage, Trigger};

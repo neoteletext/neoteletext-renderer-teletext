@@ -24,7 +24,15 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         #[cfg(feature = "opus")]
         self.opus.release(entry.sound);
         // And an instrument's sound is rendered again from its first.
-        #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+        #[cfg(any(
+            feature = "synth6581",
+            feature = "synth7",
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
+        ))]
         self.instruments.release(entry.sound);
         self.send_blocks(entry, 0, entry.blocks, sink);
     }
@@ -42,7 +50,11 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             feature = "opus",
             feature = "synth6581",
             feature = "synth7",
-            feature = "analog"
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
         )),
         expect(clippy::unused_self, reason = "a build with no decoder holds no sound to send")
     )]
@@ -61,13 +73,29 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Opus => {}
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
-            // A bank is patches, never samples (REQ-6411 item 4).
-            Codec::Synth7Bank | Codec::PatchBank => {}
+            // A bank is patches, never samples (MIDI-55).
+            Codec::Bank => {}
             // An instrument's. A codec the build leaves out renders
             // silence, and none of one is stored.
-            #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+            #[cfg(any(
+                feature = "synth6581",
+                feature = "synth7",
+                feature = "synth106",
+                feature = "synthd",
+                feature = "synth53",
+                feature = "synth8",
+                feature = "synth80"
+            ))]
             _ => self.instruments.send_stored(&self.store, entry, &mut self.statistics, sink),
-            #[cfg(not(any(feature = "synth6581", feature = "synth7", feature = "analog")))]
+            #[cfg(not(any(
+                feature = "synth6581",
+                feature = "synth7",
+                feature = "synth106",
+                feature = "synthd",
+                feature = "synth53",
+                feature = "synth8",
+                feature = "synth80"
+            )))]
             _ => {}
         }
     }
@@ -83,7 +111,11 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             feature = "opus",
             feature = "synth6581",
             feature = "synth7",
-            feature = "analog"
+            feature = "synth106",
+            feature = "synthd",
+            feature = "synth53",
+            feature = "synth8",
+            feature = "synth80"
         )),
         expect(unused_variables, reason = "a build with no decoder holds no sound to send")
     )]
@@ -102,13 +134,29 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             Codec::Opus => {}
             #[cfg(not(any(feature = "pcm16", feature = "ima")))]
             Codec::Pcm16 | Codec::ImaAdpcm => {}
-            Codec::Synth7Bank | Codec::PatchBank => {}
-            #[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
+            Codec::Bank => {}
+            #[cfg(any(
+                feature = "synth6581",
+                feature = "synth7",
+                feature = "synth106",
+                feature = "synthd",
+                feature = "synth53",
+                feature = "synth8",
+                feature = "synth80"
+            ))]
             _ => {
                 let next = self.instruments.send_live(&self.store, &entry, &mut self.statistics, sink);
                 self.store.set_live_cursor(sound, next, entry.arrived_ms);
             }
-            #[cfg(not(any(feature = "synth6581", feature = "synth7", feature = "analog")))]
+            #[cfg(not(any(
+                feature = "synth6581",
+                feature = "synth7",
+                feature = "synth106",
+                feature = "synthd",
+                feature = "synth53",
+                feature = "synth8",
+                feature = "synth80"
+            )))]
             _ => {}
         }
     }

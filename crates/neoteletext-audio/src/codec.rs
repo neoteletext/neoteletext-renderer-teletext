@@ -13,33 +13,30 @@ pub enum Codec {
     /// frames. Each block is one constant-rate packet, so every block of a
     /// sound has the same length (decision E.124).
     Opus,
-    /// synth6581 (REQ-6411 item 2): a block is 20 ms of the chip's input,
-    /// one, two or four images of its 25 writable registers, and the
-    /// receiver's decoder is the chip.
+    /// The synth6581 family, synth6581 and synth8580, which
+    /// [`crate::record::TAG_SYNTH6581_CHIP`] chooses (code 12, MIDI-107): a
+    /// block is an event list (MIDI-23).
     Synth6581,
-    /// synth7 (REQ-6411 item 3): a block is 20 ms of the
-    /// instrument's input, 1 to 16 slots of a timed MIDI message each.
+    /// synth7 (code 13): a block is an event list.
     Synth7,
-    /// A bank of synth7 patches (REQ-6411 item 4): each block is one patch in
-    /// the instrument's packed format. It is stored as a sound and never
-    /// played.
-    Synth7Bank,
-    /// synth106 or synth60 (DEC-6429 foundations item 4): a block
-    /// is synth7's block, 1 to 16 slots of a timed MIDI message each.
+    /// The synth106 family, synth106 and synth60, which
+    /// [`crate::record::TAG_VARIANT`] chooses (code 14): a block is an event
+    /// list.
     Synth106,
-    /// synthD: a block is synth7's block.
+    /// synthD (code 15): a block is an event list.
     SynthD,
-    /// synth53: a block is synth7's block.
+    /// The synth53 family, synth53, synth52 and synth51, which
+    /// [`crate::record::TAG_VARIANT`] chooses (code 16): a block is an event
+    /// list.
     Synth53,
-    /// synth8: a block is synth7's block.
+    /// synth8 (code 17): a block is an event list.
     Synth8,
-    /// synth80: a block is synth7's block.
+    /// synth80 (code 18): a block is an event list.
     Synth80,
-    /// A bank of patches for one family of the analogue synthesizers, which
-    /// its OBJECT names ([`crate::record::TAG_BANK_FAMILY`]): each block is
-    /// one patch in that instrument's own byte layout. It is stored as a
-    /// sound and never played, as a synth7 bank is.
-    PatchBank,
+    /// A bank of any family with banks, which its OBJECT names
+    /// ([`crate::record::TAG_BANK_FAMILY`]) (code 19, MIDI-55): its blocks
+    /// are the pieces of one bank image, stored as a sound and never played.
+    Bank,
 }
 
 impl Codec {
@@ -63,20 +60,30 @@ impl Codec {
             // A receiver built without the decoder ignores Opus objects, as
             // it would any reserved code.
             2 if cfg!(feature = "opus") => Some(Self::Opus),
-            // A receiver built without an instrument ignores its objects,
-            // as it would any reserved code (REQ-6411).
-            3 if cfg!(feature = "synth6581") => Some(Self::Synth6581),
-            4 if cfg!(feature = "synth7") => Some(Self::Synth7),
-            5 if cfg!(feature = "synth7") => Some(Self::Synth7Bank),
-            6 if cfg!(feature = "synth106") => Some(Self::Synth106),
-            7 if cfg!(feature = "synthd") => Some(Self::SynthD),
-            8 if cfg!(feature = "synth53") => Some(Self::Synth53),
-            9 if cfg!(feature = "synth8") => Some(Self::Synth8),
-            10 if cfg!(feature = "synth80") => Some(Self::Synth80),
-            // A bank is read by a build with any of its families; one for a
-            // family the build leaves out is ignored when its OBJECT is
-            // read (`record::parse`).
-            11 if cfg!(feature = "analog") => Some(Self::PatchBank),
+            // A receiver built without a family ignores its objects, as it
+            // would any reserved code (MIDI-107). Codes 3 to 11 are retired
+            // and reserved for ever (MIDI-108).
+            12 if cfg!(feature = "synth6581") => Some(Self::Synth6581),
+            13 if cfg!(feature = "synth7") => Some(Self::Synth7),
+            14 if cfg!(feature = "synth106") => Some(Self::Synth106),
+            15 if cfg!(feature = "synthd") => Some(Self::SynthD),
+            16 if cfg!(feature = "synth53") => Some(Self::Synth53),
+            17 if cfg!(feature = "synth8") => Some(Self::Synth8),
+            18 if cfg!(feature = "synth80") => Some(Self::Synth80),
+            // A bank is read by a build with any family that has banks;
+            // one for a family the build leaves out is ignored when its
+            // OBJECT is read (`record::parse`).
+            19 if cfg!(any(
+                feature = "synth7",
+                feature = "synth106",
+                feature = "synthd",
+                feature = "synth53",
+                feature = "synth8",
+                feature = "synth80"
+            )) =>
+            {
+                Some(Self::Bank)
+            }
             _ => None,
         }
     }
@@ -88,74 +95,56 @@ impl Codec {
             Self::Pcm16 => 0,
             Self::ImaAdpcm => 1,
             Self::Opus => 2,
-            Self::Synth6581 => 3,
-            Self::Synth7 => 4,
-            Self::Synth7Bank => 5,
-            Self::Synth106 => 6,
-            Self::SynthD => 7,
-            Self::Synth53 => 8,
-            Self::Synth8 => 9,
-            Self::Synth80 => 10,
-            Self::PatchBank => 11,
+            Self::Synth6581 => 12,
+            Self::Synth7 => 13,
+            Self::Synth106 => 14,
+            Self::SynthD => 15,
+            Self::Synth53 => 16,
+            Self::Synth8 => 17,
+            Self::Synth80 => 18,
+            Self::Bank => 19,
         }
     }
 
-    /// Whether `code` names a family of the analogue synthesizers, built
-    /// into this receiver or not: the codes a patch bank may be for.
+    /// Whether `code` names a family that has banks, built into this
+    /// receiver or not: the codes a bank may be for (MIDI-48, tag 6).
     #[must_use]
     pub const fn is_family_code(code: u8) -> bool {
-        code >= Self::Synth106.code() && code <= Self::Synth80.code()
+        code >= Self::Synth7.code() && code <= Self::Synth80.code()
     }
 
-    /// The bytes of one patch of a family of the analogue synthesizers, in
-    /// the instrument's own layout; `None` for every other codec.
+    /// How many variants of its family a codec plays, which
+    /// [`crate::record::TAG_VARIANT`] chooses among, counted from 0
+    /// (MIDI-48): synth106 and synth60; synth53, synth52 and synth51; one
+    /// for every other.
     #[must_use]
-    pub const fn patch_bytes(self) -> Option<u16> {
+    pub const fn variants(self) -> u8 {
         match self {
-            Self::Synth106 => Some(SYNTH106_PATCH_BYTES),
-            Self::SynthD => Some(SYNTHD_PATCH_BYTES),
-            Self::Synth53 => Some(SYNTH53_PATCH_BYTES),
-            Self::Synth8 => Some(SYNTH8_PATCH_BYTES),
-            Self::Synth80 => Some(SYNTH80_PATCH_BYTES),
-            _ => None,
-        }
-    }
-
-    /// How many models of its instrument a codec plays, which
-    /// [`crate::record::TAG_MODEL`] chooses among, counted from 0: two for
-    /// synth106 (synth106, then synth60) and for synth53
-    /// (synth53, then synth52 and synth51, which are one model), one for every other.
-    #[must_use]
-    pub const fn models(self) -> u8 {
-        match self {
-            Self::Synth106 | Self::Synth53 => 2,
+            Self::Synth106 => 2,
+            Self::Synth53 => 3,
             _ => 1,
         }
     }
 
-    /// The codec of the bank a sound of this codec plays the patches of,
-    /// or `None` for a codec that plays no patches.
+    /// Whether a sound of the codec names 1 to [`MOST_BANKS`] banks
+    /// (MIDI-57): every family but the synth6581 family's.
     #[must_use]
-    pub const fn bank_codec(self) -> Option<Self> {
-        match self {
-            Self::Synth7 => Some(Self::Synth7Bank),
-            Self::Synth106 | Self::SynthD | Self::Synth53 | Self::Synth8 | Self::Synth80 => Some(Self::PatchBank),
-            _ => None,
-        }
+    pub const fn has_banks(self) -> bool {
+        matches!(self, Self::Synth7 | Self::Synth106 | Self::SynthD | Self::Synth53 | Self::Synth8 | Self::Synth80)
     }
 
-    /// Whether the codec is a bank: patches, stored as a sound and never
-    /// played.
+    /// Whether the codec is a bank: a bank image, stored as a sound and
+    /// never played.
     #[must_use]
     pub const fn is_bank(self) -> bool {
-        matches!(self, Self::Synth7Bank | Self::PatchBank)
+        matches!(self, Self::Bank)
     }
 
-    /// Whether a block of the codec is slots of timed MIDI messages, the
-    /// synth7's block (REQ-6411 item 3).
+    /// Whether a block of the codec is an event list (MIDI-23): the seven
+    /// synthesizer codecs, 12 to 18.
     #[must_use]
-    pub const fn is_slots(self) -> bool {
-        matches!(self, Self::Synth7 | Self::Synth106 | Self::SynthD | Self::Synth53 | Self::Synth8 | Self::Synth80)
+    pub const fn is_event(self) -> bool {
+        self.has_banks() || matches!(self, Self::Synth6581)
     }
 
     /// Whether the codec carries sound at `hz`: Opus only at 48 kHz, the
@@ -179,28 +168,17 @@ impl Codec {
             Self::Pcm16 => bytes >= 2 && bytes <= MAX_PCM_BLOCK && bytes.is_multiple_of(2),
             // A packet the decoder takes: at least the table of contents.
             Self::Opus => bytes >= 1 && bytes <= OPUS_MAX_PACKET,
-            // One, two or four register images (REQ-6411 item 2).
-            Self::Synth6581 => {
-                bytes == SYNTH6581_IMAGE_BYTES
-                    || bytes == SYNTH6581_IMAGE_BYTES * 2
-                    || bytes == SYNTH6581_IMAGE_BYTES * 4
-            }
-            // 1 to 16 slots (REQ-6411 item 3).
-            Self::Synth7 | Self::Synth106 | Self::SynthD | Self::Synth53 | Self::Synth8 | Self::Synth80 => {
-                bytes >= SYNTH7_SLOT_BYTES
-                    && bytes <= SYNTH7_SLOT_BYTES * SYNTH7_MAX_SLOTS
-                    && bytes.is_multiple_of(SYNTH7_SLOT_BYTES)
-            }
-            Self::Synth7Bank => bytes == SYNTH7_PATCH_BYTES,
-            // A patch of some family; the OBJECT's reader then holds it to
-            // the family the bank names (`record::parse`).
-            Self::PatchBank => {
-                bytes == SYNTH106_PATCH_BYTES
-                    || bytes == SYNTHD_PATCH_BYTES
-                    || bytes == SYNTH53_PATCH_BYTES
-                    || bytes == SYNTH8_PATCH_BYTES
-                    || bytes == SYNTH80_PATCH_BYTES
-            }
+            // The longest block of the sound (MIDI-40).
+            Self::Synth6581
+            | Self::Synth7
+            | Self::Synth106
+            | Self::SynthD
+            | Self::Synth53
+            | Self::Synth8
+            | Self::Synth80 => bytes as usize <= MOST_EVENT_BLOCK_BYTES,
+            // A piece of a bank image: at most what a DATA record carries
+            // (MIDI-55).
+            Self::Bank => bytes >= 1 && bytes as usize <= BANK_PIECE_BYTES,
         }
     }
 
@@ -213,9 +191,9 @@ impl Codec {
             Self::ImaAdpcm => (bytes as u32).saturating_sub(IMA_HEADER as u32).saturating_mul(2).saturating_add(1),
             Self::Pcm16 => bytes as u32 / 2,
             Self::Opus => OPUS_FRAME_SAMPLES,
-            // A bank counts one sample a patch, so that it is a stored
-            // sound of the profile (REQ-6411 item 4).
-            Self::Synth7Bank | Self::PatchBank => 1,
+            // A bank counts one sample a byte of its image, so that it is
+            // a stored sound of the profile (MIDI-55).
+            Self::Bank => bytes as u32,
             // An instrument's block is 20 ms (REQ-6411 item 1).
             _ => INSTRUMENT_BLOCK_SAMPLES,
         }
@@ -230,6 +208,8 @@ impl Codec {
             // The first sample is the header; the rest are packed two a byte.
             Self::ImaAdpcm => samples.saturating_sub(1).div_ceil(2).saturating_add(IMA_HEADER as u32),
             Self::Pcm16 => samples.saturating_mul(2),
+            // A bank's last piece is what is left of its image (MIDI-55).
+            Self::Bank => samples,
             // A block of an instrument is whole however few of its samples
             // the sound keeps, as an Opus packet is.
             _ => block_bytes as u32,
@@ -237,11 +217,10 @@ impl Codec {
     }
 
     /// Whether the codec is an instrument's input, rendered by the
-    /// instrument and not decoded (REQ-6411): synth6581's, synth7's or an
-    /// analogue synthesizer's.
+    /// instrument and not decoded: an event codec (MIDI-23).
     #[must_use]
     pub const fn is_instrument(self) -> bool {
-        matches!(self, Self::Synth6581) || self.is_slots()
+        self.is_event()
     }
 }
 
@@ -269,55 +248,32 @@ pub const INSTRUMENT_RATE: u32 = 48_000;
 /// The samples of an instrument's block: 20 ms at [`INSTRUMENT_RATE`], the
 /// figures of an Opus block (REQ-6411 item 1).
 pub const INSTRUMENT_BLOCK_SAMPLES: u32 = 960;
-/// The bytes of one image of synth6581's writable registers, addresses 0 to
-/// 24 (REQ-6411 item 2).
-pub const SYNTH6581_IMAGE_BYTES: u16 = 25;
-/// The bytes of one slot of a synth7 block: a time, a MIDI status byte and two
-/// data bytes (REQ-6411 item 3).
-pub const SYNTH7_SLOT_BYTES: u16 = 4;
-/// The most slots in a synth7 block (REQ-6411 item 3).
-pub const SYNTH7_MAX_SLOTS: u16 = 16;
-/// The bytes of one synth7 patch in the instrument's packed format
-/// (REQ-6411 item 4).
-pub const SYNTH7_PATCH_BYTES: u16 = 128;
-/// The most patches in a bank: the instrument's own bank (REQ-6411 item 4).
-pub const SYNTH7_BANK_PATCHES: u32 = 32;
-/// The latest time a synth7 slot may name within its block, in tenths of a
-/// millisecond: the block is 20 ms (REQ-6411 item 3).
-pub const SYNTH7_SLOT_LAST_TIME: u8 = 199;
-/// The bytes of one synth106 patch: its sixteen sliders and two bytes of
-/// switches, the layout of `neoteletext_audio_instruments::synth106::Patch`.
-pub const SYNTH106_PATCH_BYTES: u16 = 18;
-/// The bytes of one synthD patch, the layout of
-/// `neoteletext_audio_instruments::synthd::Patch`.
-pub const SYNTHD_PATCH_BYTES: u16 = 36;
-/// The bytes of one synth53 patch, the layout of
-/// `neoteletext_audio_instruments::synth53::Patch`.
-pub const SYNTH53_PATCH_BYTES: u16 = 24;
-/// The bytes of one synth8 patch, the layout of
-/// `neoteletext_audio_instruments::synth8::Patch`.
-pub const SYNTH8_PATCH_BYTES: u16 = 43;
-/// The bytes of one synth80 patch: two tones and the panel's other controls,
-/// the layout of `neoteletext_audio_instruments::synth80::Patch`.
-pub const SYNTH80_PATCH_BYTES: u16 = 85;
-/// The most patches in a patch bank: as many as a synth7 bank holds, so that
-/// a program change means the same in every instrument's block.
-pub const PATCH_BANK_PATCHES: u32 = SYNTH7_BANK_PATCHES;
-// A bank's patch is as long as its instrument reads. The figures are written
-// here so that a build without an instrument still knows a bank's block
-// sizes, and so that a publisher needs none of the instruments.
-#[cfg(feature = "synth106")]
-const _: () = assert!(SYNTH106_PATCH_BYTES as usize == neoteletext_audio_instruments::synth106::patch::PATCH_BYTES);
-#[cfg(feature = "synthd")]
-const _: () = assert!(SYNTHD_PATCH_BYTES as usize == neoteletext_audio_instruments::synthd::PATCH_BYTES);
-#[cfg(feature = "synth53")]
-const _: () = assert!(SYNTH53_PATCH_BYTES as usize == neoteletext_audio_instruments::synth53::patch::PATCH_BYTES);
-#[cfg(feature = "synth8")]
-const _: () = assert!(SYNTH8_PATCH_BYTES as usize == neoteletext_audio_instruments::synth8::PATCH_BYTES);
-#[cfg(feature = "synth80")]
-const _: () = assert!(SYNTH80_PATCH_BYTES as usize == neoteletext_audio_instruments::synth80::PATCH_BYTES);
+/// The most bytes of an event codec's block (MIDI-30): a record's body,
+/// less the DATA fields of an event codec and the block's length, so that a
+/// block always fits one DATA record.
+pub const MOST_EVENT_BLOCK_BYTES: usize =
+    crate::MAX_BODY - crate::record::EVENT_DATA_FIXED - crate::record::EVENT_BLOCK_LENGTH_BYTES;
+// MIDI-30: 1,024 − 4 − 4 − 9 − 2 = 1,005, the figure the instruments' event
+// lists are bounded by.
+const _: () = assert!(MOST_EVENT_BLOCK_BYTES == 1_005);
+const _: () = assert!(MOST_EVENT_BLOCK_BYTES == neoteletext_audio_instruments::midi::MOST_BLOCK_BYTES);
+/// The most blocks of a stored sound of an event codec: two minutes
+/// (MIDI-40, MIDI-104).
+pub const MOST_EVENT_SOUND_BLOCKS: u16 = 6_000;
+/// The most bytes of all the blocks of a stored sound of an event codec
+/// (MIDI-41): 6,000 Opus blocks of the longest packet, the most store any
+/// stored sound took before the event codecs.
+pub const MOST_EVENT_SOUND_BYTES: u32 = MOST_EVENT_SOUND_BLOCKS as u32 * OPUS_MAX_PACKET as u32;
+const _: () = assert!(MOST_EVENT_SOUND_BYTES == 960_000);
+/// The bytes of a piece of a bank image: the most a DATA record of the
+/// fixed layout carries (MIDI-55).
+pub const BANK_PIECE_BYTES: usize = crate::MAX_BODY - crate::record::DATA_FIXED;
+const _: () = assert!(BANK_PIECE_BYTES == 1_011);
+/// The most bytes of a bank image (MIDI-55).
+pub const MOST_BANK_BYTES: u32 = neoteletext_audio_instruments::midi::MOST_BANK_BYTES as u32;
+/// The most banks a sound names (MIDI-57).
+pub const MOST_BANKS: usize = neoteletext_audio_instruments::midi::MOST_BANKS;
 // The instruments render what the profile says a block is.
-#[cfg(any(feature = "synth6581", feature = "synth7", feature = "analog"))]
 const _: () = {
     assert!(INSTRUMENT_RATE == neoteletext_audio_instruments::SAMPLE_RATE);
     assert!(INSTRUMENT_BLOCK_SAMPLES as usize == neoteletext_audio_instruments::BLOCK_SAMPLES);

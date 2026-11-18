@@ -102,6 +102,7 @@ mod analogue;
 mod decimator;
 mod envelope;
 pub mod fir_table;
+pub mod midi;
 mod oscillator;
 
 use analogue::{Analogue, Levels};

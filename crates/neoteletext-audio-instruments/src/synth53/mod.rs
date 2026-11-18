@@ -82,6 +82,7 @@
 //! - **Velocity is ignored**, as the instrument's keyboard has none.
 
 pub mod law;
+pub mod midi;
 pub mod patch;
 mod voice;
 

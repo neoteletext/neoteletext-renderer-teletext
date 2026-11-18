@@ -532,9 +532,14 @@ dependencies = [
 name = "neoteletext-audio"
 version = "0.1.0"
 dependencies = [
+ "neoteletext-audio-instruments",
  "neoteletext-core",
  "neoteletext-opus",
 ]
+
+[[package]]
+name = "neoteletext-audio-instruments"
+version = "0.1.0"
 
 [[package]]
 name = "neoteletext-core"
@@ -554,6 +559,7 @@ dependencies = [
  "libfuzzer-sys",
  "neoteletext-app",
  "neoteletext-audio",
+ "neoteletext-audio-instruments",
  "neoteletext-core",
  "neoteletext-formats",
  "neoteletext-input",

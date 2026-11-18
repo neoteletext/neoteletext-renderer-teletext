@@ -28,6 +28,7 @@
 //! ```
 
 pub mod kernel;
+pub mod midi;
 pub mod msfa;
 mod note;
 pub mod patch;

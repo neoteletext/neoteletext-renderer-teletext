@@ -22,6 +22,17 @@ neoteletext-slicer = { path = "../crates/neoteletext-slicer" }
 neoteletext-web = { path = "../crates/neoteletext-web" }
 # `encode` for the Ogg Opus reader of the publishing tools (TODO-1228).
 neoteletext-audio = { path = "../crates/neoteletext-audio", features = ["default", "encode"] }
+# The synthesizers' event-list reader and every family's front end
+# (midi-architecture.md, MIDI-124).
+neoteletext-audio-instruments = { path = "../crates/neoteletext-audio-instruments", features = [
+    "synth6581",
+    "synth7",
+    "synth106",
+    "synthd",
+    "synth53",
+    "synth8",
+    "synth80",
+] }
 neoteletext-opus = { path = "../crates/neoteletext-opus" }
 neoteletext-input = { path = "../crates/neoteletext-input" }
 # The pipe between neottx's fetcher and decoder processes (REQ-SEC-018),
@@ -191,6 +202,13 @@ bench = false
 [[bin]]
 name = "audio_messages"
 path = "fuzz_targets/audio_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audio_event_blocks"
+path = "fuzz_targets/audio_event_blocks.rs"
 test = false
 doc = false
 bench = false

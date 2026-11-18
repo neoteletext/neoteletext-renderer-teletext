@@ -187,6 +187,7 @@
 //!   [`Patch`] holds two.
 
 pub mod law;
+pub mod midi;
 pub mod patch;
 pub mod presets;
 mod voice;

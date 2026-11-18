@@ -6,7 +6,7 @@ use super::{MS_PER_SECOND, Receiver, duration_ms};
 use crate::control::Play;
 use crate::port::{Start, VoiceSink};
 use crate::store::{Entry, LiveEdge};
-use crate::{CHANNELS, Codec, PROGRESSIVE_BUFFER_MS};
+use crate::{CHANNELS, PROGRESSIVE_BUFFER_MS};
 
 impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// Starts a play now if its sound is ready, or keeps it waiting.
@@ -16,8 +16,8 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
             .entry(play.sound.handle)
             .copied()
             .filter(|entry| entry.sound == play.sound && !entry.conflict)
-            // A sound that plays patches plays those of its bank, so it
-            // waits for them (REQ-6411 item 5).
+            // A sound that plays patches plays those of its banks, so it
+            // waits for them (MIDI-62).
             .filter(|entry| self.bank_ready(entry))
             .filter(|entry| {
                 if entry.live {
@@ -28,7 +28,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                 entry.complete()
                     || (play.progressive && self.buffered_ms(entry) >= PROGRESSIVE_BUFFER_MS.min(duration_ms(entry)))
             });
-        // A bank is patches and is never played (REQ-6411 item 4).
+        // A bank is patches and is never played (MIDI-55).
         if self.store.entry(play.sound.handle).is_some_and(|entry| entry.codec.is_bank()) {
             return;
         }
@@ -89,16 +89,13 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         }
     }
 
-    /// Whether the bank `entry`'s sound names is held whole: it is a bank
-    /// for the sound's instrument, every patch of it has arrived and none
-    /// arrived twice with different bytes. A sound that plays no patches
-    /// waits for none.
+    /// Whether every bank `entry`'s sound names is held whole (MIDI-52,
+    /// MIDI-62): a bank for the sound's family, every piece of it arrived
+    /// and none in conflict. A sound that names none waits for none.
     fn bank_ready(&self, entry: &Entry) -> bool {
-        let Some(codec) = entry.codec.bank_codec() else { return true };
-        self.store.entry(entry.param).is_some_and(|bank| {
-            // A patch bank is for one family (`Entry::setup`).
-            let fits = codec != Codec::PatchBank || bank.setup.first() == Some(&entry.codec.code());
-            bank.codec == codec && fits && bank.complete() && !bank.conflict
+        entry.banks().iter().all(|&handle| {
+            self.store.entry(handle).is_some_and(|bank| bank.setting == entry.codec.code())
+                && self.store.image(handle).is_some()
         })
     }
 

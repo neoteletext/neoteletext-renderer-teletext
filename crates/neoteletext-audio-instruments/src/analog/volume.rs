@@ -11,29 +11,19 @@
 use super::filter::ONE_Q28;
 
 /// The most the gain moves in one sample, in Q28: from nothing to all of
-/// it in 256 samples, 5.3 ms at the output rate.
-///
-/// Source: own choice: long against a sample and short against a hand
-/// on a volume control.
-pub const VOLUME_SLEW: i32 = ONE_Q28 >> 8;
-
-/// The largest value of a volume controller.
-///
-/// Source: MIDI 1.0: a data byte is seven bits.
-const CONTROLLER_FULL: i64 = 0x7f;
-/// Its square, which the square of a controller is a share of.
-const CONTROLLER_FULL_SQUARED: i64 = CONTROLLER_FULL * CONTROLLER_FULL;
+/// it in 256 samples, 5.3 ms at the output rate. It is the one slew of
+/// every family (MIDI-82), defined once in the common layer.
+pub const VOLUME_SLEW: i32 = crate::midi::common::VOLUME_SLEW_Q28;
+// The common layer's fixed point is the filters'.
+const _: () = assert!(crate::midi::common::VOLUME_ONE_Q28 == ONE_Q28);
 
 /// The gain a volume controller asks for, in Q28: the square of its
 /// share of its largest value, 127, so half the controller is a quarter of
-/// the level. A value above the controller's largest, which no message
-/// carries, asks for as much more.
-///
-/// Source: own choice of the law, as a volume control's taper.
+/// the level: the one law of every family (MIDI-82, MIDI-92), defined in
+/// the common layer.
 #[must_use]
 pub fn wanted(controller: u8) -> i32 {
-    let square = i64::from(controller).saturating_mul(i64::from(controller));
-    i32::try_from(square.saturating_mul(i64::from(ONE_Q28)) / CONTROLLER_FULL_SQUARED).unwrap_or(ONE_Q28)
+    crate::midi::common::volume_gain_q28(controller)
 }
 
 /// A volume's gain as it stands, in Q28.

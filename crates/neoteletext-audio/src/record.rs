@@ -3,7 +3,10 @@
 //! [`MAX_RECORD`](crate::MAX_RECORD) bytes and is checked against every bound before anything
 //! in it is used.
 
-use crate::{CHANNELS, Codec, DUCK_PERCENT, MAX_BODY, MAX_FADE_MS, MAX_GAIN, SERVICE_SCOPE, sample_rate};
+use crate::{
+    CHANNELS, Codec, DUCK_PERCENT, MAX_BODY, MAX_FADE_MS, MAX_GAIN, MOST_BANK_BYTES, MOST_BANKS,
+    MOST_EVENT_SOUND_BLOCKS, MOST_EVENT_SOUND_BYTES, SERVICE_SCOPE, sample_rate,
+};
 use frame::Fields;
 
 mod frame;
@@ -107,6 +110,15 @@ pub const fn is_channel_type(kind: u8) -> bool {
 pub const OBJECT_FIXED: usize = 1 + 2 + 4 + 1 + 1 + 2 + 4 + 2;
 /// DATA's fixed fields: handle, generation, first block.
 pub const DATA_FIXED: usize = 1 + 2 + 2;
+/// The fixed fields of a DATA record of an event codec (MIDI-42): handle,
+/// generation, first block, and the byte offset of the first block within
+/// the sound, 4 bytes, 0 for a live sound.
+pub const EVENT_DATA_FIXED: usize = DATA_FIXED + EVENT_OFFSET_BYTES;
+/// The bytes of a DATA record's byte offset, for an event codec (MIDI-42).
+pub const EVENT_OFFSET_BYTES: usize = 4;
+/// The bytes of the length before each block of an event codec in a DATA
+/// record, big-endian (MIDI-42).
+pub const EVENT_BLOCK_LENGTH_BYTES: usize = 2;
 /// CONTROL's fields: channel, sequence, operation, handle, generation, gain,
 /// fade, flags, duck, page.
 pub const CONTROL_BYTES: usize = 1 + 2 + 1 + 1 + 2 + 1 + 2 + 1 + 1 + 2;
@@ -118,32 +130,37 @@ pub const MAX_LANGUAGE: usize = 16;
 pub const TAG_LABEL: u8 = 1;
 /// Extension tag of a language.
 pub const TAG_LANGUAGE: u8 = 2;
-/// Extension tag of a synth6581 sound's chip and clock, one byte (REQ-6411 item
-/// 2): bit 0 is 0 for synth6581 and 1 for synth8580; bit 1 is 0 for the PAL
-/// clock and 1 for the NTSC clock; the rest are 0.
+/// Extension tag of a sound of the synth6581 family's chip and clock, one
+/// byte, on codec 12 (MIDI-48; S6581-39): bit 0 is 0 for synth6581 and 1 for
+/// synth8580; bit 1 is 0 for the PAL clock and 1 for the NTSC clock; the
+/// rest are 0. Without it: synth6581 on the PAL clock.
 pub const TAG_SYNTH6581_CHIP: u8 = 3;
-/// Extension tag of the bank of a sound that plays patches, one byte: the
-/// handle of the sound that holds them (REQ-6411 item 3). A synth7 sound names
-/// a synth7 bank; a sound of an analogue synthesizer names a patch bank of its
-/// own family.
-pub const TAG_SYNTH7_BANK: u8 = 4;
-/// Extension tag of the model a sound of an analogue synthesizer plays, one
-/// byte, counted from 0 and below [`Codec::models`]: for synth106, 0
-/// synth106 and 1 synth60; for synth53, 0 synth53 and 1 synth52 and
-/// synth51; for the others 0 alone. Without the tag: model 0.
-pub const TAG_MODEL: u8 = 5;
-/// Extension tag of the family a patch bank is for, one byte: the code of
-/// that family's codec ([`Codec::is_family_code`]). A patch bank must
-/// carry it, and its blocks are that family's patches.
+/// Extension tag of the banks a sound names, 1 to [`MOST_BANKS`] bytes, on
+/// codecs 13 to 18 (MIDI-48, MIDI-57): the handles of its banks, bank index
+/// 0 first. Required on those codecs.
+pub const TAG_BANKS: u8 = 4;
+/// Extension tag of the variant a sound plays, one byte, on codecs 14 and
+/// 16 (MIDI-48), below [`Codec::variants`]: for codec 14, 0 synth106 and 1
+/// synth60; for codec 16, 0 synth53, 1 synth52 and 2 synth51. Without the
+/// tag: 0.
+pub const TAG_VARIANT: u8 = 5;
+/// Extension tag of the family a bank is for, one byte, on codec 19
+/// (MIDI-48): the code of that family's codec, 13 to 18
+/// ([`Codec::is_family_code`]). Required on that codec.
 pub const TAG_BANK_FAMILY: u8 = 6;
-/// Extension tag of a synth8 sound's keyboard, two bytes: the key mode
-/// ([`SYNTH8_KEYS_WHOLE`], [`SYNTH8_KEYS_DUAL`] or
+/// Extension tag of a synth8 sound's keyboard, two bytes, on codec 17: the
+/// key mode ([`SYNTH8_KEYS_WHOLE`], [`SYNTH8_KEYS_DUAL`] or
 /// [`SYNTH8_KEYS_SPLIT`]) and the split point, a MIDI key of 0 to
 /// [`MIDI_DATA_MAX`], from which up a split keyboard plays the upper patch.
-/// Without the tag: the whole keyboard plays the upper patch. It is a tag
-/// and not a controller so that a receiver that joins a live sound, or
-/// loses a block of one, has it from the OBJECT.
+/// Without the tag: the whole keyboard plays the upper patch. The adopted
+/// interface has no message for either (`synth8.md`, S8-18), so a receiver
+/// that joins a live sound has them from the OBJECT.
 pub const TAG_SYNTH8_KEYS: u8 = 7;
+/// Extension tag of the total bytes of a stored sound's blocks, 4 bytes,
+/// big-endian, 0 to [`MOST_EVENT_SOUND_BYTES`], on codecs 12 to 18
+/// (MIDI-41). Required on a stored sound of those codecs; a live sound's
+/// OBJECT must not carry it.
+pub const TAG_TOTAL_BYTES: u8 = 8;
 /// [`TAG_SYNTH8_KEYS`]: eight voices of the upper patch.
 pub const SYNTH8_KEYS_WHOLE: u8 = 0;
 /// [`TAG_SYNTH8_KEYS`]: every key plays both patches, four voices each.
@@ -196,24 +213,39 @@ pub struct Object<'a> {
     pub label: Option<&'a [u8]>,
     /// The BCP 47 language tag, as sent.
     pub language: Option<&'a [u8]>,
-    /// A synth6581 sound's chip and clock ([`TAG_SYNTH6581_CHIP`]); `None` is a synth6581 on
-    /// the PAL clock.
+    /// A sound of the synth6581 family's chip and clock
+    /// ([`TAG_SYNTH6581_CHIP`]); `None` is a synth6581 on the PAL clock.
     pub chip: Option<u8>,
-    /// The handle of the bank of a sound that plays patches
-    /// ([`TAG_SYNTH7_BANK`]).
-    pub bank: Option<u8>,
-    /// The model of an analogue synthesizer's sound ([`TAG_MODEL`]); `None`
-    /// is model 0.
-    pub model: Option<u8>,
-    /// The family a patch bank is for ([`TAG_BANK_FAMILY`]): the code of
-    /// its codec.
+    /// The handles of the banks a sound names ([`TAG_BANKS`]), bank index 0
+    /// first; [`Object::banks`] gives them as a slice.
+    pub banks: [u8; MOST_BANKS],
+    /// How many of [`Object::banks`] are named: 0 where the tag is absent.
+    pub bank_count: u8,
+    /// The variant a sound plays ([`TAG_VARIANT`]); `None` is variant 0.
+    pub variant: Option<u8>,
+    /// The family a bank is for ([`TAG_BANK_FAMILY`]): the code of its
+    /// codec.
     pub family: Option<u8>,
     /// A synth8 sound's key mode and split point
     /// ([`TAG_SYNTH8_KEYS`]); `None` is the whole keyboard.
     pub keys: Option<[u8; 2]>,
+    /// The total bytes of a stored event sound's blocks
+    /// ([`TAG_TOTAL_BYTES`]).
+    pub total: Option<u32>,
 }
 
-/// A DATA record: whole blocks of a sound (REQ-AUD-005).
+impl Object<'_> {
+    /// The handles of the banks the sound names, bank index 0 first.
+    #[must_use]
+    pub fn banks(&self) -> &[u8] {
+        self.banks.get(..usize::from(self.bank_count)).unwrap_or(&[])
+    }
+}
+
+/// A DATA record: whole blocks of a sound (REQ-AUD-005). Its layout after
+/// the first block's number is its codec's, which the record does not say:
+/// for an event codec it is the offset and length-prefixed blocks of
+/// MIDI-42, which [`event_blocks`] reads.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Data<'a> {
     /// The sound's handle.
@@ -222,8 +254,45 @@ pub struct Data<'a> {
     pub generation: u16,
     /// The index of the first block.
     pub first_block: u16,
-    /// The blocks, back to back.
+    /// The blocks, back to back; for an event codec, the byte offset and
+    /// then the blocks, each with its length.
     pub blocks: &'a [u8],
+}
+
+/// The byte offset of an event codec's DATA record's first block, and its
+/// blocks, each a 2-byte length and that many bytes (MIDI-42): the offset
+/// and an iterator of the blocks, which yields `None` and ends at a length
+/// that runs past the record. `None` for a record too short for the offset.
+#[must_use]
+pub fn event_blocks(blocks: &[u8]) -> Option<(u32, EventBlocks<'_>)> {
+    let (offset, rest) = blocks.split_first_chunk::<EVENT_OFFSET_BYTES>()?;
+    Some((u32::from_be_bytes(*offset), EventBlocks { rest }))
+}
+
+/// The length-prefixed blocks of an event codec's DATA record (MIDI-42).
+#[derive(Clone, Debug)]
+pub struct EventBlocks<'a> {
+    rest: &'a [u8],
+}
+
+impl<'a> Iterator for EventBlocks<'a> {
+    type Item = Option<&'a [u8]>;
+
+    fn next(&mut self) -> Option<Option<&'a [u8]>> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let block = self
+            .rest
+            .split_first_chunk::<EVENT_BLOCK_LENGTH_BYTES>()
+            .and_then(|(length, rest)| rest.split_at_checked(usize::from(u16::from_be_bytes(*length))));
+        let Some((block, rest)) = block else {
+            self.rest = &[];
+            return Some(None);
+        };
+        self.rest = rest;
+        Some(Some(block))
+    }
 }
 
 /// What a command does (REQ-AUD-011).
@@ -329,10 +398,12 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
         label: None,
         language: None,
         chip: None,
-        bank: None,
-        model: None,
+        banks: [0; MOST_BANKS],
+        bank_count: 0,
+        variant: None,
         family: None,
         keys: None,
+        total: None,
     };
     if let Some(codec) = codec {
         if !codec.allows_block(block_bytes) {
@@ -362,22 +433,27 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
             TAG_LABEL if length <= MAX_LABEL => object.label = Some(value),
             TAG_LANGUAGE if length <= MAX_LANGUAGE => object.language = Some(value),
             TAG_LABEL | TAG_LANGUAGE => return Err(RecordError::BadValue("extension too long")),
-            // The instruments' tags mean something only on their own codec
-            // (REQ-6411 items 2 and 3); on another they are skipped, as any
-            // unknown tag is.
+            // The synthesizers' tags mean something only on their own
+            // codecs (MIDI-48); on another they are skipped, as any unknown
+            // tag is.
             TAG_SYNTH6581_CHIP if codec == Some(Codec::Synth6581) => match value {
                 [chip] if chip & !SYNTH6581_CHIP_BITS == 0 => object.chip = Some(*chip),
                 _ => return Err(RecordError::BadValue("chip")),
             },
-            TAG_SYNTH7_BANK if codec.is_some_and(|codec| codec.bank_codec().is_some()) => match value {
-                [bank] => object.bank = Some(*bank),
-                _ => return Err(RecordError::BadValue("bank")),
+            TAG_BANKS if codec.is_some_and(Codec::has_banks) => {
+                if value.is_empty() || value.len() > MOST_BANKS {
+                    return Err(RecordError::BadValue("banks"));
+                }
+                for (place, &handle) in object.banks.iter_mut().zip(value) {
+                    *place = handle;
+                }
+                object.bank_count = u8::try_from(value.len()).map_err(|_| RecordError::BadValue("banks"))?;
+            }
+            TAG_VARIANT if codec.is_some_and(|codec| codec.variants() > 1) => match value {
+                [variant] if codec.is_some_and(|codec| *variant < codec.variants()) => object.variant = Some(*variant),
+                _ => return Err(RecordError::BadValue("variant")),
             },
-            TAG_MODEL if codec.is_some_and(|codec| codec.patch_bytes().is_some()) => match value {
-                [model] if codec.is_some_and(|codec| *model < codec.models()) => object.model = Some(*model),
-                _ => return Err(RecordError::BadValue("model")),
-            },
-            TAG_BANK_FAMILY if codec == Some(Codec::PatchBank) => match value {
+            TAG_BANK_FAMILY if codec == Some(Codec::Bank) => match value {
                 [family] if Codec::is_family_code(*family) => object.family = Some(*family),
                 _ => return Err(RecordError::BadValue("family")),
             },
@@ -387,31 +463,54 @@ fn object<'a>(fields: &mut Fields<'a>) -> Result<Object<'a>, RecordError> {
                 }
                 _ => return Err(RecordError::BadValue("keys")),
             },
+            TAG_TOTAL_BYTES if codec.is_some_and(Codec::is_event) => match value {
+                [a, b, c, d] => object.total = Some(u32::from_be_bytes([*a, *b, *c, *d])),
+                _ => return Err(RecordError::BadValue("total bytes")),
+            },
             _ => {}
         }
     }
-    // A sound that plays patches plays those of the bank it names (REQ-6411
-    // item 3).
-    if codec.is_some_and(|codec| codec.bank_codec().is_some()) && object.bank.is_none() {
-        return Err(RecordError::BadValue("bank"));
-    }
-    // A bank holds 1 to 32 patches and is never live (REQ-6411 item 4).
-    if codec.is_some_and(Codec::is_bank) && (samples == 0 || samples > crate::PATCH_BANK_PATCHES) {
-        return Err(RecordError::BadValue("patches"));
-    }
-    if codec == Some(Codec::PatchBank) {
-        // A patch bank says whose patches it holds, and each block is one
-        // patch of that family.
-        let family = object.family.ok_or(RecordError::BadValue("family"))?;
-        match Codec::from_code(family).and_then(Codec::patch_bytes) {
-            Some(bytes) if bytes == block_bytes => {}
-            Some(_) => return Err(RecordError::BadValue("block size")),
-            // A family this build leaves out: the bank is ignored, as a
-            // sound of that family is.
-            None => object.codec = None,
-        }
+    if let Some(codec) = codec {
+        check_synthesizer(&mut object, codec)?;
     }
     Ok(object)
+}
+
+/// The rules of an OBJECT of an event codec or a bank (MIDI-40, MIDI-41,
+/// MIDI-55, MIDI-57).
+fn check_synthesizer(object: &mut Object<'_>, codec: Codec) -> Result<(), RecordError> {
+    if codec.is_event() {
+        let live = object.samples == 0;
+        let whole = u32::from(object.blocks).saturating_mul(crate::INSTRUMENT_BLOCK_SAMPLES);
+        if !live && (object.blocks > MOST_EVENT_SOUND_BLOCKS || object.samples != whole) {
+            return Err(RecordError::BadValue("block count"));
+        }
+        // A stored sound states its total, which bounds its store; a live
+        // sound has none (MIDI-41).
+        let most = u32::from(object.blocks).saturating_mul(u32::from(object.block_bytes)).min(MOST_EVENT_SOUND_BYTES);
+        match (live, object.total) {
+            (true, None) => {}
+            (false, Some(total)) if total <= most => {}
+            _ => return Err(RecordError::BadValue("total bytes")),
+        }
+    }
+    // A sound that plays patches names its banks (MIDI-57).
+    if codec.has_banks() && object.bank_count == 0 {
+        return Err(RecordError::BadValue("banks"));
+    }
+    if codec == Codec::Bank {
+        // A bank image of 1 to 16,384 bytes, never live (MIDI-55).
+        if object.samples == 0 || object.samples > MOST_BANK_BYTES {
+            return Err(RecordError::BadValue("bank bytes"));
+        }
+        // A bank says whose patches it holds; one for a family this build
+        // leaves out is ignored, as a sound of that family is.
+        let family = object.family.ok_or(RecordError::BadValue("family"))?;
+        if Codec::from_code(family).is_none() {
+            object.codec = None;
+        }
+    }
+    Ok(())
 }
 
 fn control(fields: &mut Fields<'_>) -> Result<Control, RecordError> {
