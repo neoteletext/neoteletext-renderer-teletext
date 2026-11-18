@@ -61,8 +61,8 @@ embedded-io = { version = "0.7.1", default-features = false }
 regis = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2" }
 regis-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2" }
 regis-minify = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2" }
-naplps = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "9122afdbe7165314e1f12473392b4570b66cb026" }
-naplps-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "9122afdbe7165314e1f12473392b4570b66cb026" }
+naplps = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "016a83cb0859343154db06a7661b500c542d0946" }
+naplps-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "016a83cb0859343154db06a7661b500c542d0946" }
 
 [workspace.lints.rust]
 # REQ-SEC-015: only the C interface crate (REQ-GEN-018) may contain unsafe
