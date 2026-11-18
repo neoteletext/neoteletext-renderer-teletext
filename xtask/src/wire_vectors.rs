@@ -265,6 +265,15 @@ fn object(rows: &mut Vec<Row>) -> Result<(), String> {
         value: hexadecimal(&sound.object_record().map_err(refused)?),
         meaning: "the OBJECT of RULE-61's example: synth106_local handle=1 generation=1 banks=[2], a setup block of 3 bytes",
     });
+    // The server names the variant of every sound of a family that has
+    // more than one (MIDI-48), so its OBJECT of the same sound has that tag.
+    sound.variant = Some(0);
+    rows.push(Row {
+        kind: "object",
+        name: "local_sound_as_the_server_writes_it",
+        value: hexadecimal(&sound.object_record().map_err(refused)?),
+        meaning: "the OBJECT of RULE-61's example as the server writes it: synth106_local handle=1 generation=1 variant=0 banks=[2], a setup block of 3 bytes",
+    });
     Ok(())
 }
 
@@ -298,15 +307,41 @@ mod tests {
 
     use super::*;
 
+    /// The `rules` rows the server writes (RULE-85): the worked examples of
+    /// page-rules.md, whose names the server turns into numbers. The engine
+    /// has no encoder of a table by names, so it cannot write them itself.
+    const SERVER_WRITTEN_RULES: [&str; 8] =
+        ["rule_35", "example_1", "example_2", "example_3", "example_4", "example_5", "example_6", "music_player"];
+
+    /// Whether `value`, a RULES record's body in hexadecimal, passes the
+    /// check, decodes to a table and encodes back to the same bytes.
+    fn decodes_and_encodes_back(value: &str) -> bool {
+        let Some((bytes, length)) = neoteletext_web::wire_vectors::bytes_of(value) else { return false };
+        let Some(body) = bytes.get(..length) else { return false };
+        let mut table = Box::new(Table::new());
+        let Ok(header) = neoteletext_rules::decode(body, &mut table) else { return false };
+        let mut out = [0_u8; MAX_TABLE_BYTES];
+        let encoded =
+            neoteletext_rules::encode(header.page, header.generation, header.has_table.then_some(&*table), &mut out);
+        neoteletext_rules::check(body).is_ok() && encoded.is_ok_and(|length| out.get(..length) == Some(body))
+    }
+
     /// RULE-85, ANIM-23 (REQ-6528, REQ-6529): the table's rows of these
     /// kinds are exactly what the engine's encoders write, in order, so a
-    /// change to an encoder or to the table that parts them fails here.
+    /// change to an encoder or to the table that parts them fails here. The
+    /// rows the server writes are held to decode and encode back instead.
     #[test]
     fn the_tables_rows_of_these_kinds_are_what_the_engine_writes() {
         let written = rows().expect("they encode");
+        let mut server_written = Vec::new();
         let held: Vec<Row> = vectors()
             .filter_map(|vector| {
                 let kind = KINDS.into_iter().find(|kind| *kind == vector.kind)?;
+                if kind == "rules" && SERVER_WRITTEN_RULES.contains(&vector.name) {
+                    assert!(decodes_and_encodes_back(vector.value), "{}", vector.name);
+                    server_written.push(vector.name);
+                    return None;
+                }
                 let row = written.iter().find(|row| row.kind == kind && row.name == vector.name);
                 Some(Row {
                     kind,
@@ -319,5 +354,6 @@ mod tests {
             })
             .collect();
         assert_eq!(held, written);
+        assert_eq!(server_written, SERVER_WRITTEN_RULES);
     }
 }
