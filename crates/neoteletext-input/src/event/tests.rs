@@ -7,7 +7,7 @@
 use super::*;
 use crate::MAX_MESSAGE;
 use crate::caps::AGENT;
-use crate::caps::{CURSOR_CAP, RETIRED_PAGE_BIT, SELECT_CAP};
+use crate::caps::{CURSOR_CAP, NAPLPS_CAP, REGIS_CAP, RETIRED_PAGE_BIT, SELECT_CAP};
 use crate::keys::code;
 use std::borrow::ToOwned;
 use std::format;
@@ -143,6 +143,10 @@ fn every_event_round_trips() {
         Event::Compose { on: ON, cursor: 0, text: "" },
         Event::Hello { version: crate::VERSION, caps: CURSOR_CAP, agent: None },
         Event::Hello { version: crate::VERSION, caps: AGENT, agent: Some("NeoTeletext/0.1 (macOS)") },
+        // Renderer parity PAR-1 (REQ-6761): each picture language's bit.
+        Event::Hello { version: crate::VERSION, caps: SELECT_CAP | REGIS_CAP, agent: None },
+        Event::Hello { version: crate::VERSION, caps: SELECT_CAP | NAPLPS_CAP, agent: None },
+        Event::Hello { version: crate::VERSION, caps: SELECT_CAP | REGIS_CAP | NAPLPS_CAP, agent: None },
         Event::Extension { kind: 0x41, payload: &[1, 2, 3] },
     ];
     for event in events {
@@ -534,6 +538,21 @@ fn focus_and_session_events_carry_no_stamp() {
     let hello = [0xFF, 0x09, 0x03, 0x80, 0x80, 0x04];
     assert_eq!(read(&hello), Err(InputError::BadValue("caps")), "PAGE's capability, bit 65,536");
     assert_eq!(RETIRED_PAGE_BIT, 65_536);
+}
+
+// Renderer parity PAR-1 (REQ-6761): the picture bits are bits 23 and 24, and
+// HELLO's reader reads past a bit it does not know, so a server built before
+// them reads a HELLO offering them.
+#[test]
+fn hello_offers_the_picture_bits_at_23_and_24() {
+    assert_eq!((REGIS_CAP, NAPLPS_CAP), (1 << 23, 1 << 24));
+    let hello = Item::Event(Event::Hello { version: crate::VERSION, caps: REGIS_CAP | NAPLPS_CAP, agent: None });
+    assert_eq!(bytes(&hello), [0xFF, 0x09, crate::VERSION.try_into().unwrap(), 0x80, 0x80, 0x80, 0x0C]);
+    let unknown = [0xFF, 0x09, 0x03, 0x80, 0x80, 0x80, 0x10];
+    assert_eq!(
+        read(&unknown),
+        Ok(Some((Item::Event(Event::Hello { version: 3, caps: 1 << 25, agent: None }), unknown.len())))
+    );
 }
 
 // REQ-207 item 5: the L flag says a key did not come up, on a release alone.

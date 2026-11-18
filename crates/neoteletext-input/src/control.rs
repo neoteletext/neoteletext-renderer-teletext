@@ -239,7 +239,7 @@ pub fn from_packet<'b>(
 )]
 mod tests {
     use super::*;
-    use crate::caps::CURSOR_CAP;
+    use crate::caps::{CURSOR_CAP, NAPLPS_CAP, REGIS_CAP};
 
     // REQ-INT-111.
     #[test]
@@ -253,6 +253,23 @@ mod tests {
             assert_eq!(from_packet(&packet, &mut buffer), Some(Ok(control)), "{control:?}");
             assert!(crate::cursor::from_packet(&packet).is_none(), "not a cursor");
         }
+    }
+
+    // Renderer parity PAR-1 (REQ-6761): WELCOME agreeing each picture bit
+    // round-trips; bit 25, which no capability is, is refused.
+    #[test]
+    fn welcome_agrees_the_picture_bits_and_refuses_bit_25() {
+        for caps in [REGIS_CAP, NAPLPS_CAP, REGIS_CAP | NAPLPS_CAP | CURSOR_CAP] {
+            let control = Control::Welcome { version: 3, caps, resume: None };
+            let mut body = [0; MAX_BODY];
+            let length = write_body(&control, &mut body).unwrap();
+            assert_eq!(read_body(&body[..length]), Ok(control), "{caps:#x}");
+        }
+        assert_eq!(
+            read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x0C]),
+            Ok(Control::Welcome { version: 3, caps: REGIS_CAP | NAPLPS_CAP, resume: None })
+        );
+        assert_eq!(read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x10]), Err(ControlError::BadValue("caps")));
     }
 
     // REQ-INT-111, decision E.125: an older channel's mode records and mode

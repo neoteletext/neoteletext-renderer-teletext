@@ -31,7 +31,18 @@ pub const RESUME_CAP: u32 = 1 << 21;
 /// connection's selection (DOC-1753, REQ-INT-140); a channel that sets it sends the
 /// one sub-page selected, never a page's sub-pages together (DEC-1500).
 pub const SELECT_CAP: u32 = 1 << 22;
+/// Capability: the receiver draws a sub-page's ReGIS from the REGIS record
+/// (type 14), with `DRAWING_LINKS` and `REGIS_CURSOR`, as REQ-6341 and the
+/// ReGIS repository's `docs/regis-v2.md` say (renderer parity PAR-1,
+/// REQ-6761). A server agrees it only when offered; a receiver that does not
+/// offer it is given the mosaic fallback for ReGIS pictures (PAR-24).
+pub const REGIS_CAP: u32 = 1 << 23;
+/// Capability: the receiver draws a sub-page's NAPLPS from the NAPLPS record
+/// (type 17), with `NAPLPS_OBJECTS`, `DRAWING_LINKS` and `REGIS_CURSOR` for
+/// its objects, on the teletext raster of REQ-5819 (renderer parity PAR-1,
+/// REQ-6761, DEC-6667).
+pub const NAPLPS_CAP: u32 = 1 << 24;
 /// Every capability defined.
-pub const ALL_CAPS: u32 = CURSOR_CAP | AGENT | TOUCH_CAP | RESUME_CAP | SELECT_CAP;
+pub const ALL_CAPS: u32 = CURSOR_CAP | AGENT | TOUCH_CAP | RESUME_CAP | SELECT_CAP | REGIS_CAP | NAPLPS_CAP;
 // A retired bit is never a capability.
 const _: () = assert!(ALL_CAPS & (RETIRED_MODE_BITS | RETIRED_ECHO_BIT | RETIRED_PAGE_BIT) == 0);
