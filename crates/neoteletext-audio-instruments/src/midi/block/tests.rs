@@ -3,8 +3,13 @@
 use std::vec;
 use std::vec::Vec;
 
-use super::super::{ChannelMessage, Message, MidiEvent, status};
-use super::{BlockFault, BlockWriter, Events, MOST_BLOCK_BYTES, MOST_EVENTS, Read, WriteError, check};
+use super::super::{
+    Banks, ChannelMessage, Cue, Instrument, Message, MidiEvent, Outcome, PlayedCue, play_block, sample_of_tick, status,
+};
+use super::{
+    BlockFault, BlockWriter, DATA_MAX, Events, MAX_CUES_PER_BLOCK, MOST_BLOCK_BYTES, MOST_EVENTS, Read, WriteError,
+    check,
+};
 
 fn reads(block: &[u8]) -> Vec<Read<'_>> {
     Events::new(block).collect()
@@ -211,4 +216,162 @@ fn the_writer_refuses_what_a_block_never_carries() {
     assert_eq!(writer.push(0, &channel(0x90, 1, 1)), Err(WriteError::Full));
     assert_eq!(writer.push(0, &channel(0xD0, 1, 0)), Err(WriteError::Full));
     assert_eq!(writer.bytes().len(), 1_004);
+}
+
+/// An instrument that counts what it is given and renders the count of
+/// messages so far into every sample, so a test sees where each fell.
+#[derive(Default)]
+struct Counting {
+    messages: i16,
+}
+
+impl Instrument for Counting {
+    fn start(&mut self, _: &Banks<'_>) -> Outcome {
+        Outcome::Applied
+    }
+
+    fn midi(&mut self, _: &Message<'_>, _: &Banks<'_>) -> Outcome {
+        self.messages += 1;
+        Outcome::Applied
+    }
+
+    fn lost(&mut self) {}
+
+    fn render(&mut self, out: &mut [i16]) {
+        out.fill(self.messages);
+    }
+}
+
+/// Verifies RULE-109 (REQ-6614 item 2): the Cue Point meta event with one
+/// byte of data, `FF 07 01 nn`, is read as a cue at its time; the server's
+/// check takes a block that holds one.
+#[test]
+fn a_cue_is_read_with_its_time_and_number() {
+    let block = [0, 0x90, 60, 100, 50, 0xFF, 0x07, 0x01, 9, 0, 0xFF, 0x07, 0x01, 0x7F, 100, 0x80, 60, 0];
+    assert_eq!(
+        reads(&block),
+        vec![
+            event(0, channel(0x90, 60, 100)),
+            Read::Cue(Cue { time: 50, number: 9 }),
+            Read::Cue(Cue { time: 50, number: DATA_MAX }),
+            event(150, channel(0x80, 60, 0)),
+        ]
+    );
+    assert_eq!(check(&block), Ok(4));
+}
+
+/// Verifies RULE-109 (REQ-6614 item 2): a Cue Point whose length is not 1,
+/// one whose number is above the highest cue, and the Marker `FF 06` are
+/// passed over and counted as any other skipped event.
+#[test]
+fn a_cue_point_of_another_shape_is_passed_over() {
+    for skipped in [
+        &[0, 0xFF, 0x07, 0x02, 1, 2][..],
+        &[0, 0xFF, 0x07, 0x00],
+        &[0, 0xFF, 0x07, 0x01, 0x80],
+        &[0, 0xFF, 0x06, 0x01, 5],
+    ] {
+        let block = [skipped, &[0, 0xD0, 9]].concat();
+        assert_eq!(reads(&block), vec![Read::PassedOver, event(0, channel(0xD0, 9, 0))], "{skipped:02X?}");
+        assert_eq!(check(&block), Err(BlockFault::PassedOver(0)));
+    }
+    // A cue cut short is a framing error, as any event is.
+    assert_eq!(reads(&[0, 0xFF, 0x07, 0x01]), vec![Read::Malformed]);
+}
+
+/// Verifies RULE-109 (REQ-6614 item 2): a block holds at most four cues; a
+/// fifth is passed over and counted, and the events after it are read.
+#[test]
+fn a_fifth_cue_in_a_block_is_passed_over_and_counted() {
+    let mut block: Vec<u8> = (0..=MAX_CUES_PER_BLOCK).flat_map(|number| [1, 0xFF, 0x07, 0x01, number as u8]).collect();
+    block.extend([0, 0xD0, 1]);
+    let read = reads(&block);
+    let cues: Vec<_> = (0..MAX_CUES_PER_BLOCK as u8).map(|n| Read::Cue(Cue { time: n + 1, number: n })).collect();
+    assert_eq!(read[..MAX_CUES_PER_BLOCK], cues[..]);
+    assert_eq!(read[MAX_CUES_PER_BLOCK..], [Read::PassedOver, event(5, channel(0xD0, 1, 0))]);
+    assert_eq!(check(&block), Err(BlockFault::PassedOver(MAX_CUES_PER_BLOCK)));
+    let played = play_block(&mut Counting::default(), &block, &Banks::none(), &mut [0; 960]);
+    assert_eq!((played.cues.as_slice().len(), played.passed_over, played.events), (MAX_CUES_PER_BLOCK, 1, 1));
+}
+
+/// Verifies RULE-109 (REQ-6614 item 3): playing a block reports each cue
+/// with its number at its sample, the sample an event of its tick takes
+/// effect at, in the order they stand; the instrument is given nothing for
+/// a cue and renders the same samples as without it.
+#[test]
+fn playing_a_block_reports_each_cue_at_its_sample() {
+    let with = [0, 0xFF, 0x07, 0x01, 3, 10, 0x90, 60, 100, 90, 0xFF, 0x07, 0x01, 4, 99, 0xFF, 0x07, 0x01, 3];
+    let without = [10, 0x90, 60, 100];
+    let (mut heard, mut plain) = ([0_i16; 960], [0_i16; 960]);
+    let played = play_block(&mut Counting::default(), &with, &Banks::none(), &mut heard);
+    let bare = play_block(&mut Counting::default(), &without, &Banks::none(), &mut plain);
+    let at = |number, tick| PlayedCue { number, sample: sample_of_tick(tick) as u16 };
+    assert_eq!(played.cues.as_slice(), [at(3, 0), at(4, 100), at(3, 199)]);
+    assert_eq!(played.cues.as_slice()[1].sample, 480);
+    assert_eq!((played.events, played.passed_over, played.malformed), (1, 0, false));
+    assert_eq!(bare.cues.as_slice(), []);
+    assert_eq!(heard, plain);
+}
+
+/// Verifies RULE-109 (REQ-6614 item 5): the writer's cue is the four bytes
+/// `FF 07 01 nn` after its delta time and reads back as written, among a
+/// family's events.
+#[test]
+fn the_writers_cue_reads_back() {
+    let mut buffer = [0_u8; MOST_BLOCK_BYTES];
+    let mut writer = BlockWriter::new(&mut buffer);
+    writer.push(0, &channel(0x90, 60, 100)).unwrap();
+    writer.push_cue(0, 0).unwrap();
+    writer.push_cue(130, DATA_MAX).unwrap();
+    writer.push(199, &channel(0x80, 60, 64)).unwrap();
+    assert_eq!(
+        writer.bytes(),
+        [0, 0x90, 60, 100, 0, 0xFF, 0x07, 0x01, 0, 0x81, 0x02, 0xFF, 0x07, 0x01, 0x7F, 69, 0x80, 60, 64]
+    );
+    assert_eq!((writer.events(), writer.cues()), (4, 2));
+    assert_eq!((BlockWriter::cue_length(0), BlockWriter::cue_length(130)), (5, 6));
+    assert_eq!(
+        reads(writer.bytes()),
+        vec![
+            event(0, channel(0x90, 60, 100)),
+            Read::Cue(Cue { time: 0, number: 0 }),
+            Read::Cue(Cue { time: 130, number: DATA_MAX }),
+            event(199, channel(0x80, 60, 64)),
+        ]
+    );
+    assert_eq!(check(writer.bytes()), Ok(4));
+}
+
+/// Verifies RULE-109 (REQ-6614 items 2 and 5): the writer refuses a cue
+/// numbered above the highest, a fifth cue of a block, a cue before the
+/// last event and one past the block's bytes, writing nothing; a cleared
+/// writer takes four again.
+#[test]
+fn the_writer_refuses_a_cue_a_block_cannot_hold() {
+    let mut buffer = [0_u8; MOST_BLOCK_BYTES];
+    let mut writer = BlockWriter::new(&mut buffer);
+    assert_eq!(writer.push_cue(0, DATA_MAX + 1), Err(WriteError::CueNumber));
+    writer.push(20, &channel(0xD0, 1, 0)).unwrap();
+    assert_eq!(writer.push_cue(19, 1), Err(WriteError::Time));
+    assert_eq!(writer.push_cue(200, 1), Err(WriteError::Time));
+    for number in 0..MAX_CUES_PER_BLOCK as u8 {
+        writer.push_cue(20, number).unwrap();
+    }
+    let written = writer.bytes().to_vec();
+    assert_eq!(writer.push_cue(20, 5), Err(WriteError::TooManyCues));
+    assert_eq!(writer.bytes(), written);
+    writer.clear();
+    assert_eq!((writer.cues(), writer.push_cue(0, 5)), (0, Ok(())));
+    // A cue that would take the block past its bytes.
+    let mut small = [0_u8; 4];
+    let mut writer = BlockWriter::new(&mut small);
+    assert_eq!(writer.push_cue(0, 1), Err(WriteError::Full));
+    assert_eq!(writer.bytes(), [0_u8; 0]);
+    // A cue counts among the block's events (MIDI-31).
+    let mut buffer = [0_u8; MOST_BLOCK_BYTES];
+    let mut writer = BlockWriter::new(&mut buffer);
+    for _ in 0..MOST_EVENTS {
+        writer.push(0, &channel(0xD0, 1, 0)).unwrap();
+    }
+    assert_eq!(writer.push_cue(0, 1), Err(WriteError::TooManyEvents));
 }

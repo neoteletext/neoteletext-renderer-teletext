@@ -1,6 +1,6 @@
 //! The one trait the receiver plays every family through.
 
-use super::{MOST_BANKS, Message};
+use super::{MAX_CUES_PER_BLOCK, MOST_BANKS, Message};
 
 /// What an instrument did with one message, which the receiver counts
 /// (MIDI-123).
@@ -235,9 +235,49 @@ pub trait Instrument {
     }
 }
 
+/// A cue the reader passed while a block was played (page-rules.md
+/// RULE-109; REQ-6614 item 3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct PlayedCue {
+    /// The cue's number, 0 to [`super::DATA_MAX`].
+    pub number: u8,
+    /// The sample of the block, 0 to 955, at which the cue stands: where
+    /// an event of its tick takes effect ([`super::sample_of_tick`]).
+    pub sample: u16,
+}
+
+/// The cues of one block, in the order they stand: at most
+/// [`MAX_CUES_PER_BLOCK`], held in place.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct PlayedCues {
+    cues: [PlayedCue; MAX_CUES_PER_BLOCK],
+    count: usize,
+}
+
+impl PlayedCues {
+    /// The cues, in the order they stand in the block.
+    #[must_use]
+    pub fn as_slice(&self) -> &[PlayedCue] {
+        self.cues.get(..self.count).unwrap_or(&[])
+    }
+
+    /// Adds a cue; past [`MAX_CUES_PER_BLOCK`], which the reader never
+    /// gives, it does nothing.
+    fn push(&mut self, cue: PlayedCue) {
+        if let Some(place) = self.cues.get_mut(self.count) {
+            *place = cue;
+            self.count = self.count.saturating_add(1);
+        }
+    }
+}
+
 /// What playing one block found, for the receiver's counters (MIDI-123).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Played {
+    /// The cues the block holds, each with its sample (RULE-109): the
+    /// caller, which renders ahead of what is heard, marks each at its
+    /// place in the stream. A cue changes nothing in the instrument.
+    pub cues: PlayedCues,
     /// Events given to the instrument.
     pub events: u32,
     /// Events passed over: by the reader (MIDI-29, MIDI-31, MIDI-34) or by
@@ -278,6 +318,10 @@ pub fn play_block<I: Instrument + ?Sized>(
                     Outcome::PassedOver => played.passed_over = played.passed_over.saturating_add(1),
                     Outcome::PatchRefused => played.patches_refused = played.patches_refused.saturating_add(1),
                 }
+            }
+            super::block::Read::Cue(cue) => {
+                let sample = u16::try_from(super::sample_of_tick(cue.time)).unwrap_or(u16::MAX);
+                played.cues.push(PlayedCue { number: cue.number, sample });
             }
             super::block::Read::PassedOver => played.passed_over = played.passed_over.saturating_add(1),
             super::block::Read::Malformed => played.malformed = true,

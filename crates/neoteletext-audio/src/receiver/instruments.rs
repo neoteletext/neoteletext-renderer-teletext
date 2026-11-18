@@ -631,7 +631,10 @@ impl Lane {
                 return;
             }
             match store.block(entry.sound, stream.next) {
-                Some(block) => self.render(block, &banks, &mut pcm, statistics),
+                Some(block) => {
+                    let played = self.render(block, &banks, &mut pcm, statistics);
+                    mark_cues(&stream, &played, sink);
+                }
                 None if stream.due(now_ms) => {
                     self.conceal(&mut pcm);
                     statistics.concealed = statistics.concealed.saturating_add(1);
@@ -668,7 +671,8 @@ impl Lane {
                 break;
             }
             if let Some(block) = store.live_block(entry.sound, stream.next) {
-                self.render(block, &banks, &mut pcm, statistics);
+                let played = self.render(block, &banks, &mut pcm, statistics);
+                mark_cues(&stream, &played, sink);
             } else {
                 self.conceal(&mut pcm);
                 statistics.concealed = statistics.concealed.saturating_add(1);
@@ -682,8 +686,15 @@ impl Lane {
         self.stream = Some(stream);
     }
     /// Plays one block's event list into the lane's synthesizer and renders
-    /// its 20 ms, counting what it passed over (MIDI-123).
-    fn render(&mut self, block: &[u8], banks: &Banks<'_>, pcm: &mut [i16; BLOCK], statistics: &mut Statistics) {
+    /// its 20 ms, counting what it passed over (MIDI-123). Answers what the
+    /// block held, for its cues (RULE-109).
+    fn render(
+        &mut self,
+        block: &[u8],
+        banks: &Banks<'_>,
+        pcm: &mut [i16; BLOCK],
+        statistics: &mut Statistics,
+    ) -> Played {
         let played = with_instrument!(
             &mut self.synthesizer,
             instrument => play_block(instrument, block, banks, pcm),
@@ -702,6 +713,7 @@ impl Lane {
         if played.malformed {
             statistics.blocks_malformed = statistics.blocks_malformed.saturating_add(1);
         }
+        played
     }
 
     /// Renders 20 ms for a block that never arrived (MIDI-102): the
@@ -721,6 +733,24 @@ impl Lane {
             },
             pcm.fill(0)
         );
+    }
+}
+
+/// Gives the sink a mark for each cue of the block `stream` renders next
+/// (page-rules.md RULE-109; REQ-6614 item 3): the cue's number and its
+/// place in the stream, a count of samples from the stream's first, which
+/// is every block given to the stream so far and the cue's sample within
+/// this one. The receiver renders ahead of what is heard, so the sink
+/// reports the cue when that sample is heard. A stream fading out of a
+/// stop marks none: a stopped sound has no further cue.
+fn mark_cues(stream: &Stream, played: &Played, sink: &mut dyn VoiceSink) {
+    if stream.until_ms.is_some() {
+        return;
+    }
+    let block_start = u64::from(stream.rendered).saturating_mul(u64::from(crate::INSTRUMENT_BLOCK_SAMPLES));
+    for cue in played.cues.as_slice() {
+        let position = block_start.saturating_add(u64::from(cue.sample));
+        sink.stream_cue(stream.channel, stream.sound, position, cue.number);
     }
 }
 

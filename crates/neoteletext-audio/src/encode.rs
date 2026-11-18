@@ -309,15 +309,20 @@ impl Sound {
     /// # Errors
     /// A codec that has no local sound ([`EncodeError::Encoder`]), a setup
     /// the receiver's reader would not wholly act on
-    /// ([`EncodeError::Block`]), or an event of it after tick 0
-    /// ([`EncodeError::Setup`]).
+    /// ([`EncodeError::Block`]), or an event of it after tick 0 or a cue
+    /// in it ([`EncodeError::Setup`]).
     pub fn local(handle: u8, generation: u16, codec: Codec, setup: &[u8]) -> Result<Self, EncodeError> {
         if !codec.has_banks() {
             return Err(EncodeError::Encoder);
         }
         let mut sound = Self::events(handle, generation, codec, &[setup])?;
-        let late = crate::midi::block::Events::new(setup)
-            .any(|read| matches!(read, crate::midi::block::Read::Event(event) if event.time != 0));
+        // A local sound has no timeline and so no cues (RULE-109): a cue is
+        // no event of a setup, at any tick.
+        let late = crate::midi::block::Events::new(setup).any(|read| match read {
+            crate::midi::block::Read::Event(event) => event.time != 0,
+            crate::midi::block::Read::Cue(_) => true,
+            crate::midi::block::Read::PassedOver | crate::midi::block::Read::Malformed => false,
+        });
         if late {
             return Err(EncodeError::Setup);
         }
@@ -685,6 +690,17 @@ pub struct TimedEvent<'a> {
     pub message: Message<'a>,
 }
 
+/// One cue of a synthesizer's sound, as the server places it
+/// (page-rules.md RULE-109; REQ-6614 item 5): its absolute tick from the
+/// sound's start and its number.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TimedCue {
+    /// The tick, 0.1 ms from the sound's start.
+    pub tick: u64,
+    /// The cue's number, 0 to [`neoteletext_audio_instruments::midi::DATA_MAX`].
+    pub number: u8,
+}
+
 /// Why timed events could not be written into blocks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlocksError {
@@ -699,6 +715,17 @@ pub enum BlocksError {
     Full(usize),
     /// A block that would hold more than 256 events (MIDI-31).
     TooManyEvents(usize),
+    /// A cue, counted from 0 among the cues, earlier than the one before
+    /// it.
+    CueOrder(usize),
+    /// A cue whose tick lies past the sound's last block.
+    CuePastEnd(usize),
+    /// A cue whose number is above the highest (RULE-109).
+    CueNumber(usize),
+    /// A block, counted from 0, that would hold more cues than
+    /// [`neoteletext_audio_instruments::midi::MAX_CUES_PER_BLOCK`]
+    /// (RULE-109).
+    TooManyCues(usize),
 }
 
 /// Writes timed events into `blocks` blocks of event lists (MIDI-16,
@@ -710,32 +737,77 @@ pub enum BlocksError {
 /// # Errors
 /// The first event or block at fault, as [`BlocksError`] says.
 pub fn event_blocks(events: &[TimedEvent<'_>], blocks: u16) -> Result<Vec<Vec<u8>>, BlocksError> {
+    event_blocks_with_cues(events, &[], blocks)
+}
+
+/// One thing to write into a block: an event or a cue, by its index.
+#[derive(Clone, Copy)]
+enum Timed {
+    Event(usize),
+    Cue(usize),
+}
+
+/// Writes timed events and cues into `blocks` blocks of event lists, as
+/// [`event_blocks`] writes events (RULE-109; REQ-6614 item 5): each cue in
+/// block `floor(tick ÷ 200)` at time `tick mod 200`, as the Cue Point meta
+/// event with one byte of data. The cues must not go back in time; a cue
+/// at the tick of an event stands before it, so that it is heard with the
+/// note it marks.
+///
+/// # Errors
+/// The first event, cue or block at fault, as [`BlocksError`] says.
+pub fn event_blocks_with_cues(
+    events: &[TimedEvent<'_>],
+    cues: &[TimedCue],
+    blocks: u16,
+) -> Result<Vec<Vec<u8>>, BlocksError> {
     let per_block = u64::from(TICKS_PER_BLOCK);
     let mut out = Vec::with_capacity(usize::from(blocks));
     let mut buffer = [0_u8; MOST_EVENT_BLOCK_BYTES];
     let mut writer = BlockWriter::new(&mut buffer);
     let mut current: u64 = 0;
-    let mut last: u64 = 0;
-    for (index, event) in events.iter().enumerate() {
-        if event.tick < last {
-            return Err(BlocksError::Order(index));
-        }
-        last = event.tick;
-        let block = event.tick.checked_div(per_block).unwrap_or(0);
-        if block >= u64::from(blocks) {
-            return Err(BlocksError::PastEnd(index));
+    let (mut last_event, mut last_cue): (u64, u64) = (0, 0);
+    let (mut next_event, mut next_cue): (usize, usize) = (0, 0);
+    loop {
+        let (event, cue) = (events.get(next_event), cues.get(next_cue));
+        let (timed, tick) = match (event, cue) {
+            (Some(event), Some(cue)) if event.tick < cue.tick => (Timed::Event(next_event), event.tick),
+            (_, Some(cue)) => (Timed::Cue(next_cue), cue.tick),
+            (Some(event), None) => (Timed::Event(next_event), event.tick),
+            (None, None) => break,
+        };
+        let block = tick.checked_div(per_block).unwrap_or(0);
+        match timed {
+            Timed::Event(index) if tick < last_event => return Err(BlocksError::Order(index)),
+            Timed::Event(index) if block >= u64::from(blocks) => return Err(BlocksError::PastEnd(index)),
+            Timed::Cue(index) if tick < last_cue => return Err(BlocksError::CueOrder(index)),
+            Timed::Cue(index) if block >= u64::from(blocks) => return Err(BlocksError::CuePastEnd(index)),
+            Timed::Event(_) => {
+                last_event = tick;
+                next_event = next_event.saturating_add(1);
+            }
+            Timed::Cue(_) => {
+                last_cue = tick;
+                next_cue = next_cue.saturating_add(1);
+            }
         }
         while current < block {
             out.push(writer.bytes().to_vec());
             writer.clear();
             current = current.saturating_add(1);
         }
-        let time =
-            u8::try_from(event.tick.checked_rem(per_block).unwrap_or(0)).map_err(|_| BlocksError::PastEnd(index))?;
+        // Below 200, by the remainder.
+        let time = u8::try_from(tick.checked_rem(per_block).unwrap_or(0)).unwrap_or(0);
         let at = usize::try_from(block).unwrap_or(usize::MAX);
-        writer.push(time, &event.message).map_err(|error| match error {
+        let (index, written) = match timed {
+            Timed::Event(index) => (index, events.get(index).map_or(Ok(()), |event| writer.push(time, &event.message))),
+            Timed::Cue(index) => (index, cues.get(index).map_or(Ok(()), |cue| writer.push_cue(time, cue.number))),
+        };
+        written.map_err(|error| match error {
             WriteError::Full => BlocksError::Full(at),
             WriteError::TooManyEvents => BlocksError::TooManyEvents(at),
+            WriteError::TooManyCues => BlocksError::TooManyCues(at),
+            WriteError::CueNumber => BlocksError::CueNumber(index),
             WriteError::Time | WriteError::Message => BlocksError::Message(index),
         })?;
     }

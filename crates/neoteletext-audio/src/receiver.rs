@@ -585,6 +585,41 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         self.render(sink);
     }
 
+    /// The page that was open in the view is open no longer although the
+    /// page number [`Receiver::open_page`] was given has not changed: the
+    /// view went from one sub-code of it to another, which is leaving one
+    /// page and opening another (page-rules.md RULE-112, RULE-111;
+    /// DEC-6599). A local sound belongs to the page, number and sub-code,
+    /// that was open when its play was carried out, and the CONTROL record
+    /// names the number only, so the port, which knows the sub-code, says
+    /// so here: every local sound playing ends, with its channel stopped
+    /// as [`Receiver::open_page`] stops it, and a play of a local sound
+    /// that is armed or waiting for its sound is given up, so that none
+    /// starts by itself on the page now open. Sounds that are not local
+    /// follow the page number as before (REQ-AUD-012).
+    pub fn end_local_sounds(&mut self, sink: &mut dyn VoiceSink) {
+        for index in 0..CHANNELS {
+            let local = |play: Option<Play>| {
+                play.is_some_and(|play| {
+                    self.store.entry(play.sound.handle).is_some_and(|entry| entry.sound == play.sound && entry.local)
+                })
+            };
+            let Some(channel) = self.channels.get(usize::from(index)) else { continue };
+            let (armed, waiting) = (local(channel.armed), local(channel.waiting));
+            if let Some(channel) = self.channels.get_mut(usize::from(index)) {
+                if armed {
+                    channel.armed = None;
+                }
+                if waiting {
+                    channel.waiting = None;
+                }
+            }
+            if self.local_sound(index).is_some() {
+                self.stop_page_play(index, sink);
+            }
+        }
+    }
+
     /// The user's page sounds setting (REQ-AUD-012).
     pub fn set_page_sounds(&mut self, on: bool, sink: &mut dyn VoiceSink) {
         if on == self.page_sounds {

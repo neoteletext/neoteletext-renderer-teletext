@@ -4,13 +4,17 @@
 //! a bank image taken from the input, and the rest is read as a sequence of
 //! blocks, each a two-byte length and its bytes, played in order with a
 //! lost block wherever a length's top bit is set. Whatever a block holds,
-//! the reader ends, every block renders exactly its 960 samples, and the
-//! writer's own blocks read back as written.
+//! the reader ends, every block renders exactly its 960 samples, the cues
+//! it reports are within the block's bounds (page-rules.md RULE-109;
+//! REQ-6614), and the writer's own blocks, cues among them, read back as
+//! written.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use neoteletext_audio_instruments::midi::block::{BlockWriter, Events, Read, check};
-use neoteletext_audio_instruments::midi::{Banks, Instrument, MOST_BLOCK_BYTES, play_block};
+use neoteletext_audio_instruments::midi::{
+    Banks, DATA_MAX, Instrument, LAST_TICK, MAX_CUES_PER_BLOCK, MOST_BLOCK_BYTES, play_block, sample_of_tick,
+};
 use neoteletext_audio_instruments::{BLOCK_SAMPLES, synth7, synth8, synth53, synth80, synth106, synth6581, synthd};
 
 /// A length's bit that marks the block lost.
@@ -29,31 +33,40 @@ fn play(instrument: &mut dyn Instrument, banks: &Banks<'_>, mut blocks: &[u8]) {
         } else {
             let played = play_block(instrument, block, banks, &mut pcm);
             assert!(played.events as usize <= neoteletext_audio_instruments::midi::MOST_EVENTS);
+            // RULE-109: at most four cues a block, each a data byte at a
+            // sample of the block, in the order they stand.
+            let cues = played.cues.as_slice();
+            assert!(cues.len() <= MAX_CUES_PER_BLOCK);
+            assert!(
+                cues.iter().all(|cue| cue.number <= DATA_MAX && usize::from(cue.sample) <= sample_of_tick(LAST_TICK))
+            );
+            assert!(cues.windows(2).all(|pair| pair[0].sample <= pair[1].sample));
         }
         blocks = after;
     }
 }
 
-/// Rewrites every event the reader finds with the writer and checks the
-/// writer's block reads back the same (MIDI-24, MIDI-44).
+/// Rewrites every event and every cue the reader finds with the writer
+/// and checks the writer's block reads back the same (MIDI-24, MIDI-44;
+/// RULE-109).
 fn round_trip(block: &[u8]) {
     let mut buffer = [0_u8; MOST_BLOCK_BYTES];
     let mut writer = BlockWriter::new(&mut buffer);
-    let mut events = Vec::new();
+    let mut written = Vec::new();
     for read in Events::new(block) {
-        if let Read::Event(event) = read
-            && writer.push(event.time, &event.message).is_ok()
-        {
-            events.push(event);
+        let kept = match read {
+            Read::Event(event) => writer.push(event.time, &event.message).is_ok(),
+            // The reader gives no more cues than the writer takes, and no
+            // number it refuses.
+            Read::Cue(cue) => writer.push_cue(cue.time, cue.number).is_ok(),
+            Read::PassedOver | Read::Malformed => false,
+        };
+        if kept {
+            written.push(read);
         }
     }
-    let again: Vec<_> = Events::new(writer.bytes())
-        .map(|read| match read {
-            Read::Event(event) => event,
-            other => panic!("the writer's block read as {other:?}"),
-        })
-        .collect();
-    assert_eq!(again, events);
+    let again: Vec<_> = Events::new(writer.bytes()).collect();
+    assert_eq!(again, written);
     assert!(check(writer.bytes()).is_ok());
 }
 

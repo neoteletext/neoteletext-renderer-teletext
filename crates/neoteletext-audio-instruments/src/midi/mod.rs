@@ -26,7 +26,9 @@ mod instrument;
 pub mod restate;
 pub mod state;
 
-pub use instrument::{Banks, Instrument, METER_FULL, Meter, MeterStage, Outcome, Played, meter_level, play_block};
+pub use instrument::{
+    Banks, Instrument, METER_FULL, Meter, MeterStage, Outcome, Played, PlayedCue, PlayedCues, meter_level, play_block,
+};
 pub use state::{PatchField, Performance, class, family, rule_message};
 
 /// Ticks in a block: a block is 20 ms and a tick 0.1 ms (MIDI-25,
@@ -41,6 +43,10 @@ pub const MOST_EVENTS: usize = 256;
 /// the DX7's single-voice dump, the longest timed message of any adopted
 /// interface, is 162.
 pub const MOST_SYSTEM_EXCLUSIVE_BYTES: usize = 256;
+/// The most cues a block holds (page-rules.md RULE-109; REQ-6614 item 2):
+/// a limit of the audio block and not of the rule table. A fifth is passed
+/// over and counted.
+pub const MAX_CUES_PER_BLOCK: usize = 4;
 /// The most bytes of a block (MIDI-30). Its derivation from the record's
 /// bounds is asserted in `neoteletext-audio`'s `codec.rs`, where the
 /// record's figures live.
@@ -152,6 +158,20 @@ pub mod status {
     /// System reset; in a Standard MIDI File, a meta event.
     pub const META: u8 = 0xFF;
 }
+
+/// Meta event types (Standard MIDI Files 1.0, "Meta-Events").
+pub mod meta {
+    /// Cue Point, `FF 07 len text`: with one byte of data, the cue's
+    /// number, the one meta event a block carries (page-rules.md RULE-109).
+    pub const CUE_POINT: u8 = 0x07;
+}
+
+/// The bytes of data a cue's Cue Point meta event has: its number
+/// (RULE-109: the four bytes `FF 07 01 nn`).
+pub const CUE_DATA_BYTES: usize = 1;
+/// The bytes of a cue after its delta time, `FF 07 01 nn`: the status,
+/// the type and the length, a byte each, and the data.
+pub const CUE_EVENT_BYTES: usize = [status::META, meta::CUE_POINT, CUE_DATA_BYTES as u8].len() + CUE_DATA_BYTES;
 
 /// Controller numbers (MIDI 1.0 4.2, Tables III and IV, PDF 102 and 104).
 pub mod controller {
@@ -276,6 +296,20 @@ pub enum Message<'a> {
     /// `0xF7` and every other a data byte, 1 to
     /// [`MOST_SYSTEM_EXCLUSIVE_BYTES`] of them (MIDI-27).
     SystemExclusive(&'a [u8]),
+}
+
+/// A cue of a block (page-rules.md RULE-109; REQ-6614): a numbered point
+/// of the sound, carried as the Standard MIDI Files Cue Point meta event
+/// with one byte of data (Standard MIDI Files 1.0, "Meta-Events":
+/// `FF 07 len text`). It is no message of the synthesizer's: the reader
+/// gives it to its caller, who reports it when the sound is heard there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Cue {
+    /// The tick within the block, 0 to [`LAST_TICK`].
+    pub time: u8,
+    /// The cue's number, 0 to [`DATA_MAX`]: RULE-109's `MAX_CUE`, the
+    /// largest value of the one data byte that carries it.
+    pub number: u8,
 }
 
 /// One event of a block: a time and one message (MIDI-5).

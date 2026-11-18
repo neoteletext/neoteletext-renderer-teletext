@@ -11,8 +11,10 @@ publish.workspace = true
 # receiver decoded, so it needs only `alloc`.
 [dependencies]
 
+# The test of cue marks (page-rules.md RULE-109) plays a synthesizer's
+# stored sound through the audio receiver into the mixer.
 [dev-dependencies]
-neoteletext-audio = { workspace = true }
+neoteletext-audio = { workspace = true, features = ["synth7", "encode"] }
 
 [lints]
 workspace = true

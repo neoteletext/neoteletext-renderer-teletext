@@ -23,7 +23,9 @@
     reason = "a test reports a failure by panicking, on data it built to a known size"
 )]
 
-use neoteletext_audio::encode::{BlocksError, Command, EncodeError, Sound, TimedEvent, event_blocks, frame};
+use neoteletext_audio::encode::{
+    BlocksError, Command, EncodeError, Sound, TimedCue, TimedEvent, event_blocks, event_blocks_with_cues, frame,
+};
 use neoteletext_audio::port::{LocalStart, SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
 use neoteletext_audio::record::{
@@ -73,6 +75,9 @@ struct Recorder {
     stops: Vec<u8>,
     /// The gains set: channel and gain.
     gains: Vec<(u8, u8)>,
+    /// The cue marks given (RULE-109): channel, sound, position, number,
+    /// and the samples the stream held when the mark came.
+    cues: Vec<(u8, SoundId, u64, u8, usize)>,
 }
 
 impl Recorder {
@@ -110,6 +115,10 @@ impl VoiceSink for Recorder {
             .expect("samples come only to a stream begun and not ended")
             .pcm
             .extend_from_slice(pcm);
+    }
+    fn stream_cue(&mut self, channel: u8, sound: SoundId, position: u64, number: u8) {
+        let held = self.open(channel, sound).expect("a mark comes only to a stream begun and not ended").pcm.len();
+        self.cues.push((channel, sound, position, number, held));
     }
     fn end_stream(&mut self, channel: u8, sound: SoundId) {
         self.open(channel, sound).expect("only a stream begun ends").ended = true;
@@ -1399,4 +1408,210 @@ fn a_live_sounds_tracked_notes_end_at_a_lost_block() {
         assert_eq!(sink.concealed, vec![5], "{:?}", family.codec);
         assert_eq!(receiver.tracked(0, class::NOTES, 0, 0), Some(0), "{:?}: released at the gap", family.codec);
     }
+}
+
+/// A stored synth7 sound of `blocks` blocks with a note in block 0 and the
+/// cues given, each a tick from the sound's start and a number.
+fn cued_tune(blocks: u16, cues: &[(u64, u8)]) -> Sound {
+    let note = TimedEvent { tick: 0, message: Message::Channel(ChannelMessage::new(status::NOTE_ON, 0, 57, 100)) };
+    let cues: Vec<TimedCue> = cues.iter().map(|&(tick, number)| TimedCue { tick, number }).collect();
+    let tune = event_blocks_with_cues(&[note], &cues, blocks).unwrap();
+    let mut sound = Sound::events(SOUND, 1, Codec::Synth7, &tune).unwrap();
+    sound.banks = vec![BANK];
+    sound
+}
+
+/// The sample of a stream a tick from its start stands at: 4.8 samples a
+/// tick (MIDI-5), by block.
+fn sample_of(tick: u64) -> u64 {
+    (tick / 200) * BLOCK as u64 + (tick % 200) * 24 / 5
+}
+
+// Verifies RULE-109 (REQ-6614 items 3 and 5): the server's writer places
+// each cue in the block and at the tick its time gives, before an event of
+// the same tick, and refuses a fifth in a block, a number above the
+// highest, a cue out of order and one past the sound's end.
+#[test]
+fn timed_cues_are_written_into_their_blocks() {
+    let note = |tick| TimedEvent { tick, message: Message::Channel(ChannelMessage::new(status::NOTE_ON, 0, 60, 100)) };
+    let cue = |tick, number| TimedCue { tick, number };
+    let blocks = event_blocks_with_cues(&[note(0), note(210)], &[cue(0, 1), cue(205, 2), cue(210, 3)], 3).unwrap();
+    assert_eq!(
+        blocks,
+        vec![
+            vec![0, 0xFF, 0x07, 0x01, 1, 0, 0x90, 60, 100],
+            vec![5, 0xFF, 0x07, 0x01, 2, 5, 0xFF, 0x07, 0x01, 3, 0, 0x90, 60, 100],
+            vec![]
+        ]
+    );
+    assert_eq!(
+        event_blocks(&[note(0), note(210)], 3).unwrap(),
+        event_blocks_with_cues(&[note(0), note(210)], &[], 3).unwrap()
+    );
+    let five: Vec<TimedCue> = (0..5).map(|number| cue(400, number)).collect();
+    assert_eq!(event_blocks_with_cues(&[], &five, 3), Err(BlocksError::TooManyCues(2)));
+    assert_eq!(event_blocks_with_cues(&[], &[cue(0, 128)], 3), Err(BlocksError::CueNumber(0)));
+    assert_eq!(event_blocks_with_cues(&[], &[cue(9, 1), cue(8, 1)], 3), Err(BlocksError::CueOrder(1)));
+    assert_eq!(event_blocks_with_cues(&[], &[cue(600, 1)], 3), Err(BlocksError::CuePastEnd(0)));
+    assert_eq!(event_blocks_with_cues(&[note(600)], &[cue(1, 1)], 3), Err(BlocksError::PastEnd(0)));
+}
+
+// Verifies RULE-109 (REQ-6614 item 3): the receiver gives the sink a mark
+// for each cue of a stored sound it renders, once and in order, with the
+// cue's number and its place in the stream as a count of samples from the
+// stream's start, before the samples of the block that holds it; the
+// samples streamed are those of the sound without its cues; and a sound
+// that is looped marks its cues again on each pass, the positions rising.
+#[test]
+fn a_stored_sounds_cues_are_marked_at_their_place_in_the_stream() {
+    const BLOCKS: u16 = 40;
+    let cues = [(0, 7), (1_234, 0), (5_999, 127)];
+    let sound = cued_tune(BLOCKS, &cues);
+    let bare = cued_tune(BLOCKS, &[]);
+    let id = SoundId { handle: SOUND, generation: 1 };
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder::default();
+    push(&mut receiver, &synth7_bank(), &mut sink);
+    push(&mut receiver, &sound, &mut sink);
+    receiver.push_record(&play(1, 1, &sound), &mut sink);
+    let ended = run(&mut receiver, &mut sink, 0, FOREVER_MS);
+    assert!(sink.streams[0].ended);
+    assert_eq!(sink.streams[0].pcm, synth7_alone(&bare), "a cue changes no sample");
+    let marks: Vec<(u8, SoundId, u64, u8)> =
+        sink.cues.iter().map(|&(channel, sound, position, number, _)| (channel, sound, position, number)).collect();
+    let expected: Vec<(u8, SoundId, u64, u8)> =
+        cues.iter().map(|&(tick, number)| (1, id, sample_of(tick), number)).collect();
+    assert_eq!(marks, expected);
+    assert_eq!(expected[1].2, 6 * BLOCK as u64 + 163);
+    for &(_, _, position, _, held) in &sink.cues {
+        // The mark comes before its block's samples: the sink can never
+        // have played past it.
+        assert!(held as u64 <= position && position < (held + BLOCK) as u64, "{position} with {held} held");
+    }
+    assert_eq!(receiver.statistics().events_passed_over, 0);
+
+    // Looped, it plays on in one stream (MIDI-105) and marks each pass.
+    let mut command = Command {
+        channel: 1,
+        sequence: 2,
+        operation: 1,
+        handle: sound.handle,
+        generation: sound.generation,
+        gain: 100,
+        fade_ms: 0,
+        flags: neoteletext_audio::record::FLAG_LOOP,
+        duck: 0,
+        page: None,
+    };
+    sink.cues.clear();
+    receiver.push_record(&command.record(), &mut sink);
+    let passes = 3_u64;
+    let now = run(&mut receiver, &mut sink, ended, ended + passes * u64::from(BLOCKS) * BLOCK_MS);
+    let marked: Vec<(u64, u8)> = sink.cues.iter().map(|&(_, _, position, number, _)| (position, number)).collect();
+    let pass = u64::from(BLOCKS) * BLOCK as u64;
+    assert!(marked.len() >= 3 * passes as usize, "{marked:?}");
+    for (index, &(position, number)) in marked.iter().enumerate() {
+        let (tick, expected) = cues[index % 3];
+        assert_eq!((position, number), ((index / 3) as u64 * pass + sample_of(tick), expected));
+    }
+
+    // Verifies RULE-109: a stopped sound has no further cue, though its
+    // stream is rendered on to the end of its fade.
+    command.sequence = 3;
+    command.operation = 2;
+    command.fade_ms = 2_000;
+    let before = sink.cues.len();
+    let rendered = sink.streams[1].pcm.len();
+    receiver.tick(now, &mut sink);
+    receiver.push_record(&command.record(), &mut sink);
+    run(&mut receiver, &mut sink, now, now + FOREVER_MS);
+    assert!(sink.streams[1].ended);
+    assert!(sink.streams[1].pcm.len() >= rendered + u64::from(BLOCKS) as usize * BLOCK, "the fade spans a whole pass");
+    assert_eq!(sink.cues.len(), before, "{:?}", &sink.cues[before..]);
+}
+
+// Verifies RULE-109 (REQ-6614 item 3): a live sound's cues are marked as
+// its blocks are rendered, counted from where its stream began; a block
+// that never arrived, played through as lost, marks none.
+#[test]
+fn a_live_sounds_cues_are_marked_and_a_lost_blocks_are_not() {
+    let family = &families()[0];
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder::default();
+    push(&mut receiver, &bank(BANK, family.codec, &(family.image)(&[&family.plain])), &mut sink);
+    let mut sound = Sound::live_events(SOUND, 1, family.codec).unwrap();
+    sound.banks = vec![BANK];
+    receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+    // Block 4 never arrives.
+    for index in (0..=12_u16).filter(|index| *index != 4) {
+        let block = if index == 0 { Vec::new() } else { vec![100, 0xFF, 0x07, 0x01, index as u8] };
+        for record in sound.live_event_records(index, &[block]).unwrap() {
+            receiver.push_record(&record, &mut sink);
+        }
+        if index == 0 {
+            receiver.push_record(&play(0, 1, &sound), &mut sink);
+        }
+    }
+    let numbers: Vec<u8> = sink.cues.iter().map(|cue| cue.3).collect();
+    assert!(numbers.len() >= 6 && numbers.contains(&5) && !numbers.contains(&4), "{numbers:?}");
+    assert!(numbers.windows(2).all(|pair| pair[0] < pair[1]), "{numbers:?}");
+    for &(_, _, position, _, held) in &sink.cues {
+        assert_eq!(position, held as u64 + 480, "tick 100 of the block rendered next");
+    }
+    assert_eq!(sink.concealed, vec![4]);
+}
+
+// Verifies RULE-109 and RULE-60: a local sound has no timeline and so no
+// cues; the encoder refuses a setup that holds one.
+#[test]
+fn a_local_sounds_setup_holds_no_cue() {
+    let setup = [&SETUP[..], &[0, 0xFF, 0x07, 0x01, 1]].concat();
+    assert!(matches!(Sound::local(SOUND, 1, Codec::Synth7, &setup), Err(EncodeError::Setup)));
+    assert!(Sound::local(SOUND, 1, Codec::Synth7, &SETUP).is_ok());
+}
+
+// Verifies RULE-112 (DEC-6599): a local sound belongs to the page, number
+// and sub-code, open when its play was carried out. The CONTROL record
+// names the number alone, so the port says when the sub-code changed: the
+// local sound ends, with its channel stopped, and does not start again by
+// itself, while a page sound that is not local plays on.
+#[test]
+fn a_local_sound_ends_when_the_ports_sub_code_changes() {
+    let mut arena = vec![0_u8; 128 * 1024];
+    let mut receiver: Receiver<'_, 8, 2> = Receiver::new(&mut arena);
+    let mut sink = Recorder { local: true, ..Recorder::default() };
+    receiver.open_page(Some(PAGE), &mut sink);
+    let sound = local(SOUND, Codec::Synth7);
+    let id = SoundId { handle: SOUND, generation: 1 };
+    push(&mut receiver, &synth7_bank(), &mut sink);
+    push(&mut receiver, &sound, &mut sink);
+    let mut tune = synth7_tune(200);
+    tune.handle = SOUND + 1;
+    push(&mut receiver, &tune, &mut sink);
+    receiver.push_record(&play_on(2, 1, &sound, Some(PAGE)), &mut sink);
+    receiver.push_record(&play_on(0, 1, &tune, Some(PAGE)), &mut sink);
+    assert_eq!((receiver.local_sound(2), sink.locals.len(), sink.streams.len()), (Some(id), 1, 1));
+    sink.stops.clear();
+    receiver.end_local_sounds(&mut sink);
+    assert_eq!((receiver.local_sound(2), sink.stops.clone()), (None, vec![2]));
+    assert!(!sink.streams[0].ended, "a page sound that is not local follows the page number");
+    // It is armed no longer: nothing starts it again on this page number.
+    receiver.open_page(Some(0x102), &mut sink);
+    receiver.open_page(Some(PAGE), &mut sink);
+    assert_eq!((receiver.local_sound(2), sink.locals.len()), (None, 1));
+    // A play of a local sound still waiting for its sound is given up too.
+    let late = {
+        let mut late = local(SOUND + 2, Codec::Synth7);
+        late.banks = vec![BANK];
+        late
+    };
+    receiver.push_record(&late.object_record().unwrap(), &mut sink);
+    receiver.push_record(&play_on(3, 1, &late, Some(PAGE)), &mut sink);
+    receiver.end_local_sounds(&mut sink);
+    for record in late.data_records() {
+        receiver.push_record(&record, &mut sink);
+    }
+    assert_eq!((receiver.local_sound(3), sink.locals.len()), (None, 1));
 }
