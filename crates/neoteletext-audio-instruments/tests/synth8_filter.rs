@@ -251,9 +251,20 @@ fn the_high_pass_filter_is_off_at_its_foot_and_one_pole_above() {
 fn the_low_pass_filter_is_the_synth106s() {
     use neoteletext_audio_instruments::synth106::{Model, Patch as Synth106Patch, Slider, Synth106};
 
+    // Each cent the cutoffs are apart moves the harmonics above them by
+    // the four-pole slope's 24 dB an octave, and each voice's trim moves
+    // its cutoff up to 10 cents more. The margin above that is what the
+    // comparison kept when the cutoffs were 12 cents apart (bound 0.6 dB
+    // over 22 cents' 0.44 dB).
+    const SLOPE_DECIBELS_PER_OCTAVE: f64 = 24.0;
+    const TRIM_CENTS: f64 = 10.0;
+    const MARGIN_DECIBELS: f64 = 0.16;
+
     // synth60's law: 6.94 Hz at 0 and 17.2 octaves to 127; its
-    // slider at 53 is 1,006 Hz. synth8's at 68, its byte 137, is 1,021 Hz.
-    let (synth106_slider, synth8_slider) = (53u8, 68u8);
+    // slider at 53 is 1,005 Hz. synth8's slider is a control change's
+    // value now (S8-21 item 1), which reaches bytes 135 and 137 but not
+    // 136: the nearest, 67, is byte 135, 988 Hz, 29 cents below.
+    let (synth106_slider, synth8_slider) = (53u8, 67u8);
     let synth106_cutoff = 6.94 * (17.2 * f64::from(synth106_slider) / 127.0).exp2();
     let synth8_cutoff = law(synth8_slider, A2, 0.0);
     println!("cutoffs: synth60 {synth106_cutoff:.0} Hz, synth8 {synth8_cutoff:.0} Hz");
@@ -283,7 +294,8 @@ fn the_low_pass_filter_is_the_synth106s() {
         worst = worst.max((synth106_level - synth8_level).abs());
     }
     println!("the largest difference over 29 harmonics, to 3.3 kHz: {worst:.2} dB");
-    // The two cutoffs are 10 cents apart, and each voice's trim is up to
-    // 10 cents: a quarter of a decibel on the filter's slope.
-    assert!(worst < 0.6);
+    let apart = (1_200.0 * (synth106_cutoff / synth8_cutoff).log2()).abs();
+    let bound = (apart + TRIM_CENTS) * SLOPE_DECIBELS_PER_OCTAVE / 1_200.0 + MARGIN_DECIBELS;
+    println!("the cutoffs are {apart:.0} cents apart: bound {bound:.2} dB");
+    assert!(worst < bound);
 }
