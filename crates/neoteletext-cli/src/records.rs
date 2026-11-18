@@ -10,8 +10,8 @@ use neoteletext_core::sprites::{ForcedLook, FrameRef, Operation, Sprite, SpriteE
 use neoteletext_core::types::FixedVec;
 
 /// The sub-code of an ANIMATE record that names whichever sub-page of the
-/// page is shown (ANIM-6).
-pub const SUBCODE_SHOWN: u16 = 0x3F7F;
+/// page is shown (ANIM-6): the sub-code that names no one sub-page.
+pub const SUBCODE_SHOWN: u16 = neoteletext_core::limits::SUBCODE_ANY;
 /// The most operations in an ANIMATE record (ANIM-6).
 pub const MAX_ANIMATE_OPERATIONS: usize = 64;
 /// The marks of a FRAME record (ANIM-2).
