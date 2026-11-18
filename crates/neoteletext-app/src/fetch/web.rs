@@ -9,6 +9,8 @@ use super::{clock, neottx};
 use crate::pipe::{self, Frame, Notice};
 use neoteletext_core::types::Instant;
 use neoteletext_formats::page::{AddressSpan, PageFile};
+use neoteletext_input::event::{Event as InputEvent, Item, write};
+use neoteletext_input::state::NoneReason;
 use neoteletext_transport::{SOCKET_READ, web_address};
 use neoteletext_web::agent::{
     Config, Event, Failure, Input, InputMessage, Output, PageBytes, PushStop, Source as Came, Storage, UserAgent,
@@ -67,13 +69,22 @@ pub(super) fn run_web(
     let invalid = Cell::new(InvalidReport::default());
     // A live sub-page's links while its LINKS sending is in progress.
     let links = RefCell::new(None);
+    // The channel's server challenged the viewer's key: neottx keeps no
+    // state, and answers so (VS-501).
+    let challenged = Cell::new(false);
     let mut next_tick: Option<Instant> = Some(Instant(0));
     let sink = |output: Output<'_>, pump: &mut Pump<StdTransport>, next_tick: &mut Option<Instant>| {
         if let Some(net) = output.net() {
             pump.execute(net);
             return;
         }
-        let noted = Noted { service_ready: &service_ready, push_state: &push_state, invalid: &invalid, links: &links };
+        let noted = Noted {
+            service_ready: &service_ready,
+            push_state: &push_state,
+            invalid: &invalid,
+            links: &links,
+            challenged: &challenged,
+        };
         if forward(output, next_tick, &noted, clock(start)).is_err() {
             broken.set(true);
         }
@@ -88,6 +99,13 @@ pub(super) fn run_web(
             if let Some(input) = pump.poll(connection, &mut buffer) {
                 busy = true;
                 agent.handle(clock(start), Input::Net(input), &mut |output| sink(output, &mut pump, &mut next_tick));
+            }
+            // Answered at once, before anything the decoder sends, so that
+            // the answer goes before SELECT (VS-202).
+            if challenged.replace(false) {
+                let answer = stateless_answer();
+                let message = Input::Send(InputMessage::alone(&answer));
+                agent.handle(clock(start), message, &mut |output| sink(output, &mut pump, &mut next_tick));
             }
         }
         if let Some(open) = push_state.take()
@@ -201,7 +219,22 @@ struct Noted<'a> {
     invalid: &'a Cell<InvalidReport>,
     /// A live sub-page's links while its sending is in progress.
     links: &'a RefCell<Option<Box<PageFile>>>,
+    /// A `STATE_CHALLENGE` came, to be answered (VS-501).
+    challenged: &'a Cell<bool>,
 }
+
+/// neottx's answer to every `STATE_CHALLENGE`: `STATE_NONE`, stateless
+/// (VS-501). It keeps no key, so it never signs, and sends no cookie.
+fn stateless_answer() -> Vec<u8> {
+    let mut out = [0_u8; STATE_NONE_MESSAGE_BYTES];
+    let item = Item::Event(InputEvent::StateNone(NoneReason::Stateless));
+    let length = write(&item, &mut out).unwrap_or(0);
+    out.get(..length).unwrap_or(&[]).to_vec()
+}
+
+/// `STATE_NONE` written: the event byte, its type, its length and its
+/// reason.
+const STATE_NONE_MESSAGE_BYTES: usize = 3 + neoteletext_input::state::STATE_NONE_BYTES;
 
 /// Acts on one of the agent's outputs that is not for the network: a timer
 /// moves the next tick, pages and notices go to the decoder, and a new
@@ -212,7 +245,7 @@ fn forward(
     noted: &Noted<'_>,
     now: Instant,
 ) -> std::io::Result<()> {
-    let Noted { service_ready, push_state, invalid, links } = *noted;
+    let Noted { service_ready, push_state, invalid, links, challenged } = *noted;
     match output {
         Output::Timer { at } => {
             *next_tick = Some(next_tick.map_or(at, |current| current.min(at)));
@@ -240,6 +273,10 @@ fn forward(
             send(&Frame::Notice(Notice::Message(format!("index.t42 was not used: {failure:?}"))))
         }
         Output::Event(Event::Unencrypted { .. }) => send(&Frame::Notice(Notice::Unencrypted)),
+        Output::Event(Event::StateChallenge(_)) => {
+            challenged.set(true);
+            Ok(())
+        }
         Output::Event(Event::PushConnected) => {
             push_state.set(Some(true));
             Ok(())
@@ -617,5 +654,12 @@ mod report_tests {
         report.rose(1, at(30));
         let line = report.due(at(50)).unwrap();
         assert!(line.starts_with("1 invalid packets") && line.contains("1 since"), "{line}");
+    }
+
+    /// VS-501: neottx answers every challenge `STATE_NONE`, stateless: the
+    /// event byte, type 0x49, length 1, reason 2.
+    #[test]
+    fn neottx_answers_every_challenge_stateless() {
+        assert_eq!(stateless_answer(), [0xFF, 0x49, 1, 2]);
     }
 }
