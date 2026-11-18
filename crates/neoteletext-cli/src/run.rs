@@ -33,6 +33,9 @@ pub fn run() -> ExitCode {
         Command::Render { common, page, output, raster, image, sequence } => {
             commands::render(&common.options(), &page, &output, &raster, image, &sequence)
         }
+        Command::RulesRun { table, inputs, frames, picture, no_sandbox } => {
+            commands::rules_run(&table, &inputs, frames, picture, no_sandbox)
+        }
         Command::Text { common, page, reveal, legacy_mosaics } => {
             commands::text(&common.options(), &page, reveal, legacy_mosaics)
         }

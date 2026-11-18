@@ -20,6 +20,9 @@ neoteletext-app.workspace = true
 # The channel rules and the contents format of `neottx contents` (REQ-CLI-008).
 # with `neottx html`'s pages.
 neoteletext-web = { workspace = true, features = ["alloc"] }
+# The page rule table of `neottx rules-run`, and the animation operations
+# an ANIMATE record and a rule's action share (animation.md ANIM-6, ANIM-18).
+neoteletext-rules.workspace = true
 # Writing sounds as the audio profile's packets (REQ-CLI-011).
 neoteletext-audio = { workspace = true, features = ["encode", "opus"], optional = true }
 # DEVELOPMENT.md section 7: an application crate pins its own

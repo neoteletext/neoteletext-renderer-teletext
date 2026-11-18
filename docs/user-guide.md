@@ -51,6 +51,7 @@ The toolchain is pinned in `rust-toolchain.toml`. `scripts/check.sh full` runs e
 | `neottx services INPUT` | Lists the teletext streams, languages and subtitle pages of a transport stream. |
 | `neottx service-info INPUT` | Prints the broadcast service data of packet 8/30: network, time, programme label and status message. |
 | `neottx check FILES...` | Checks TTI page files for authoring problems, a row longer than the page among them. `--descriptor FILE` resolves link targets against a channel's `channel.ttx` or a service's descriptor. |
+| `neottx rules-run TABLE INPUTS` | Evaluates a page rule table against timed inputs and writes the script of an image sequence. See "Image sequences" below. |
 | `neottx font convert INPUT OUTPUT` | Converts a BDF font of another cell size to a 12 × 10 or 12 × 20 font that `neottx render --font` loads, only where the conversion is exact. See "Fonts" below. |
 | `neottx font sets FONT` | Reports, for each of the 55 character sets fonts draw (the standard's 24 and NeoTeletext's own 31), whether a 12 × 10 or 12 × 20 font conforms for it (REQ-FNT-011), how many of its 96 positions it draws, and the first rule it fails; `--library-line NAME` prints the font's `c` line for a library's `fonts.txt`. |
 | `neottx font library LIBRARY` | Lists a font library's fonts by title, from its `fonts.txt` (the folder or the file), with each font's file name or address, its SHA-256 and the sets its `c` line states; each malformed line is reported on standard error. No font is read or fetched. |
@@ -149,6 +150,12 @@ A live input runs in two processes (REQ-SEC-018). A fetcher process does the net
 | `cycle <n> <first> <last> <period> [once]` | Cycles its frames, one every `period` ticks |
 | `stop_cycle <n>`, `reset <n>` | Stops a cycle; forgets everything the script did to it |
 | `record <type> <hexadecimal body>` | Applies a record at that tick: `ANIMATE`, `SPRITES` or `FRAME` |
+
+`neottx rules-run TABLE INPUTS` makes such a script from a page rule table (page-rules.md): it evaluates the table, the body of a RULES record as bytes or as hexadecimal text, tick by tick against a file of timed inputs, and writes the animation operations each tick's actions produce, with the table's reports and sound operations as comment lines. The inputs are one a line in ascending tick: `<tick> key down|up char|name|physical <key>`, `<tick> pointer <x> <y> <buttons>`, `<tick> level <audio channel> <0-255>`, and `<tick> rectangle <n> <x> <y> <width> <height>`, which gives object `n` its bounding rectangle for the table's pointer and collision tests. `--frames TICKS` sets how many ticks are evaluated (by default, to the tick after the last input), and `--picture teletext|regis|naplps` whose picture the page is. The output is a script for `neottx render --frames` and for the ReGIS and NAPLPS renderers' programs, so a rule-driven page can be played into images without the browser:
+
+```
+neottx rules-run table.bin inputs.txt | neottx render page.t42 150 --frames 120 --script - -o out/page.png
+```
 
 `<n>` is a sprite's number; `control:<n>` names the page's `n`th control, for `show`, `hide`, `look` and `reset`. Sprites are placements of the page's objects, so they are drawn at Level 2.5 and above by a `neottx` built with the `objects` feature; a build without it says so when a script gives a page sprites.
 

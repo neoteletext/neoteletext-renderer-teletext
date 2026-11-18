@@ -29,7 +29,6 @@
 
 use neoteletext_core::limits::KEEP_LAYER;
 use neoteletext_core::sprites::{ForcedLook, Operation, Target};
-#[cfg(test)]
 use std::fmt::Write as _;
 
 /// The longest script read, in bytes: every operation of the longest
@@ -240,7 +239,6 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
 
 /// One operation as a line of a script, without its line end: what
 /// [`parse`] reads back as the same operation.
-#[cfg(test)]
 #[must_use]
 pub fn write_operation(tick: u32, target: Target, operation: Operation) -> String {
     let target = match target {

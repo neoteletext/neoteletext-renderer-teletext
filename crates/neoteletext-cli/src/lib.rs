@@ -28,6 +28,7 @@ mod frame;
 mod image;
 #[cfg(any(feature = "view", feature = "keyboard"))]
 mod nfc;
+mod operations;
 mod options;
 mod records;
 mod run;

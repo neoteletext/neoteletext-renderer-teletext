@@ -6,33 +6,17 @@
 //! its limit, a short body and bytes after its end each refuse it whole.
 
 use neoteletext_core::limits::{MAX_OBJECT_FRAMES, MAX_SPRITES};
-use neoteletext_core::sprites::{ForcedLook, FrameRef, Operation, Sprite, SpriteError, Sprites, Target};
+use neoteletext_core::sprites::{FrameRef, Operation, Sprite, SpriteError, Sprites, Target};
 use neoteletext_core::types::FixedVec;
+use neoteletext_rules::animate::{self, Place};
+use neoteletext_rules::limits::MAX_ANIMATE_OPERATIONS;
 
 /// The sub-code of an ANIMATE record that names whichever sub-page of the
 /// page is shown (ANIM-6): the sub-code that names no one sub-page.
 pub const SUBCODE_SHOWN: u16 = neoteletext_core::limits::SUBCODE_ANY;
-/// The most operations in an ANIMATE record (ANIM-6).
-pub const MAX_ANIMATE_OPERATIONS: usize = 64;
 /// The marks of a FRAME record (ANIM-2).
 const MARK_BEGIN: u8 = 1;
 const MARK_END: u8 = 2;
-/// The kind bytes of a target (ANIM-6).
-const TARGET_CONTROL: u8 = 1;
-const TARGET_OBJECT: u8 = 2;
-/// The code bytes of the operations (ANIM-6).
-const CODE_SHOW: u8 = 5;
-const CODE_HIDE: u8 = 6;
-const CODE_LOOK: u8 = 7;
-const CODE_MOVE: u8 = 15;
-const CODE_ORDER: u8 = 16;
-const CODE_FRAME: u8 = 17;
-const CODE_CYCLE: u8 = 18;
-const CODE_STOP_CYCLE: u8 = 19;
-const CODE_RESET: u8 = 20;
-/// Bit 0 of `move`'s flags: relative; of `cycle`'s: once. The other bits
-/// are 0.
-const FLAG: u8 = 0x01;
 /// The flags of a sprite: bit 0 shown, bit 1 detectable; the other bits 0
 /// (ANIM-7).
 const SPRITE_SHOWN: u8 = 0x01;
@@ -56,10 +40,6 @@ impl Reader<'_> {
 
     fn u16(&mut self) -> Result<u16, String> {
         Ok(u16::from_be_bytes([self.u8()?, self.u8()?]))
-    }
-
-    fn i16(&mut self) -> Result<i16, String> {
-        Ok(i16::from_be_bytes([self.u8()?, self.u8()?]))
     }
 
     fn reserved(&mut self) -> Result<(), String> {
@@ -121,59 +101,20 @@ pub struct Animate {
     pub operations: Vec<(Target, Operation)>,
 }
 
+/// One operation at the front of a reader's bytes, read by the one
+/// function that reads these bytes in a rule's action too
+/// (`neoteletext_rules::animate::read`, ANIM-6).
 fn operation(reader: &mut Reader<'_>) -> Result<(Target, Operation), String> {
-    let code = reader.u8()?;
-    let kind = reader.u8()?;
-    let number = reader.u16()?;
-    if number == 0 {
-        return Err("a target's number is 0".to_owned());
-    }
-    let target = match kind {
-        TARGET_CONTROL => Target::Control(number),
-        TARGET_OBJECT => Target::Object(number),
-        _ => return Err(format!("a target's kind is 1 or 2, not {kind}")),
-    };
-    let objects_only = || {
-        if kind == TARGET_OBJECT { Ok(()) } else { Err(format!("operation {code} applies to objects only")) }
-    };
-    let operation = match code {
-        CODE_SHOW => Operation::Show,
-        CODE_HIDE => Operation::Hide,
-        CODE_LOOK => Operation::Look(ForcedLook::from_code(reader.u8()?).ok_or("a look is 0 to 3")?),
-        CODE_MOVE => {
-            objects_only()?;
-            let relative = reader.flags(FLAG)? & FLAG != 0;
-            Operation::Move { relative, x: reader.i16()?, y: reader.i16()? }
-        }
-        CODE_ORDER => {
-            objects_only()?;
-            let layer = reader.u8()?;
-            Operation::order(layer, reader.i8()?).ok_or("a layer is 0 to 3, or 255 to keep it")?
-        }
-        CODE_FRAME => {
-            objects_only()?;
-            Operation::Frame(reader.u8()?)
-        }
-        CODE_CYCLE => {
-            objects_only()?;
-            let (first, last, period) = (reader.u8()?, reader.u8()?, reader.u16()?);
-            Operation::Cycle { first, last, period, once: reader.flags(FLAG)? & FLAG != 0 }
-        }
-        CODE_STOP_CYCLE => {
-            objects_only()?;
-            Operation::StopCycle
-        }
-        CODE_RESET => Operation::Reset,
-        _ => return Err(format!("{code} is not an operation's code")),
-    };
-    Ok((target, operation))
+    let (operation, used) =
+        animate::read(reader.rest, Place::Record).map_err(|fault| format!("an operation is refused: {fault:?}"))?;
+    reader.rest = reader.rest.get(used..).ok_or("the body is short")?;
+    crate::operations::to_core(&operation)
+        .ok_or_else(|| "an operation's target is not a control or an object".to_owned())
 }
 
 /// Reads an ANIMATE record's body: the page, the sub-code, a count of 1 to
 /// 64, a reserved byte, then that many operations, each a code byte, a
-/// target (a kind byte and a number, not 0) and a body. The ranges of a
-/// frame and a cycle are held when the operation is applied
-/// (`Animation::apply` refuses one outside them).
+/// target (a kind byte and a number, not 0) and a body.
 ///
 /// # Errors
 /// Why the body is refused.
@@ -271,6 +212,7 @@ const FILLER: FrameRef = FrameRef {
 mod tests {
     use super::*;
     use neoteletext_core::packet::{ObjectKind, ObjectNumber, ObjectSource};
+    use neoteletext_core::sprites::ForcedLook;
 
     /// ANIM-2 (REQ-6529): the eight bytes of a FRAME record.
     #[test]
@@ -303,7 +245,7 @@ mod tests {
             &[17, 2, 0, 10, 15],
             &[18, 2, 0, 10, 0, 3, 0x0E, 0x10, 1],
             &[19, 2, 0, 10],
-            &[20, 1, 0xFF, 0xFF],
+            &[20, 1, 0, 32],
         ]
         .concat();
         let record = animate(&body).unwrap();
@@ -318,7 +260,7 @@ mod tests {
             (object, Operation::Frame(15)),
             (object, Operation::Cycle { first: 0, last: 3, period: 3_600, once: true }),
             (object, Operation::StopCycle),
-            (Target::Control(65_535), Operation::Reset),
+            (Target::Control(32), Operation::Reset),
         ];
         assert_eq!(record.operations, expected);
 
@@ -327,6 +269,7 @@ mod tests {
         for (refused, why) in [
             (&[5, 2, 0, 0][..], "number 0"),
             (&[5, 0, 0, 1], "kind 0"),
+            (&[5, 1, 0, 33], "control 33"),
             (&[5, 3, 0, 1], "kind 3"),
             (&[4, 2, 0, 1], "not a code"),
             (&[21, 2, 0, 1], "not a code"),
@@ -335,6 +278,9 @@ mod tests {
             (&[15, 2, 0, 1, 2, 0, 0, 0, 0], "a reserved flag"),
             (&[16, 2, 0, 1, 4, 0], "layer 4"),
             (&[18, 2, 0, 1, 0, 3, 0, 6, 2], "a reserved flag"),
+            (&[17, 2, 0, 1, 16], "frame 16"),
+            (&[18, 2, 0, 1, 3, 2, 0, 6, 0], "a cycle whose last is before its first"),
+            (&[18, 2, 0, 1, 0, 3, 0x0E, 0x11, 0], "a period of 3,601"),
             (&[5, 2, 0, 1, 0], "bytes after the end"),
             (&[15, 2, 0, 1, 0, 0, 0, 0], "short"),
         ] {

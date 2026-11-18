@@ -296,6 +296,31 @@ pub(crate) enum Command {
         #[command(flatten)]
         sequence: SequenceArgs,
     },
+    /// Evaluate a page rule table against timed inputs, and write the
+    /// animation operations each tick's actions produce as the script of
+    /// an image sequence (`render --frames --script`, and the ReGIS and
+    /// NAPLPS renderers' programs); reports and sound operations are
+    /// written as comment lines.
+    RulesRun {
+        /// The table: a RULES record's body, as bytes or as hexadecimal text.
+        table: PathBuf,
+        /// The inputs, one a line in ascending tick: `<tick> key down|up
+        /// char|name|physical <key>`, `<tick> pointer <x> <y> <buttons>`,
+        /// `<tick> level <audio channel> <0-255>` and `<tick> rectangle <n>
+        /// <x> <y> <width> <height>`, an object's bounding rectangle.
+        inputs: PathBuf,
+        /// Evaluate this many ticks from tick 0; by default, to the tick
+        /// after the last input.
+        #[arg(long, value_name = "TICKS", value_parser = clap::value_parser!(u32).range(1..=i64::from(crate::commands::MAX_SEQUENCE_TICKS)))]
+        frames: Option<u32>,
+        /// Whose picture the page is: its size, and the pixels of one
+        /// unit of an object's position.
+        #[arg(long, value_enum, default_value = "teletext")]
+        picture: crate::commands::Picture,
+        /// Run without the operating-system sandbox (REQ-SEC-017).
+        #[arg(long)]
+        no_sandbox: bool,
+    },
     /// Write one page, or all, as UTF-8 text.
     Text {
         #[command(flatten)]
