@@ -31,6 +31,21 @@ neoteletext-audio = { workspace = true, features = ["encode", "opus"], optional 
 clap = { version = "=4.6.7", features = ["derive"] }
 # MIT: the terminal of `neottx view`.
 crossterm = { version = "=0.29.0", optional = true }
+# The readable patch fields of each synthesizer family, by which the JSON
+# `rules` message of `neottx rules-run` names a field (page-rules.md RULE-29).
+neoteletext-audio-instruments = { workspace = true, features = [
+    "synth6581",
+    "synth7",
+    "synth106",
+    "synthd",
+    "synth53",
+    "synth8",
+    "synth80",
+] }
+# MIT or Apache-2.0, pure Rust (DEC-6579): the program protocol's `rules`
+# message as JSON for `neottx rules-run` (page-rules.md RULE-35); the
+# version the server reads the protocol with.
+serde_json = "=1.0.154"
 # Key records for `neottx view`'s typing back and `neottx keyboard` (area INT).
 neoteletext-input.workspace = true
 # A phone as the keyboard through qrkeyboard (`neottx qr`, `neottx keyboard`).

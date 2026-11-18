@@ -50,7 +50,7 @@ use neoteletext_rules::evaluator::{
     Bounds, Input, InputEvent, KeyAction, KeyIdentity, PointerAction, Report, Reported, SoundState, TargetState,
 };
 use neoteletext_rules::limits::{
-    AUDIO_CHANNELS, MAX_BUTTON, MAX_CUE, MAX_GAIN, MAX_POINTER_OBJECTS, MAX_TABLE_BYTES, MAX_WATCHED, NO_RULE,
+    AUDIO_CHANNELS, MAX_BUTTON, MAX_CUE, MAX_GAIN, MAX_POINTER_OBJECTS, MAX_WATCHED, NO_RULE,
 };
 use neoteletext_rules::state::PageState;
 use neoteletext_rules::table::{Target, TargetKind, WATCH_LEVEL};
@@ -472,9 +472,18 @@ fn image_bytes(file: &[u8]) -> Vec<u8> {
     hexadecimal(&text).unwrap_or_else(|| file.to_vec())
 }
 
-/// The table of `file` (page-rules.md RULE-35, RULE-41): a table's image,
-/// as bytes or as hexadecimal text, for the page `page` and `sub`.
+/// The table of `file` (page-rules.md RULE-35, RULE-41): the program
+/// protocol's `rules` message as JSON, which names its own page; or a
+/// table's image, as bytes or as hexadecimal text, for the page `page` and
+/// `sub`.
 fn load_table(file: &[u8], page: u16, sub: u16) -> Result<Box<Table>, String> {
+    // A JSON object begins with a brace, which no image's format byte and
+    // no hexadecimal digit is.
+    if file.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'{') {
+        let text = core::str::from_utf8(file).map_err(|_| "a `rules` message is text in UTF-8".to_owned())?;
+        let (_, _, table) = crate::rules_json::read_rules_message(text)?;
+        return Ok(table);
+    }
     // A decoded table is about a hundred kilobytes.
     let mut table = Box::new(Table::new(page, sub));
     neoteletext_rules::decode(&image_bytes(file), page, sub, body_check, &mut table)
@@ -619,7 +628,10 @@ pub fn rules_run(
     };
     // Both files are read, within their bounds, before the sandbox closes,
     // and parsed after it (REQ-SEC-017).
-    let table_file = read_bounded(table, MAX_TABLE_BYTES.saturating_mul(3))?;
+    // A `rules` message's JSON is held to the script's bound, the most this
+    // program reads of any text file; an image as hexadecimal text is
+    // within it too.
+    let table_file = read_bounded(table, MAX_SCRIPT_BYTES)?;
     let inputs_file = read_bounded(inputs, MAX_SCRIPT_BYTES)?;
     sandbox_closed(no_sandbox)?;
     let text = String::from_utf8(inputs_file).map_err(|_| io_failure(inputs, "the inputs are text in UTF-8"))?;

@@ -281,3 +281,74 @@ fn a_refused_table_and_refused_inputs_say_why() {
         assert!(message.contains(part), "{inputs:?}: {message}");
     }
 }
+
+/// RULE-35's example, the worked examples of page-rules.md section 7.5,
+/// and the default table of RULE-53 as a `rules` message, one a line.
+const EXAMPLES: [&str; 9] = [
+    r#"{"type":"rules","connections":[7],"page":"101","sub":"0001","table":{"rects":[{"name":"pad","x":40,"y":300,"width":200,"height":100}],"rows":{"keys":[{"p0":{"physical":"a"},"p1":60,"p2":101},{"p0":{"physical":"s"},"p1":62,"p2":103}]},"groups":[{"name":"note_on","commands":[{"type":"local_midi","channel":0,"message":{"event":"note_on","channel":1,"key":{"plus":0,"row":"p1"},"velocity":100}},{"type":"animate","ops":[{"action":"look","target":{"object":{"row":"p2"}},"look":"pressed"}]}]},{"name":"note_off","commands":[{"type":"local_midi","channel":0,"message":{"event":"note_off","channel":1,"key":{"plus":0,"row":"p1"},"velocity":64}},{"type":"animate","ops":[{"action":"look","target":{"object":{"row":"p2"}},"look":"normal"}]}]}],"sequences":[{"name":"pulse","length":30,"repeat":0,"steps":[{"tick":0,"run":"note_on"},{"tick":15,"run":"note_off"}]}],"rules":[{"name":"down","on":[{"event":"key","keys":[{"physical":{"row":"p0"}}]},{"event":"press","target":{"object":{"row":"p2"}},"button":0}],"when":null,"rows":"keys","run":"note_on"},{"name":"up","on":[{"event":"key_up","keys":[{"physical":{"row":"p0"}}]},{"event":"release","target":{"object":{"row":"p2"}},"button":0}],"rows":"keys","run":"note_off"},{"name":"typed","on":{"event":"key","keys":"any","repeat":true},"do":[{"type":"report"}]}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"120","sub":"0000","table":{"rules":[{"name":"typed","on":[{"event":"key","keys":"any","repeat":true},{"event":"text"}],"do":[{"type":"report"}]}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"130","sub":"0000","table":{"rules":[{"name":"vote_down","on":{"event":"press","target":{"control":3},"button":0},"do":[{"type":"animate","ops":[{"action":"look","target":{"control":3},"look":"pressed"}]}]},{"name":"vote","on":{"event":"release","target":{"control":3},"button":0},"echo":true,"do":[{"type":"animate","ops":[{"action":"look","target":{"control":3},"look":"normal"}]}]}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"140","sub":"0000","table":{"groups":[{"name":"up","commands":[{"type":"variable","op":"inc","variable":"v0"},{"type":"variable","op":"min","variable":"v0","value":10},{"type":"report","value":{"of":"variable","variable":"v0"}}]},{"name":"down","commands":[{"type":"variable","op":"dec","variable":"v0"},{"type":"variable","op":"max","variable":"v0","value":0},{"type":"report","value":{"of":"variable","variable":"v0"}}]}],"rules":[{"name":"start","on":{"event":"open"},"do":[{"type":"variable","op":"set","variable":"v0","value":5}]},{"name":"up","on":{"event":"key","keys":[{"name":"ArrowUp"}],"repeat":true},"run":"up"},{"name":"down","on":{"event":"key","keys":[{"name":"ArrowDown"}],"repeat":true},"run":"down"}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"150","sub":"0000","table":{"rules":[{"name":"left","on":{"event":"key","keys":[{"name":"ArrowLeft"}],"repeat":true},"do":[{"type":"animate","ops":[{"action":"move","target":{"object":10},"x":-8,"y":0,"relative":true}]}]},{"name":"right","on":{"event":"key","keys":[{"name":"ArrowRight"}],"repeat":true},"do":[{"type":"animate","ops":[{"action":"move","target":{"object":10},"x":8,"y":0,"relative":true}]}]},{"name":"hit","on":{"event":"becomes"},"when":{"overlaps":[{"object":10},{"object":20}]},"echo":true,"do":[{"type":"sound","kind":"play","channel":1,"handle":5,"generation":1,"gain":100,"fade_ms":5,"duck":0,"loop":false,"after":false},{"type":"animate","ops":[{"action":"hide","target":{"object":20}}]}]}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"160","sub":"0000","table":{"rules":[{"name":"start","on":{"event":"open"},"do":[{"type":"animate","ops":[{"action":"cycle","target":{"object":7},"first":0,"last":1,"period":30,"once":false}]},{"type":"timer","op":"start","timer":"t0"}]},{"name":"awake","on":{"event":"key","keys":"any"},"do":[{"type":"timer","op":"start","timer":"t0"}]},{"name":"asleep","on":{"event":"after","ticks":600,"timer":"t0"},"do":[{"type":"report"}]}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"170","sub":"0000","table":{"rules":[{"name":"gate_on","on":{"event":"becomes"},"when":{"and":[{"read":{"of":"variable","variable":"v0"},"op":"==","value":0},{"read":{"of":"synth","channel":0,"family":"synth106","part":1,"property":"notes"},"op":">","value":0}]},"do":[{"type":"animate","ops":[{"action":"show","target":{"object":50}}]}]},{"name":"gate_off","on":{"event":"becomes"},"when":{"or":[{"read":{"of":"variable","variable":"v0"},"op":"!=","value":0},{"read":{"of":"synth","channel":0,"family":"synth106","part":1,"property":"notes"},"op":"==","value":0}]},"do":[{"type":"animate","ops":[{"action":"hide","target":{"object":50}}]}]},{"name":"help","on":{"event":"key","keys":[{"char":"h"}]},"do":[{"type":"variable","op":"set","variable":"v0","value":1}]},{"name":"back","on":{"event":"key","keys":[{"name":"Escape"}]},"do":[{"type":"variable","op":"set","variable":"v0","value":0}]},{"name":"open_filter","on":{"event":"wheel","target":{"object":51}},"do":[{"type":"report"}]}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"180","sub":"0000","table":{"groups":[{"name":"go","commands":[{"type":"sequence","op":"start","sequence":"fanfare"}]},{"name":"n1","commands":[{"type":"local_midi","channel":0,"message":{"event":"note_on","channel":1,"key":60,"velocity":100}}]},{"name":"n2","commands":[{"type":"local_midi","channel":0,"message":{"event":"note_off","channel":1,"key":60,"velocity":64}},{"type":"local_midi","channel":0,"message":{"event":"note_on","channel":1,"key":64,"velocity":100}}]},{"name":"n3","commands":[{"type":"local_midi","channel":0,"message":{"event":"note_off","channel":1,"key":64,"velocity":64}},{"type":"local_midi","channel":0,"message":{"event":"note_on","channel":1,"key":67,"velocity":100}}]},{"name":"n4","commands":[{"type":"local_midi","channel":0,"message":{"event":"note_off","channel":1,"key":67,"velocity":64}}]},{"name":"lit","commands":[{"type":"animate","ops":[{"action":"show","target":{"object":9}}]}]},{"name":"unlit","commands":[{"type":"animate","ops":[{"action":"hide","target":{"object":9}}]}]}],"sequences":[{"name":"fanfare","length":32,"repeat":2,"steps":[{"tick":0,"run":"n1"},{"tick":8,"run":"n2"},{"tick":16,"run":"n3"},{"tick":24,"run":"n4"}]},{"name":"flash","length":6,"repeat":1,"steps":[{"tick":0,"run":"lit"},{"tick":5,"run":"unlit"}]}],"rules":[{"name":"start","on":{"event":"open"},"do":[{"type":"timer","op":"start","timer":"t0"}]},{"name":"space","on":{"event":"key","keys":[{"char":" "}]},"do":[{"type":"run","group":"go","at":{"beat":{"timer":"t0","ticks":30}}}]},{"name":"bar","on":{"event":"cue","channel":1,"number":1},"do":[{"type":"sequence","op":"start","sequence":"flash"}]}]}}"#,
+    r#"{"type":"rules","connections":"all","page":"100","sub":"0000","table":{"groups":[{"name":"send","commands":[{"type":"report"}]}],"rules":[{"name":"keys","on":{"event":"key","keys":"any","repeat":true},"run":"send"},{"name":"keys_up","on":{"event":"key_up","keys":"any"},"run":"send"},{"name":"text","on":{"event":"text"},"run":"send"},{"name":"press","on":{"event":"press","target":"page","button":"any"},"run":"send"},{"name":"release","on":{"event":"release","target":"page","button":"any"},"run":"send"},{"name":"move","on":{"event":"move","target":"page","held":false},"run":"send"},{"name":"hover_in","on":{"event":"enter","target":{"control":"any"}},"run":"send"},{"name":"hover_out","on":{"event":"leave","target":{"control":"any"}},"run":"send"},{"name":"drawing_in","on":{"event":"enter","target":{"object":"any"}},"run":"send"},{"name":"drawing_out","on":{"event":"leave","target":{"object":"any"}},"run":"send"},{"name":"focus","on":{"event":"focus"},"run":"send"},{"name":"blur","on":{"event":"blur"},"run":"send"},{"name":"wheel","on":{"event":"wheel","target":"page"},"run":"send"}]}}"#,
+];
+
+fn run_json(name: &str, message: &str, inputs: &str) -> std::process::Output {
+    let dir = folder(name);
+    let (table_path, inputs_path) = (dir.join("table.json"), dir.join("inputs.txt"));
+    std::fs::write(&table_path, message).unwrap();
+    std::fs::write(&inputs_path, inputs).unwrap();
+    neottx(&["rules-run", table_path.to_str().unwrap(), inputs_path.to_str().unwrap()])
+}
+
+/// RULE-35, RULE-39 (REQ-6612, REQ-6613): each of the document's own
+/// `rules` messages is read, made into a table that a receiver's decoder
+/// accepts, and evaluated; the page is the message's own.
+#[test]
+fn the_documents_rules_messages_are_read() {
+    for (index, message) in EXAMPLES.iter().enumerate() {
+        let output = run_json(&format!("rules_run_json_{index}"), message, "");
+        assert!(output.status.success(), "example {index}: {}", String::from_utf8_lossy(&output.stderr));
+        let text = String::from_utf8(output.stdout).unwrap();
+        let first = text.lines().next().unwrap();
+        let page: serde_json::Value = serde_json::from_str(message).unwrap();
+        let named = format!("# page {}/{},", page["page"].as_str().unwrap(), page["sub"].as_str().unwrap());
+        assert!(first.starts_with(&named), "example {index}: {first}");
+    }
+}
+
+/// RULE-35 example 3 (RULE-7, RULE-22, RULE-99): the arrow keys change v0
+/// between 0 and 10 from 5, and the same group reports the new value.
+#[test]
+fn a_counter_written_as_json_reports_its_new_values() {
+    let output = run_json(
+        "rules_run_json_counter",
+        EXAMPLES[3],
+        "1 key down name ArrowUp\n2 key down name ArrowUp\n3 key down name ArrowDown\n",
+    );
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let text = String::from_utf8(output.stdout).unwrap();
+    let values: Vec<&str> =
+        text.lines().filter(|line| line.contains(" report ")).filter_map(|line| line.rsplit(' ').next()).collect();
+    assert_eq!(values, ["6", "7", "6"], "{text}");
+}
+
+/// RULE-35 and RULE-39: a rule with both `run` and `do` is refused, and so
+/// is a `do` holding a record a group may not hold.
+#[test]
+fn a_faulty_rules_message_is_refused() {
+    let both = r#"{"type":"rules","connections":"all","page":"120","sub":"0000","table":{
+        "groups":[{"name":"g","commands":[{"type":"report"}]}],
+        "rules":[{"name":"r","on":{"event":"open"},"run":"g","do":[{"type":"report"}]}]}}"#;
+    let forbidden = r#"{"type":"rules","connections":"all","page":"120","sub":"0000","table":{
+        "rules":[{"name":"r","on":{"event":"open"},"do":[{"type":"redirect"}]}]}}"#;
+    for (name, message, why) in [("both", both, "invalid_rules"), ("forbidden", forbidden, "invalid_group")] {
+        let output = run_json(&format!("rules_run_json_{name}"), message, "");
+        assert!(!output.status.success(), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(why), "{name}: {stderr}");
+    }
+}

@@ -33,6 +33,7 @@ mod options;
 #[cfg(any(feature = "view", feature = "keyboard"))]
 mod page_rules;
 mod records;
+mod rules_json;
 mod run;
 mod script;
 mod terminal;
