@@ -28,34 +28,19 @@ use neoteletext_audio_instruments::synth8::{
 };
 use neoteletext_audio_instruments::{BLOCK_SAMPLES, SAMPLE_RATE};
 use support::{
-    A2, CONTROL, NOTE_OFF, NOTE_ON, PITCH_BEND, cents, component, decibels, instrument, pitch, render, rms, samples,
-    square,
+    A2, CONTROL, NOTE_OFF, NOTE_ON, ON, PITCH_BEND, cents, component, decibels, instrument, pitch, render, rms,
+    samples, square, vco1_range, vco1_wave, vco2_range, vco2_wave,
 };
 
-/// A patch from random bytes: most random bytes are no patch, and that
-/// they are refused, not a panic, is part of the test.
+/// A patch from random bytes: bytes above 127 are no patch, and that they
+/// are refused, not a panic, is part of the test; seven bits of each are
+/// always one (S8-23).
 fn random_patch(random: &mut Random) -> Patch {
-    loop {
-        let mut bytes = [0u8; PATCH_BYTES];
-        for byte in &mut bytes {
-            *byte = random.word() as u8;
-        }
-        if let Ok(patch) = Patch::from_bytes(&bytes) {
-            return patch;
-        }
-        // Held to each control's range, any bytes are one.
-        let mut patch = Patch::DEFAULT;
-        for (place, &byte) in bytes.iter().enumerate() {
-            let mut held = patch.to_bytes();
-            held[place] = byte;
-            if let Ok(taken) = Patch::from_bytes(&held) {
-                patch = taken;
-            }
-        }
-        if random.word().is_multiple_of(2) {
-            return patch;
-        }
+    let mut bytes = [0u8; PATCH_BYTES];
+    for byte in &mut bytes {
+        *byte = random.word() as u8;
     }
+    Patch::from_bytes(&bytes).unwrap_or_else(|_| Patch::from_bytes(&bytes.map(|byte| byte & 0x7f)).unwrap())
 }
 
 /// A random message: mostly ones the instrument takes, some it ignores,
@@ -66,7 +51,13 @@ fn random_event(random: &mut Random) -> (u8, u8, u8) {
     match kind % 16 {
         0..=6 => (NOTE_ON | (a & 15), 24 + b % 85, c & 0x7f),
         7..=10 => (NOTE_OFF | (a & 15), 24 + b % 85, c & 0x7f),
-        11 => (CONTROL, [1, 5, 7, 8, 64, 65, 120, 121, 123, 10, 91][usize::from(b % 11)], c & 0x7f),
+        // The performance controllers, some the instrument ignores, and
+        // panel controllers on channels 1 to 3 (S8-2).
+        11 => (
+            CONTROL | (a % 3),
+            [1, 5, 7, 8, 11, 41, 64, 65, 118, 120, 121, 123, 10, 91, 3, 35, 57, 62, 63, 119, 107][usize::from(b % 21)],
+            c & 0x7f,
+        ),
         12 => (PITCH_BEND, b & 0x7f, c & 0x7f),
         13 => (0xc0 | (a & 15), b & 0x7f, c & 0x7f),
         _ => (a, b, c),
@@ -155,7 +146,7 @@ fn a_volume_message_between_two_renders_does_not_step_the_signal() {
     // slope, and anything sudden is larger. The volume's gain was worked
     // out once for each call to render, so a volume message moved it
     // between one sample and the next (TODO-6438).
-    let patch = Patch::DEFAULT.with(Param::Vco1Wave, 0);
+    let patch = Patch::DEFAULT.with(Param::Vco1Wave, vco1_wave(0));
     // Half a second for the note to settle; then twenty changes of the
     // volume 3,058 samples apart, the calls to render cut at `cut`
     // samples; then the volume at its half.
@@ -209,7 +200,7 @@ fn poly_1_has_eight_voices_and_the_ninth_key_waits() {
     // Owner's manual, printed page 12: "When eight notes are played and
     // held, no new notes can be sounded until one of the original eight
     // is released."
-    let mut synth8 = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, 0));
+    let mut synth8 = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, vco1_wave(0)));
     for &key in &KEYS[..9] {
         synth8.event(NOTE_ON, key, 100);
     }
@@ -228,7 +219,10 @@ fn poly_1_lets_a_release_ring_and_poly_2_cuts_it_short() {
     // Owner's manual: in poly 2 "any notes played previously will have
     // instantaneous Releases regardless of the patch programs".
     for (mode, rings) in [(0u8, true), (3, false)] {
-        let patch = Patch::DEFAULT.with(Param::Vco1Wave, 0).with(Param::Env2Release, 220).with(Param::AssignMode, mode);
+        let patch = Patch::DEFAULT
+            .with(Param::Vco1Wave, vco1_wave(0))
+            .with(Param::Env2Release, 110)
+            .with(Param::AssignMode, mode * 32);
         let mut synth8 = instrument(&patch);
         synth8.event(NOTE_ON, KEYS[0], 100);
         render(&mut synth8, 0.2);
@@ -250,7 +244,7 @@ fn poly_1_goes_round_the_voices_and_poly_2_keeps_the_first() {
     // its own, within 0.8 cent: the same key on another voice is another
     // pitch, and on the same voice the same.
     let tapped = |mode: u8| {
-        let mut synth8 = instrument(&square().with(Param::AssignMode, mode));
+        let mut synth8 = instrument(&square().with(Param::AssignMode, mode * 32));
         (0..9)
             .map(|_| {
                 synth8.event(NOTE_ON, A2, 100);
@@ -274,7 +268,7 @@ fn poly_1_goes_round_the_voices_and_poly_2_keeps_the_first() {
 fn solo_plays_the_lowest_key_on_one_voice() {
     // Owner's manual: "using only one voice ... The Solo Mode uses Low
     // Note priority."
-    let mut synth8 = instrument(&square().with(Param::AssignMode, 1));
+    let mut synth8 = instrument(&square().with(Param::AssignMode, 32));
     synth8.event(NOTE_ON, A2, 100);
     synth8.event(NOTE_ON, A2 + 7, 100);
     assert!(cents(440.0, pitch(&render(&mut synth8, 0.5)[samples(0.1)..])).abs() < 1.0);
@@ -294,7 +288,7 @@ fn solo_plays_the_lowest_key_on_one_voice() {
 fn solo_plays_the_lowest_of_more_keys_than_it_remembers() {
     // Sixteen keys are remembered; a seventeenth below them all, which
     // MIDI can send, is the lowest key down and the one solo plays.
-    let mut synth8 = instrument(&square().with(Param::AssignMode, 1));
+    let mut synth8 = instrument(&square().with(Param::AssignMode, 32));
     for key in (A2 + 1..=A2 + 16).rev() {
         synth8.event(NOTE_ON, key, 100);
     }
@@ -318,12 +312,12 @@ fn solo_plays_the_lowest_of_more_keys_than_it_remembers() {
 fn unison_shares_all_eight_voices_among_the_keys() {
     // Owner's manual: "All 8 synthesizers will be assigned to any one key
     // pressed, dividing to four each for two keys, and so on".
-    let mut synth8 = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, 0).with(Param::AssignMode, 2));
+    let mut synth8 = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, vco1_wave(0)).with(Param::AssignMode, 64));
     synth8.event(NOTE_ON, KEYS[0], 100);
     let one = rms(&render(&mut synth8, 0.5)[samples(0.2)..]);
     assert_eq!(synth8.sounding_voices(), 8);
     let single = rms(&{
-        let mut solo = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, 0).with(Param::AssignMode, 1));
+        let mut solo = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, vco1_wave(0)).with(Param::AssignMode, 32));
         solo.event(NOTE_ON, KEYS[0], 100);
         render(&mut solo, 0.5)[samples(0.2)..].to_vec()
     });
@@ -345,8 +339,8 @@ fn unison_shares_all_eight_voices_among_the_keys() {
 fn dual_layers_the_two_patches_and_split_shares_the_keyboard() {
     // Owner's manual, printed page 3. The upper patch at 8', the lower
     // two octaves up at 2': which half plays is heard from the pitch.
-    let upper = Patch::DEFAULT.with(Param::Vco1Wave, 0);
-    let lower = upper.with(Param::Vco1Range, 3);
+    let upper = Patch::DEFAULT.with(Param::Vco1Wave, vco1_wave(0));
+    let lower = upper.with(Param::Vco1Range, vco1_range(3));
     let mut synth8 = Synth8::new();
     synth8.set_patch(&upper);
     synth8.set_lower_patch(&lower);
@@ -394,7 +388,7 @@ fn a_key_plays_both_halves_whatever_was_played_before_the_key_mode_changed() {
     // slot's first trigger. Every key of the first five, played again
     // in dual, sounds on a voice of each half.
     for again in &KEYS[..5] {
-        let mut synth8 = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, 0));
+        let mut synth8 = instrument(&Patch::DEFAULT.with(Param::Vco1Wave, vco1_wave(0)));
         for &key in &KEYS[..5] {
             synth8.event(NOTE_ON, key, 100);
             render(&mut synth8, 0.05);
@@ -424,9 +418,9 @@ fn a_key_beyond_the_voices_takes_the_voice_the_hold_has_kept_longest() {
     // than there are voices available. In this case, voices will be taken
     // in the order that they were originally used so long as their keys
     // are not physically held on the keyboard."
-    let triangle = Patch::DEFAULT.with(Param::Vco1Wave, 0);
+    let triangle = Patch::DEFAULT.with(Param::Vco1Wave, vco1_wave(0));
     for mode in [0u8, 3] {
-        let mut synth8 = instrument(&triangle.with(Param::AssignMode, mode));
+        let mut synth8 = instrument(&triangle.with(Param::AssignMode, mode * 32));
         synth8.event(CONTROL, 64, 127);
         for &key in &KEYS[..8] {
             synth8.event(NOTE_ON, key, 100);
@@ -441,7 +435,7 @@ fn a_key_beyond_the_voices_takes_the_voice_the_hold_has_kept_longest() {
         assert!(levels[1].abs() < 1.5 && levels[2] < -40.0, "assign mode {mode}: {levels:?}");
         // A key under a finger keeps its voice: with all eight down, the
         // ninth waits, hold or no hold.
-        let mut synth8 = instrument(&triangle.with(Param::AssignMode, mode));
+        let mut synth8 = instrument(&triangle.with(Param::AssignMode, mode * 32));
         synth8.event(CONTROL, 64, 127);
         for &key in &KEYS[..9] {
             synth8.event(NOTE_ON, key, 100);
@@ -451,7 +445,7 @@ fn a_key_beyond_the_voices_takes_the_voice_the_hold_has_kept_longest() {
     }
     // Solo has one voice: a key played after one the hold keeps takes it,
     // though it is the higher.
-    let mut synth8 = instrument(&square().with(Param::AssignMode, 1));
+    let mut synth8 = instrument(&square().with(Param::AssignMode, 32));
     synth8.event(CONTROL, 64, 127);
     synth8.event(NOTE_ON, A2 - 12, 100);
     render(&mut synth8, 0.1);
@@ -463,7 +457,7 @@ fn a_key_beyond_the_voices_takes_the_voice_the_hold_has_kept_longest() {
     render(&mut synth8, 0.5);
     assert_eq!(synth8.sounding_voices(), 0);
     // Unison: the ninth key takes the place of the first the hold keeps.
-    let mut synth8 = instrument(&triangle.with(Param::AssignMode, 2));
+    let mut synth8 = instrument(&triangle.with(Param::AssignMode, 64));
     synth8.event(CONTROL, 64, 127);
     for &key in &KEYS[..8] {
         synth8.event(NOTE_ON, key, 100);
@@ -475,17 +469,17 @@ fn a_key_beyond_the_voices_takes_the_voice_the_hold_has_kept_longest() {
 }
 
 #[test]
-fn the_pedal_holds_the_lower_half_alone_in_split_and_outlasts_a_change_of_mode() {
-    // Owner's manual, printed page 13: "In either the Whole or Dual Key
-    // Modes, the DP-2 will activate the Hold function for the entire
-    // keyboard ... When used with the Split Key Mode, the DP-2 will
-    // activate the Hold function on the Lower end of the keyboard only".
+fn s8_11_the_pedal_holds_the_whole_keyboard_in_every_key_mode_and_outlasts_a_change_of_mode() {
+    // `synth8.md`, S8-11 and MIDI-87 (DEC-6465 answer 37): the hold holds
+    // the whole keyboard in whole, dual and split alike, where the
+    // instrument's own pedal holds the lower half alone in split (owner's
+    // manual, printed page 13).
     let patch = square().with(Param::Env2Release, 0);
     let (low, high) = (A2 - 24, A2 + 12);
     let tap = |synth8: &mut Synth8, key: u8| {
-        synth8.event(NOTE_ON, key, 100);
+        let _ = synth8.event(NOTE_ON, key, 100);
         render(synth8, 0.05);
-        synth8.event(NOTE_OFF, key, 0);
+        let _ = synth8.event(NOTE_OFF, key, 0);
     };
     let mut synth8 = instrument(&patch);
     synth8.set_lower_patch(&patch);
@@ -493,11 +487,12 @@ fn the_pedal_holds_the_lower_half_alone_in_split_and_outlasts_a_change_of_mode()
     synth8.event(CONTROL, 64, 127);
     tap(&mut synth8, low);
     tap(&mut synth8, high);
-    let held = render(&mut synth8, 0.3);
-    assert_eq!(synth8.sounding_voices(), 1, "split: the pedal holds the lower key alone");
-    assert!(cents(110.0, pitch(&held[samples(0.1)..])).abs() < 2.0);
-    // In dual it holds both halves; going to split lets the upper go.
+    render(&mut synth8, 0.3);
+    assert_eq!(synth8.sounding_voices(), 2, "split: the pedal holds both halves");
+    // In dual it holds both halves, and going to split keeps them.
     synth8.event(CONTROL, 64, 0);
+    render(&mut synth8, 0.3);
+    assert_eq!(synth8.sounding_voices(), 0);
     synth8.set_key_mode(KeyMode::Dual);
     synth8.event(CONTROL, 64, 127);
     tap(&mut synth8, high);
@@ -505,7 +500,7 @@ fn the_pedal_holds_the_lower_half_alone_in_split_and_outlasts_a_change_of_mode()
     assert_eq!(synth8.sounding_voices(), 2, "dual: the pedal holds both halves");
     synth8.set_key_mode(KeyMode::Split);
     render(&mut synth8, 0.3);
-    assert_eq!(synth8.sounding_voices(), 1, "dual to split: the upper half's hold is let go");
+    assert_eq!(synth8.sounding_voices(), 2, "dual to split: the hold stays on both halves");
     // The pedal is still down after a change of the key mode or of the
     // assign mode, each of which releases every voice: what is played
     // then is held.
@@ -515,15 +510,21 @@ fn the_pedal_holds_the_lower_half_alone_in_split_and_outlasts_a_change_of_mode()
     tap(&mut synth8, high);
     render(&mut synth8, 0.3);
     assert_eq!(synth8.sounding_voices(), 1, "the pedal holds after a change of the key mode");
-    synth8.set_patch(&patch.with(Param::AssignMode, 3));
+    synth8.set_patch(&patch.with(Param::AssignMode, 96));
     render(&mut synth8, 0.3);
     assert_eq!(synth8.sounding_voices(), 0, "a change of the assign mode releases every voice");
     tap(&mut synth8, high);
     render(&mut synth8, 0.3);
     assert_eq!(synth8.sounding_voices(), 1, "the pedal holds after a change of the assign mode");
-    synth8.event(CONTROL, 64, 0);
-    render(&mut synth8, 0.3);
-    assert_eq!(synth8.sounding_voices(), 0);
+    // Values 0 to 63 are up, 64 to 127 down (MIDI-87).
+    for (value, held) in [(0u8, 0), (1, 0), (63, 0), (64, 1), (127, 1)] {
+        synth8.event(CONTROL, 64, value);
+        tap(&mut synth8, high);
+        render(&mut synth8, 0.3);
+        assert_eq!(synth8.sounding_voices(), held, "pedal at {value}");
+        synth8.event(CONTROL, 64, 0);
+        render(&mut synth8, 0.1);
+    }
 }
 
 #[test]
@@ -551,7 +552,7 @@ fn the_hold_holds_and_the_controllers_do_what_midi_says() {
     synth8.event(CONTROL, 123, 0);
     render(&mut synth8, 0.1);
     assert_eq!(synth8.sounding_voices(), 0);
-    synth8.set_patch(&square().with(Param::Env2Release, 255));
+    synth8.set_patch(&square().with(Param::Env2Release, 127));
     synth8.event(NOTE_ON, A2, 100);
     render(&mut synth8, 0.1);
     synth8.event(CONTROL, 120, 0);
@@ -581,7 +582,7 @@ fn the_hold_holds_and_the_controllers_do_what_midi_says() {
     synth8.reset();
     assert_eq!(
         (synth8.sounding_voices(), synth8.ignored_events(), *synth8.patch()),
-        (0, 0, square().with(Param::Env2Release, 255))
+        (0, 0, square().with(Param::Env2Release, 127))
     );
     assert!((decibels(level(&mut synth8), full)).abs() < 0.2);
 }
@@ -605,7 +606,7 @@ fn the_wheel_adds_the_oscillators_swing_to_the_pitch() {
     // The bender panel's LFO modulation at the wheel's top: 50 cents
     // either way as the instrument is made, and what the panel says.
     let swing = |performance: &Performance| {
-        let mut synth8 = instrument(&square().with(Param::LfoRate, 150));
+        let mut synth8 = instrument(&square().with(Param::LfoRate, 75));
         synth8.set_performance(performance);
         synth8.event(CONTROL, 1, 127);
         synth8.event(NOTE_ON, A2 + 24, 100);
@@ -628,25 +629,25 @@ fn rendering_speed() {
     let seconds = 20usize;
     let mut out = vec![0i16; seconds * SAMPLE_RATE as usize];
     let cross = Patch::DEFAULT
-        .with(Param::CrossMod, 128)
-        .with(Param::Sync, 1)
-        .with(Param::MixVco2, 255)
-        .with(Param::VcfResonance, 128);
+        .with(Param::CrossMod, 64)
+        .with(Param::Sync, ON)
+        .with(Param::MixVco2, 127)
+        .with(Param::VcfResonance, 64);
     // The most work found: the slider at 10 under VCO-2's sine, both
     // oscillators at 2' on the keyboard's top octaves, where VCO-1 is at
     // its bound of 48 kHz for much of every cycle of VCO-2 and starts a
     // cycle in every fourth sample; the pulse's width swept as well.
     let hardest = Patch::DEFAULT
-        .with(Param::CrossMod, 255)
-        .with(Param::Vco2Wave, 0)
-        .with(Param::Vco1Range, 3)
-        .with(Param::Vco2Range, 36)
-        .with(Param::MixVco2, 255)
+        .with(Param::CrossMod, 127)
+        .with(Param::Vco2Wave, vco2_wave(0))
+        .with(Param::Vco1Range, vco1_range(3))
+        .with(Param::Vco2Range, vco2_range(36))
+        .with(Param::MixVco2, 127)
         .with(Param::PwmSource, 0)
-        .with(Param::PwmDepth, 255)
-        .with(Param::LfoRate, 255)
-        .with(Param::HpfCutoff, 100)
-        .with(Param::VcfResonance, 128);
+        .with(Param::PwmDepth, 127)
+        .with(Param::LfoRate, 127)
+        .with(Param::HpfCutoff, 50)
+        .with(Param::VcfResonance, 64);
     for (name, patch, higher) in [
         ("a sawtooth each", Patch::DEFAULT, 0),
         ("LO STRINGS", factory::lo_strings(), 0),

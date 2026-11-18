@@ -22,7 +22,9 @@
 //! synth106 and synth60 (module `synth106`). Behind the feature `synthd`, not on
 //! by default either, is synthD (module `synthd`).
 //! Behind the feature `synth53`, also not on by default, is synth53 (module `synth53`).
-//! Behind the feature `synth8`, not on by default either, is synth8 (module `synth8`).
+//! Behind the feature `synth8`, not on by default either, is synth8 (module `synth8`);
+//! behind the feature `interface` alone, its interface module
+//! (`synth8::interface`) and its patch (`synth8::patch`) without its synthesis.
 //! Behind the feature `synth80`, not on by default either, is synth80 (module `synth80`).
 //!
 //! # Whose code this is
@@ -102,7 +104,7 @@ pub mod synth6581 {
 }
 #[cfg(feature = "synth7")]
 pub mod synth7;
-#[cfg(feature = "synth8")]
+#[cfg(any(feature = "synth8", feature = "interface"))]
 pub mod synth8;
 #[cfg(any(feature = "synth80", feature = "interface"))]
 pub mod synth80;

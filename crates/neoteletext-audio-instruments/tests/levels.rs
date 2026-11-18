@@ -136,7 +136,16 @@ fn players() -> Vec<Player> {
         midi("synthD", 1, one_voice, synthd::SynthD::event, synthd::SynthD::render),
         synth53("synth53", synth53::Model::Synth53),
         synth53("synth52", synth53::Model::Synth52),
-        midi("synth8", synth8::VOICES, eight, synth8::Synth8::event, synth8::Synth8::render),
+        midi(
+            "synth8",
+            synth8::VOICES,
+            eight,
+            // synth8's reader answers what it did, which this table does not want.
+            |synth, status, data1, data2| {
+                let _ = synth8::Synth8::event(synth, status, data1, data2);
+            },
+            synth8::Synth8::render,
+        ),
         midi("synth80", synth80::VOICES, touch, synth80::Synth80::event, synth80::Synth80::render),
     ]
 }

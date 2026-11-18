@@ -16,7 +16,8 @@
 )]
 
 use neoteletext_audio_instruments::SAMPLE_RATE;
-use neoteletext_audio_instruments::synth8::{Param, Patch, Synth8};
+use neoteletext_audio_instruments::synth8::patch::{slider_byte, vco2_range_value};
+use neoteletext_audio_instruments::synth8::{LfoWave, Param, Patch, Synth8, Vco1Range, Vco1Wave, Vco2Wave};
 
 /// The output rate as f64.
 pub const RATE: f64 = SAMPLE_RATE as f64;
@@ -66,9 +67,9 @@ pub fn instrument(patch: &Patch) -> Synth8 {
 #[must_use]
 pub fn play(patch: &Patch, key: u8, held: f64, after: f64) -> Vec<f64> {
     let mut synth8 = instrument(patch);
-    synth8.event(NOTE_ON, key, 100);
+    let _ = synth8.event(NOTE_ON, key, 100);
     let mut signal = render(&mut synth8, held);
-    synth8.event(NOTE_OFF, key, 0);
+    let _ = synth8.event(NOTE_OFF, key, 0);
     signal.extend(render(&mut synth8, after));
     signal
 }
@@ -77,13 +78,61 @@ pub fn play(patch: &Patch, key: u8, held: f64, after: f64) -> Vec<f64> {
 /// sustain.
 #[must_use]
 pub fn square() -> Patch {
-    Patch::DEFAULT.with(Param::Vco1Wave, 3)
+    Patch::DEFAULT.with(Param::Vco1Wave, Vco1Wave::Square.value())
 }
 
-/// VCO-2 alone, with a waveform, in the mixer.
+/// VCO-2 alone, with a waveform, in the mixer: 0 sine, 1 sawtooth, 2
+/// pulse, 3 noise.
 #[must_use]
 pub fn second(wave: u8) -> Patch {
-    Patch::DEFAULT.with(Param::MixVco1, 0).with(Param::MixVco2, 255).with(Param::Vco2Wave, wave)
+    Patch::DEFAULT.with(Param::MixVco1, 0).with(Param::MixVco2, ON).with(Param::Vco2Wave, vco2_wave(wave))
+}
+
+/// A switch on, and a slider or a modulation slider at its top
+/// (`synth8.md`, S8-21).
+pub const ON: u8 = 127;
+
+/// VCO-1 RANGE's canonical value by its place from 16′: 0 16′, 1 8′, 2
+/// 4′, 3 2′.
+#[must_use]
+pub fn vco1_range(index: u8) -> u8 {
+    [Vco1Range::Sixteen, Vco1Range::Eight, Vco1Range::Four, Vco1Range::Two][usize::from(index)].value()
+}
+
+/// VCO-1 WAVEFORM's canonical value: 0 triangle, 1 sawtooth, 2 pulse, 3
+/// square.
+#[must_use]
+pub fn vco1_wave(index: u8) -> u8 {
+    [Vco1Wave::Triangle, Vco1Wave::Sawtooth, Vco1Wave::Pulse, Vco1Wave::Square][usize::from(index)].value()
+}
+
+/// VCO-2 WAVEFORM's canonical value: 0 sine, 1 sawtooth, 2 pulse, 3
+/// noise.
+#[must_use]
+pub fn vco2_wave(index: u8) -> u8 {
+    [Vco2Wave::Sine, Vco2Wave::Sawtooth, Vco2Wave::Pulse, Vco2Wave::Noise][usize::from(index)].value()
+}
+
+/// LFO WAVE FORM's canonical value: 0 sine, 1 sawtooth, 2 square, 3
+/// random.
+#[must_use]
+pub fn lfo_wave(index: u8) -> u8 {
+    [LfoWave::Sine, LfoWave::Sawtooth, LfoWave::Square, LfoWave::Random][usize::from(index)].value()
+}
+
+/// VCO-2 RANGE's canonical value at so many semitones above 16′ (S8-30).
+#[must_use]
+pub fn vco2_range(semitones: u8) -> u8 {
+    vco2_range_value(semitones)
+}
+
+/// The slider's value nearest a byte of the instrument's 0 to 255, and
+/// the byte that value stands for (S8-21 item 1), which the laws are
+/// written in.
+#[must_use]
+pub fn slider(byte: u8) -> (u8, u8) {
+    let value = (f64::from(byte) * 127.0 / 255.0).round() as u8;
+    (value, slider_byte(value))
 }
 
 /// The frequency in hertz of a steady tone, from the times of its rising

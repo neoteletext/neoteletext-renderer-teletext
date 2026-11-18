@@ -78,7 +78,7 @@ fn parts() -> Vec<(&'static str, Vec<Timed>, f64)> {
     }
 
     // The line, all eight voices on each key, sliding from key to key.
-    let lead = factory::sync_sweep().with(Param::Env2Release, 90);
+    let lead = factory::sync_sweep().with(Param::Env2Release, 45);
     let glide = Performance { portamento: Portamento::On, portamento_time: 12, ..Performance::DEFAULT };
     let mut line = vec![
         Timed(0.0, Change::Mode(KeyMode::Whole)),
@@ -98,7 +98,7 @@ fn parts() -> Vec<(&'static str, Vec<Timed>, f64)> {
         Timed(
             0.0,
             Change::Upper(Box::new(
-                factory::gong().with(Param::AssignMode, 0).with(Param::Env2Sustain, 0).with(Param::Env2Decay, 190),
+                factory::gong().with(Param::AssignMode, 0).with(Param::Env2Sustain, 0).with(Param::Env2Decay, 95),
             )),
         ),
     ];
@@ -124,7 +124,9 @@ fn render(synth8: &mut Synth8, mut score: Vec<Timed>, length: f64) -> Vec<i16> {
         synth8.render(&mut samples[done..until]);
         done = until;
         match change {
-            Change::Midi([status, first, second]) => synth8.event(status, first, second),
+            Change::Midi([status, first, second]) => {
+                let _ = synth8.event(status, first, second);
+            }
             Change::Upper(patch) => synth8.set_patch(&patch),
             Change::Lower(patch) => synth8.set_lower_patch(&patch),
             Change::Mode(mode) => synth8.set_key_mode(mode),

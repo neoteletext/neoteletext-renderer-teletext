@@ -42,7 +42,7 @@ synthd = ["analog"]
 synth53 = ["analog"]
 # synth8, made from the analogue building blocks (TODO-6435), codec 17. Not
 # on by default.
-synth8 = ["analog"]
+synth8 = ["analog", "interface"]
 # synth80, made from the analogue building blocks (TODO-6434), codec 18. Not
 # on by default.
 synth80 = ["analog"]
