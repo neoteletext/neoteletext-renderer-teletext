@@ -109,6 +109,13 @@ fn a_table_is_run_into_a_script() {
     let again = run("rules_run_again", hexadecimal.as_bytes(), INPUTS, &[]);
     assert_eq!(String::from_utf8(again.stdout).unwrap(), text);
 
+    // RULE-96 (REQ-6526): with every event given on arrival the output
+    // is the same: this table's one sound action is a `becomes` rule's,
+    // which stays on the tick.
+    let arrival = run("rules_run_arrival", &table(), INPUTS, &["--on-arrival"]);
+    assert!(arrival.status.success(), "{}", String::from_utf8_lossy(&arrival.stderr));
+    assert_eq!(String::from_utf8(arrival.stdout).unwrap(), text);
+
     // On a ReGIS picture a unit is a pixel, so two moves of one pixel do
     // not bring object 10 onto object 20, and nothing is hidden.
     let regis = run("rules_run_regis", &table(), INPUTS, &["--picture", "regis", "--frames", "12"]);
@@ -140,6 +147,36 @@ fn a_table_is_run_into_a_script() {
     ]);
     assert!(played.status.success(), "{}", String::from_utf8_lossy(&played.stderr));
     assert!(dir.join("seq-00008.png").exists());
+}
+
+/// RULE-96 (REQ-6526, DEC-6580 item 1): with `--on-arrival` a key
+/// rule's sound operations are written first among its tick's lines, as
+/// the world is given them on the key's arrival; its report and its
+/// animation operation stay in their order, and the counts are the same.
+#[test]
+fn a_key_rules_sound_is_written_on_arrival() {
+    let mut table = Box::new(Table::new());
+    let mut keys = any_key();
+    keys.push(Key { kind: KeyKind::Character, code: u32::from('a') }).unwrap();
+    let mut key = Rule::new(Trigger::Key { keys, repeat: false, mods_mask: 0, mods_value: 0 });
+    key.actions.push(Action::Send(None)).unwrap();
+    let moved = OperationKind::Move { relative: true, x: 1, y: 0 };
+    key.actions.push(Action::Animate(Operation { target: Target::object(10), kind: moved })).unwrap();
+    key.actions.push(Action::Midi { channel: 0, status: 0x90, data1: 60, data2: 100 }).unwrap();
+    table.rules.push(key).unwrap();
+    let mut body = vec![0u8; neoteletext_rules::limits::MAX_TABLE_BYTES];
+    let used = neoteletext_rules::encode(0x150, 7, Some(&table), &mut body).unwrap();
+    body.truncate(used);
+    let inputs = "0 rectangle 10 0 0 12 20\n1 key down char a\n";
+
+    let at_the_tick = run("rules_run_key_tick", &body, inputs, &[]);
+    let on_arrival = run("rules_run_key_arrival", &body, inputs, &["--on-arrival"]);
+    let head = "# page 150, generation 7, 1 rules\n";
+    let report = "# 1 report rule 0 tick 1 target page 0 input 1\n";
+    let (moved, midi) = ("1 move 10 1 0 relative\n", "# 1 midi 0 0x90 60 100\n");
+    let counts = "# 3 ticks, 1 rules fired, 3 actions run, 0 skipped, 0 events dropped, 0 overruns\n";
+    assert_eq!(String::from_utf8(at_the_tick.stdout).unwrap(), [head, report, moved, midi, counts].concat());
+    assert_eq!(String::from_utf8(on_arrival.stdout).unwrap(), [head, midi, report, moved, counts].concat());
 }
 
 /// ANIM-18: a table its decoder refuses, and a line of the inputs that is

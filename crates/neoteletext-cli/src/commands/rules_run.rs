@@ -20,6 +20,11 @@
 //! pixels (ANIM-13), which no renderer is here to report; a `move` the
 //! table then makes moves it with the object. Nothing here reads a clock:
 //! page tick `n` is the `n`th turn of the loop.
+//!
+//! With `--on-arrival` each key and pointer input is given to the
+//! evaluator as a receiver gives one the moment it arrives (page-rules.md
+//! RULE-96): the sound operations of the rules it fires are written
+//! first among its tick's lines, and every line is otherwise the same.
 
 use super::{io_failure, sandbox_closed};
 use crate::operations::to_core;
@@ -367,8 +372,15 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Failure> {
 }
 
 /// Evaluates `ticks` ticks of the table in `table_file`'s bytes against
-/// `inputs`, and gives the lines to write.
-fn evaluate(table_file: &[u8], inputs: &[(u32, Given)], ticks: u32, picture: Picture) -> Result<Vec<String>, String> {
+/// `inputs`, and gives the lines to write. With `on_arrival`, each event
+/// is given by `Evaluator::push_now` (RULE-96) and not left for the tick.
+fn evaluate(
+    table_file: &[u8],
+    inputs: &[(u32, Given)],
+    ticks: u32,
+    picture: Picture,
+    on_arrival: bool,
+) -> Result<Vec<String>, String> {
     // A decoded table and its evaluator are tens of kilobytes each.
     let mut table = Box::new(Table::new());
     let header = neoteletext_rules::decode(&table_bytes(table_file), &mut table)
@@ -382,11 +394,17 @@ fn evaluate(table_file: &[u8], inputs: &[(u32, Given)], ticks: u32, picture: Pic
         vec![format!("# page {:03X}, generation {}, {} rules", header.page, header.generation, table.rules.len())];
     let mut pending = inputs.iter().peekable();
     let (mut sequence, mut held, mut at) = (0u32, 0u8, None::<(u16, u16)>);
+    // A report or a sound operation is a comment of its tick.
+    let of_tick = |tick: u32, line: String| match line.strip_prefix("# ") {
+        Some(comment) => format!("# {tick} {comment}"),
+        None => line,
+    };
+    let mut events: Vec<InputEvent> = Vec::new();
     for tick in 0..ticks {
         while let Some((_, given)) = pending.next_if(|(due, _)| *due <= tick) {
             let mut push = |input: Input| {
                 sequence = sequence.saturating_add(1);
-                let _ = evaluator.push(InputEvent { sequence, input });
+                events.push(InputEvent { sequence, input });
             };
             match *given {
                 Given::Key { down, key, base } => {
@@ -425,12 +443,14 @@ fn evaluate(table_file: &[u8], inputs: &[(u32, Given)], ticks: u32, picture: Pic
                 }
             }
         }
+        // The tick's levels and rectangles are in place before its
+        // first event either way, so both ways read the same snapshot
+        // (RULE-7).
+        for event in events.drain(..) {
+            let _ = if on_arrival { evaluator.push_now(event, &mut run) } else { evaluator.push(event) };
+        }
         evaluator.tick(&mut run);
-        // A report or a sound operation is a comment of its tick.
-        lines.extend(run.out.drain(..).map(|line| match line.strip_prefix("# ") {
-            Some(comment) => format!("# {tick} {comment}"),
-            None => line,
-        }));
+        lines.extend(run.out.drain(..).map(|line| of_tick(tick, line)));
     }
     let counters = evaluator.counters();
     lines.push(format!(
@@ -450,6 +470,7 @@ pub fn rules_run(
     inputs: &Path,
     frames: Option<u32>,
     picture: Picture,
+    on_arrival: bool,
     no_sandbox: bool,
 ) -> Result<(), Failure> {
     // Both files are read, within their bounds, before the sandbox closes,
@@ -463,7 +484,7 @@ pub fn rules_run(
     // is applied.
     let last = given.last().map_or(0, |(tick, _)| *tick);
     let ticks = frames.unwrap_or_else(|| last.saturating_add(2)).min(MAX_SEQUENCE_TICKS);
-    let lines = evaluate(&table_file, &given, ticks, picture)
+    let lines = evaluate(&table_file, &given, ticks, picture, on_arrival)
         .map_err(|why| (exit::INPUT, format!("{}: {why}", table.display())))?;
     let mut out = std::io::stdout().lock();
     for line in lines {
