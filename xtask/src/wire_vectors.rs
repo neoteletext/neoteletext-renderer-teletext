@@ -467,13 +467,39 @@ mod tests {
 
     use super::*;
 
-    /// The `rules` rows the server writes (RULE-85): the images of the
-    /// worked examples of page-rules.md, whose names the server turns into
+    /// The `rules` rows the server writes (RULE-85): the images of
+    /// RULE-35's example, the worked examples of page-rules.md section 7.5
+    /// and the music player's table, whose names the server turns into
     /// numbers. The engine's libraries have no encoder of a table by names,
-    /// so it cannot write them itself; the table holds them once the server
-    /// has written them at this version.
-    const SERVER_WRITTEN_RULES: [&str; 8] =
-        ["rule_35", "example_1", "example_2", "example_3", "example_4", "example_5", "example_6", "music_player"];
+    /// so it cannot write them itself; each also has a `records` row,
+    /// `rules_` and its name, the RULES record it travels in.
+    const SERVER_WRITTEN_RULES: [&str; 10] = [
+        "rule_35",
+        "example_1",
+        "example_2",
+        "example_3",
+        "example_4",
+        "example_5",
+        "example_6",
+        "example_7",
+        "example_8",
+        "music_player",
+    ];
+
+    /// The prefix of a `records` row's name that carries a `rules` row's
+    /// image.
+    const RULES_RECORD: &str = "rules_";
+
+    /// Whether `value`, the packets of a `records` row, are exactly what
+    /// the engine writes for the image `image` (hexadecimal) at generation
+    /// 1, as for the vectors' every RULES record.
+    fn is_the_engines_record_of(value: &str, image: &str) -> bool {
+        let Some((bytes, length)) = neoteletext_web::wire_vectors::bytes_of(image) else { return false };
+        let Some(image) = bytes.get(..length) else { return false };
+        let (Some(page), sub) = (PageAddress::from_mpp(PAGE), SubCode::new(SUB)) else { return false };
+        packets(|out| rules::encode_image(page, sub, 1, image, SERVICE, &mut |_| RECORD_ID, out))
+            .is_ok_and(|written| written == value)
+    }
 
     /// Whether `value`, a table's image in hexadecimal, passes the check,
     /// decodes to a table for the vectors' page and encodes back to the
@@ -503,6 +529,18 @@ mod tests {
                 let kind = KINDS.into_iter().find(|kind| *kind == vector.kind)?;
                 if kind == "rules" && SERVER_WRITTEN_RULES.contains(&vector.name) {
                     assert!(decodes_and_encodes_back(vector.value), "{}", vector.name);
+                    return None;
+                }
+                if let Some(name) = vector.name.strip_prefix(RULES_RECORD)
+                    && kind == "records"
+                    && SERVER_WRITTEN_RULES.contains(&name)
+                {
+                    let image = vectors().find(|image| image.kind == "rules" && image.name == name);
+                    assert!(
+                        image.is_some_and(|image| is_the_engines_record_of(vector.value, image.value)),
+                        "{}",
+                        vector.name
+                    );
                     return None;
                 }
                 let row = written.iter().find(|row| row.kind == kind && row.name == vector.name);
