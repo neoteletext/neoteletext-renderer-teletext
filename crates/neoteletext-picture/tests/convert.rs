@@ -14,7 +14,8 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
 use image::{DynamicImage, Frame, ImageEncoder, ImageFormat, Rgb, RgbImage, Rgba, RgbaImage};
 use neoteletext_picture::{
-    Align, Display, Error, Fit, Focus, Level, MAX_INPUT_BYTES, Options, Place, Region, convert, parse_colour,
+    Align, Display, Error, Fit, Focus, Level, MAX_INPUT_BYTES, Options, Place, Raster, Region, convert, convert_raster,
+    parse_colour,
 };
 
 const RED: [u8; 3] = [255, 0, 0];
@@ -469,4 +470,15 @@ fn the_page_as_t42_is_whole_packets() {
     let page = convert(&png(&busy(120, 90)), &Options { objects: true, ..Options::default() }).unwrap();
     let packets = page.t42().unwrap();
     assert!(!packets.is_empty() && packets.len().is_multiple_of(42), "{} bytes", packets.len());
+}
+
+/// Renderer parity PAR-9, PAR-11: a picture already in pixels converts to
+/// the page its PNG converts to.
+#[test]
+fn convert_raster_equals_convert_of_the_png() {
+    let picture = busy(97, 61);
+    let raster = Raster::new(97, 61, picture.as_raw().clone()).unwrap();
+    for options in [Options::default(), level_15()] {
+        assert_eq!(convert_raster(raster.clone(), &options).unwrap(), convert(&png(&picture), &options).unwrap());
+    }
 }

@@ -865,9 +865,12 @@ name = "neoteletext-picture"
 version = "0.1.0"
 dependencies = [
  "image",
+ "naplps",
  "neoteletext-core",
  "neoteletext-formats",
  "neoteletext-image",
+ "regis",
+ "regis-minify",
 ]
 
 [[package]]
@@ -1192,6 +1195,14 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "regis"
 version = "0.1.0"
 source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2#9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2"
+
+[[package]]
+name = "regis-minify"
+version = "0.1.0"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2#9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2"
+dependencies = [
+ "regis",
+]
 
 [[package]]
 name = "ring"

@@ -41,6 +41,8 @@ mod decode;
 mod enhanced;
 mod error;
 mod fit;
+#[cfg(feature = "picture-languages")]
+mod languages;
 mod level1;
 mod options;
 mod page;
@@ -50,7 +52,10 @@ mod tti;
 
 pub use decode::{MAX_DECODE_BYTES, MAX_INPUT_BYTES, MAX_SIDE};
 pub use error::Error;
+#[cfg(feature = "picture-languages")]
+pub use languages::{MAX_PICTURE_OUTPUT_BYTES, PictureOptions, to_naplps, to_regis};
 pub use options::{Align, Display, Fit, Focus, Level, Options, Place, Region, Rgb8, Smooth, parse_colour};
+pub use raster::Raster;
 pub use tti::PAGE_NUMBER;
 
 /// A converted page.
@@ -109,13 +114,55 @@ impl Page {
 /// - [`Error::NoChangeCostFits`] and [`Error::TooManyObjectSubpages`] when,
 ///   at Levels 2.5 and 3.5, the page's enhancement triplets cannot be made to
 ///   fit.
+#[cfg(feature = "decode")]
 pub fn convert(bytes: &[u8], options: &Options) -> Result<Page, Error> {
     options.check()?;
-    let picture = decode::decode(bytes, options)?;
-    let sixels = fit::sixels(picture, options)?;
+    convert_raster(decode::decode(bytes, options)?, options)
+}
+
+/// Converts a picture already in pixels to a teletext page: [`convert`]'s
+/// path after decoding (renderer parity PAR-11), for a program that holds
+/// the pixels, such as the server drawing a picture's mosaic fallback. The
+/// orientation and transparency options, which belong to decoding, do not
+/// apply.
+///
+/// # Errors
+///
+/// As [`convert`], but for the errors of decoding.
+pub fn convert_raster(raster: Raster, options: &Options) -> Result<Page, Error> {
+    options.check()?;
+    let sixels = fit::sixels(raster, options)?;
     if options.level.is_enhanced() {
         enhanced::encode(&sixels, options)
     } else {
         Ok(level1::encode(&sixels, options.hold_mosaics))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "a test panics on what it rules out")]
+    use super::*;
+
+    // Renderer parity PAR-11: the server's fallback, a raster at Level 1
+    // contained in rows 1 to 23, writes nothing on rows 0 and 24; and it
+    // builds without the decoders.
+    #[test]
+    fn the_fallback_draws_rows_1_to_23_only() {
+        let raster = Raster::filled(800, 480, [255, 0, 0]);
+        let options = Options {
+            level: Level::One,
+            fit: Fit::Contain,
+            keep_header: true,
+            keep_footer: true,
+            ..Options::default()
+        };
+        let page = convert_raster(raster, &options).unwrap();
+        let rows: Vec<&str> = page.tti.lines().filter(|line| line.starts_with("OL,")).collect();
+        assert_eq!(rows.len(), 23, "{rows:?}");
+        assert!(!rows.iter().any(|line| line.starts_with("OL,0,") || line.starts_with("OL,24,")));
+        assert!(page.drawn.contains(&[255, 0, 0]), "the picture is drawn in red");
+        let enhanced = Options { keep_footer: true, ..Options::default() };
+        assert!(matches!(convert_raster(Raster::filled(8, 8, [0; 3]), &enhanced), Err(Error::Conflict(_))));
     }
 }

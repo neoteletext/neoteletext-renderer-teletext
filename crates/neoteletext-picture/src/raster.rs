@@ -32,34 +32,40 @@ pub struct Raster {
 impl Raster {
     /// A picture of `data`, or `None` when its length is not
     /// `width × height × 3` or a side is 0.
+    #[must_use]
     pub fn new(width: usize, height: usize, data: Vec<u8>) -> Option<Self> {
         let length = width.checked_mul(height)?.checked_mul(CHANNELS)?;
         (width > 0 && height > 0 && data.len() == length).then_some(Self { width, height, data })
     }
 
     /// A picture of one colour.
+    #[must_use]
     pub fn filled(width: usize, height: usize, colour: [u8; CHANNELS]) -> Self {
         let length = width.saturating_mul(height).saturating_mul(CHANNELS);
         Self { width, height, data: colour.iter().copied().cycle().take(length).collect() }
     }
 
     /// The width in pixels.
+    #[must_use]
     pub const fn width(&self) -> usize {
         self.width
     }
 
     /// The height in pixels.
+    #[must_use]
     pub const fn height(&self) -> usize {
         self.height
     }
 
     /// The bytes of row `y`, or none past the last.
+    #[must_use]
     pub fn row(&self, y: usize) -> &[u8] {
         let length = self.width.saturating_mul(CHANNELS);
         y.checked_mul(length).and_then(|start| self.data.get(start..start.saturating_add(length))).unwrap_or_default()
     }
 
     /// The colour at `x`, `y`.
+    #[must_use]
     pub fn pixel(&self, x: usize, y: usize) -> Option<[u8; CHANNELS]> {
         let start = x.checked_mul(CHANNELS)?;
         let bytes = self.row(y).get(start..start.checked_add(CHANNELS)?)?;
@@ -68,6 +74,7 @@ impl Raster {
 
     /// The region at `x`, `y` of `width` by `height`, or `None` when it is
     /// empty or falls outside.
+    #[must_use]
     pub fn cropped(&self, x: usize, y: usize, width: usize, height: usize) -> Option<Self> {
         if x.checked_add(width)? > self.width || y.checked_add(height)? > self.height {
             return None;

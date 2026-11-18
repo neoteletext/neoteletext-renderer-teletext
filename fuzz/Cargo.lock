@@ -517,6 +517,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "naplps"
+version = "0.1.0"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=27000408468141b3e7e708f5da130f4e6e52c926#27000408468141b3e7e708f5da130f4e6e52c926"
+
+[[package]]
 name = "neoteletext-app"
 version = "0.1.0"
 dependencies = [
@@ -596,8 +601,11 @@ name = "neoteletext-picture"
 version = "0.1.0"
 dependencies = [
  "image",
+ "naplps",
  "neoteletext-core",
  "neoteletext-formats",
+ "regis",
+ "regis-minify",
 ]
 
 [[package]]
@@ -787,6 +795,19 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
+name = "regis"
+version = "0.1.0"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2#9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2"
+
+[[package]]
+name = "regis-minify"
+version = "0.1.0"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2#9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2"
+dependencies = [
+ "regis",
+]
 
 [[package]]
 name = "ring"

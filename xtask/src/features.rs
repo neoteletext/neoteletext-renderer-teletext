@@ -143,10 +143,13 @@ const BUILDS: &[Build] = &[
     Build { package: "neoteletext-rules", features: "error-trait" },
     Build { package: "neoteletext-transport", features: "" },
     Build { package: "neoteletext-qrkeyboard", features: "" },
-    // The picture converter and its program (DEC-2325), which have no
-    // optional area: each alone, so the core's features they name are
-    // checked to be enough (REQ-1642 rule 5).
+    // The picture converter and its program (DEC-2325): the converter with
+    // no decoder, as the server links it (renderer parity PAR-11), with its
+    // decoders, and with ReGIS and NAPLPS (PAR-9); each alone, so the core's
+    // features they name are checked to be enough (REQ-1642 rule 5).
     Build { package: "neoteletext-picture", features: "" },
+    Build { package: "neoteletext-picture", features: "decode" },
+    Build { package: "neoteletext-picture", features: "picture-languages" },
     Build { package: "neoteletext-picture-cli", features: "" },
     Build { package: "neoteletext-app", features: "" },
     Build { package: "neoteletext-app", features: "live" },

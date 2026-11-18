@@ -75,7 +75,7 @@ pub fn encode(picture: &Picture, hold: bool) -> Page {
         }
     }
     let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(ROWS);
-    for row in picture.first_row..ROWS {
+    for row in picture.first_row..picture.end_row {
         let start = first_column(row);
         // The row opens on Graphics colour, and with Hold Mosaics on that
         // attribute first: those cells show black.

@@ -58,6 +58,9 @@ pub type Rgb = [i64; 3];
 pub struct Picture {
     /// 0, or 1 when row 0 is left to the page's header.
     pub first_row: usize,
+    /// One past the last row drawn: 25, or 24 when row 24 is left to the
+    /// page (PAR-11).
+    pub end_row: usize,
     /// Each sixel's colour, row by row.
     pub pixels: Vec<Rgb>,
     /// How much each sixel's error counts: its height in lines, and nothing
@@ -68,9 +71,10 @@ pub struct Picture {
 }
 
 impl Picture {
-    /// The picture of `pixels`, which hold [`PIXELS`] colours.
-    pub fn new(pixels: Vec<Rgb>, first_row: usize) -> Self {
-        Self { first_row, pixels, weights: weights(first_row), cells: cell_pixels() }
+    /// The picture of `pixels`, which hold [`PIXELS`] colours, drawn on
+    /// rows `first_row` to `end_row` (exclusive).
+    pub fn with_rows(pixels: Vec<Rgb>, first_row: usize, end_row: usize) -> Self {
+        Self { first_row, end_row, pixels, weights: weights(first_row, end_row), cells: cell_pixels() }
     }
 
     /// The sixels of the cell at `row` and `column`.
@@ -91,10 +95,11 @@ pub const fn first_column(row: usize) -> usize {
 }
 
 #[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects, reason = "indices within the fixed sixel grid")]
-fn weights(first_row: usize) -> Vec<i64> {
+fn weights(first_row: usize, end_row: usize) -> Vec<i64> {
     let mut weights = vec![0; PIXELS];
     for (index, weight) in weights.iter_mut().enumerate() {
-        *weight = i64::try_from(SIXEL_LINES[index / WIDTH % SIXELS_DOWN]).unwrap_or(0);
+        let drawn = index / WIDTH / SIXELS_DOWN < end_row;
+        *weight = if drawn { i64::try_from(SIXEL_LINES[index / WIDTH % SIXELS_DOWN]).unwrap_or(0) } else { 0 };
     }
     let reserved = if first_row == 0 { RECEIVER_COLUMNS * SIXELS_ACROSS } else { WIDTH };
     for line in 0..SIXELS_DOWN {

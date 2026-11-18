@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use neoteletext_picture::{Level, Options, convert};
+use neoteletext_picture::{Level, Options, PictureOptions, convert, to_naplps, to_regis};
 
 const PROGRAM: &str = env!("CARGO_BIN_EXE_neottx-picture");
 
@@ -56,6 +56,30 @@ fn the_program_writes_the_librarys_page() {
     let page = convert(&bmp(), &Options { level: Level::OnePointFive, ..Options::default() }).unwrap();
     assert_eq!(std::fs::read_to_string(&tti).unwrap(), page.tti);
     assert_eq!(std::fs::read(&t42).unwrap(), page.t42().unwrap());
+}
+
+/// Renderer parity PAR-9: `--to regis` and `--to naplps` write the
+/// library's picture, `--colours` its colours.
+#[test]
+fn the_program_writes_the_librarys_pictures() {
+    let folder = scratch("pictures");
+    let picture = folder.join("p.bmp");
+    std::fs::write(&picture, bmp()).unwrap();
+    for (to, expected) in [
+        ("regis", to_regis(&bmp(), &PictureOptions { colours: 4, ..PictureOptions::default() }).unwrap()),
+        ("naplps", to_naplps(&bmp(), &PictureOptions { colours: 4, ..PictureOptions::default() }).unwrap()),
+    ] {
+        let out = folder.join(format!("p.{to}"));
+        let status = Command::new(PROGRAM)
+            .args([picture.to_str().unwrap(), out.to_str().unwrap(), "--to", to, "--colours", "4"])
+            .status()
+            .unwrap();
+        assert!(status.success(), "{to}");
+        assert_eq!(std::fs::read(&out).unwrap(), expected, "{to}");
+    }
+    let refused =
+        Command::new(PROGRAM).args([picture.to_str().unwrap(), "x", "--to", "regis", "--t42", "y"]).status().unwrap();
+    assert!(!refused.success(), "--t42 is for teletext pages");
 }
 
 /// REQ-2337: an unknown option, a bad value and a missing argument fail.

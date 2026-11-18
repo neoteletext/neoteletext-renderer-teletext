@@ -49,12 +49,21 @@ pub enum Error {
     },
     /// The page written could not be encoded as T42; the text says why.
     T42(String),
+    /// A picture's ReGIS or NAPLPS is longer than
+    /// `MAX_PICTURE_OUTPUT_BYTES` (renderer parity PAR-9): its length.
+    TooLarge {
+        /// Its length in bytes.
+        bytes: usize,
+    },
+    /// A picture's ReGIS or NAPLPS, drawn by its renderer, does not draw
+    /// the picture it was written for; the text says which.
+    Unchecked(&'static str),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Conflict(reason) => formatter.write_str(reason),
+            Self::Conflict(reason) | Self::Unchecked(reason) => formatter.write_str(reason),
             Self::InputTooLarge { bytes } => {
                 write!(formatter, "the file is {bytes} bytes, more than the {} accepted", crate::MAX_INPUT_BYTES)
             }
@@ -77,6 +86,9 @@ impl fmt::Display for Error {
                 write!(formatter, "{needed} object sub-pages are needed, more than an object page holds")
             }
             Self::T42(reason) => write!(formatter, "the page could not be encoded as T42: {reason}"),
+            Self::TooLarge { bytes } => {
+                write!(formatter, "the picture takes {bytes} bytes, more than a picture's ReGIS or NAPLPS may")
+            }
         }
     }
 }

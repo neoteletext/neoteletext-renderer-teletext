@@ -223,6 +223,11 @@ pub struct Options {
     pub focus: Focus,
     /// Draw rows 1 to 24 only and leave row 0 to the page's header.
     pub keep_header: bool,
+    /// Draw no row after 23 and leave row 24, the Fastext row, to the page
+    /// (renderer parity PAR-11: the server's mosaic fallback draws a picture
+    /// on rows 1 to 23 of a page whose rows 0 and 24 are the program's).
+    /// Levels 1 and 1.5 only.
+    pub keep_footer: bool,
 }
 
 impl Default for Options {
@@ -242,6 +247,7 @@ impl Default for Options {
             upscale: true,
             focus: Focus::default(),
             keep_header: false,
+            keep_footer: false,
         }
     }
 }
@@ -259,6 +265,8 @@ impl Options {
     pub fn check(&self) -> Result<(), Error> {
         let refused = if self.hold_mosaics && self.level.is_enhanced() {
             Some("hold mosaics is for Levels 1 and 1.5")
+        } else if self.keep_footer && self.level.is_enhanced() {
+            Some("keeping row 24 is for Levels 1 and 1.5")
         } else if self.objects && !self.level.is_enhanced() {
             Some("objects are for Levels 2.5 and 3.5")
         } else if self.pixel_art && (self.fit != Fit::Crop || self.focus != Focus::Align) {

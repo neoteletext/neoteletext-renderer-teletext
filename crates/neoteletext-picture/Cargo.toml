@@ -17,8 +17,23 @@ neoteletext-core.workspace = true
 neoteletext-formats = { workspace = true, features = ["tti", "std"] }
 # MIT OR Apache-2.0. The picture decoders of the five formats DEC-2114
 # names, approved by the owner in DEC-2142; default features off, so no
-# other format and no threads.
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+# other format and no threads. Behind `decode` (renderer parity PAR-11):
+# the server links the converter for its mosaic fallback without them.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"], optional = true }
+# The project's own picture renderers (DEC-6579, DEC-6760 items 16 and 17):
+# the converter writes ReGIS and NAPLPS (PAR-9), shortens ReGIS with the
+# ReGIS repository's minifier and checks both by drawing them.
+regis = { workspace = true, optional = true }
+regis-minify = { workspace = true, optional = true }
+naplps = { workspace = true, optional = true }
+
+[features]
+default = ["decode", "picture-languages"]
+# The five decoders of DEC-2114 and every entry that takes a file's bytes
+# (PAR-11): without it only `convert_raster` is built.
+decode = ["dep:image"]
+# `to_regis` and `to_naplps` (PAR-9).
+picture-languages = ["decode", "dep:regis", "dep:regis-minify", "dep:naplps"]
 
 [dev-dependencies]
 # The round trip receives, composes and renders the converter's pages as
@@ -26,6 +41,20 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # included (TODO-1184).
 neoteletext-core = { workspace = true, features = ["default", "objects"] }
 neoteletext-image = { workspace = true, features = ["alloc"] }
+# The tests write their pictures with the decoders' own encoders.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "convert"
+required-features = ["decode"]
+
+[[test]]
+name = "evaluation"
+required-features = ["decode"]
+
+[[test]]
+name = "round_trip"
+required-features = ["decode"]

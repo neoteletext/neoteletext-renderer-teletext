@@ -25,13 +25,14 @@ const LUMA_WEIGHTS: [i64; CHANNELS] = [299, 587, 114];
 /// The picture as the page's sixels, row 0 or 1 to row 24.
 pub fn sixels(picture: Raster, options: &Options) -> Result<crate::page::Picture, Error> {
     let first_row = usize::from(options.keep_header);
+    let end_row = ROWS.saturating_sub(usize::from(options.keep_footer));
     let mut picture = picture;
     if let Some(region) = options.crop {
         picture = picture
             .cropped(region.x, region.y, region.width, region.height)
             .ok_or(Error::CropOutside { width: picture.width(), height: picture.height() })?;
     }
-    let tallest = ROWS.saturating_sub(first_row).saturating_mul(SIXELS_DOWN);
+    let tallest = end_row.saturating_sub(first_row).saturating_mul(SIXELS_DOWN);
     let pixels = if options.pixel_art {
         if picture.width() > WIDTH || picture.height() > tallest {
             return Err(Error::PixelArtTooLarge {
@@ -41,16 +42,16 @@ pub fn sixels(picture: Raster, options: &Options) -> Result<crate::page::Picture
                 page_height: tallest,
             });
         }
-        as_drawn(&picture, options, tallest, options.align.unwrap_or(Align::CENTRE))
+        as_drawn(&picture, options, tallest, end_row, options.align.unwrap_or(Align::CENTRE))
     } else if picture.width() == WIDTH && (SHORTEST_AS_DRAWN..=tallest).contains(&picture.height()) {
         // A picture of exactly the page's sixels was drawn for it: taken as
         // drawn, its spare rows at the top.
-        as_drawn(&picture, options, tallest, options.align.unwrap_or(Align::BOTTOM))
+        as_drawn(&picture, options, tallest, end_row, options.align.unwrap_or(Align::BOTTOM))
     } else {
-        let raster_height = ROWS.saturating_sub(first_row).saturating_mul(CELL_HEIGHT);
-        averaged(&fitted(&picture, options, raster_height), first_row)
+        let raster_height = end_row.saturating_sub(first_row).saturating_mul(CELL_HEIGHT);
+        averaged(&fitted(&picture, options, RASTER_WIDTH, raster_height, widen(options.display)), first_row, end_row)
     };
-    Ok(crate::page::Picture::new(pixels, first_row))
+    Ok(crate::page::Picture::with_rows(pixels, first_row, end_row))
 }
 
 /// How much wider a raster dot is than tall on the display.
@@ -111,16 +112,23 @@ fn busiest_window(picture: &Raster, keep: usize, across: bool) -> usize {
     best
 }
 
-/// The picture on the page's raster of `RASTER_WIDTH` by `raster_height`.
-fn fitted(picture: &Raster, options: &Options, raster_height: usize) -> Raster {
+/// The picture fitted to a raster of `raster_width` by `raster_height`
+/// whose dot is `widen` times as wide as it is high: the page's raster, or
+/// a picture language's canvas (renderer parity PAR-9).
+pub(crate) fn fitted(
+    picture: &Raster,
+    options: &Options,
+    raster_width: usize,
+    raster_height: usize,
+    widen: f64,
+) -> Raster {
     let (width, height) = (picture.width(), picture.height());
-    let widen = widen(options.display);
     let align = options.align.unwrap_or(Align::CENTRE);
     if options.fit == Fit::Stretch {
-        return resample(picture, RASTER_WIDTH, raster_height, options.smooth);
+        return resample(picture, raster_width, raster_height, options.smooth);
     }
     if options.fit == Fit::Crop && options.upscale {
-        let target = real(RASTER_WIDTH) * widen / real(raster_height);
+        let target = real(raster_width) * widen / real(raster_height);
         let detail = options.focus == Focus::Detail;
         let window = if real(width) / real(height) > target {
             let keep = whole(real(height) * target, 1, width);
@@ -139,18 +147,18 @@ fn fitted(picture: &Raster, options: &Options, raster_height: usize) -> Raster {
             };
             picture.cropped(0, y, width, keep)
         };
-        return resample(window.as_ref().unwrap_or(picture), RASTER_WIDTH, raster_height, options.smooth);
+        return resample(window.as_ref().unwrap_or(picture), raster_width, raster_height, options.smooth);
     }
     // Contain, or either fit that must not enlarge: one scale for the
     // picture as shown, where a raster dot is `widen` wide and a line high.
-    let scale_across = real(RASTER_WIDTH) * widen / real(width);
+    let scale_across = real(raster_width) * widen / real(width);
     let scale_down = real(raster_height) / real(height);
     let mut scale =
         if options.fit == Fit::Contain { scale_across.min(scale_down) } else { scale_across.max(scale_down) };
     if !options.upscale {
         scale = scale.min(1.0);
     }
-    let window_width = whole((real(RASTER_WIDTH) * widen / scale).round(), 1, width);
+    let window_width = whole((real(raster_width) * widen / scale).round(), 1, width);
     let window_height = whole((real(raster_height) / scale).round(), 1, height);
     let window = picture.cropped(
         align.across.offset(width.saturating_sub(window_width)),
@@ -158,13 +166,13 @@ fn fitted(picture: &Raster, options: &Options, raster_height: usize) -> Raster {
         window_width,
         window_height,
     );
-    let out_width = whole((real(window_width) * scale / widen).round(), 1, RASTER_WIDTH);
+    let out_width = whole((real(window_width) * scale / widen).round(), 1, raster_width);
     let out_height = whole((real(window_height) * scale).round(), 1, raster_height);
     let scaled = resample(window.as_ref().unwrap_or(picture), out_width, out_height, options.smooth);
-    let mut raster = Raster::filled(RASTER_WIDTH, raster_height, options.background);
+    let mut raster = Raster::filled(raster_width, raster_height, options.background);
     raster.paste(
         &scaled,
-        align.across.offset(RASTER_WIDTH.saturating_sub(out_width)),
+        align.across.offset(raster_width.saturating_sub(out_width)),
         align.down.offset(raster_height.saturating_sub(out_height)),
     );
     raster
@@ -177,7 +185,7 @@ fn colour(pixel: [u8; CHANNELS]) -> Rgb {
 
 /// A picture taken sixel for sixel, enlarged by the largest whole number
 /// that fits unless enlarging is off, on bars of the background.
-fn as_drawn(picture: &Raster, options: &Options, tallest: usize, align: Align) -> Vec<Rgb> {
+fn as_drawn(picture: &Raster, options: &Options, tallest: usize, end_row: usize, align: Align) -> Vec<Rgb> {
     let factor = if options.upscale {
         (WIDTH.checked_div(picture.width()).unwrap_or(1)).min(tallest.checked_div(picture.height()).unwrap_or(1)).max(1)
     } else {
@@ -186,7 +194,8 @@ fn as_drawn(picture: &Raster, options: &Options, tallest: usize, align: Align) -
     let (width, height) = (picture.width().saturating_mul(factor), picture.height().saturating_mul(factor));
     let mut out = vec![colour(options.background); PIXELS];
     let left = align.across.offset(WIDTH.saturating_sub(width));
-    let top = HEIGHT.saturating_sub(tallest).saturating_add(align.down.offset(tallest.saturating_sub(height)));
+    let bottom = end_row.saturating_mul(SIXELS_DOWN).min(HEIGHT);
+    let top = bottom.saturating_sub(tallest).saturating_add(align.down.offset(tallest.saturating_sub(height)));
     for y in 0..height {
         for x in 0..width {
             let source = picture.pixel(x.checked_div(factor).unwrap_or(0), y.checked_div(factor).unwrap_or(0));
@@ -199,12 +208,12 @@ fn as_drawn(picture: &Raster, options: &Options, tallest: usize, align: Align) -
     out
 }
 
-/// Each sixel of rows `first_row` to 24 the mean of the raster area it
-/// covers: 6 dots by 6, 8 or 6 lines.
-fn averaged(raster: &Raster, first_row: usize) -> Vec<Rgb> {
+/// Each sixel of rows `first_row` to `end_row` (exclusive) the mean of
+/// the raster area it covers: 6 dots by 6, 8 or 6 lines.
+fn averaged(raster: &Raster, first_row: usize, end_row: usize) -> Vec<Rgb> {
     let mut out = vec![[0; CHANNELS]; PIXELS];
     let mut line = 0usize;
-    for row in first_row..ROWS {
+    for row in first_row..end_row {
         for (band, &lines) in SIXEL_LINES.iter().enumerate() {
             let count = real(lines.saturating_mul(SIXEL_DOTS));
             for x in 0..WIDTH {

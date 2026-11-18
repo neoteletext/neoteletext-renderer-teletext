@@ -1,14 +1,15 @@
 //! Decoding within fixed bounds: the five formats of DEC-2114, the
 //! orientation tag, and transparency laid over the background.
 
-use std::io::Cursor;
-
-use image::error::ImageError;
-use image::{DynamicImage, ImageDecoder, ImageReader, Limits};
-
-use crate::error::Error;
-use crate::options::Options;
-use crate::raster::{CHANNELS, Raster};
+#[cfg(feature = "decode")]
+use {
+    crate::error::Error,
+    crate::options::Options,
+    crate::raster::{CHANNELS, Raster},
+    image::error::ImageError,
+    image::{DynamicImage, ImageDecoder, ImageReader, Limits},
+    std::io::Cursor,
+};
 
 /// The largest picture file accepted, in bytes: far above any photograph a
 /// camera writes, and a bound on what a caller must hold before decoding.
@@ -21,13 +22,17 @@ pub const MAX_SIDE: u32 = 32_768;
 /// with transparency, 8,000 by 6,000 at four bytes a pixel, needs 192 MiB.
 pub const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 
+#[cfg(feature = "decode")]
 /// Full opacity of an eight-bit alpha channel.
 const OPAQUE: u32 = 255;
+#[cfg(feature = "decode")]
 /// The alpha channel's place in an RGBA pixel.
 const ALPHA: usize = 3;
+#[cfg(feature = "decode")]
 /// Bytes of an RGBA pixel.
 const RGBA_BYTES: usize = 4;
 
+#[cfg(feature = "decode")]
 /// The picture in `bytes`, upright unless the options say otherwise, with
 /// any transparency over the background colour. An animation gives its
 /// first frame.
@@ -68,6 +73,7 @@ pub fn decode(bytes: &[u8], options: &Options) -> Result<Raster, Error> {
     Raster::new(width, height, data).ok_or(Error::PictureTooLarge)
 }
 
+#[cfg(feature = "decode")]
 /// The error a decoder's refusal becomes.
 fn refusal(error: ImageError) -> Error {
     match error {
@@ -76,6 +82,7 @@ fn refusal(error: ImageError) -> Error {
     }
 }
 
+#[cfg(feature = "decode")]
 /// RGBA pixels laid over `background`, rounded to the nearest level.
 fn over_background(rgba: &[u8], background: [u8; CHANNELS]) -> Vec<u8> {
     let mut out = Vec::with_capacity((rgba.len() / RGBA_BYTES).saturating_mul(CHANNELS));
@@ -88,6 +95,7 @@ fn over_background(rgba: &[u8], background: [u8; CHANNELS]) -> Vec<u8> {
     out
 }
 
+#[cfg(feature = "decode")]
 /// `over` at opacity `alpha` out of 255 on `under`, to the nearest level.
 fn blend(over: u32, under: u32, alpha: u32) -> u8 {
     let total = over.saturating_mul(alpha).saturating_add(under.saturating_mul(OPAQUE.saturating_sub(alpha)));
@@ -95,7 +103,7 @@ fn blend(over: u32, under: u32, alpha: u32) -> u8 {
     u8::try_from(rounded).unwrap_or(u8::MAX)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "decode"))]
 mod tests {
     use super::*;
 
