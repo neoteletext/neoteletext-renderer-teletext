@@ -16,7 +16,8 @@ mod synth53_programs;
 mod synth53_support;
 
 use neoteletext_audio_instruments::SAMPLE_RATE;
-use neoteletext_audio_instruments::synth53::patch::PATCH_BYTES;
+use neoteletext_audio_instruments::synth53::interface::{PROGRAM_BYTES, Program};
+use neoteletext_audio_instruments::synth53::patch::{KNOB_PARAMETERS, SWITCH_PARAMETERS};
 use neoteletext_audio_instruments::synth53::{Knob, Model, Patch, Switch, Synth53, VOICES};
 use synth53_programs::SHEETS;
 use synth53_support::{
@@ -182,12 +183,14 @@ impl Random {
         (self.0 >> 32) as u32
     }
 
-    fn patch(&mut self) -> Patch {
-        let mut bytes = [0u8; PATCH_BYTES];
+    /// A program of random bytes, every parameter held to its maximum
+    /// as the receiver reads it (S53-33), as a panel of `model`.
+    fn patch(&mut self, model: Model) -> Patch {
+        let mut bytes = [0u8; PROGRAM_BYTES];
         for byte in &mut bytes {
             *byte = self.next() as u8;
         }
-        Patch::from_bytes(&bytes)
+        Patch::of_program(&Program::from_bytes(bytes), model)
     }
 }
 
@@ -199,7 +202,7 @@ fn random_patches_and_random_messages_neither_panic_nor_leave_the_bounds() {
         let (mut out, mut loud) = (vec![0i16; 480], 0u32);
         for round in 0..600 {
             if round % 8 == 0 {
-                synth53.set_patch(&random.patch());
+                synth53.set_patch(&random.patch(model));
             }
             for _ in 0..random.next() % 6 {
                 // Any three bytes at all, with notes and controllers
@@ -360,7 +363,7 @@ fn no_run_of_keys_pedals_and_patches_leaves_a_note_sounding() {
                     14 => synth53.event(CONTROL, 123, 0),
                     15 => synth53.event(CONTROL, 121, 0),
                     16 => synth53.event(CONTROL, 120, 0),
-                    17 | 18 => synth53.set_patch(&random.patch()),
+                    17 | 18 => synth53.set_patch(&random.patch(model)),
                     _ => {
                         let patch = *synth53.patch();
                         synth53.set_patch(&patch.with_switch(Switch::Unison, !patch.on(Switch::Unison)));
@@ -471,11 +474,17 @@ fn rendering_speed() {
         // Five voices, both oscillators with every waveform, oscillator B
         // through Poly-Mod to all three at audio rate: the most a
         // sample costs.
-        let mut bytes = [0xffu8; PATCH_BYTES];
+        let mut patch = Patch::DEFAULT;
+        for (knob, _) in KNOB_PARAMETERS {
+            patch.set(knob, 127);
+        }
+        for (switch, _) in SWITCH_PARAMETERS {
+            patch.switch(switch, true);
+        }
         // Not unison, which is five voices too but one key; the filter
         // open, no glide.
-        bytes[7] = 0x7f;
-        let patch = Patch::from_bytes(&bytes).with(Knob::Resonance, 60).with(Knob::AmplifierRelease, 127);
+        let patch =
+            patch.with_switch(Switch::Unison, false).with(Knob::Resonance, 60).with(Knob::AmplifierRelease, 127);
         // Oscillator B out of its low-frequency mode and at the top of
         // its knob, under the keyboard's top octave: its voltage jumps
         // or turns in every other sample, and each of those samples is

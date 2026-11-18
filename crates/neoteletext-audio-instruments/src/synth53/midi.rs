@@ -1,70 +1,110 @@
-//! synth53's front end to the receiver (MIDI-10, [`crate::midi::Instrument`]):
-//! the common layer ([`crate::midi::common`]) before the instrument's own
-//! message reader, and its patches read from bank index 0 as fixed patches
-//! of its own byte layout.
-//!
-//! This is the interim front end the new carriage was built with. The
-//! family's adopted interface (its family document's messages, control map,
-//! patch form, banks, mapping of program changes and restatement) is to be
-//! built here, replacing [`crate::midi::classic`]'s bridge.
+//! synth53, synth52 and synth51 as the receiver plays them
+//! ([`crate::midi::Instrument`]): the interface's part
+//! ([`super::interface::Part`]) moves the edit buffer, the group, the
+//! selection and the controllers exactly as the server's tracker does, and
+//! the instrument is told what each message changed
+//! (`neoteletext-common/docs/audio/synth53-synth52-synth51.md`, S53-1 to
+//! S53-46).
 
-use crate::midi::classic::{Classic, ClassicFamily, Fronted};
-use crate::midi::common::Config;
+use crate::midi::{Banks, ChannelMessage, Instrument, Message, Outcome, controller, status};
 
 use super::Synth53;
+use super::interface::{Change, Part};
 
-/// synth53 as the receiver plays it.
-pub type Midi = Fronted<Synth53>;
+/// The instrument as the receiver plays it.
+#[derive(Clone, Debug)]
+pub struct Midi {
+    part: Part,
+    synth: Synth53,
+}
 
-/// The instrument's bend at either end, in cents:
-/// [`super::PITCH_BEND_SEMITONES`].
-const BEND_CENTS: u16 = 700;
-const _: () =
-    assert!(super::PITCH_BEND_SEMITONES * crate::midi::common::CENTS_PER_SEMITONE as i32 == BEND_CENTS as i32);
-
-impl ClassicFamily for Synth53 {
-    type Patch = super::Patch;
-    const CONFIG: Config = Config {
-        bend_range_cents: BEND_CENTS,
-        most_bend_range_cents: BEND_CENTS,
-        bank_select: false,
-        non_registered: false,
-    };
-    const CLASSIC: Classic = Classic {
-        controllers: &[crate::midi::controller::MODULATION],
-        voice_bend_range_cents: BEND_CENTS,
-        reset_pedals: &[],
-        expression: false,
-        channel_pressure: false,
-        key_pressure: false,
-    };
-    const PATCH_BYTES: usize = super::patch::PATCH_BYTES;
-    const PROGRAM_CHANNELS: u8 = crate::midi::CHANNEL_MASK + 1;
-
-    fn default_patch(&self) -> Self::Patch {
-        super::Patch::DEFAULT
+impl Midi {
+    /// `synth` behind the interface, whose kind is its model's (S53-1).
+    #[must_use]
+    pub fn new(synth: Synth53) -> Self {
+        Self { part: Part::new(synth.model().variant()), synth }
     }
 
-    fn read_patch(bytes: &[u8]) -> Option<Self::Patch> {
-        // The instrument's reader holds each byte to its range itself, so
-        // only bytes of another length are no patch.
-        Some(super::Patch::from_bytes(bytes.try_into().ok()?))
+    /// The instrument.
+    #[must_use]
+    pub const fn family(&self) -> &Synth53 {
+        &self.synth
     }
 
-    fn set_patch(&mut self, channel: u8, patch: &Self::Patch) {
-        let _ = channel;
-        self.set_patch(patch);
+    /// The interface's state of the part.
+    #[must_use]
+    pub const fn part(&self) -> &Part {
+        &self.part
     }
 
-    fn event(&mut self, status: u8, data1: u8, data2: u8) {
-        Synth53::event(self, status, data1, data2);
+    /// A control change for the instrument's own reader, on channel 0: the
+    /// instrument hears every channel alike (S53-3).
+    fn control(&mut self, number: u8, value: u8) {
+        let ChannelMessage { status, data1, data2 } = ChannelMessage::new(status::CONTROL_CHANGE, 0, number, value);
+        self.synth.event(status, data1, data2);
     }
 
-    fn release_all(&mut self) {
-        Synth53::release_all(self);
+    /// Gives the instrument what one message changed.
+    fn apply(&mut self, change: Change) {
+        match change {
+            Change::None | Change::PassedOver => {}
+            Change::NoteOn { key } => {
+                // S53-4: velocity does not change the sound.
+                let ChannelMessage { status, data1, data2 } =
+                    ChannelMessage::new(status::NOTE_ON, 0, key, crate::midi::DATA_MAX);
+                self.synth.event(status, data1, data2);
+            }
+            Change::NoteOff { key } => {
+                let ChannelMessage { status, data1, data2 } = ChannelMessage::new(status::NOTE_OFF, 0, key, 0);
+                self.synth.event(status, data1, data2);
+            }
+            Change::Sustain { down } => self.control(controller::SUSTAIN, if down { crate::midi::DATA_MAX } else { 0 }),
+            Change::AllNotesOff => self.control(controller::ALL_NOTES_OFF, 0),
+            Change::AllSoundOff => self.control(controller::ALL_SOUND_OFF, 0),
+            // The wheel to 0, the pedal up and the pitch wheel centred
+            // (S53-16): what the instrument's own controller 121 does.
+            Change::ResetAllControllers => self.control(controller::RESET_ALL_CONTROLLERS, 0),
+            Change::PitchBend { value } => {
+                let bend = ChannelMessage::new(
+                    status::PITCH_BEND,
+                    0,
+                    u8::try_from(value & u16::from(crate::midi::DATA_MAX)).unwrap_or(0),
+                    u8::try_from(value >> 7).unwrap_or(0),
+                );
+                self.synth.event(bend.status, bend.data1, bend.data2);
+            }
+            Change::BendRange => {
+                self.synth.set_bend_range_cents(self.part.bend_range_cents());
+                // Parameter 86 is a parameter of the edit buffer as well.
+                self.synth.set_program(self.part.program());
+            }
+            Change::Volume { value } => self.control(controller::VOLUME, value),
+            Change::Modulation { value } => self.control(controller::MODULATION, value),
+            Change::Brightness { value } => self.synth.set_brightness(value),
+            Change::Program { .. } | Change::Parameter { .. } => self.synth.set_program(self.part.program()),
+        }
+    }
+}
+
+impl Instrument for Midi {
+    fn start(&mut self, banks: &Banks<'_>) -> Outcome {
+        let outcome = self.part.start(banks);
+        self.synth.set_program(self.part.program());
+        outcome
+    }
+
+    fn midi(&mut self, message: &Message<'_>, banks: &Banks<'_>) -> Outcome {
+        let change = self.part.take(message, banks);
+        self.apply(change);
+        change.outcome()
+    }
+
+    fn lost(&mut self) {
+        self.part.lost();
+        self.synth.release_all();
     }
 
     fn render(&mut self, out: &mut [i16]) {
-        Synth53::render(self, out);
+        self.synth.render(out);
     }
 }

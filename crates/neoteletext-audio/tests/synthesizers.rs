@@ -107,7 +107,23 @@ fn dump(voices: &[&[u8]]) -> Vec<u8> {
     image
 }
 
+/// synth53's bank image of 128-byte programs: program k as the program
+/// dump of group 0 and k (S53-26).
+fn synth53_bank(programs: &[&[u8]]) -> Vec<u8> {
+    programs
+        .iter()
+        .zip(0..)
+        .flat_map(|(bytes, number)| {
+            let program = synth53::interface::Program::from_bytes((*bytes).try_into().unwrap());
+            synth53::interface::program_dump(0, number, &program).unwrap()
+        })
+        .collect()
+}
+
 fn families() -> Vec<Family> {
+    let synth53_plain = synth53::interface::Program::default_for(synth53::interface::Variant::Synth53);
+    let mut synth53_dull = synth53_plain;
+    synth53_dull.set(synth53::interface::parameter::CUTOFF, 20);
     let concat: fn(&[&[u8]]) -> Vec<u8> = |patches| patches.concat();
     let mut quiet_voice = synth7::Patch::DEFAULT.to_packed();
     // Operator 1's output level, the last operator's byte 14 of the packed
@@ -166,14 +182,16 @@ fn families() -> Vec<Family> {
         analogue(Codec::Synth80, synth80::Patch::DEFAULT.to_bytes().to_vec(), synth80_patch.to_bytes().to_vec()),
         Family {
             codec: Codec::Synth53,
-            plain: synth53::Patch::DEFAULT.to_bytes().to_vec(),
-            dull: synth53::Patch::DEFAULT.with(synth53::Knob::Cutoff, 20).to_bytes().to_vec(),
-            image: concat,
-            // synth53's interim reader holds every byte to its range
-            // itself: a faulty patch is one of another length, which a bank
-            // of fixed patches cannot hold, so the faulty bank is the plain
-            // one alone.
-            faulty: synth53::Patch::DEFAULT.to_bytes().to_vec(),
+            plain: synth53_plain.bytes().to_vec(),
+            dull: synth53_dull.bytes().to_vec(),
+            image: synth53_bank,
+            // A program dump one byte long at program 1 (S53-28).
+            faulty: [
+                synth53_bank(&[synth53_plain.bytes()]),
+                synth53::interface::program_dump(0, 1, &synth53_plain).unwrap()[..158].to_vec(),
+                vec![0, 0xF7],
+            ]
+            .concat(),
         },
     ]
 }
@@ -361,10 +379,8 @@ fn a_program_change_chooses_a_patch_and_a_faulty_one_is_the_default() {
             // Program 1 of a bank of one patch: the default, passed over.
             let (missing, counted) = rendered(&dull, &notes(&change));
             assert_eq!((missing, counted.passed_over), (plain.clone(), 1), "{:?}", family.codec);
-            if family.codec != Codec::Synth53 {
-                let (refused, counted) = rendered(&bank(BANK, family.codec, &family.faulty), &notes(&change));
-                assert_eq!((refused, counted.refused), (plain, 1), "{:?}", family.codec);
-            }
+            let (refused, counted) = rendered(&bank(BANK, family.codec, &family.faulty), &notes(&change));
+            assert_eq!((refused, counted.refused), (plain, 1), "{:?}", family.codec);
         }
     }
 }

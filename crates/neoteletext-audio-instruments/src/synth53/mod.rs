@@ -36,8 +36,21 @@
 //!   modulation wheel's amount to either oscillator's frequency or
 //!   pulse width and to the cutoff.
 //! - **The keys.** Each new key takes the voice used longest ago and a
-//!   repeated key its own voice again; in unison all five voices play
-//!   the lowest key held, and the glide works.
+//!   repeated key its own voice again; in unison one to five voices play
+//!   one key, the lowest or the last held as the program says, detuned
+//!   about it, and the glide works.
+//!
+//! # How it is played and programmed
+//!
+//! Through the 2020 instrument's MIDI interface, as
+//! `neoteletext-common/docs/audio/synth53-synth52-synth51.md` (cited as
+//! "S53-n") adopts it: a program of 128 bytes, its parameters set by
+//! control changes and NRPN, whole programs in system exclusive dumps
+//! ([`interface`], without the synthesis), played by the receiver through
+//! [`midi::Midi`]. The parameters the instrument modelled lacks and that
+//! the document builds (S53-41 to S53-43, and the pitch wheel's range and
+//! brightness, S53-8 and S53-12) are here; the others are carried and not
+//! acted on.
 //! - **The panel's numbers.** A program stores each knob as the seven
 //!   bits the instrument's converter made of it, and every control
 //!   voltage is that number of twelfths of a volt: a semitone of pitch
@@ -81,6 +94,7 @@
 //!   small amount instead.
 //! - **Velocity is ignored**, as the instrument's keyboard has none.
 
+pub mod interface;
 pub mod law;
 pub mod midi;
 pub mod patch;
@@ -95,6 +109,7 @@ use crate::analog::oscillator::Noise;
 use crate::analog::volume::{self, VolumeGain};
 use crate::analog::{frequency, to_sample};
 
+use interface::{Program, Variant, parameter};
 use law::{Law, Mixing, OCTAVE, UNIT};
 pub use patch::{Knob, Patch, Switch};
 use voice::{Controls, Settings, TICK_RATE, TICK_SAMPLES, Voice};
@@ -128,6 +143,26 @@ impl Model {
         }
     }
 
+    /// The kind of the family that plays this model (S53-1).
+    #[must_use]
+    pub const fn variant(self) -> Variant {
+        match self {
+            Self::Synth53 => Variant::Synth53,
+            Self::Synth52 => Variant::Synth52,
+            Self::Synth51 => Variant::Synth51,
+        }
+    }
+
+    /// The model a kind plays (S53-1): synth51 is synth52's model today.
+    #[must_use]
+    pub const fn of(variant: Variant) -> Self {
+        match variant {
+            Variant::Synth53 => Self::Synth53,
+            Variant::Synth52 => Self::Synth52,
+            Variant::Synth51 => Self::Synth51,
+        }
+    }
+
     /// The number of an oscillator's frequency knob that raises it so
     /// many semitones on this model, whose knobs differ: four octaves on
     /// revision 3 and five on revisions 1 and 2. Twenty-four semitones
@@ -154,6 +189,9 @@ pub const LOWEST_KEY: u8 = 36;
 /// varied up or down by about a 5th"; TM3 test table (page 61): "RAISES
 /// AND LOWERS PITCH BY AT LEAST A FIFTH".
 pub const PITCH_BEND_SEMITONES: i32 = 7;
+const _: () = assert!(
+    PITCH_BEND_SEMITONES * crate::midi::common::CENTS_PER_SEMITONE as i32 == interface::DEFAULT_BEND_RANGE_CENTS as i32
+);
 /// How far the master tune goes either way, in cents.
 ///
 /// Source: TM2 section 2-18 (page 38): "allowing over a semitone of flat
@@ -235,6 +273,45 @@ const _: () = assert!(LOOP_TICKS == 36);
 ///
 /// Source: own choice.
 const DEFERRED: usize = 16;
+
+/// The most voices unison stacks: all five (S53-42 item 1, "counts above
+/// five ... play all five of synth5x's").
+const UNISON_MOST: u8 = VOICES as u8;
+const _: () = assert!(VOICES <= u8::MAX as usize);
+/// Cents of unison detune either way for each step of UNISON DETUNE at the
+/// outer voices: `±3d` cents (S53-42 item 2; NeoTeletext's own law, the
+/// family document's section 14 item 4).
+const DETUNE_CENTS_PER_STEP: i32 = 3;
+/// Cents in an octave, for the detune's law.
+const CENTS_PER_OCTAVE: i32 = 1_200;
+
+/// Something the instrument is told, kept while all sound off takes the
+/// sound out (S53-20: "messages that arrive meanwhile are taken in order
+/// when the sound has gone").
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Command {
+    /// A channel message for [`Synth53::event`].
+    Event(u8, u8, u8),
+    /// A whole program ([`Synth53::set_program`]).
+    Program(Program),
+    /// The pitch wheel's range, in cents.
+    BendRange(u16),
+    /// Brightness, controller 74.
+    Brightness(u8),
+}
+
+/// The key priority of unison and whether a new key restarts the
+/// envelopes, by RETRIGGER AND UNISON's value 0 to 3 (S53-42 item 3): low
+/// note, low note retrigger, last note, last note retrigger (User's Guide,
+/// page 45, in that order).
+const fn key_priority(value: u8) -> (Priority, Trigger) {
+    match value {
+        0 => (Priority::Low, Trigger::Single),
+        1 => (Priority::Low, Trigger::Multiple),
+        2 => (Priority::Last, Trigger::Single),
+        _ => (Priority::Last, Trigger::Multiple),
+    }
+}
 
 /// The pitch bend value that bends nothing.
 ///
@@ -361,6 +438,9 @@ impl Modulator {
 #[derive(Clone, Debug)]
 pub struct Synth53 {
     model: Model,
+    /// The program of the adopted interface the patch was set from, whose
+    /// additions the instrument modelled lacks (S53-41 to S53-43).
+    program: Program,
     patch: Patch,
     /// The numbers the computer holds for the knobs, each on its way to
     /// where the patch has its knob ([`LOOP_TICKS`]), with the patch's
@@ -380,6 +460,13 @@ pub struct Synth53 {
     pink: OnePole,
     /// The pitch bend, less its centre.
     bend: i32,
+    /// How far the pitch wheel bends at either end, in cents (S53-8).
+    bend_range_cents: u16,
+    /// Controller 74: dial steps added to the cutoff (S53-12).
+    brightness: u8,
+    /// Unison and the key priority the allocator was last set for, which
+    /// a change of either lets go of every key (S53-19).
+    assignment: (bool, u8),
     wheel: u8,
     volume: u8,
     /// The volume's gain as it stands, in Q28, on its way to what the
@@ -389,7 +476,7 @@ pub struct Synth53 {
     /// that takes it there, which the voices are cut at the end of.
     cut: Option<VolumeGain>,
     /// The messages that came meanwhile, in order, and how many.
-    deferred: [(u8, u8, u8); DEFERRED],
+    deferred: [Command; DEFERRED],
     deferred_count: usize,
     pedal: bool,
     /// The master tune, in octaves.
@@ -403,7 +490,8 @@ pub struct Synth53 {
 }
 
 impl Synth53 {
-    /// An instrument at rest playing [`Patch::DEFAULT`].
+    /// An instrument at rest playing [`Patch::DEFAULT`], with the default
+    /// program's additions (S53-30).
     #[must_use]
     pub fn new(model: Model) -> Self {
         let law = model.law();
@@ -418,11 +506,12 @@ impl Synth53 {
         pink.set_cutoff(frequency(PINK_CORNER, TICK_RATE));
         let mut synth53 = Self {
             model,
+            program: Program::default_for(model.variant()),
             patch: Patch::DEFAULT,
             panel: Patch::DEFAULT,
             loop_wait: 0,
             settings: Settings::new(&Patch::DEFAULT, model),
-            allocator: Allocator::new(Self::mode(&Patch::DEFAULT)),
+            allocator: Allocator::new(Mode::Poly(Assign::Cyclic)),
             voices,
             triggers: [0; VOICES],
             noise: Noise::new(SEED),
@@ -430,11 +519,14 @@ impl Synth53 {
             wheel_noise: Noise::new(SEED.rotate_left(16)),
             pink,
             bend: 0,
+            bend_range_cents: interface::DEFAULT_BEND_RANGE_CENTS,
+            brightness: 0,
+            assignment: (false, 0),
             wheel: 0,
             volume: DATA_MAX,
             volume_gain: VolumeGain::full(),
             cut: None,
-            deferred: [(0, 0, 0); DEFERRED],
+            deferred: [Command::Event(0, 0, 0); DEFERRED],
             deferred_count: 0,
             pedal: false,
             tune: 0,
@@ -465,8 +557,33 @@ impl Synth53 {
     /// lowest note played on the keyboard becomes the main pitch control
     /// for all voices"; "The five GATEs occur simultaneously, but the
     /// envelope generators only re-trigger if no keys are held."
-    fn mode(patch: &Patch) -> Mode {
-        if patch.on(Switch::Unison) { Mode::Unison(Priority::Low, Trigger::Single) } else { Mode::Poly(Assign::Cyclic) }
+    ///
+    /// In unison the program's RETRIGGER AND UNISON chooses the key and
+    /// the trigger (S53-42 item 3); its value 0 is the instrument
+    /// modelled's. Polyphonically it changes nothing (S53-40).
+    fn mode(&self) -> Mode {
+        if self.patch.on(Switch::Unison) {
+            let (priority, trigger) = key_priority(self.program.get(parameter::RETRIGGER_AND_UNISON));
+            Mode::Unison(priority, trigger)
+        } else {
+            Mode::Poly(Assign::Cyclic)
+        }
+    }
+
+    /// Sets the allocator for unison and the key priority as they now
+    /// stand, letting go of every key and keeping the pedal, if either
+    /// changed since it was last set (S53-19). It is called before a key
+    /// is taken and before samples are rendered, so that messages of one
+    /// tick that change either and change it back let go of nothing.
+    fn settle_assignment(&mut self) {
+        let assignment = (self.patch.on(Switch::Unison), self.program.get(parameter::RETRIGGER_AND_UNISON));
+        if assignment != self.assignment {
+            self.assignment = assignment;
+            // The allocator lets go of every key, and of the pedal with
+            // them; the pedal has not moved, and is given back.
+            self.allocator.set_mode(self.mode());
+            self.allocator.sustain(self.pedal);
+        }
     }
 
     /// Which instrument this is.
@@ -480,10 +597,71 @@ impl Synth53 {
     /// controllers at rest, the next key on the first voice, the count
     /// of ignored messages at zero.
     pub fn reset(&mut self) {
-        let (patch, tune) = (self.patch, self.tune);
+        let (program, patch, tune) = (self.program, self.patch, self.tune);
         *self = Self::new(self.model);
         self.tune = tune;
+        self.program = program;
         self.set_patch(&patch);
+    }
+
+    /// Gives the instrument a program of the adopted interface (S53-18,
+    /// S53-29, S53-34): its panel by S53-35 to S53-37, as
+    /// [`Synth53::set_patch`] sets it, and its additions (S53-41 to
+    /// S53-43). The pitch wheel's range is not taken from it (S53-8).
+    /// While all sound off takes the sound out it waits for it to have
+    /// gone.
+    pub fn set_program(&mut self, program: &Program) {
+        if self.defer(Command::Program(*program)) {
+            return;
+        }
+        self.program = *program;
+        let patch = Patch::of_program(program, self.model);
+        self.set_patch(&patch);
+    }
+
+    /// The program the instrument was last given.
+    #[must_use]
+    pub const fn program(&self) -> &Program {
+        &self.program
+    }
+
+    /// Sets how far the pitch wheel bends at either end, in cents, held
+    /// to an octave (S53-8).
+    pub fn set_bend_range_cents(&mut self, cents: u16) {
+        if !self.defer(Command::BendRange(cents)) {
+            self.bend_range_cents = cents.min(interface::MOST_BEND_RANGE_CENTS);
+        }
+    }
+
+    /// How far the pitch wheel bends at either end, in cents (S53-8).
+    #[must_use]
+    pub const fn bend_range_cents(&self) -> u16 {
+        self.bend_range_cents
+    }
+
+    /// Sets brightness, controller 74: so many dial steps added to the
+    /// cutoff, the sum held at the model's top (S53-12).
+    pub fn set_brightness(&mut self, value: u8) {
+        if !self.defer(Command::Brightness(value)) {
+            self.brightness = value.min(DATA_MAX);
+            self.apply_patch();
+        }
+    }
+
+    /// While all sound off takes the sound out, keeps `command` to be taken
+    /// when it has gone, or with no room cuts the sound now; answers
+    /// whether it was kept.
+    fn defer(&mut self, command: Command) -> bool {
+        if self.cut.is_none() {
+            return false;
+        }
+        if let Some(slot) = self.deferred.get_mut(self.deferred_count) {
+            *slot = command;
+            self.deferred_count = self.deferred_count.saturating_add(1);
+            return true;
+        }
+        self.cut();
+        false
     }
 
     /// Gives the instrument a patch, which it copies. It takes effect on
@@ -491,19 +669,20 @@ impl Synth53 {
     /// does: the switches at once, and each knob one step of its 128
     /// every six thousandths of a second, as the instrument's computer
     /// follows a knob that is turned. With no voice sounding, all of it
-    /// is there at once. Switching unison on or off lets go of every
-    /// key, and leaves the pedal as it is.
+    /// is there at once. Switching unison on or off, or the key priority,
+    /// lets go of every key, and leaves the pedal as it is, once the
+    /// messages of the tick are all taken (S53-19).
     pub fn set_patch(&mut self, patch: &Patch) {
         self.patch = *patch;
         if self.sounding_voices() == 0 {
             self.panel = *patch;
         } else {
             // The switches, which are the top bit of each byte.
-            let mut bytes = patch.to_bytes();
-            for (byte, held) in bytes.iter_mut().zip(self.panel.to_bytes()) {
+            let mut bytes = patch.stored();
+            for (byte, held) in bytes.iter_mut().zip(self.panel.stored()) {
                 *byte = (*byte & !patch::KNOB_MAX) | (held & patch::KNOB_MAX);
             }
-            self.panel = Patch::from_bytes(&bytes);
+            self.panel = Patch::from_stored(&bytes);
         }
         self.apply_patch();
     }
@@ -514,8 +693,8 @@ impl Synth53 {
         if self.panel == self.patch {
             return;
         }
-        let mut bytes = self.panel.to_bytes();
-        for (byte, wanted) in bytes.iter_mut().zip(self.patch.to_bytes()) {
+        let mut bytes = self.panel.stored();
+        for (byte, wanted) in bytes.iter_mut().zip(self.patch.stored()) {
             let (held, wanted) = (*byte & patch::KNOB_MAX, wanted & patch::KNOB_MAX);
             let next = match held.cmp(&wanted) {
                 core::cmp::Ordering::Less => held.saturating_add(1),
@@ -524,7 +703,7 @@ impl Synth53 {
             };
             *byte = (*byte & !patch::KNOB_MAX) | next;
         }
-        self.panel = Patch::from_bytes(&bytes);
+        self.panel = Patch::from_stored(&bytes);
         self.apply_patch();
     }
 
@@ -542,16 +721,16 @@ impl Synth53 {
 
     fn apply_patch(&mut self) {
         let law = self.model.law();
-        self.settings = Settings::new(&self.panel, self.model);
+        // Brightness turns the cutoff knob so many steps higher, as far as
+        // its top (S53-12).
+        let mut panel = self.panel;
+        let cutoff = panel.get(Knob::Cutoff).min(law.knob_top);
+        panel.set(Knob::Cutoff, cutoff.saturating_add(self.brightness).min(law.knob_top));
+        // FILTER KEYBOARD TRACK at 1, half (S53-41).
+        let half = self.program.get(parameter::FILTER_KEYBOARD_TRACK) == 1 && self.patch.on(Switch::FilterKeyboard);
+        self.settings = Settings::new(&panel, self.model).with_half_tracking(half);
         for voice in &mut self.voices {
             voice.configure(&self.settings);
-        }
-        let mode = Self::mode(&self.patch);
-        if mode != self.allocator.mode() {
-            // The allocator lets go of every key, and of the pedal with
-            // them; the pedal has not moved, and is given back.
-            self.allocator.set_mode(mode);
-            self.allocator.sustain(self.pedal);
         }
         let steps = i32::from(self.panel.get(Knob::LfoFrequency).min(law.knob_top));
         let rate = law::raise(law.lfo.0, steps.saturating_mul(law.lfo.1));
@@ -600,19 +779,18 @@ impl Synth53 {
     pub fn event(&mut self, status: u8, data1: u8, data2: u8) {
         // While all sound off takes the sound out, a message waits for
         // it to have gone; with no room to wait, the sound is cut now.
-        if self.cut.is_some() {
-            if let Some(slot) = self.deferred.get_mut(self.deferred_count) {
-                *slot = (status, data1, data2);
-                self.deferred_count = self.deferred_count.saturating_add(1);
-                return;
-            }
-            self.cut();
+        if self.defer(Command::Event(status, data1, data2)) {
+            return;
         }
         if data1 > DATA_MAX || data2 > DATA_MAX {
             self.ignore();
             return;
         }
-        match status & 0xf0 {
+        let kind = status & crate::midi::KIND_MASK;
+        if matches!(kind, STATUS_NOTE_ON | STATUS_NOTE_OFF) {
+            self.settle_assignment();
+        }
+        match kind {
             STATUS_NOTE_OFF => self.allocator.key_up(data1),
             STATUS_NOTE_ON if data2 == 0 => self.allocator.key_up(data1),
             STATUS_NOTE_ON => self.allocator.key_down(data1, data2),
@@ -655,6 +833,7 @@ impl Synth53 {
                 self.allocator.sustain(false);
             }
             CONTROL_ALL_NOTES_OFF => {
+                self.settle_assignment();
                 // As a note off for every key: the pedal still holds. In
                 // unison a key that goes up hands its note to another
                 // still held, so the key that sounds is let go until
@@ -691,8 +870,13 @@ impl Synth53 {
     fn take_deferred(&mut self) {
         let (deferred, count) = (self.deferred, self.deferred_count);
         self.deferred_count = 0;
-        for &(status, data1, data2) in deferred.iter().take(count) {
-            self.event(status, data1, data2);
+        for command in deferred.iter().take(count) {
+            match *command {
+                Command::Event(status, data1, data2) => self.event(status, data1, data2),
+                Command::Program(program) => self.set_program(&program),
+                Command::BendRange(cents) => self.set_bend_range_cents(cents),
+                Command::Brightness(value) => self.set_brightness(value),
+            }
         }
     }
 
@@ -745,9 +929,18 @@ impl Synth53 {
         let mix = i32::from(self.panel.get(Knob::SourceMix).min(law.knob_top));
         let top = i32::from(law.knob_top);
         let source = law::share(lfo, top.saturating_sub(mix), top).saturating_add(law::share(pink, mix, top));
-        let wheel = law::share(source, i32::from(self.wheel), i32::from(DATA_MAX));
-        // The bender's whole travel either way is so many semitones.
-        let bend = law::share(law::semitones(PITCH_BEND_SEMITONES), self.bend, PITCH_BEND_CENTRE);
+        // The wheel adds to the low-frequency oscillator's initial amount,
+        // the sum held to the whole (S53-43): `min(1, initial ÷ 120 +
+        // wheel ÷ 127)`, over the common denominator 120 × 127.
+        let initial = i32::from(self.program.get(parameter::LFO_INITIAL_AMOUNT));
+        let (initial_top, wheel_top) = (i32::from(interface::KNOB_TOP), i32::from(DATA_MAX));
+        let whole = initial_top.saturating_mul(wheel_top);
+        let amount =
+            initial.saturating_mul(wheel_top).saturating_add(i32::from(self.wheel).saturating_mul(initial_top));
+        let wheel = law::share(source, amount.min(whole), whole);
+        // The bender's whole travel either way is the range (S53-8).
+        let range = law::cents(i32::from(self.bend_range_cents));
+        let bend = law::share(range, self.bend, PITCH_BEND_CENTRE);
         let keys = *self.allocator.voices();
         let unison = if matches!(self.allocator.mode(), Mode::Unison(..)) {
             let key = keys
@@ -760,11 +953,23 @@ impl Synth53 {
             None
         };
         let controls = Controls { wheel, pitch: bend.saturating_add(self.tune), unison, pedal: self.pedal };
-        for ((voice, key), seen) in self.voices.iter_mut().zip(&keys).zip(&mut self.triggers) {
+        // Unison stacks voices 1 to the count; the others are let go
+        // (S53-42 item 1).
+        let stacked = if unison.is_some() { self.unison_count() } else { UNISON_MOST };
+        let detune = self.program.get(parameter::UNISON_DETUNE);
+        for (index, ((voice, key), seen)) in self.voices.iter_mut().zip(&keys).zip(&mut self.triggers).enumerate() {
             if key.stage == Stage::Rest {
                 continue;
             }
-            if *seen != key.triggers {
+            let mut controls = controls;
+            if unison.is_some() {
+                let detuned = Self::detune(index, stacked, detune);
+                controls.pitch = controls.pitch.saturating_add(detuned);
+            }
+            if usize::from(stacked) <= index {
+                *seen = key.triggers;
+                voice.release();
+            } else if *seen != key.triggers {
                 *seen = key.triggers;
                 voice.start(Self::key_number(key.key));
             } else if key.gate() {
@@ -776,6 +981,26 @@ impl Synth53 {
                 voice.tick(&self.settings, controls);
             }
         }
+    }
+
+    /// The voices unison stacks: UNISON VOICE COUNT's value v stacks
+    /// v + 1, and all five from 4 up (S53-42 item 1).
+    fn unison_count(&self) -> u8 {
+        self.program.get(parameter::UNISON_VOICE_COUNT).saturating_add(1).min(UNISON_MOST)
+    }
+
+    /// The tuning of voice `index` of `count` stacked at UNISON DETUNE
+    /// `detune`, in octaves: `(2k − (n − 1)) × d × 3 ÷ (n − 1)` cents, the
+    /// voices spread evenly over `±3d` cents, and none for one voice
+    /// (S53-42 item 2).
+    fn detune(index: usize, count: u8, detune: u8) -> i32 {
+        let span = i32::from(count).saturating_sub(1);
+        if span <= 0 {
+            return 0;
+        }
+        let place = i32::try_from(index).unwrap_or(0).saturating_mul(2).saturating_sub(span);
+        let cents = place.saturating_mul(i32::from(detune)).saturating_mul(DETUNE_CENTS_PER_STEP);
+        law::octaves(cents, CENTS_PER_OCTAVE.saturating_mul(span))
     }
 
     /// One sample of the voices' sum, at their rate.
@@ -800,6 +1025,9 @@ impl Synth53 {
     /// second. The work of a sample is at most that of five voices,
     /// whatever messages came.
     pub fn render(&mut self, out: &mut [i16]) {
+        if !out.is_empty() {
+            self.settle_assignment();
+        }
         let mut volume = volume::wanted(self.volume);
         for sample in out {
             let mut earlier = self.voices_sample();
