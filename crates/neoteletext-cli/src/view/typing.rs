@@ -19,6 +19,17 @@ use crate::page_rules::PageRules;
 /// What `neottx view` offers in HELLO (DOC-1922): it shows
 /// pages and says which with SELECT; it draws no cursor and no echo.
 const OFFERED: u32 = neoteletext_input::caps::SELECT_CAP;
+/// What it offers besides where it shows pictures (renderer parity PAR-1,
+/// PAR-7): it draws the ReGIS and NAPLPS pictures it is sent. A viewer of
+/// characters alone cannot show a picture, so it does not offer them and is
+/// sent the server's mosaic page instead (PAR-25).
+const PICTURES_OFFERED: u32 = neoteletext_input::caps::REGIS_CAP | neoteletext_input::caps::NAPLPS_CAP;
+
+/// What the viewer offers in HELLO: [`OFFERED`], and [`PICTURES_OFFERED`]
+/// when it shows pictures.
+pub(super) const fn offered(pictures: bool) -> u32 {
+    if pictures { OFFERED | PICTURES_OFFERED } else { OFFERED }
+}
 
 /// Whether the viewer keeps `packet` of the channel's stream for
 /// [`Typing::records`]: every fragment of the carriage its records come
@@ -121,20 +132,23 @@ pub(super) struct Typing {
     records: RecordReader,
     /// The rule tables, and the evaluator of the page on screen.
     rules: PageRules,
+    /// The ReGIS and NAPLPS pictures the channel sent, by sub-page (PAR-7).
+    pictures: crate::picture::PictureStore,
     /// The time of the last [`Typing::tick`], in microseconds since the
     /// viewer started: when a record taken since is said to have come.
     now_us: u64,
 }
 
 impl Typing {
-    /// A session not yet open.
-    pub(super) fn new() -> Self {
+    /// A session not yet open; `pictures` when the viewer shows pictures,
+    /// so that it offers the picture languages (PAR-7).
+    pub(super) fn new(pictures: bool) -> Self {
         Self {
             open: false,
             left: false,
             unfocused: false,
             focus_told: None,
-            input: neoteletext_input::session::Session::new(OFFERED),
+            input: neoteletext_input::session::Session::new(offered(pictures)),
             started: false,
             told: None,
             parameters: None,
@@ -144,8 +158,14 @@ impl Typing {
             redirect: None,
             records: RecordReader::new(),
             rules: PageRules::new(),
+            pictures: crate::picture::PictureStore::new(),
             now_us: 0,
         }
+    }
+
+    /// The pictures the channel, or the file, sent (PAR-7).
+    pub(super) const fn pictures(&self) -> &crate::picture::PictureStore {
+        &self.pictures
     }
 
     /// Tells the channel the focus when it changed: away when the viewer
@@ -247,6 +267,7 @@ impl Typing {
         // A new connection's server sends the tables again (RULE-40).
         self.records.clear();
         self.rules = PageRules::new();
+        self.pictures.clear();
         if open {
             let mut out = [0_u8; neoteletext_input::MAX_MESSAGE];
             if let Ok(length) = self.input.open(clock_ms, None, &mut out)
@@ -279,6 +300,7 @@ impl Typing {
                 // names (DOC-1954).
                 self.input.acknowledged(cursor.acked);
             } else if let Read::Record(record) = self.records.push(&packet) {
+                self.pictures.record(&record);
                 self.rules.record(&record, self.now_us);
             }
         }

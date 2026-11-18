@@ -37,6 +37,11 @@ pub fn view(
     let area = if display == Display::Text { None } else { terminal::text_area() };
     let height = ROWS.saturating_mul(Frame::still(session.decoder().config(), false).options.row_height());
     let scale = scale_for(raster_args, area, (PAGE_WIDTH, height));
+    // PAR-7, PAR-31: a picture is shown with rows 0 and 24 around it.
+    let regis = crate::picture::REGIS_FRAMED_SIZE;
+    let regis_scale = scale_for(raster_args, area, regis);
+    let naplps_scale = scale_for(raster_args, area, crate::picture::NAPLPS_FRAMED_SIZE);
+    let fonts = super::picture::read_fonts(raster_args)?;
     sandbox_closed(options.no_sandbox)?;
     let depth = if colours8 { ColourDepth::Eight } else { ColourDepth::TrueColour };
     let look = crate::view::Look {
@@ -45,8 +50,10 @@ pub fn view(
         depth,
         mosaics: mosaic_style(legacy_mosaics),
         text_row_pixels: area.and_then(terminal::TextArea::text_row_pixels),
+        regis_scale,
+        naplps_scale,
     };
-    let ran = crate::view::run(&mut session, source.as_mut(), opening, look, remote_keys)
+    let ran = crate::view::run(&mut session, source.as_mut(), opening, look, remote_keys, fonts)
         .map_err(|error| (exit::INPUT, error.to_string()));
     // REQ-RND-029: why characters were drawn, as `show` says it, once the
     // terminal is the user's again.

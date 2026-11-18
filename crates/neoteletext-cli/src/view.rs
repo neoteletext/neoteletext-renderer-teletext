@@ -104,7 +104,17 @@ struct ViewState {
     // The build of the last grid built and whether its designation fell
     // back (REQ-72), recorded with the report above.
     unrecorded_designation: Option<(PageBuild, bool)>,
+    // The fonts a picture's own text is drawn in (PAR-7).
+    fonts: crate::picture::Fonts,
+    // The picture last drawn, for the sub-page and the version of the
+    // pictures it was drawn from: drawn again only when a record changed
+    // it (PAR-7).
+    picture: Option<(ShownPicture, Raster, crate::picture::Language)>,
 }
+
+/// Which picture a drawing shows: the sub-page and the version of the
+/// pictures the channel sent (PAR-7).
+type ShownPicture = (PageAddress, u16, u64);
 
 /// What a turn knows about the page it shows, for the steps after the
 /// page is found.
@@ -117,14 +127,14 @@ struct Shown<'a> {
 
 impl ViewState {
     /// The viewer at the start of `session`'s service, started at `start`.
-    fn new(session: &Session, start: StdInstant, opening: Opening) -> Self {
+    fn new(session: &Session, start: StdInstant, opening: Opening, pictures: bool) -> Self {
         let (initial, subcode) = opening.page.unwrap_or((initial_page(session.service().as_ref()), SubCode::ANY));
         let mut viewer = Viewer::new(initial).with_trace(session.decoder().config().trace);
         let mut action = viewer.event(ViewerEvent::Started);
         if subcode != SubCode::ANY {
             action = viewer.show_subpage(subcode);
         }
-        let mut typing = Typing::new();
+        let mut typing = Typing::new(pictures);
         typing.opened_with((initial.mpp(), subcode.value()), opening.parameters);
         Self {
             start,
@@ -154,7 +164,27 @@ impl ViewState {
             index_held: None,
             pending_step: None,
             unrecorded_designation: None,
+            fonts: crate::picture::Fonts::default(),
+            picture: None,
         }
+    }
+
+    /// The picture of the sub-page on screen, `on`, when the channel or the
+    /// file sent one (PAR-7): drawn once for each change of the pictures,
+    /// its NAPLPS objects composed. A picture the renderer cannot set up is
+    /// not shown, and the teletext page is.
+    fn picture_on(&mut self, on: Option<(PageAddress, SubCode)>) -> Option<ShownPicture> {
+        let (address, subcode) = on?;
+        let store = self.typing.pictures();
+        let source = store.picture(address, subcode.value())?;
+        let shown = (address, subcode.value(), store.version());
+        if self.picture.as_ref().is_some_and(|(drawn, _, _)| *drawn == shown) {
+            return Some(shown);
+        }
+        let language = source.language?;
+        let (raster, _, _) = crate::picture::draw_source(source, &self.fonts).ok()?;
+        self.picture = Some((shown, raster, language));
+        Some(shown)
     }
 
     /// The messages the source gave, for after the terminal is restored.
@@ -213,6 +243,10 @@ pub struct Look {
     /// size in pixels and the rows divide it exactly; a Sixel redraw of
     /// the changed rows alone needs it (REQ-RND-029).
     pub text_row_pixels: Option<usize>,
+    /// The scale of a ReGIS picture with its rows 0 and 24 (PAR-31).
+    pub regis_scale: Scale,
+    /// The scale of a NAPLPS picture, the teletext raster (DEC-6667).
+    pub naplps_scale: Scale,
 }
 
 /// Runs the viewer until the user quits; `remote_keys` are the keys given
@@ -223,6 +257,7 @@ pub fn run(
     opening: Opening,
     look: Look,
     remote_keys: RemoteKeys,
+    fonts: crate::picture::Fonts,
 ) -> std::io::Result<()> {
     terminal::enable_raw_mode()?;
     // Releases and repeats where the terminal has the Kitty keyboard
@@ -237,7 +272,8 @@ pub fn run(
     }
 
     let start = StdInstant::now();
-    let mut state = ViewState::new(session, start, opening);
+    let mut state = ViewState::new(session, start, opening, look.display != Display::Text);
+    state.fonts = fonts;
     state.remote_keys = remote_keys;
     state.releases_reported = enhanced;
     session.keep(typing::is_channel_packet);
@@ -261,7 +297,9 @@ pub fn run(
     }));
     let display = look.display;
     let mut drawer = Drawer::new(look);
-    state.run(session, source, &wakes, display, &mut |grid, frame, whole| drawer.draw(&mut out, grid, frame, whole))?;
+    state.run(session, source, &wakes, display, &mut |grid, frame, whole, picture| {
+        drawer.draw(&mut out, grid, frame, whole, picture)
+    })?;
     drawer.kitty.free_all(&mut out)?;
     drop(guard);
     for message in state.into_messages() {
@@ -279,6 +317,8 @@ struct Drawer {
     mosaics: MosaicStyle,
     kitty: KittyImages,
     sixel: SixelRows,
+    regis_scale: Scale,
+    naplps_scale: Scale,
 }
 
 impl Drawer {
@@ -290,14 +330,44 @@ impl Drawer {
             mosaics: look.mosaics,
             kitty: KittyImages::default(),
             sixel: SixelRows { last: None, text_row_pixels: look.text_row_pixels },
+            regis_scale: look.regis_scale,
+            naplps_scale: look.naplps_scale,
         }
     }
 
     /// Draws `frame` of `grid`. `whole` asks for the whole page even where
     /// only changed rows would be sent, as after the terminal was resized.
-    fn draw(&mut self, out: &mut impl Write, grid: &Grid, frame: Frame, whole: bool) -> std::io::Result<()> {
+    /// A picture, when given, is drawn in the page's place with the page's
+    /// rows 0 and 24 around it (PAR-7, PAR-31).
+    fn draw(
+        &mut self,
+        out: &mut impl Write,
+        grid: &Grid,
+        frame: Frame,
+        whole: bool,
+        picture: Option<(&Raster, crate::picture::Language)>,
+    ) -> std::io::Result<()> {
         queue!(out, cursor::MoveTo(0, 0))?;
         let black = Rgba::opaque(0, 0, 0);
+        if let Some((picture, language)) = picture.filter(|_| self.display != Display::Text) {
+            let page = raster(grid, frame, Scale { x: 1, y: 1, aspect: false }, black);
+            let scale = match language {
+                crate::picture::Language::Regis => self.regis_scale,
+                crate::picture::Language::Naplps => self.naplps_scale,
+            };
+            let framed = crate::picture::framed(language, picture, &page);
+            let shown = crate::picture::scaled(&framed, scale.x, scale.y);
+            match self.display {
+                Display::Kitty => self.kitty.show_picture(out, &png(&shown)?)?,
+                Display::Sixel => self.sixel.draw(out, shown, whole, black)?,
+                Display::Iterm2 => {
+                    let encoded = png(&shown)?;
+                    out.write_all(iterm2_inline(&encoded, shown.width, shown.height).as_bytes())?;
+                }
+                Display::Text => {}
+            }
+            return out.flush();
+        }
         match self.display {
             Display::Kitty => {
                 if whole {
@@ -410,6 +480,9 @@ struct KittyImages {
     sent: Vec<(Frame, u32)>,
     shown: Option<u32>,
     last_id: u32,
+    // The image of a picture shown (PAR-7): one, sent again whenever it
+    // or the rows around it change.
+    picture: Option<u32>,
 }
 
 impl KittyImages {
@@ -451,9 +524,22 @@ impl KittyImages {
         Ok(())
     }
 
+    /// Shows a picture's image, `png`, in place of every other.
+    fn show_picture(&mut self, out: &mut dyn Write, png: &[u8]) -> std::io::Result<()> {
+        self.free_all(out)?;
+        self.last_id = self.last_id.checked_add(1).unwrap_or(1);
+        out.write_all(kitty_transmit(png, self.last_id, false).as_bytes())?;
+        out.write_all(kitty_place(self.last_id).as_bytes())?;
+        self.picture = Some(self.last_id);
+        Ok(())
+    }
+
     /// Frees every image sent.
     fn free_all(&mut self, out: &mut dyn Write) -> std::io::Result<()> {
         for (_, id) in self.sent.drain(..) {
+            out.write_all(kitty_free(id).as_bytes())?;
+        }
+        if let Some(id) = self.picture.take() {
             out.write_all(kitty_free(id).as_bytes())?;
         }
         self.shown = None;

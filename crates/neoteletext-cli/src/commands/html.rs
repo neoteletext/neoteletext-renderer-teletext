@@ -77,16 +77,23 @@ fn page_text(grid: &Grid) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// What a page opted in shows.
+/// The name of the PNG of a sub-page's ReGIS or NAPLPS picture, beside
+/// its page's HTML (PAR-8).
+pub const PICTURE_FILE: &str = "picture.png";
+
+/// A page opted in: its HTML and, when its sub-page carries a ReGIS or
+/// NAPLPS picture, that picture's PNG, drawn as `neottx render` draws it,
+/// in place of the teletext page's picture (PAR-8).
 fn public_html(
     folder: &mut Folder,
     name: &str,
     place: &str,
     page: PageAddress,
     found: &Found,
-) -> Result<String, Failure> {
+) -> Result<(String, Option<Vec<u8>>), Failure> {
     let refused = || (exit::NOT_FOUND, format!("page {} not found", String::from_utf8_lossy(&page.ascii())));
-    let session = &mut folder.loaded.get_mut(found.file).ok_or_else(refused)?.session;
+    let loaded = folder.loaded.get_mut(found.file).ok_or_else(refused)?;
+    let session = &mut loaded.session;
     let key = session
         .pages()
         .iter()
@@ -94,19 +101,36 @@ fn public_html(
         .map(|stored| stored.key)
         .ok_or_else(refused)?;
     let grid = session.grid(key, None).ok_or_else(refused)?;
+    let drawn = match super::picture::picture_of(core::mem::take(&mut loaded.pictures), page, key.subcode) {
+        Some(source) => {
+            let (raster, _, title) = crate::picture::draw_source(&source, &crate::picture::Fonts::default())
+                .map_err(|why| (exit::INPUT, why))?;
+            let bytes = crate::image::png(&raster).map_err(|error| (exit::INPUT, error.to_string()))?;
+            Some((bytes, raster.width, raster.height, title))
+        }
+        None => None,
+    };
+    let text = page_text(&grid);
+    let page_html = |picture: &[u8], width, height, alt: Option<&str>| {
+        public_page(
+            name,
+            place,
+            &PublicPage {
+                title: &found.title,
+                text: &text,
+                canonical: place,
+                picture: Some((picture, width, height)),
+                alt,
+            },
+        )
+    };
+    if let Some((bytes, width, height, title)) = drawn {
+        let html = page_html(&bytes, width, height, title.as_deref());
+        return Ok((html, Some(bytes)));
+    }
     let picture = png_picture(&grid).map_err(|error| (exit::INPUT, error.to_string()))?;
     let (width, height) = picture_size();
-    Ok(public_page(
-        name,
-        place,
-        &PublicPage {
-            title: &found.title,
-            text: &page_text(&grid),
-            canonical: place,
-            picture: Some((&picture, width, height)),
-            alt: None,
-        },
-    ))
+    Ok((page_html(&picture, width, height, None), None))
 }
 
 /// `neottx html FOLDER --address ADDRESS [--public PAGE]...`.
@@ -131,14 +155,18 @@ pub fn html(options: &Options, address: &str, public: &[String]) -> Result<(), F
     for (page, found) in &pages {
         let number = String::from_utf8_lossy(&page.ascii()).into_owned();
         let place = format!("{address}{number}");
-        let html = if public.contains(page) {
+        let (html, picture) = if public.contains(page) {
             public_html(&mut read, &name, &place, *page, found)?
         } else {
-            private_page(&name, &place)
+            (private_page(&name, &place), None)
         };
         let page_folder = folder.join(&number);
         std::fs::create_dir_all(&page_folder).map_err(|error| io_failure(&page_folder, error))?;
         write(&page_folder.join(INDEX_FILE), html)?;
+        if let Some(bytes) = picture {
+            let path = page_folder.join(PICTURE_FILE);
+            std::fs::write(&path, bytes).map_err(|error| io_failure(&path, error))?;
+        }
     }
     skipped_files(&read)
 }

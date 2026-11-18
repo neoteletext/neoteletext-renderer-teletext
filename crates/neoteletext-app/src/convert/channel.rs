@@ -121,5 +121,14 @@ pub(super) fn convert(options: &Options, folder: &Path, filter: Option<(PageAddr
     write_files(folder, &files)
 }
 
+/// Writes `pages`, already made, as a channel's folder at `folder`, laid
+/// out as [`convert`] lays the input's out: for `neottx write-text
+/// --picture --to channel`, whose page is the picture's sub-page (renderer
+/// parity PAR-10).
+pub(super) fn write_pages(folder: &Path, pages: &[PageFile]) -> Result<(), Failure> {
+    let files = channel_files(pages)?;
+    write_files(folder, &files)
+}
+
 #[cfg(test)]
 mod tests;

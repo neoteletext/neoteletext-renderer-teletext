@@ -59,10 +59,11 @@ pub fn run() -> ExitCode {
         }
         Command::Contents { common } => commands::contents(&common.options()),
         Command::Html { common, address, public } => commands::html(&common.options(), &address, &public),
-        Command::WriteText { picture: Some(picture), language, input, output, no_sandbox, .. } => {
-            commands::write_picture(picture, language.as_deref(), &input, &output, no_sandbox)
+        Command::WriteText { picture: Some(picture), language, page, input, output, no_sandbox, to, .. } => {
+            let channel = to.is_some().then_some(page.as_str());
+            commands::write_picture(picture, language.as_deref(), channel, &input, &output, no_sandbox)
         }
-        Command::WriteText { set, language, level, page, input, output, no_sandbox, picture: None } => {
+        Command::WriteText { set, language, level, page, input, output, no_sandbox, picture: None, .. } => {
             let choice =
                 commands::TextChoice { set: set.as_deref(), language: language.as_deref(), standard: level == "3.5" };
             commands::write_text(choice, &page, &input, &output, no_sandbox)

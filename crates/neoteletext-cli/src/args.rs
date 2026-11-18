@@ -217,6 +217,11 @@ pub struct ChannelPictureArgs {
     /// A NAPLPS file to carry as the sub-page's picture.
     #[arg(long, value_name = "FILE")]
     pub naplps: Option<PathBuf>,
+    /// A NAPLPS picture's objects: the JSON of the program protocol's
+    /// `naplps_objects` message without `type`, `connections`, `page` and
+    /// `sub` (`{"objects": [...], "title": "..."}`).
+    #[arg(long, value_name = "FILE", requires = "naplps")]
+    pub objects: Option<PathBuf>,
     /// The picture's links: a JSON array as `regis_links` and
     /// `naplps_links` give theirs, each `{"drawing": n, "target": "200"}`
     /// or `{"object": n, "target": "200"}`.
@@ -511,6 +516,11 @@ pub(crate) enum Command {
         /// page, in `--language`'s provided set (renderer parity PAR-10).
         #[arg(long, value_enum, conflicts_with = "set")]
         picture: Option<crate::commands::PictureChoice>,
+        /// With `--picture`, write a static channel's sub-page instead of a
+        /// picture file: OUTPUT is the channel's folder, and `--page` names
+        /// the page and sub-code, e.g. 200/0001 (PAR-10, PAR-8).
+        #[arg(long, value_parser = ["channel"], requires = "picture")]
+        to: Option<String>,
         /// Run without the operating-system sandbox (REQ-SEC-017).
         #[arg(long)]
         no_sandbox: bool,

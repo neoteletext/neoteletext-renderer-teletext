@@ -4,7 +4,7 @@
 
 use super::{ConvertTarget, Selection, io_failure, parse_selection};
 use crate::args::ChannelPictureArgs;
-use crate::picture::{Language, picture_packets};
+use crate::picture::{Language, NaplpsObjectsFile, picture_packets};
 use neoteletext_app::convert as conversion;
 use neoteletext_app::input::Options;
 use neoteletext_app::{Failure, exit};
@@ -56,9 +56,142 @@ fn parse_links(path: &Path, bytes: &[u8]) -> Result<Vec<(u16, Vec<u8>)>, Failure
     Ok(links)
 }
 
+/// The largest objects file read: 64 objects (`MAX_OBJECTS`), each at its
+/// longest label and sixteen frames, written as JSON with room to spare.
+const MAX_OBJECTS_FILE_BYTES: usize = 262_144;
+
+/// The keys of the objects file: the `naplps_objects` message's, without
+/// `type`, `connections`, `page` and `sub` (the program protocol's schema).
+const OBJECTS_KEYS: [&str; 3] = ["objects", "one", "title"];
+/// The keys of one object (the schema's `NaplpsObject`).
+const OBJECT_KEYS: [&str; 18] = [
+    "number",
+    "kind",
+    "shown",
+    "detectable",
+    "layer",
+    "order",
+    "x",
+    "y",
+    "width",
+    "height",
+    "origin_x",
+    "origin_y",
+    "frames",
+    "cover",
+    "hover",
+    "pressed",
+    "alternative",
+    "label",
+];
+
+/// The objects of an objects file, each field in its type's range; the
+/// record's writer then checks every rule its reader keeps (ANIM-11).
+fn parse_objects(path: &Path, bytes: &[u8]) -> Result<NaplpsObjectsFile, Failure> {
+    use neoteletext_web::records::naplps_objects::MAX_OBJECTS;
+    let refused = |why: &str| io_failure(path, why);
+    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|error| io_failure(path, error))?;
+    let file = value.as_object().ok_or_else(|| refused("the objects file is a JSON object"))?;
+    if let Some(key) = file.keys().find(|key| !OBJECTS_KEYS.contains(&key.as_str())) {
+        return Err(refused(&format!("the objects file has no field {key:?}")));
+    }
+    let items =
+        file.get("objects").and_then(serde_json::Value::as_array).ok_or_else(|| refused("`objects` is an array"))?;
+    if items.len() > MAX_OBJECTS {
+        return Err(refused("more objects than a sub-page has (MAX_OBJECTS)"));
+    }
+    let one = match file.get("one") {
+        None => false,
+        Some(value) => value.as_bool().ok_or_else(|| refused("`one` is true or false"))?,
+    };
+    let title = match file.get("title") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => Some(value.as_str().ok_or_else(|| refused("`title` is text or null"))?.to_owned()),
+    };
+    let mut objects = Vec::with_capacity(items.len());
+    for item in items {
+        objects.push(parse_object(item).map_err(|why| refused(&why))?);
+    }
+    Ok(NaplpsObjectsFile { objects, title, one })
+}
+
+/// One object of an objects file.
+fn parse_object(item: &serde_json::Value) -> Result<naplps::Object, String> {
+    let object = item.as_object().ok_or("each object is a JSON object")?;
+    if let Some(key) = object.keys().find(|key| !OBJECT_KEYS.contains(&key.as_str())) {
+        return Err(format!("an object has no field {key:?}"));
+    }
+    let integer = |name: &str| -> Result<i64, String> {
+        object
+            .get(name)
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| format!("an object's `{name}` is a whole number"))
+    };
+    let flag = |name: &str| -> Result<bool, String> {
+        object
+            .get(name)
+            .and_then(serde_json::Value::as_bool)
+            .ok_or_else(|| format!("an object's `{name}` is true or false"))
+    };
+    let narrow = |name: &str, value: i64| format!("an object's `{name}` is out of range: {value}");
+    let field = |name: &str| -> Result<i16, String> {
+        let value = integer(name)?;
+        i16::try_from(value).map_err(|_| narrow(name, value))
+    };
+    let side = |name: &str| -> Result<u16, String> {
+        let value = integer(name)?;
+        u16::try_from(value).map_err(|_| narrow(name, value))
+    };
+    let small = |name: &str| -> Result<u8, String> {
+        match object.get(name) {
+            None | Some(serde_json::Value::Null) => Ok(0),
+            Some(value) => {
+                let value = value.as_i64().ok_or_else(|| format!("an object's `{name}` is a whole number or null"))?;
+                u8::try_from(value).map_err(|_| narrow(name, value))
+            }
+        }
+    };
+    let kind = match object.get("kind").and_then(serde_json::Value::as_str) {
+        Some("macro") => naplps::ObjectKind::Macro,
+        Some("region") => naplps::ObjectKind::Region,
+        _ => return Err("an object's `kind` is \"macro\" or \"region\"".to_owned()),
+    };
+    let frames =
+        object.get("frames").and_then(serde_json::Value::as_array).ok_or("an object's `frames` is an array")?;
+    let frames = frames
+        .iter()
+        .map(|frame| frame.as_u64().and_then(|code| u8::try_from(code).ok()).ok_or("a frame is a macro's code"))
+        .collect::<Result<Vec<u8>, _>>()?;
+    let label = match object.get("label") {
+        None | Some(serde_json::Value::Null) => String::new(),
+        Some(value) => value.as_str().ok_or("an object's `label` is text or null")?.to_owned(),
+    };
+    let order = integer("order")?;
+    Ok(naplps::Object {
+        number: side("number")?,
+        kind,
+        shown: flag("shown")?,
+        detectable: flag("detectable")?,
+        layer: small("layer")?,
+        order: i8::try_from(order).map_err(|_| narrow("order", order))?,
+        x: field("x")?,
+        y: field("y")?,
+        width: side("width")?,
+        height: side("height")?,
+        origin_x: field("origin_x")?,
+        origin_y: field("origin_y")?,
+        cover: small("cover")?,
+        hover: small("hover")?,
+        pressed: small("pressed")?,
+        alternative: small("alternative")?,
+        frames,
+        label,
+    })
+}
+
 /// The sub-page's file in a channel's folder: `NNN/SSSS.t42` when the page
 /// has a sub-page folder, else `NNN.t42` (DOC-1868).
-fn sub_page_file(folder: &Path, page: PageAddress, subcode: SubCode) -> PathBuf {
+pub(super) fn sub_page_file(folder: &Path, page: PageAddress, subcode: SubCode) -> PathBuf {
     let name = String::from_utf8_lossy(&page.ascii()).into_owned();
     let sub_page = folder.join(&name).join(format!("{:04X}.t42", subcode.value()));
     if sub_page.is_file() { sub_page } else { folder.join(format!("{name}.t42")) }
@@ -84,7 +217,8 @@ pub fn convert(
         (None, Some(path)) => Some((Language::Naplps, path)),
         (None, None) => None,
     };
-    let wants_picture = language.is_some() || picture.links.is_some() || picture.cursor.is_some();
+    let wants_picture =
+        language.is_some() || picture.objects.is_some() || picture.links.is_some() || picture.cursor.is_some();
     if wants_picture && !matches!(to, ConvertTarget::Channel) {
         return Err((exit::USAGE, "a picture is carried only by --to channel".to_owned()));
     }
@@ -107,6 +241,14 @@ pub fn convert(
         })
         .transpose()?
         .unwrap_or_default();
+    let objects = picture
+        .objects
+        .as_deref()
+        .map(|path| {
+            read_bounded(path, MAX_OBJECTS_FILE_BYTES, "an objects file's bound")
+                .and_then(|bytes| parse_objects(path, &bytes))
+        })
+        .transpose()?;
     let target = match to {
         ConvertTarget::T42 => conversion::Target::T42,
         ConvertTarget::Tti => conversion::Target::Tti,
@@ -116,8 +258,8 @@ pub fn convert(
     conversion::convert(options, output, target, filter)?;
     let Some((page, subcode)) = place else { return Ok(()) };
     let (language, stream) = stream.unwrap_or((Language::Regis, Vec::new()));
-    let packets =
-        picture_packets(page, subcode, language, &stream, &links, picture.cursor).map_err(|why| (exit::INPUT, why))?;
+    let packets = picture_packets(page, subcode, language, &stream, objects.as_ref(), &links, picture.cursor)
+        .map_err(|why| (exit::INPUT, why))?;
     let file = sub_page_file(output, page, subcode);
     let mut out = std::fs::OpenOptions::new().append(true).open(&file).map_err(|error| io_failure(&file, error))?;
     out.write_all(&packets).and_then(|()| out.flush()).map_err(|error| io_failure(&file, error))

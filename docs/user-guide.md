@@ -339,11 +339,13 @@ Options that contradict each other, such as `--hold-mosaics` at Level 3.5, are r
 - a NAPLPS file, `.naplps` or `.nap`;
 - a `.t42` file, such as a static channel's sub-page, whose records carry a picture for the page named.
 
-A picture is drawn as the browser draws it. ReGIS fills the VT340's 800 by 480 screen in its colour map, with numbered drawings composed; its alphabet 0 is the VT340 font compiled in, or `--regis-font FILE`. NAPLPS is drawn on the teletext raster, 480 by 500, from line 19, the border lines in the picture's screen colour, with the stroke font compiled in or `--naplps-font FILE`. Text in either language may use the 55 provided character sets, drawn in Noto Teletext, with the plain Arabic-script sets' letters joined. `show` and `view` need a terminal that shows images (kitty, Sixel or iTerm2).
+A picture is drawn as the browser draws it. ReGIS fills the VT340's 800 by 480 screen in its colour map, with numbered drawings composed; its alphabet 0 is the VT340 font compiled in, or `--regis-font FILE`. NAPLPS is drawn on the teletext raster, 480 by 500, from line 19, the border lines in the picture's screen colour, with the stroke font compiled in or `--naplps-font FILE`. Text in either language may use the 55 provided character sets, drawn in Noto Teletext, with the plain Arabic-script sets' letters joined. A sub-page's NAPLPS objects are composed over its picture. `show` and `view` need a terminal that shows images (kitty, Sixel or iTerm2); a sub-page's picture from a `.t42` file is shown with row 0 of its teletext page above it and row 24 beneath, as the browser lays it out (a ReGIS picture between the two rows at its width, a NAPLPS picture with them over its first and last lines).
+
+`neottx view` on a live channel draws the pictures the channel sends, and says so in HELLO, offering the ReGIS and NAPLPS capabilities, when the terminal shows images; in a terminal of characters it offers neither and the channel sends its mosaic page instead. The one-shot commands (`render`, `show`, `text`) offer neither, and show that mosaic page.
 
 `neottx check` reads a picture as a NeoTeletext server reads it and prints what it finds: for ReGIS a failed commit, with its code and drawing, or a limit reached; for NAPLPS each refusal and the bytes passed over. It exits with status 4 when there is a refusal.
 
-`neottx convert --to channel --page 200/0001` carries a picture in that sub-page's file: `--regis FILE` or `--naplps FILE`, with `--links FILE`, a JSON array such as `[{"drawing": 3, "target": "300"}]` (`"object"` for a NAPLPS object), and `--cursor N`, the drawing or object that is the sub-page's cursor. A picture over 1,048,576 bytes is refused, as a server refuses to keep one.
+`neottx convert --to channel --page 200/0001` carries a picture in that sub-page's file: `--regis FILE` or `--naplps FILE`, with `--links FILE`, a JSON array such as `[{"drawing": 3, "target": "300"}]` (`"object"` for a NAPLPS object), and `--cursor N`, the drawing or object that is the sub-page's cursor. A NAPLPS picture's objects are `--objects FILE`, the JSON of the program protocol's `naplps_objects` message without `type`, `connections`, `page` and `sub`, such as `{"objects": [{"number": 7, "kind": "region", "shown": false, "detectable": true, "layer": 1, "order": 0, "x": 0, "y": 0, "width": 200, "height": 200, "origin_x": 0, "origin_y": 0, "frames": [], "cover": 3, "label": "A door"}], "title": "The harbour"}`. A picture over 1,048,576 bytes is refused, as a server refuses to keep one. `neottx html` draws a public page whose sub-page carries a picture as `render` draws it, writes it beside the page's HTML as `NNN/picture.png`, and gives the picture's title as its `alt` text.
 
 ```sh
 neottx render map.regis 100 -o map.png
@@ -418,10 +420,11 @@ neottx write-text --set vietnamese --page 100 tin-tuc.txt 100.tti
 neottx write-text --language uk --page 120 novyny.txt 120.tti
 ```
 
-With `--picture regis` or `--picture naplps` the text is written as a ReGIS or NAPLPS picture instead (REQ-6763): 40 columns on rows 1 to 23, each line broken at spaces as for a page, in the provided set of `--language` (Latin English when none is named) and Latin English for what that set cannot show. A character no set shows is written as `?`. ReGIS cells are 20 by 20 pixels, row `r` at y = 10 + 20 (r − 1); NAPLPS cells are 1/40 of the screen wide and one teletext row high. `--page` is still given but not used.
+With `--picture regis` or `--picture naplps` the text is written as a ReGIS or NAPLPS picture instead (REQ-6763): 40 columns on rows 1 to 23, each line broken at spaces as for a page, in the provided set of `--language` (Latin English when none is named) and Latin English for what that set cannot show. A character no set shows is written as `?`. ReGIS cells are 20 by 20 pixels, row `r` at y = 10 + 20 (r − 1); NAPLPS cells are 1/40 of the screen wide and one teletext row high. `--page` is not used, except with `--to channel`: then OUTPUT is a channel's folder and the picture is written as the sub-page `--page` names (`200` or `200/0001`), as `convert --to channel` carries one.
 
 ```sh
 neottx write-text --language el --picture naplps --page 100 news.txt news.nap
+neottx write-text --language el --picture regis --to channel --page 200/0001 news.txt site
 ```
 
 ## Languages

@@ -77,6 +77,8 @@ pub(super) struct Loaded {
     modified: Option<SystemTime>,
     /// What it decoded to.
     pub session: Session,
+    /// The pictures its records carry, by page and sub-code (PAR-8).
+    pub pictures: BTreeMap<(PageAddress, u16), crate::picture::PictureSource>,
 }
 
 /// The civil date of a day count since 1970-01-01 (H. Hinnant's
@@ -178,7 +180,9 @@ fn decode(options: &Options, unparsed: Unparsed) -> Option<Loaded> {
     let file_options = Options { input: path.to_string_lossy().into_owned(), ..options.clone() };
     match input::load_from(&file_options, &mut bytes.as_slice()) {
         Ok(session) => {
-            Some(Loaded { page, description: if t42 { None } else { description(&bytes) }, path, modified, session })
+            let pictures = if t42 { crate::picture::pictures_in_t42(&bytes) } else { BTreeMap::new() };
+            let description = if t42 { None } else { description(&bytes) };
+            Some(Loaded { path, page, description, modified, session, pictures })
         }
         Err((_, message)) => {
             report(&message);

@@ -33,6 +33,19 @@ pub fn show(
     if selection == Selection::All {
         return Err((exit::USAGE, "show displays one page; use text or render for all".into()));
     }
+    // PAR-7, PAR-31: a `.t42` sub-page that carries a picture shows it,
+    // with row 0 of its teletext page above and row 24 beneath.
+    if let Selection::Page(address, subcode) = selection
+        && let Some(source) = super::picture::t42_picture(&options.input, address, subcode)?
+    {
+        let setup = super::picture::show_setup(raster_args, graphics)?;
+        let mut session = input::load_sandboxed(options, selection.page(), || sandbox_closed(options.no_sandbox))?;
+        let frame = Frame::still(session.decoder().config(), raster_args.reveal);
+        let key = *selected(&session, selection)?.first().ok_or((exit::NOT_FOUND, "no page found".to_owned()))?;
+        let grid = grid_of(&mut session, key)?;
+        let page = raster(&grid, frame, crate::image::Scale { x: 1, y: 1, aspect: false }, Rgba::opaque(0, 0, 0));
+        return super::picture::show_framed(&source, &setup, &page, raster_args);
+    }
     let is_terminal = std::io::stdout().is_terminal();
     let (display, reason) = terminal::detect(display(graphics), is_terminal);
     if let (Some(reason), true) = (reason, options.verbose > 0) {

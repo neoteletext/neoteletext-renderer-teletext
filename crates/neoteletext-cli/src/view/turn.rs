@@ -24,12 +24,25 @@ use std::sync::mpsc;
 /// display is a picture (every picture protocol draws the flash phase
 /// itself, REQ-RND-029; text flashes by the terminal's blink), reveal and
 /// zoom. The page is drawn again when it changes.
-pub(super) fn drawn_state(grid: &Grid, display: Display, frame: Frame, reveal: bool) -> DrawnState {
-    (*grid, (display != Display::Text).then_some(frame), reveal, frame.zoom)
+/// A picture shown in the page's place is drawn again when the pictures
+/// change (PAR-7).
+pub(super) fn drawn_state(
+    grid: &Grid,
+    display: Display,
+    frame: Frame,
+    reveal: bool,
+    picture: Option<super::ShownPicture>,
+) -> DrawnState {
+    (*grid, (display != Display::Text).then_some(frame), reveal, frame.zoom, picture)
 }
 
 /// See [`drawn_state`].
-pub(super) type DrawnState = (Grid, Option<Frame>, bool, neoteletext_core::level1::Zoom);
+pub(super) type DrawnState = (Grid, Option<Frame>, bool, neoteletext_core::level1::Zoom, Option<super::ShownPicture>);
+
+/// What draws the page: a grid at a flash phase, the whole page or what
+/// changed, and the picture shown in its place, if any.
+pub(super) type Paint<'a> = dyn FnMut(&Grid, Frame, bool, Option<(&crate::image::Raster, crate::picture::Language)>) -> std::io::Result<()>
+    + 'a;
 
 impl ViewState {
     /// Runs turns until the user quits. `paint` draws a grid at a flash
@@ -42,7 +55,7 @@ impl ViewState {
         source: &mut dyn Source,
         wakes: &mpsc::Receiver<Wakened>,
         display: Display,
-        paint: &mut dyn FnMut(&Grid, Frame, bool) -> std::io::Result<()>,
+        paint: &mut Paint<'_>,
     ) -> std::io::Result<()> {
         loop {
             if let Some(report) = self.unrecorded.take() {
@@ -84,9 +97,13 @@ impl ViewState {
             self.ask_enhancements(session, source, shown.page, &config);
             let reveal = self.viewer.reveal(now);
             let frame = Frame { zoom: self.viewer.zoom(), ..Frame::at(&config, reveal, now) };
-            let state = drawn_state(&self.grid, display, frame, reveal);
+            // PAR-7: the sub-page on screen shows the picture it carries.
+            let on = shown.page.map(|page| (page.key.address, page.key.subcode));
+            let picture = if display == Display::Text { None } else { self.picture_on(on) };
+            let state = drawn_state(&self.grid, display, frame, reveal, picture);
             if self.last_drawn.as_ref() != Some(&state) {
-                paint(&self.grid, frame, core::mem::take(&mut self.repaint_whole))?;
+                let drawn = picture.and(self.picture.as_ref()).map(|(_, raster, language)| (raster, *language));
+                paint(&self.grid, frame, core::mem::take(&mut self.repaint_whole), drawn)?;
                 self.last_drawn = Some(state);
             }
             // A key given to the page's table is evaluated at its next tick,

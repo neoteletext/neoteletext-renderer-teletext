@@ -212,8 +212,8 @@ pub struct Findings {
 /// A font or set the renderer refuses, as text.
 pub fn draw(language: Language, bytes: &[u8], fonts: &Fonts) -> Result<(Raster, Findings), String> {
     match language {
-        Language::Regis => draw_regis(bytes, fonts),
-        Language::Naplps => draw_naplps(bytes, fonts),
+        Language::Regis => draw_regis_titled(bytes, fonts).map(|(raster, findings, _)| (raster, findings)),
+        Language::Naplps => draw_naplps_with(bytes, fonts, None),
     }
 }
 
@@ -221,7 +221,7 @@ fn colour([red, green, blue]: [u8; 3]) -> Rgba {
     Rgba::opaque(red, green, blue)
 }
 
-fn draw_regis(bytes: &[u8], fonts: &Fonts) -> Result<(Raster, Findings), String> {
+fn draw_regis_titled(bytes: &[u8], fonts: &Fonts) -> Result<(Raster, Findings, Option<String>), String> {
     let mut terminal = regis_terminal(fonts)?;
     let mut screen = regis::Screen::new();
     let mut events = terminal.feed(&mut screen, &regis_stream(bytes));
@@ -254,10 +254,10 @@ fn draw_regis(bytes: &[u8], fonts: &Fonts) -> Result<(Raster, Findings), String>
     let palette = terminal.palette().colours().iter().copied().map(colour).collect();
     let width = usize::try_from(REGIS_WIDTH).map_err(|_| "the screen's width".to_owned())?;
     let height = usize::try_from(REGIS_HEIGHT).map_err(|_| "the screen's height".to_owned())?;
-    Ok((Raster { width, height, indices, palette }, findings))
+    Ok((Raster { width, height, indices, palette }, findings, terminal.title()))
 }
 
-fn draw_naplps(bytes: &[u8], fonts: &Fonts) -> Result<(Raster, Findings), String> {
+fn draw_naplps_with(bytes: &[u8], fonts: &Fonts, objects: Option<&ObjectLayer>) -> Result<(Raster, Findings), String> {
     let mut terminal = naplps_terminal(fonts)?;
     let width = u32::try_from(PAGE_WIDTH).map_err(|_| "the raster's width".to_owned())?;
     let lines = u32::try_from(NAPLPS_LINES).map_err(|_| "the picture's height".to_owned())?;
@@ -280,6 +280,17 @@ fn draw_naplps(bytes: &[u8], fonts: &Fonts) -> Result<(Raster, Findings), String
         let first = diagnostics.first_passed_over.unwrap_or(0);
         findings.lines.push(format!("{} bytes passed over, the first at byte {first}", diagnostics.passed_over));
     }
+    // The objects are composed over the stream's picture (ANIM-11), as
+    // the browser shows them.
+    let canvas = match objects {
+        Some(objects) => {
+            terminal.set_objects(&objects.objects).map_err(|error| format!("the NAPLPS objects: {error:?}"))?;
+            let mut presented = naplps::Canvas::new(width, lines).map_err(|error| format!("{error:?}"))?;
+            terminal.compose(&canvas, &mut presented).map_err(|error| format!("{error:?}"))?;
+            presented
+        }
+        None => canvas,
+    };
     let border = terminal.screen_colour();
     let mut indices = vec![border; PAGE_WIDTH.saturating_mul(RASTER_LINES)];
     for (line, row) in canvas.pixels().chunks(PAGE_WIDTH).enumerate() {
@@ -448,8 +459,9 @@ const RECORD_SERVICE: u8 = 0;
 /// The generation of a static picture's stream: its first and only.
 const STATIC_GENERATION: u16 = 1;
 
-/// One sub-page's picture as a static channel carries it (PAR-8): its
-/// stream, its links and its cursor.
+/// One sub-page's picture as a static channel or a live connection
+/// carries it (PAR-7, PAR-8): its stream, its NAPLPS objects, its links
+/// and its cursor.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PictureSource {
     /// The language of the stream, once one is read.
@@ -458,16 +470,114 @@ pub struct PictureSource {
     pub stream: Vec<u8>,
     /// The latest generation read.
     pub generation: u16,
+    /// The sub-page's NAPLPS objects and the picture's title, from its
+    /// `NAPLPS_OBJECTS` record (ANIM-11).
+    pub objects: Option<ObjectLayer>,
     /// The links: each drawing or object and its target.
     pub links: Vec<(u16, Vec<u8>)>,
     /// The drawing or object that is the cursor, 0 for none.
     pub cursor: u16,
 }
 
+/// A sub-page's NAPLPS objects and the picture's title, as its
+/// `NAPLPS_OBJECTS` record gives them (ANIM-11): drawn over the stream's
+/// picture by the renderer's `compose` while their generation is the
+/// stream's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ObjectLayer {
+    /// The generation of the stream they belong to.
+    pub generation: u16,
+    /// The objects, as the renderer takes them.
+    pub objects: Vec<naplps::Object>,
+    /// The picture's title, if it has one.
+    pub title: Option<String>,
+}
+
+/// An object of the record as the NAPLPS renderer takes it: the same
+/// fields (ANIM-11).
+fn renderer_object(labelled: &neoteletext_web::records::naplps_objects::LabelledObject<'_>) -> naplps::Object {
+    use neoteletext_web::records::naplps_objects::ObjectKind;
+    let object = &labelled.object;
+    let [hover, pressed, alternative] = object.looks;
+    naplps::Object {
+        number: object.number,
+        kind: match object.kind {
+            ObjectKind::Macro => naplps::ObjectKind::Macro,
+            ObjectKind::Region => naplps::ObjectKind::Region,
+        },
+        shown: object.shown,
+        detectable: object.detectable,
+        layer: object.layer,
+        order: object.order,
+        x: object.x,
+        y: object.y,
+        width: object.width,
+        height: object.height,
+        origin_x: object.origin.0,
+        origin_y: object.origin.1,
+        cover: object.cover,
+        hover,
+        pressed,
+        alternative,
+        frames: object.frames.to_vec(),
+        label: labelled.label.to_owned(),
+    }
+}
+
+/// A file of `neottx convert --objects` (PAR-8): the JSON of the program
+/// protocol's `naplps_objects` message without `type`, `connections`,
+/// `page` and `sub`, read into the renderer's objects.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NaplpsObjectsFile {
+    /// The objects; exactly one with `one`.
+    pub objects: Vec<naplps::Object>,
+    /// The picture's title, never with `one`.
+    pub title: Option<String>,
+    /// The record redefines the one object given, keeping the others.
+    pub one: bool,
+}
+
+/// An object as the record's writer takes it.
+fn record_object(object: &naplps::Object) -> neoteletext_web::records::naplps_objects::LabelledObject<'_> {
+    use neoteletext_web::records::naplps_objects::{LabelledObject, NaplpsObject, ObjectKind};
+    LabelledObject {
+        object: NaplpsObject {
+            number: object.number,
+            kind: match object.kind {
+                naplps::ObjectKind::Macro => ObjectKind::Macro,
+                naplps::ObjectKind::Region => ObjectKind::Region,
+            },
+            shown: object.shown,
+            detectable: object.detectable,
+            layer: object.layer,
+            order: object.order,
+            x: object.x,
+            y: object.y,
+            width: object.width,
+            height: object.height,
+            origin: (object.origin_x, object.origin_y),
+            cover: object.cover,
+            looks: [object.hover, object.pressed, object.alternative],
+            frames: &object.frames,
+        },
+        label: &object.label,
+    }
+}
+
+/// A copy of a raster, which the image crate does not clone.
+fn copy_of(raster: &Raster) -> Raster {
+    Raster {
+        width: raster.width,
+        height: raster.height,
+        indices: raster.indices.clone(),
+        palette: raster.palette.clone(),
+    }
+}
+
 /// A sub-page's picture as records, each written by its encoder and so
 /// checked by its reader: the stream as REGIS or NAPLPS records of
-/// generation 1 from offset 0, then `DRAWING_LINKS` and `REGIS_CURSOR`
-/// (PAR-8). Gives the packets' bytes.
+/// generation 1 from offset 0, then `NAPLPS_OBJECTS`, `DRAWING_LINKS` and
+/// `REGIS_CURSOR` (PAR-8). Gives the packets' bytes.
 ///
 /// # Errors
 ///
@@ -477,10 +587,11 @@ pub fn picture_packets(
     subcode: neoteletext_core::types::SubCode,
     language: Language,
     stream: &[u8],
+    objects: Option<&NaplpsObjectsFile>,
     links: &[(u16, Vec<u8>)],
     cursor: Option<u16>,
 ) -> Result<Vec<u8>, String> {
-    use neoteletext_web::records::{drawing_links, regis, regis_cursor};
+    use neoteletext_web::records::{drawing_links, naplps_objects, regis, regis_cursor};
     let mut out = Vec::new();
     let mut record_id = 0_u8;
     let mut offset = 0_u32;
@@ -495,6 +606,18 @@ pub fn picture_packets(
         .map_err(fault)?;
         record_id = record_id.wrapping_add(1);
         offset = offset.saturating_add(u32::try_from(chunk.len()).map_err(|_| "a chunk passes 32 bits".to_owned())?);
+    }
+    if let Some(file) = objects {
+        let labelled: Vec<naplps_objects::LabelledObject<'_>> = file.objects.iter().map(record_object).collect();
+        let contents = match (file.one, labelled.as_slice()) {
+            (true, [only]) => naplps_objects::Contents::One(*only),
+            (true, _) => return Err("`one` redefines exactly one object".to_owned()),
+            (false, all) => naplps_objects::Contents::Whole { objects: all, title: file.title.as_deref() },
+        };
+        let mut write = |packet: neoteletext_core::packet::Packet| out.extend_from_slice(&packet.bytes);
+        let place = (page, subcode, STATIC_GENERATION);
+        naplps_objects::encode_contents(place, &contents, RECORD_SERVICE, record_id, &mut write).map_err(fault)?;
+        record_id = record_id.wrapping_add(1);
     }
     if !links.is_empty() {
         let links: Vec<drawing_links::DrawingLink<'_>> =
@@ -512,56 +635,305 @@ pub fn picture_packets(
     Ok(out)
 }
 
-/// The pictures a file of T42 packets carries, by page and sub-code, read
-/// by the engine's record reader (PAR-7, PAR-8): each stream's latest
-/// generation, a record out of order in it dropping the stream, as a
-/// receiver drops it.
-#[must_use]
-pub fn pictures_in_t42(
-    bytes: &[u8],
-) -> std::collections::BTreeMap<(neoteletext_core::types::PageAddress, u16), PictureSource> {
-    use neoteletext_core::consts::PACKET_BYTES;
-    use neoteletext_web::records::{ChannelRecord, Read, RecordReader};
-    let mut reader = RecordReader::new();
-    let mut pictures: std::collections::BTreeMap<_, PictureSource> = std::collections::BTreeMap::new();
-    for packet_bytes in bytes.as_chunks::<PACKET_BYTES>().0 {
-        let packet = neoteletext_core::packet::Packet { bytes: *packet_bytes };
-        let Read::Record(record) = reader.push(&packet) else { continue };
+/// The most sub-pages whose pictures a [`PictureStore`] keeps. A static
+/// sub-page's file holds one, and a live connection sends the pictures
+/// of the sub-pages selected; past this the lowest-numbered is let go, so
+/// a channel cannot make the receiver hold more than this many streams of
+/// `MAX_PICTURE_STREAM_BYTES` (PAR-8, PAR-17).
+pub const MAX_PICTURES_KEPT: usize = 16;
+
+/// The pictures of a file of packets or a live connection, by page and
+/// sub-code, as the engine's record reader reads them (PAR-7, PAR-8):
+/// each stream's latest generation, a record out of order in it dropping
+/// the stream, as a receiver drops it; a stream past
+/// `MAX_PICTURE_STREAM_BYTES` dropped as a server refuses to keep it.
+#[derive(Clone, Debug, Default)]
+pub struct PictureStore {
+    pictures: std::collections::BTreeMap<(neoteletext_core::types::PageAddress, u16), PictureSource>,
+    version: u64,
+}
+
+impl PictureStore {
+    /// An empty store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The entry of a sub-page, made when it has none, within
+    /// [`MAX_PICTURES_KEPT`].
+    fn entry(&mut self, key: (neoteletext_core::types::PageAddress, u16)) -> &mut PictureSource {
+        if !self.pictures.contains_key(&key)
+            && self.pictures.len() >= MAX_PICTURES_KEPT
+            && let Some(first) = self.pictures.keys().next().copied()
+        {
+            self.pictures.remove(&first);
+        }
+        self.pictures.entry(key).or_default()
+    }
+
+    /// Takes one record of the channel; others than a picture's are passed
+    /// over.
+    pub fn record(&mut self, record: &neoteletext_web::records::ChannelRecord<'_>) {
+        use neoteletext_formats::picture_text::MAX_PICTURE_STREAM_BYTES;
+        use neoteletext_web::records::ChannelRecord;
+        use neoteletext_web::records::naplps_objects::Scope;
         match record {
             ChannelRecord::Regis(stream) | ChannelRecord::Naplps(stream) => {
                 let language =
                     if matches!(record, ChannelRecord::Regis(_)) { Language::Regis } else { Language::Naplps };
-                let source = pictures.entry((stream.page, stream.subcode.value())).or_default();
+                let source = self.entry((stream.page, stream.subcode.value()));
                 if stream.offset == 0 {
+                    let objects = source.objects.take();
                     *source = PictureSource {
                         language: Some(language),
                         generation: stream.generation,
+                        links: core::mem::take(&mut source.links),
+                        cursor: source.cursor,
                         ..PictureSource::default()
                     };
+                    // ObjectLayer for the new generation came first are kept;
+                    // an older generation's are dropped (ANIM-11).
+                    source.objects = objects.filter(|kept| kept.generation == stream.generation);
                 }
                 let at = u32::try_from(source.stream.len()).unwrap_or(u32::MAX);
-                if source.generation == stream.generation && source.language == Some(language) && stream.offset == at {
+                let fits = source.stream.len().saturating_add(stream.data.len()) <= MAX_PICTURE_STREAM_BYTES;
+                if source.generation == stream.generation
+                    && source.language == Some(language)
+                    && stream.offset == at
+                    && fits
+                {
                     source.stream.extend_from_slice(stream.data);
                 } else {
                     source.stream.clear();
                     source.language = None;
                 }
             }
+            ChannelRecord::NaplpsObjects(objects) => {
+                let source = self.entry((objects.page, objects.subcode.value()));
+                let given: Vec<naplps::Object> =
+                    objects.labelled_objects().map(|labelled| renderer_object(&labelled)).collect();
+                match objects.scope {
+                    Scope::Whole => {
+                        source.objects = Some(ObjectLayer {
+                            generation: objects.generation,
+                            objects: given,
+                            title: objects.title.map(str::to_owned),
+                        });
+                    }
+                    Scope::One => {
+                        let kept = source.objects.get_or_insert_with(|| ObjectLayer {
+                            generation: objects.generation,
+                            ..ObjectLayer::default()
+                        });
+                        if kept.generation != objects.generation {
+                            *kept = ObjectLayer { generation: objects.generation, ..ObjectLayer::default() };
+                        }
+                        for object in given {
+                            match kept.objects.iter_mut().find(|known| known.number == object.number) {
+                                Some(known) => *known = object,
+                                None => kept.objects.push(object),
+                            }
+                        }
+                    }
+                }
+            }
             ChannelRecord::DrawingLinks(links) => {
-                let source = pictures.entry((links.page, links.subcode.value())).or_default();
+                let source = self.entry((links.page, links.subcode.value()));
                 if links.part == 0 {
                     source.links.clear();
                 }
                 source.links.extend(links.links().map(|link| (link.drawing, link.target.to_vec())));
             }
             ChannelRecord::RegisCursor(cursor) => {
-                pictures.entry((cursor.page, cursor.subcode.value())).or_default().cursor = cursor.drawing;
+                self.entry((cursor.page, cursor.subcode.value())).cursor = cursor.drawing;
             }
-            _ => {}
+            _ => return,
+        }
+        self.version = self.version.wrapping_add(1);
+    }
+
+    /// The picture of a sub-page, when one is whole.
+    #[cfg_attr(
+        not(feature = "view"),
+        allow(dead_code, reason = "the viewer reads it; a build without the viewer does not")
+    )]
+    #[must_use]
+    pub fn picture(&self, page: neoteletext_core::types::PageAddress, subcode: u16) -> Option<&PictureSource> {
+        self.pictures.get(&(page, subcode)).filter(|source| source.language.is_some())
+    }
+
+    /// A count that changes whenever a record changes a picture, so that a
+    /// receiver draws again only then.
+    #[cfg_attr(
+        not(feature = "view"),
+        allow(dead_code, reason = "the viewer reads it; a build without the viewer does not")
+    )]
+    #[must_use]
+    pub const fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Forgets every picture: a new connection's server sends them again.
+    #[cfg_attr(
+        not(feature = "view"),
+        allow(dead_code, reason = "the viewer reads it; a build without the viewer does not")
+    )]
+    pub fn clear(&mut self) {
+        self.pictures.clear();
+        self.version = self.version.wrapping_add(1);
+    }
+
+    /// The pictures held, by page and sub-code.
+    #[must_use]
+    pub fn into_pictures(
+        self,
+    ) -> std::collections::BTreeMap<(neoteletext_core::types::PageAddress, u16), PictureSource> {
+        let mut pictures = self.pictures;
+        pictures.retain(|_, source| source.language.is_some());
+        pictures
+    }
+}
+
+/// The pictures a file of T42 packets carries, by page and sub-code, read
+/// by the engine's record reader as a [`PictureStore`] reads them.
+#[must_use]
+pub fn pictures_in_t42(
+    bytes: &[u8],
+) -> std::collections::BTreeMap<(neoteletext_core::types::PageAddress, u16), PictureSource> {
+    use neoteletext_core::consts::PACKET_BYTES;
+    use neoteletext_web::records::{Read, RecordReader};
+    let mut reader = RecordReader::new();
+    let mut store = PictureStore::new();
+    for packet_bytes in bytes.as_chunks::<PACKET_BYTES>().0 {
+        let packet = neoteletext_core::packet::Packet { bytes: *packet_bytes };
+        if let Read::Record(record) = reader.push(&packet) {
+            store.record(&record);
         }
     }
-    pictures.retain(|_, source| source.language.is_some());
-    pictures
+    store.into_pictures()
+}
+
+/// A sub-page's picture drawn as [`draw`] draws its stream, with its NAPLPS
+/// objects composed over it (ANIM-11, PAR-7), and the picture's title: a
+/// ReGIS stream's `D(T'…')` (`Terminal::title`) or the `NAPLPS_OBJECTS`
+/// record's (REQ-6644, REQ-6653).
+///
+/// # Errors
+///
+/// A font or set the renderer refuses, as text.
+pub fn draw_source(source: &PictureSource, fonts: &Fonts) -> Result<(Raster, Findings, Option<String>), String> {
+    match source.language {
+        Some(Language::Regis) => {
+            let (raster, findings, title) = draw_regis_titled(&source.stream, fonts)?;
+            Ok((raster, findings, title))
+        }
+        Some(Language::Naplps) => {
+            let objects = source.objects.as_ref().filter(|objects| objects.generation == source.generation);
+            let (raster, findings) = draw_naplps_with(&source.stream, fonts, objects)?;
+            Ok((raster, findings, objects.and_then(|objects| objects.title.clone())))
+        }
+        None => Err("the sub-page carries no whole picture".to_owned()),
+    }
+}
+
+/// `raster` enlarged `across` times across and `down` times down.
+#[must_use]
+pub fn scaled(raster: &Raster, across: usize, down: usize) -> Raster {
+    let (across, down) = (across.max(1), down.max(1));
+    let width = raster.width.saturating_mul(across);
+    let mut indices = Vec::with_capacity(width.saturating_mul(raster.height).saturating_mul(down));
+    for row in raster.indices.chunks(raster.width.max(1)) {
+        let line: Vec<u8> = row.iter().flat_map(|&index| core::iter::repeat_n(index, across)).collect();
+        for _ in 0..down {
+            indices.extend_from_slice(&line);
+        }
+    }
+    Raster { width, height: raster.height.saturating_mul(down), indices, palette: raster.palette.clone() }
+}
+
+/// The rows of a teletext page: row 0 the header, row 24 the coloured-key
+/// prompts (EN 300 706 clause 9.3).
+const PAGE_ROWS: usize = neoteletext_core::consts::ROWS;
+const HEADER_ROW: usize = 0;
+const PROMPT_ROW: usize = PAGE_ROWS - 1;
+/// A teletext row's height at a ReGIS picture's width, as the browser lays
+/// a ReGIS page out (PAR-31): a row is 20 lines of a 480-dot width, so at
+/// 800 pixels it is 800 × 20 / 480 lines, rounded.
+pub const REGIS_ROW_LINES: usize = (CELL_HEIGHT * REGIS_WIDTH as usize + PAGE_WIDTH / 2) / PAGE_WIDTH;
+/// The size of a ReGIS picture laid out with its rows 0 and 24 (PAR-31).
+#[cfg_attr(
+    not(feature = "view"),
+    allow(dead_code, reason = "the viewer reads it; a build without the viewer does not")
+)]
+pub const REGIS_FRAMED_SIZE: (usize, usize) = (REGIS_WIDTH as usize, REGIS_HEIGHT as usize + 2 * REGIS_ROW_LINES);
+/// The size of a NAPLPS picture: the teletext raster, its rows 0 and 24
+/// drawn over it.
+#[cfg_attr(
+    not(feature = "view"),
+    allow(dead_code, reason = "the viewer reads it; a build without the viewer does not")
+)]
+pub const NAPLPS_FRAMED_SIZE: (usize, usize) = (PAGE_WIDTH, RASTER_LINES);
+/// The lines of the NAPLPS raster a teletext row covers: 500 / 25.
+const NAPLPS_ROW_LINES_ON_RASTER: usize = RASTER_LINES / PAGE_ROWS;
+const _: () = assert!(NAPLPS_ROW_LINES_ON_RASTER == CELL_HEIGHT);
+
+/// Row `row` of `page`, a whole page's raster, resampled to `width` by
+/// `height` pixels (nearest neighbour), its indices raised by `offset`.
+fn page_row(page: &Raster, row: usize, (width, height): (usize, usize), offset: u8) -> Vec<u8> {
+    let row_lines = page.height / PAGE_ROWS;
+    let mut out = Vec::with_capacity(width.saturating_mul(height));
+    for line in 0..height {
+        let source_line = row
+            .saturating_mul(row_lines)
+            .saturating_add(line.saturating_mul(row_lines).checked_div(height).unwrap_or(0));
+        for x in 0..width {
+            let source_x = x.saturating_mul(page.width).checked_div(width).unwrap_or(0);
+            let index = page.indices.get(source_line.saturating_mul(page.width).saturating_add(source_x));
+            out.push(index.copied().unwrap_or(0).saturating_add(offset));
+        }
+    }
+    out
+}
+
+/// A picture laid out with row 0 of its sub-page's teletext page above it
+/// and row 24 beneath, as the browser lays it out (PAR-7, PAR-31): a ReGIS
+/// picture stacked between the two rows, each at the picture's width; a
+/// NAPLPS picture, which is the teletext raster (DEC-6667), with row 0 over
+/// its lines 0 to 19 and row 24 over lines 480 to 499. `page` is the
+/// sub-page's teletext page drawn whole, without transparency. The picture
+/// is given alone when the two palettes do not fit one image's 256 entries.
+#[must_use]
+pub fn framed(language: Language, picture: &Raster, page: &Raster) -> Raster {
+    let combined = picture.palette.len().saturating_add(page.palette.len());
+    let Ok(offset) = u8::try_from(picture.palette.len()) else { return copy_of(picture) };
+    if combined > usize::from(u8::MAX) + 1 || page.height < PAGE_ROWS || page.width == 0 {
+        return copy_of(picture);
+    }
+    let mut palette = picture.palette.clone();
+    palette.extend_from_slice(&page.palette);
+    match language {
+        Language::Regis => {
+            let size = (picture.width, REGIS_ROW_LINES);
+            let mut indices = page_row(page, HEADER_ROW, size, offset);
+            indices.extend_from_slice(&picture.indices);
+            indices.extend(page_row(page, PROMPT_ROW, size, offset));
+            let height = picture.height.saturating_add(REGIS_ROW_LINES.saturating_mul(2));
+            Raster { width: picture.width, height, indices, palette }
+        }
+        Language::Naplps => {
+            let size = (picture.width, NAPLPS_ROW_LINES_ON_RASTER);
+            let mut indices = picture.indices.clone();
+            let row_pixels = picture.width.saturating_mul(NAPLPS_ROW_LINES_ON_RASTER);
+            let last = picture.height.saturating_sub(NAPLPS_ROW_LINES_ON_RASTER).saturating_mul(picture.width);
+            for (start, row) in [(0, HEADER_ROW), (last, PROMPT_ROW)] {
+                if let Some(target) = indices.get_mut(start..start.saturating_add(row_pixels)) {
+                    target.copy_from_slice(&page_row(page, row, size, offset));
+                }
+            }
+            Raster { width: picture.width, height: picture.height, indices, palette }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -633,6 +1005,63 @@ mod tests {
             assert!(naplps.indices.iter().any(|&index| index != border), "{text}");
         }
         assert!(wrap(&"x\n".repeat(24), None).is_err(), "24 rows");
+    }
+
+    // PAR-31: a ReGIS picture is stacked between rows 0 and 24 at its
+    // width; a NAPLPS picture has them over its lines 0 to 19 and 480 to
+    // 499, the picture's palette first and the page's after it.
+    #[test]
+    fn a_picture_is_framed_by_its_page_rows() {
+        let red = Rgba::opaque(255, 0, 0);
+        let page_palette = vec![Rgba::opaque(0, 0, 0), Rgba::opaque(0, 0, 255)];
+        // A page whose row 0 is colour 1 and every other row colour 0.
+        let mut page_indices = vec![0_u8; PAGE_WIDTH * RASTER_LINES];
+        page_indices[..PAGE_WIDTH * CELL_HEIGHT].fill(1);
+        let page = Raster { width: PAGE_WIDTH, height: RASTER_LINES, indices: page_indices, palette: page_palette };
+        let regis = Raster { width: 800, height: 480, indices: vec![0; 800 * 480], palette: vec![red] };
+        let framed_regis = framed(Language::Regis, &regis, &page);
+        assert_eq!((framed_regis.width, framed_regis.height), REGIS_FRAMED_SIZE);
+        assert_eq!(REGIS_ROW_LINES, 33);
+        assert_eq!(framed_regis.palette.len(), 3);
+        assert_eq!(framed_regis.indices[0], 2, "row 0 in the page's colour 1, after the picture's one");
+        assert_eq!(framed_regis.indices[33 * 800], 0, "the picture beneath row 0");
+        assert_eq!(*framed_regis.indices.last().unwrap(), 1, "row 24 in the page's colour 0");
+        let naplps = Raster {
+            width: PAGE_WIDTH,
+            height: RASTER_LINES,
+            indices: vec![0; PAGE_WIDTH * RASTER_LINES],
+            palette: vec![red],
+        };
+        let framed_naplps = framed(Language::Naplps, &naplps, &page);
+        assert_eq!((framed_naplps.width, framed_naplps.height), NAPLPS_FRAMED_SIZE);
+        assert_eq!(framed_naplps.indices[19 * PAGE_WIDTH], 2, "row 0 covers line 19");
+        assert_eq!(framed_naplps.indices[20 * PAGE_WIDTH], 0, "the picture from line 20");
+        assert_eq!(framed_naplps.indices[480 * PAGE_WIDTH], 1, "row 24 covers line 480");
+    }
+
+    // PAR-8, PAR-17: a store keeps at most MAX_PICTURES_KEPT sub-pages'
+    // pictures, and drops a stream that would pass MAX_PICTURE_STREAM_BYTES.
+    #[test]
+    fn a_store_is_bounded() {
+        use neoteletext_core::types::{PageAddress, SubCode};
+        use neoteletext_formats::picture_text::MAX_PICTURE_STREAM_BYTES;
+        use neoteletext_web::records::ChannelRecord;
+        use neoteletext_web::records::regis::{MAX_DATA, RegisRecord};
+        let page = PageAddress::from_mpp(0x200).unwrap();
+        let mut store = PictureStore::new();
+        for sub in 0..=u16::try_from(MAX_PICTURES_KEPT).unwrap() {
+            let record = RegisRecord { page, subcode: SubCode::new(sub), generation: 1, offset: 0, data: b"P[0,0]" };
+            store.record(&ChannelRecord::Regis(record));
+        }
+        assert_eq!(store.clone().into_pictures().len(), MAX_PICTURES_KEPT);
+        let data = vec![b' '; MAX_DATA];
+        let mut offset = 0_u32;
+        while usize::try_from(offset).unwrap() <= MAX_PICTURE_STREAM_BYTES {
+            let record = RegisRecord { page, subcode: SubCode::new(1), generation: 2, offset, data: &data };
+            store.record(&ChannelRecord::Regis(record));
+            offset += u32::try_from(MAX_DATA).unwrap();
+        }
+        assert!(store.picture(page, 1).is_none(), "a stream past the bound is dropped");
     }
 
     #[test]

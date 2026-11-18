@@ -106,7 +106,7 @@ fn repeats_and_releases_where_the_terminal_reports_them() {
 /// REQ-1502: a program's page redirect selects the page it names.
 #[test]
 fn a_redirect_names_the_page_to_open() {
-    let mut typing = Typing::new();
+    let mut typing = Typing::new(false);
     assert!(!typing.on());
     typing.redirected(0x301, 0x0002, None);
     assert_eq!(typing.take_redirect(), Some((0x301, 0x0002)));
@@ -226,7 +226,7 @@ impl neoteletext_app::source::Source for Recorded {
 fn welcomed(source: &mut Recorded) -> Typing {
     use neoteletext_input::caps::SELECT_CAP;
     use neoteletext_input::control::{Control, packet_of};
-    let mut typing = Typing::new();
+    let mut typing = Typing::new(false);
     typing.connection(source, true, 0);
     let welcome = Control::Welcome { version: neoteletext_input::VERSION, caps: SELECT_CAP, resume: None };
     let packet = packet_of(&welcome, 1, 1).unwrap();
@@ -466,7 +466,7 @@ fn service_packet(mpp: u16) -> neoteletext_core::packet::Packet {
 
 fn view_state(session: &neoteletext_app::session::Session) -> super::ViewState {
     let opening = neoteletext_app::input::Opening { page: None, parameters: String::new() };
-    super::ViewState::new(session, StdInstant::now(), opening)
+    super::ViewState::new(session, StdInstant::now(), opening, false)
 }
 
 /// REQ-458 (REQ-SVC-004), DEC-2410: an 8/30 that arrives on a live source
@@ -716,16 +716,18 @@ fn sixel_sends_only_the_rows_that_changed() {
         depth: ColourDepth::TrueColour,
         mosaics: MosaicStyle::Unicode16,
         text_row_pixels: Some(TEXT_ROW_PIXELS),
+        regis_scale: Scale { x: 1, y: 1, aspect: false },
+        naplps_scale: Scale { x: 1, y: 1, aspect: false },
     };
     let mut drawer = Drawer::new(look);
     let frame = Frame::still(&neoteletext_core::config::Config::default(), false);
     let mut first = Vec::new();
-    drawer.draw(&mut first, &grid_showing(5, b"ALPHA"), frame, true).unwrap();
+    drawer.draw(&mut first, &grid_showing(5, b"ALPHA"), frame, true, None).unwrap();
     let page_height = sixel_heights(&first)[0];
     assert_eq!(page_height, 500, "the whole page first");
 
     let mut changed = Vec::new();
-    drawer.draw(&mut changed, &grid_showing(5, b"OMEGA"), frame, false).unwrap();
+    drawer.draw(&mut changed, &grid_showing(5, b"OMEGA"), frame, false, None).unwrap();
     let heights = sixel_heights(&changed);
     assert_eq!(heights.len(), 1);
     // Teletext row 5 is pixel rows 100 to 119; its first changed pixel
@@ -737,11 +739,11 @@ fn sixel_sends_only_the_rows_that_changed() {
     assert!(String::from_utf8_lossy(&changed).contains("\u{1b}[7;1H"), "placed at text row 6");
 
     let mut unchanged = Vec::new();
-    drawer.draw(&mut unchanged, &grid_showing(5, b"OMEGA"), frame, false).unwrap();
+    drawer.draw(&mut unchanged, &grid_showing(5, b"OMEGA"), frame, false, None).unwrap();
     assert!(sixel_heights(&unchanged).is_empty(), "nothing changed, nothing sent");
 
     let mut whole = Vec::new();
-    drawer.draw(&mut whole, &grid_showing(5, b"OMEGA"), frame, true).unwrap();
+    drawer.draw(&mut whole, &grid_showing(5, b"OMEGA"), frame, true, None).unwrap();
     assert_eq!(sixel_heights(&whole), [page_height]);
 }
 
@@ -757,9 +759,13 @@ fn a_picture_is_drawn_again_at_each_flash_phase() {
     let off = Frame { flash_visible: false, ..on };
     let grid = super::Grid::EMPTY;
     for display in [Display::Kitty, Display::Sixel, Display::Iterm2] {
-        assert_ne!(drawn_state(&grid, display, on, false), drawn_state(&grid, display, off, false), "{display:?}");
+        assert_ne!(
+            drawn_state(&grid, display, on, false, None),
+            drawn_state(&grid, display, off, false, None),
+            "{display:?}"
+        );
     }
-    assert_eq!(drawn_state(&grid, Display::Text, on, false), drawn_state(&grid, Display::Text, off, false));
+    assert_eq!(drawn_state(&grid, Display::Text, on, false, None), drawn_state(&grid, Display::Text, off, false, None));
 }
 
 /// REQ-382: a text row's height is known only when the rows divide the
@@ -1143,4 +1149,91 @@ fn a_level_2_5_page_asks_for_its_table_then_its_object_pages_once() {
         &Config { level: PresentationLevel::Level15, ..Config::default() },
     );
     assert_eq!(other.prefetched, [0x1A0, 0x1A1]);
+}
+
+/// PAR-7, PAR-1: the viewer that shows pictures offers both picture
+/// languages in HELLO, beside SELECT; one of characters alone offers
+/// SELECT only, and is sent the server's mosaic page.
+#[test]
+fn hello_offers_the_picture_languages_where_pictures_are_shown() {
+    use neoteletext_input::caps::{NAPLPS_CAP, REGIS_CAP, SELECT_CAP};
+    use neoteletext_input::event::{Event, Item, read_message};
+    for (pictures, expected) in [(true, SELECT_CAP | REGIS_CAP | NAPLPS_CAP), (false, SELECT_CAP)] {
+        let mut source = Recorded::default();
+        let mut typing = Typing::new(pictures);
+        typing.connection(&mut source, true, 0);
+        let mut offered = Vec::new();
+        let _ = read_message(&source.0[0], &mut |item| {
+            if let Item::Event(Event::Hello { caps, .. }) = item {
+                offered.push(caps);
+            }
+        });
+        assert_eq!(offered, [expected], "pictures shown: {pictures}");
+    }
+}
+
+/// PAR-7: a sub-page's REGIS records, taken with the channel's other
+/// records, give the viewer the picture to draw in its place; a new
+/// connection forgets it, since its server sends it again.
+#[test]
+fn the_viewer_keeps_the_picture_the_channel_sends() {
+    let mut source = Recorded::default();
+    let mut typing = welcomed(&mut source);
+    let (page, subcode) = on_screen();
+    let bytes = b"S(E)W(I2)P[10,10]F(V[100,10][100,100][10,100])";
+    let packets =
+        crate::picture::picture_packets(page, subcode, crate::picture::Language::Regis, bytes, None, &[], None)
+            .unwrap();
+    let packets = packets
+        .as_chunks::<{ neoteletext_core::consts::PACKET_BYTES }>()
+        .0
+        .iter()
+        .map(|bytes| neoteletext_core::packet::Packet { bytes: *bytes });
+    let before = typing.pictures().version();
+    typing.records(&mut source, packets, 0);
+    let picture = typing.pictures().picture(page, subcode.value()).unwrap();
+    assert_eq!((picture.language, picture.stream.as_slice()), (Some(crate::picture::Language::Regis), &bytes[..]));
+    assert_ne!(typing.pictures().version(), before, "a change draws again");
+    typing.connection(&mut source, true, 0);
+    assert!(typing.pictures().picture(page, subcode.value()).is_none());
+}
+
+/// PAR-7, PAR-31: a picture is drawn in the page's place, at its own
+/// scale, with the page's rows 0 and 24 around it.
+#[test]
+fn the_viewer_draws_a_picture_in_the_page_place() {
+    use super::{Drawer, Look, Scale};
+    use crate::ansi::{ColourDepth, MosaicStyle};
+    use crate::frame::Frame;
+    use crate::terminal::Display;
+    let one = Scale { x: 1, y: 1, aspect: false };
+    let look = Look {
+        display: Display::Sixel,
+        scale: one,
+        depth: ColourDepth::TrueColour,
+        mosaics: MosaicStyle::Unicode16,
+        text_row_pixels: None,
+        regis_scale: one,
+        naplps_scale: one,
+    };
+    let frame = Frame::still(&neoteletext_core::config::Config::default(), false);
+    let grid = grid_showing(5, b"ALPHA");
+    let (picture, _) = crate::picture::draw(
+        crate::picture::Language::Regis,
+        b"W(I2)P[10,10]F(V[300,10][300,200][10,200])",
+        &crate::picture::Fonts::default(),
+    )
+    .unwrap();
+    let (mut page, mut shown) = (Vec::new(), Vec::new());
+    Drawer::new(look).draw(&mut page, &grid, frame, true, None).unwrap();
+    Drawer::new(look).draw(&mut shown, &grid, frame, true, Some((&picture, crate::picture::Language::Regis))).unwrap();
+    // A Sixel image's raster attributes give its size: "Pan;Pad;Ph;Pv.
+    let size = |out: &[u8]| {
+        let text = String::from_utf8_lossy(out);
+        let attributes = text.split('"').nth(1).unwrap().split(['#', '-']).next().unwrap().to_owned();
+        attributes.split(';').skip(2).map(|side| side.trim().parse::<usize>().unwrap()).collect::<Vec<_>>()
+    };
+    let (width, height) = crate::picture::REGIS_FRAMED_SIZE;
+    assert_eq!(size(&shown), [width, height]);
+    assert_ne!(size(&page), size(&shown));
 }

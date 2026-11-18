@@ -142,6 +142,27 @@ fn to_channel(options: &Options, folder: &Path, filter: Option<(PageAddress, Sub
     channel::convert(options, folder, filter)
 }
 
+/// Writes pages already made as a channel's folder at `folder`, laid out as
+/// [`convert`] with [`Target::Channel`] lays the input's out, never writing
+/// over a file that is there (renderer parity PAR-10).
+///
+/// # Errors
+/// A page the layout refuses, or a file that cannot be written.
+#[cfg(feature = "live")]
+pub fn write_channel(folder: &Path, pages: &[PageFile]) -> Result<(), Failure> {
+    channel::write_pages(folder, pages)
+}
+
+/// [`write_channel`] in a build without the `live` feature, which has no
+/// web module to lay a channel out with (decision E.61).
+///
+/// # Errors
+/// Always: the channel's folder is not in this build.
+#[cfg(not(feature = "live"))]
+pub fn write_channel(_folder: &Path, _pages: &[PageFile]) -> Result<(), Failure> {
+    Err(crate::not_in_build("a channel's folder", "live"))
+}
+
 /// A build without the `live` feature has no web module to lay a channel
 /// out with (decision E.61).
 #[cfg(not(feature = "live"))]
