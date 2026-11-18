@@ -8,22 +8,33 @@
 //! ```text
 //! block           = { event }
 //! event           = delta message                       ; time 0 to 199
-//! message         = channel-message | sysex | skipped
+//! message         = channel-message | sysex | cue | skipped
 //! channel-message = status data data | status data      ; MIDI-26, no running status (MIDI-12)
 //! sysex           = 0xF0 length { data } 0xF7           ; length 1 to 256 (MIDI-27, MIDI-28)
 //! skipped         = 0xF7 length { any }                 ; continuation or escape
 //!                 | 0xFF type length { any }            ; meta event, type 0x00 to 0x7F
+//! cue             = 0xFF 0x07 0x01 number               ; number 0x00 to 0x7F (RULE-109)
 //!                 | 0xF1 data | 0xF2 data data | 0xF3 data | 0xF6
 //!                 | 0xF8 | 0xFA | 0xFB | 0xFC | 0xFE
 //! ```
 //!
 //! The reader ([`Events`]) reads every alternative; the writer
-//! ([`BlockWriter`]) writes only channel messages and system exclusive
-//! events, and refuses every message a block never carries (MIDI-8).
+//! ([`BlockWriter`]) writes only channel messages, system exclusive
+//! events and cues, and refuses every message a block never carries
+//! (MIDI-8).
+//!
+//! A cue (page-rules.md RULE-109; REQ-6614) is the Standard MIDI Files Cue
+//! Point meta event with one byte of data, the cue's number (Standard MIDI
+//! Files 1.0, "Meta-Events": `FF 07 len text`). It is a form of the meta
+//! event the grammar always passed over by its length, so a reader that
+//! knows no cues is unaffected; it is the one meta event a block carries,
+//! at most [`MAX_CUES_PER_BLOCK`] of them. A Cue Point of any other length,
+//! one whose number has its top bit set, and a cue past the block's limit
+//! are passed over and counted, as every other skipped event is.
 
 use super::{
-    ChannelMessage, DATA_MAX, LAST_TICK, MOST_BLOCK_BYTES, MOST_EVENTS, MOST_SYSTEM_EXCLUSIVE_BYTES, Message,
-    MidiEvent, STATUS_BIT, controller, data_bytes, status,
+    CUE_DATA_BYTES, CUE_EVENT_BYTES, ChannelMessage, Cue, DATA_MAX, LAST_TICK, MAX_CUES_PER_BLOCK, MOST_BLOCK_BYTES,
+    MOST_EVENTS, MOST_SYSTEM_EXCLUSIVE_BYTES, Message, MidiEvent, STATUS_BIT, controller, data_bytes, meta, status,
 };
 
 /// The high byte of a two-byte variable-length quantity carries this bit
@@ -41,6 +52,8 @@ const BITS_PER_BYTE: u32 = 7;
 enum Found<'a> {
     /// A message to give the synthesizer.
     Message(Message<'a>),
+    /// A cue of this number (RULE-109).
+    Cue(u8),
     /// An event passed over by its length.
     Skipped,
 }
@@ -50,9 +63,12 @@ enum Found<'a> {
 pub enum Read<'a> {
     /// An event to give the synthesizer.
     Event(MidiEvent<'a>),
+    /// A cue (RULE-109), for the caller: the synthesizer is given nothing.
+    Cue(Cue),
     /// An event whose extent is known that is passed over and counted: a
     /// skipped form (MIDI-29), a system exclusive event that is not whole
-    /// (MIDI-34), or an event past the first [`MOST_EVENTS`] (MIDI-31).
+    /// (MIDI-34), an event past the first [`MOST_EVENTS`] (MIDI-31), or a
+    /// cue past the first [`MAX_CUES_PER_BLOCK`] (RULE-109).
     PassedOver,
     /// A framing error (MIDI-33): the rest of the block is passed over and
     /// the block counted once as malformed. Reading ends after it.
@@ -69,6 +85,8 @@ pub struct Events<'a> {
     time: u16,
     /// Events read so far, passed over or not.
     count: usize,
+    /// Cues read so far, passed over or not.
+    cues: usize,
     done: bool,
 }
 
@@ -76,7 +94,7 @@ impl<'a> Events<'a> {
     /// The events of `block`.
     #[must_use]
     pub const fn new(block: &'a [u8]) -> Self {
-        Self { rest: block, time: 0, count: 0, done: false }
+        Self { rest: block, time: 0, count: 0, cues: 0, done: false }
     }
 
     /// Takes a minimal variable-length quantity of at most two bytes
@@ -143,8 +161,14 @@ impl<'a> Events<'a> {
                     return None;
                 }
                 let length = usize::from(self.quantity()?);
-                self.take(length)?;
-                Some(Found::Skipped)
+                let data = self.take(length)?;
+                // RULE-109: the Cue Point with one byte of data, a number
+                // of seven bits, is a cue; every other meta event, and a
+                // Cue Point of another shape, is passed over as before.
+                Some(match (kind, data) {
+                    (&[meta::CUE_POINT], &[number]) if number <= DATA_MAX => Found::Cue(number),
+                    _ => Found::Skipped,
+                })
             }
             // Bare system common and real-time messages, passed over by the
             // data bytes MIDI 1.0 gives each (Tables V and VI, PDF 105 and
@@ -207,6 +231,14 @@ impl<'a> Iterator for Events<'a> {
         self.count = self.count.saturating_add(1);
         Some(match message {
             Found::Message(message) if self.count <= MOST_EVENTS => Read::Event(MidiEvent { time, message }),
+            Found::Cue(number) => {
+                self.cues = self.cues.saturating_add(1);
+                if self.count <= MOST_EVENTS && self.cues <= MAX_CUES_PER_BLOCK {
+                    Read::Cue(Cue { time, number })
+                } else {
+                    Read::PassedOver
+                }
+            }
             Found::Message(_) | Found::Skipped => Read::PassedOver,
         })
     }
@@ -236,7 +268,7 @@ pub fn check(block: &[u8]) -> Result<usize, BlockFault> {
     let mut count: usize = 0;
     for read in Events::new(block) {
         match read {
-            Read::Event(_) => {}
+            Read::Event(_) | Read::Cue(_) => {}
             Read::PassedOver => return Err(BlockFault::PassedOver(count)),
             Read::Malformed => return Err(BlockFault::Malformed(count)),
         }
@@ -255,6 +287,10 @@ pub enum WriteError {
     Full,
     /// The block holds [`MOST_EVENTS`] events already (MIDI-31).
     TooManyEvents,
+    /// The block holds [`MAX_CUES_PER_BLOCK`] cues already (RULE-109).
+    TooManyCues,
+    /// A cue's number is past [`DATA_MAX`] (RULE-109).
+    CueNumber,
     /// Not a message a block carries: a status that is not a channel
     /// message's, a data byte with its top bit set (MIDI-11), local control
     /// (MIDI-8), or a system exclusive message that is not whole or longer
@@ -264,22 +300,23 @@ pub enum WriteError {
 
 /// Writes one block's event list into a buffer, the server's writer
 /// (MIDI-23): only channel messages, each with its status byte (MIDI-12),
-/// and whole system exclusive messages, at nondecreasing times, every
-/// number in its minimal form so that one list has one encoding (MIDI-24,
-/// MIDI-44).
+/// whole system exclusive messages and cues (RULE-109), at nondecreasing
+/// times, every number in its minimal form so that one list has one
+/// encoding (MIDI-24, MIDI-44).
 #[derive(Debug)]
 pub struct BlockWriter<'b> {
     buffer: &'b mut [u8],
     length: usize,
     time: u8,
     events: usize,
+    cues: usize,
 }
 
 impl<'b> BlockWriter<'b> {
     /// A writer of an empty block into `buffer`, of which at most
     /// [`MOST_BLOCK_BYTES`] bytes are used.
     pub fn new(buffer: &'b mut [u8]) -> Self {
-        Self { buffer, length: 0, time: 0, events: 0 }
+        Self { buffer, length: 0, time: 0, events: 0, cues: 0 }
     }
 
     /// Empties the block, to write the next one into the same buffer.
@@ -287,6 +324,7 @@ impl<'b> BlockWriter<'b> {
         self.length = 0;
         self.time = 0;
         self.events = 0;
+        self.cues = 0;
     }
 
     /// The block written so far.
@@ -319,11 +357,22 @@ impl<'b> BlockWriter<'b> {
         Some(quantity_length(u16::from(delta)).saturating_add(body))
     }
 
-    /// Adds `message` at tick `time` of the block.
-    ///
-    /// # Errors
-    /// [`WriteError`], with nothing written.
-    pub fn push(&mut self, time: u8, message: &Message<'_>) -> Result<(), WriteError> {
+    /// Cues written so far.
+    #[must_use]
+    pub const fn cues(&self) -> usize {
+        self.cues
+    }
+
+    /// The bytes a cue takes at a delta time of `delta` ticks: the delta
+    /// and `FF 07 01 nn` (RULE-109).
+    #[must_use]
+    pub const fn cue_length(delta: u8) -> usize {
+        quantity_length(delta as u16).saturating_add(CUE_EVENT_BYTES)
+    }
+
+    /// Where an event of `length` bytes at tick `time` goes: its delta time
+    /// and the place for its bytes, or why it cannot be written.
+    fn place(&mut self, time: u8, length: impl FnOnce(u8) -> Option<usize>) -> Result<(u8, &mut [u8]), WriteError> {
         if time > LAST_TICK || time < self.time {
             return Err(WriteError::Time);
         }
@@ -331,12 +380,48 @@ impl<'b> BlockWriter<'b> {
             return Err(WriteError::TooManyEvents);
         }
         let delta = time.saturating_sub(self.time);
-        let length = Self::encoded_length(delta, message).ok_or(WriteError::Message)?;
-        let end = self.length.saturating_add(length);
+        let end = self.length.saturating_add(length(delta).ok_or(WriteError::Message)?);
         if end > MOST_BLOCK_BYTES {
             return Err(WriteError::Full);
         }
         let place = self.buffer.get_mut(self.length..end).ok_or(WriteError::Full)?;
+        Ok((delta, place))
+    }
+
+    /// Adds the cue `number`, 0 to [`DATA_MAX`], at tick `time` of the
+    /// block (RULE-109; REQ-6614 item 5): the Cue Point meta event with
+    /// one byte of data (Standard MIDI Files 1.0, "Meta-Events"). A cue
+    /// counts among the block's events (MIDI-31).
+    ///
+    /// # Errors
+    /// [`WriteError`], with nothing written.
+    pub fn push_cue(&mut self, time: u8, number: u8) -> Result<(), WriteError> {
+        if number > DATA_MAX {
+            return Err(WriteError::CueNumber);
+        }
+        if self.cues >= MAX_CUES_PER_BLOCK {
+            return Err(WriteError::TooManyCues);
+        }
+        let (delta, place) = self.place(time, |delta| Some(Self::cue_length(delta)))?;
+        let mut at = write_quantity(place, 0, u16::from(delta));
+        let data_bytes = u8::try_from(CUE_DATA_BYTES).unwrap_or(0);
+        for byte in [status::META, meta::CUE_POINT, data_bytes, number] {
+            put(place, &mut at, byte);
+        }
+        self.length = self.length.saturating_add(at);
+        self.time = time;
+        self.events = self.events.saturating_add(1);
+        self.cues = self.cues.saturating_add(1);
+        Ok(())
+    }
+
+    /// Adds `message` at tick `time` of the block.
+    ///
+    /// # Errors
+    /// [`WriteError`], with nothing written.
+    pub fn push(&mut self, time: u8, message: &Message<'_>) -> Result<(), WriteError> {
+        let (delta, place) = self.place(time, |delta| Self::encoded_length(delta, message))?;
+        let length = place.len();
         let mut at = write_quantity(place, 0, u16::from(delta));
         match message {
             Message::Channel(channel) => {
@@ -352,7 +437,7 @@ impl<'b> BlockWriter<'b> {
                 }
             }
         }
-        self.length = end;
+        self.length = self.length.saturating_add(length);
         self.time = time;
         self.events = self.events.saturating_add(1);
         Ok(())
