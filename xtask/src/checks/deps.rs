@@ -16,8 +16,14 @@ const PERMITTED: &[(&str, &[&str])] = &[
     ("neoteletext-formats", &["neoteletext-core", "unicode-bidi"]),
     ("neoteletext-slicer", &["neoteletext-core"]),
     // The channel's records share the audio profile's frame, and a LOG
-    // record the TTI reader's rules for an `LG` line (DOC-1956).
-    ("neoteletext-web", &["neoteletext-core", "embedded-io", "neoteletext-audio", "neoteletext-formats"]),
+    // record the TTI reader's rules for an `LG` line (DOC-1956). Viewer
+    // state's records and proofs take their input extensions and challenge
+    // length from the input protocol, so both sides agree by construction
+    // (DEC-6471).
+    (
+        "neoteletext-web",
+        &["neoteletext-core", "embedded-io", "neoteletext-audio", "neoteletext-formats", "neoteletext-input"],
+    ),
     ("neoteletext-image", &["neoteletext-core"]),
     // Decision E.124 item 5: the Opus decoder, behind the `opus` feature.
     // And the instruments, behind the `synth6581` and `synth7` features (REQ-6411)
