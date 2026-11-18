@@ -140,7 +140,8 @@ use crate::analog::oscillator::{Noise, Oscillator, Waves, waveform};
 use crate::analog::{LEVEL, LIMIT, Oversampling, frequency};
 
 use super::law::{self, OCTAVE};
-use super::patch::{LfoWave, Param, Patch, PwmSource, Vco1Wave, Vco2Wave};
+use super::panel::Panel;
+use super::patch::{LfoWave, Param, PwmSource, Vco1Wave, Vco2Wave};
 
 /// How far above the output rate the oscillators run under cross
 /// modulation.
@@ -335,7 +336,7 @@ struct EnvelopeSettings {
 }
 
 impl EnvelopeSettings {
-    fn new(patch: &Patch, first: Param, sustain: Param, follow: Param) -> Self {
+    fn new(patch: &Panel, first: Param, sustain: Param, follow: Param) -> Self {
         let slider = |offset: u8| {
             // The four sliders of an envelope are consecutive bytes.
             patch.to_bytes().get(usize::from((first as u8).saturating_add(offset))).copied().unwrap_or(0)
@@ -433,8 +434,10 @@ pub struct Settings {
 /// level as far above as below, as it did before the drawing was read:
 /// without the depth, the one-sided form has no figure to be given.
 const LEVEL_LFO: i32 = ENVELOPE_ONE;
-/// The switch's positions as points of the signed byte's 127 steps, and
-/// the depth at each in thousandths of position 3's: 234, 532 and all.
+/// The depth at each of the switch's four positions, 0 to 3, in
+/// thousandths of position 3's: none, 234, 532 and all (S8-16 byte 27:
+/// VCA LFO MOD is a switch of four positions, the reference manual's
+/// "Amp Mod-Step, 0–3").
 ///
 /// Source: service notes, module controller schematic (page 12 of the
 /// file), VCA MOD, read at the scan's 400 dots an inch. The oscillator
@@ -444,30 +447,17 @@ const LEVEL_LFO: i32 = ENVELOPE_ONE;
 /// TR20, TR18) shorts its path to ground as the switch's two lines say,
 /// TR18 when either is high. What is left open is the 517 kΩ path, the
 /// 227 kΩ path, or all three: 1.934, 4.405 and 8.274 µS. Own reading:
-/// the least is position 1. Own choice: straight lines between, for a
-/// byte that is not at a position.
-const LEVEL_LFO_LAW: [(i32, i32); 4] = [(0, 0), (42, 234), (85, 532), (law::SIGNED_MAX, LEVEL_LFO_WHOLE)];
+/// the least is position 1.
+const LEVEL_LFO_LAW: [i32; 4] = [0, 234, 532, LEVEL_LFO_WHOLE];
 /// The whole of [`LEVEL_LFO_LAW`]'s shares.
 const LEVEL_LFO_WHOLE: i32 = 1_000;
 
 /// The share of its level that the oscillator moves the amplifier either
-/// way for the signed byte of its switch, in Q30, signed as the byte is.
-fn level_lfo(slider: i32) -> i32 {
-    let position = slider.clamp(-law::SIGNED_MAX, law::SIGNED_MAX);
-    let size = position.saturating_abs();
-    let mut from = (0, 0);
-    let mut thousandths = LEVEL_LFO_WHOLE;
-    for to in LEVEL_LFO_LAW {
-        if size <= to.0 {
-            let along =
-                law::share_of(to.1.saturating_sub(from.1), size.saturating_sub(from.0), to.0.saturating_sub(from.0));
-            thousandths = from.1.saturating_add(along);
-            break;
-        }
-        from = to;
-    }
-    let share = law::share_of(LEVEL_LFO, thousandths, LEVEL_LFO_WHOLE);
-    if position < 0 { share.saturating_neg() } else { share }
+/// way at the switch's position, in Q30; a position past 3 is 3.
+fn level_lfo(position: u8) -> i32 {
+    let last = LEVEL_LFO_LAW.len().saturating_sub(1);
+    let thousandths = LEVEL_LFO_LAW.get(usize::from(position).min(last)).copied().unwrap_or(LEVEL_LFO_WHOLE);
+    law::share_of(LEVEL_LFO, thousandths, LEVEL_LFO_WHOLE)
 }
 /// The most the amplifier's level is multiplied by: twice, less a unit
 /// of Q30.
@@ -477,7 +467,7 @@ const LEVEL_SHIFT: u32 = 30 - LEVEL.trailing_zeros();
 
 impl Settings {
     /// The settings of a patch.
-    pub fn new(patch: &Patch) -> Self {
+    pub fn new(patch: &Panel) -> Self {
         let range = |position: u8| law::octaves(i32::from(position), 1).saturating_sub(OCTAVE);
         let resonance = law::share(RESONANCE_TOP, patch.get(Param::VcfResonance));
         let hpf = match patch.get(Param::HpfCutoff) {
@@ -503,8 +493,8 @@ impl Settings {
             mix2: law::level(patch.get(Param::MixVco2)),
             pitch_lfo: law::signed_share(law::PITCH_LFO, patch.signed(Param::VcoLfoMod)),
             pitch_envelope: law::signed_share(law::PITCH_ENVELOPE, patch.signed(Param::VcoEnvMod)),
-            modulate1: patch.on(Param::Vco1Mod),
-            modulate2: patch.on(Param::Vco2Mod),
+            modulate1: patch.modulated().0,
+            modulate2: patch.modulated().1,
             bend1: patch.on(Param::Vco1Bend),
             bend2: patch.on(Param::Vco2Bend),
             pwm: patch.pwm_source(),
@@ -519,7 +509,7 @@ impl Settings {
             cutoff_lfo: law::signed_share(law::CUTOFF_LFO, patch.signed(Param::VcfLfoMod)),
             key_follow: law::key_follow(patch.signed(Param::VcfKeyFollow)),
             level: law::level(patch.get(Param::VcaLevel)),
-            level_lfo: level_lfo(patch.signed(Param::VcaLfoMod)),
+            level_lfo: level_lfo(patch.get(Param::VcaLfoMod)),
             inverted: patch.on(Param::Env1Polarity),
             envelopes: [
                 EnvelopeSettings::new(patch, Param::Env1Attack, Param::Env1Sustain, Param::Env1KeyFollow),
@@ -1084,7 +1074,7 @@ impl Lfo {
 
     /// Takes a patch's rate, waveform and delay. A delay that is
     /// shortened while it runs shortens what is left of it.
-    pub fn configure(&mut self, patch: &Patch) {
+    pub fn configure(&mut self, patch: &Panel) {
         let rate = law::raise(law::LFO_RATE_BASE, law::share(law::LFO_RATE_SPAN, patch.get(Param::LfoRate)));
         self.step = frequency(rate, TICK_RATE);
         self.wave = patch.lfo_wave();
@@ -1153,7 +1143,7 @@ impl Lfo {
 mod tests {
     extern crate std;
     use super::{
-        Controls, Decimator, IMMEDIATE, OSCILLATOR_RATE, OSCILLATOR_SAMPLES, Param, Patch, Settings, TICK_SAMPLES,
+        Controls, Decimator, IMMEDIATE, OSCILLATOR_RATE, OSCILLATOR_SAMPLES, Panel, Param, Settings, TICK_SAMPLES,
         Voice,
     };
     use std::{println, vec, vec::Vec};
@@ -1204,7 +1194,7 @@ mod tests {
     /// output rate, on a key of a voice with no tolerance: `points`
     /// samples after `settle` that are left out; and VCO-1's cycles a
     /// second, counted from the starts of its cycle.
-    fn mixed(patch: &Patch, key: u8, points: usize, settle: usize) -> (Vec<f64>, f64) {
+    fn mixed(patch: &Panel, key: u8, points: usize, settle: usize) -> (Vec<f64>, f64) {
         let settings = Settings::new(patch);
         let mut voice = Voice::new([0, 0], 0);
         voice.configure(&settings);
@@ -1243,7 +1233,7 @@ mod tests {
     /// period, in decibels against the strongest harmonic. The period is
     /// counted from the starts of VCO-1's cycle.
     fn before_the_filter(key: u8, depth: u8, wave: u8, first: u8) -> f64 {
-        let patch = Patch::DEFAULT
+        let patch = Panel::default()
             .with(Param::Vco1Wave, first)
             .with(Param::CrossMod, depth)
             .with(Param::Vco2Wave, wave)
@@ -1318,7 +1308,7 @@ mod tests {
         /// that are allowed for: a quarter more.
         const BEYOND: f64 = 1.25;
         let patch = |range1: u8, range2: u8| {
-            Patch::DEFAULT
+            Panel::default()
                 .with(Param::Vco1Wave, first)
                 .with(Param::CrossMod, depth)
                 .with(Param::Vco2Wave, wave)
@@ -1446,7 +1436,7 @@ mod tests {
         // which no sample then saw: VCO-1 slid through the next sample
         // to the frequency it should have jumped to.
         let (step, fall) = (0x0400_0000u32, 0x0100_0000u32);
-        let patch = Patch::DEFAULT.with(Param::CrossMod, 128).with(Param::Vco2Wave, 2);
+        let patch = Panel::default().with(Param::CrossMod, 128).with(Param::Vco2Wave, 2);
         let settings = Settings::new(&patch);
         let mut voice = Voice::new([0, 0], 0);
         voice.configure(&settings);

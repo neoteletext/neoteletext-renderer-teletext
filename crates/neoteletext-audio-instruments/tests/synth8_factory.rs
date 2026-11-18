@@ -14,7 +14,10 @@
 #![cfg(feature = "synth8")]
 #![allow(dead_code, reason = "each file that includes this uses a part")]
 
-use neoteletext_audio_instruments::synth8::{Param, Patch};
+use neoteletext_audio_instruments::synth8::patch::{switch_value, vco2_range_value};
+use neoteletext_audio_instruments::synth8::{
+    AssignMode, Param, Patch, PwmSource, Vco1Range, Vco1Wave, Vco2Wave, VcoModulator,
+};
 
 /// A panel's sliders, each at a position of its scale of 0 to 10 in
 /// tenths.
@@ -22,7 +25,8 @@ fn sliders(patch: Patch, positions: &[(Param, u8)]) -> Patch {
     positions.iter().fold(patch, |patch, &(param, tenths)| patch.at(param, tenths))
 }
 
-/// A panel's switches and knobs, each at a value of its byte.
+/// A panel's switches and knobs, each at its control change's value
+/// (`synth8.md`, S8-21).
 fn switches(patch: Patch, values: &[(Param, u8)]) -> Patch {
     values.iter().fold(patch, |patch, &(param, value)| patch.with(param, value))
 }
@@ -31,13 +35,19 @@ fn switches(patch: Patch, values: &[(Param, u8)]) -> Patch {
 /// here has it or nearly.
 fn mixed() -> Patch {
     let mut patch = Patch::DEFAULT;
-    patch.set_source_mix(128);
+    patch.set_source_mix(64);
     patch
 }
 
 /// VCO-2's fine tune a little sharp of the middle: the sheets show the
-/// knob just right of 12 o'clock. Taken as 8 cents.
-const A_LITTLE_SHARP: u8 = 148;
+/// knob just right of 12 o'clock. Taken as 8 cents: value 74, the signed
+/// byte's +20 of 127 (S8-21 item 3).
+const A_LITTLE_SHARP: u8 = 74;
+/// A switch that is on.
+const ON: u8 = switch_value(true);
+/// VCF SLOPE at −12 dB an octave, the first position the reference manual
+/// lists (S8-21 item 5).
+const TWELVE_DB: u8 = 0;
 
 /// Patch 31, "LO STRINGS" (sheet 18).
 #[must_use]
@@ -70,16 +80,16 @@ pub fn lo_strings() -> Patch {
         patch,
         &[
             // The modulator's switch is at its top, read as VCO-1.
-            (Param::Vco2Mod, 0),
-            (Param::PwmSource, 0),
-            (Param::Vco1Range, 0),
-            (Param::Vco1Wave, 1),
-            (Param::Vco2Range, 0),
+            (Param::VcoModulator, VcoModulator::Vco1.value()),
+            (Param::PwmSource, PwmSource::Lfo.value()),
+            (Param::Vco1Range, Vco1Range::Sixteen.value()),
+            (Param::Vco1Wave, Vco1Wave::Sawtooth.value()),
+            (Param::Vco2Range, vco2_range_value(0)),
             (Param::FineTune, A_LITTLE_SHARP),
-            (Param::Vco2Wave, 2),
-            (Param::VcfSlope, 1),
-            (Param::Env1KeyFollow, 1),
-            (Param::Env2KeyFollow, 1),
+            (Param::Vco2Wave, Vco2Wave::Pulse.value()),
+            (Param::VcfSlope, TWELVE_DB),
+            (Param::Env1KeyFollow, ON),
+            (Param::Env2KeyFollow, ON),
         ],
     )
 }
@@ -109,16 +119,16 @@ pub fn mid_strings() -> Patch {
     switches(
         patch,
         &[
-            (Param::Vco2Mod, 0),
-            (Param::PwmSource, 0),
-            (Param::Vco1Range, 1),
-            (Param::Vco1Wave, 1),
-            (Param::Vco2Range, 12),
+            (Param::VcoModulator, VcoModulator::Vco1.value()),
+            (Param::PwmSource, PwmSource::Lfo.value()),
+            (Param::Vco1Range, Vco1Range::Eight.value()),
+            (Param::Vco1Wave, Vco1Wave::Sawtooth.value()),
+            (Param::Vco2Range, vco2_range_value(12)),
             (Param::FineTune, A_LITTLE_SHARP),
-            (Param::Vco2Wave, 2),
-            (Param::VcfSlope, 1),
-            (Param::Env1KeyFollow, 1),
-            (Param::Env2KeyFollow, 1),
+            (Param::Vco2Wave, Vco2Wave::Pulse.value()),
+            (Param::VcfSlope, TWELVE_DB),
+            (Param::Env1KeyFollow, ON),
+            (Param::Env2KeyFollow, ON),
         ],
     )
 }
@@ -146,11 +156,11 @@ pub fn lo_brass() -> Patch {
     switches(
         patch,
         &[
-            (Param::Vco1Range, 0),
-            (Param::Vco1Wave, 1),
-            (Param::Vco2Range, 0),
+            (Param::Vco1Range, Vco1Range::Sixteen.value()),
+            (Param::Vco1Wave, Vco1Wave::Sawtooth.value()),
+            (Param::Vco2Range, vco2_range_value(0)),
             (Param::FineTune, A_LITTLE_SHARP),
-            (Param::Vco2Wave, 1),
+            (Param::Vco2Wave, Vco2Wave::Sawtooth.value()),
         ],
     )
 }
@@ -182,18 +192,18 @@ pub fn sync_sweep() -> Patch {
         patch,
         &[
             // The modulator's switch is at its foot: VCO-2 alone.
-            (Param::Vco1Mod, 0),
-            (Param::PwmSource, 0),
-            (Param::Vco1Range, 0),
-            (Param::Vco1Wave, 1),
-            (Param::Sync, 1),
+            (Param::VcoModulator, VcoModulator::Vco2.value()),
+            (Param::PwmSource, PwmSource::Lfo.value()),
+            (Param::Vco1Range, Vco1Range::Sixteen.value()),
+            (Param::Vco1Wave, Vco1Wave::Sawtooth.value()),
+            (Param::Sync, ON),
             // The range knob at 12 o'clock, between 8' and 4'.
-            (Param::Vco2Range, 18),
-            (Param::Vco2Wave, 2),
+            (Param::Vco2Range, vco2_range_value(18)),
+            (Param::Vco2Wave, Vco2Wave::Pulse.value()),
             // The sheet: "UNISON", and "BENDER: VCO-2 ONLY (MANUAL SYNC
             // SWEEP)".
-            (Param::AssignMode, 2),
-            (Param::Vco1Bend, 0),
+            (Param::AssignMode, AssignMode::Unison.value()),
+            (Param::Vco1Bend, switch_value(false)),
         ],
     )
 }
@@ -222,18 +232,18 @@ pub fn gong() -> Patch {
     switches(
         patch,
         &[
-            (Param::PwmSource, 2),
-            (Param::Vco1Range, 1),
-            (Param::Vco1Wave, 2),
+            (Param::PwmSource, PwmSource::Envelope.value()),
+            (Param::Vco1Range, Vco1Range::Eight.value()),
+            (Param::Vco1Wave, Vco1Wave::Pulse.value()),
             // The range knob is drawn near 12 o'clock, between 8' and
             // 4', with an asterisk, and the sheet's head says by hand
             // what the drawing cannot: "TUNE UP A FIFTH", seven
             // semitones above VCO-1's 8'.
-            (Param::Vco2Range, 19),
-            (Param::Vco2Wave, 0),
-            (Param::Env1Polarity, 1),
+            (Param::Vco2Range, vco2_range_value(19)),
+            (Param::Vco2Wave, Vco2Wave::Sine.value()),
+            (Param::Env1Polarity, ON),
             // The sheet: "UNISON MODE".
-            (Param::AssignMode, 2),
+            (Param::AssignMode, AssignMode::Unison.value()),
         ],
     )
 }

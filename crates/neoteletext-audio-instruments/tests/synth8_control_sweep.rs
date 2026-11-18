@@ -21,7 +21,10 @@ use control_sweep_support::{
     PROGRAM, Sound, all_sound_off_leaves_the_pedal, all_sound_off_silences, check, continuous,
     messages_after_all_sound_off_are_taken, on_off, run, sweep, switch, to_crest,
 };
-use neoteletext_audio_instruments::synth8::{KeyMode, Param, Patch, Performance, Portamento, Synth8};
+use neoteletext_audio_instruments::synth8::patch::canonical;
+use neoteletext_audio_instruments::synth8::{
+    KeyMode, Kind, Param, Patch, Performance, Portamento, Synth8, Vco1Wave, Vco2Wave,
+};
 
 impl Instrument for Synth8 {
     fn play(&mut self, out: &mut [i16]) {
@@ -29,51 +32,6 @@ impl Instrument for Synth8 {
     }
 }
 
-const PARAMS: [Param; 43] = [
-    Param::LfoRate,
-    Param::LfoDelay,
-    Param::LfoWave,
-    Param::VcoLfoMod,
-    Param::VcoEnvMod,
-    Param::Vco1Mod,
-    Param::Vco2Mod,
-    Param::PwmDepth,
-    Param::PwmSource,
-    Param::CrossMod,
-    Param::Vco1Range,
-    Param::Vco1Wave,
-    Param::Sync,
-    Param::LowFrequency,
-    Param::Vco2Range,
-    Param::FineTune,
-    Param::Vco2Wave,
-    Param::MixVco1,
-    Param::MixVco2,
-    Param::HpfCutoff,
-    Param::VcfCutoff,
-    Param::VcfResonance,
-    Param::VcfSlope,
-    Param::VcfEnvMod,
-    Param::VcfEnvSource,
-    Param::VcfLfoMod,
-    Param::VcfKeyFollow,
-    Param::VcaLevel,
-    Param::VcaLfoMod,
-    Param::Env1Attack,
-    Param::Env1Decay,
-    Param::Env1Sustain,
-    Param::Env1Release,
-    Param::Env1Polarity,
-    Param::Env2Attack,
-    Param::Env2Decay,
-    Param::Env2Sustain,
-    Param::Env2Release,
-    Param::AssignMode,
-    Param::Env1KeyFollow,
-    Param::Env2KeyFollow,
-    Param::Vco1Bend,
-    Param::Vco2Bend,
-];
 const KEY_MODES: [KeyMode; 3] = [KeyMode::Whole, KeyMode::Dual, KeyMode::Split];
 const PORTAMENTOS: [Portamento; 3] = [Portamento::Off, Portamento::On, Portamento::UpperOnly];
 
@@ -96,51 +54,58 @@ fn instrument(key_mode: KeyMode, upper: &Patch, lower: &Patch, wheel: u8) -> Syn
     synth8.set_patch(upper);
     synth8.set_lower_patch(lower);
     synth8.set_performance(&PANEL);
-    synth8.event(CONTROL, 1, wheel);
+    let _ = synth8.event(CONTROL, 1, wheel);
     synth8
+}
+
+/// Sends a message, for the support's tables, which want no answer.
+fn event(synth8: &mut Synth8, status: u8, data1: u8, data2: u8) {
+    let _ = synth8.event(status, data1, data2);
 }
 
 /// Both oscillators' sawtooths through the open filter.
 fn bright() -> Patch {
-    Patch::DEFAULT.with(Param::MixVco2, 255).with(Param::FineTune, 140)
+    // FINE TUNE's value 70 is the signed byte's +12 (S8-21 item 3).
+    Patch::DEFAULT.with(Param::MixVco2, 127).with(Param::FineTune, 70)
 }
 
 /// VCO-1's triangle alone through the open filter: the sound whose own
 /// steps are smallest, under which the least step of a level shows.
 fn pure() -> Patch {
-    Patch::DEFAULT.with(Param::Vco1Wave, 0)
+    Patch::DEFAULT.with(Param::Vco1Wave, Vco1Wave::Triangle.value())
 }
 
 /// Every part of the instrument at work on a mellow sound, so that every
 /// slider has something to change.
 fn everything() -> Patch {
-    let mut patch = Patch::DEFAULT.with(Param::Vco1Wave, 0);
+    let mut patch = Patch::DEFAULT.with(Param::Vco1Wave, Vco1Wave::Triangle.value());
     for (param, value) in [
-        (Param::LfoRate, 150),
-        (Param::VcoLfoMod, 148),
-        (Param::VcoEnvMod, 138),
-        (Param::PwmDepth, 100),
-        (Param::CrossMod, 20),
-        (Param::MixVco1, 180),
-        (Param::MixVco2, 150),
-        (Param::Vco2Wave, 2),
-        (Param::FineTune, 140),
-        (Param::HpfCutoff, 40),
-        (Param::VcfCutoff, 120),
-        (Param::VcfResonance, 80),
-        (Param::VcfEnvMod, 178),
-        (Param::VcfLfoMod, 158),
-        (Param::VcfKeyFollow, 188),
-        (Param::VcaLevel, 180),
-        (Param::VcaLfoMod, 158),
-        (Param::Env1Attack, 30),
-        (Param::Env1Decay, 120),
-        (Param::Env1Sustain, 150),
-        (Param::Env1Release, 120),
-        (Param::Env2Attack, 20),
-        (Param::Env2Decay, 120),
-        (Param::Env2Sustain, 200),
-        (Param::Env2Release, 120),
+        (Param::LfoRate, 75),
+        (Param::VcoLfoMod, 20),
+        (Param::VcoEnvMod, 10),
+        (Param::PwmDepth, 50),
+        (Param::CrossMod, 10),
+        (Param::MixVco1, 90),
+        (Param::MixVco2, 75),
+        (Param::Vco2Wave, Vco2Wave::Pulse.value()),
+        (Param::FineTune, 70),
+        (Param::HpfCutoff, 20),
+        (Param::VcfCutoff, 60),
+        (Param::VcfResonance, 40),
+        (Param::VcfEnvMod, 50),
+        (Param::VcfLfoMod, 30),
+        (Param::VcfKeyFollow, 60),
+        (Param::VcaLevel, 90),
+        // VCA LFO MOD's position 1 (S8-21 item 4).
+        (Param::VcaLfoMod, 32),
+        (Param::Env1Attack, 15),
+        (Param::Env1Decay, 60),
+        (Param::Env1Sustain, 75),
+        (Param::Env1Release, 60),
+        (Param::Env2Attack, 10),
+        (Param::Env2Decay, 60),
+        (Param::Env2Sustain, 100),
+        (Param::Env2Release, 60),
     ] {
         patch.set(param, value);
     }
@@ -158,7 +123,7 @@ fn sounds() -> Vec<Sound<Synth8>> {
         make: Box::new(move || instrument(key_mode, &upper(), &lower(), wheel)),
         play: Box::new(move |synth8: &mut Synth8, clock: &mut Clock| {
             for &key in keys {
-                synth8.event(NOTE_ON, key, 100);
+                event(synth8, NOTE_ON, key, 100);
             }
             to_crest(synth8, 4 * AFTER, clock)
         }),
@@ -175,9 +140,9 @@ fn sounds() -> Vec<Sound<Synth8>> {
             name: "release",
             make: Box::new(|| instrument(KeyMode::Whole, &everything(), &everything(), WHEEL)),
             play: Box::new(|synth8: &mut Synth8, clock: &mut Clock| {
-                synth8.event(NOTE_ON, 60, 100);
+                event(synth8, NOTE_ON, 60, 100);
                 to_crest(synth8, 4 * AFTER, clock);
-                synth8.event(NOTE_OFF, 60, 0);
+                event(synth8, NOTE_OFF, 60, 0);
                 to_crest(synth8, AFTER / 2, clock)
             }),
         },
@@ -185,9 +150,9 @@ fn sounds() -> Vec<Sound<Synth8>> {
             name: "silence",
             make: Box::new(|| instrument(KeyMode::Whole, &bright(), &bright(), 0)),
             play: Box::new(|synth8: &mut Synth8, _clock: &mut Clock| {
-                synth8.event(NOTE_ON, 60, 100);
+                event(synth8, NOTE_ON, 60, 100);
                 run(synth8, 2 * AFTER);
-                synth8.event(NOTE_OFF, 60, 0);
+                event(synth8, NOTE_OFF, 60, 0);
                 run(synth8, 6 * AFTER).last().copied().unwrap_or(0)
             }),
         },
@@ -200,21 +165,31 @@ fn changes(synth8: &Synth8) -> Vec<Change<Synth8>> {
     let mut all = Vec::new();
     for (half, patch) in [("upper", *synth8.patch()), ("lower", *synth8.lower_patch())] {
         let lower = half == "lower";
-        for param in PARAMS {
-            let set = move |synth8: &mut Synth8, value: i32| {
-                if lower {
-                    let patch = synth8.lower_patch().with(param, value as u8);
-                    synth8.set_lower_patch(&patch);
-                } else {
-                    let patch = synth8.patch().with(param, value as u8);
-                    synth8.set_patch(&patch);
+        for param in Param::ALL {
+            // Each control moved by its controller on its half's channel
+            // (S8-2 item 4, S8-16).
+            let channel = u8::from(lower);
+            let name = format!("{half} {param:?}");
+            match param.kind() {
+                Kind::Slider | Kind::Modulation | Kind::Centred => {
+                    let set = move |synth8: &mut Synth8, value: i32| {
+                        event(synth8, CONTROL | channel, param.controller(), value as u8);
+                    };
+                    all.extend(continuous(&name, (0, 127), patch.get(param).into(), set));
                 }
-            };
-            let (name, most, at) = (format!("{half} {param:?}"), i32::from(Patch::max(param)), patch.get(param).into());
-            if most > 3 {
-                all.extend(continuous(&name, (0, most), at, set));
-            } else {
-                all.extend(switch(&name, most + 1, at, |position| position.to_string(), set));
+                Kind::Selector(positions) => {
+                    let set = move |synth8: &mut Synth8, position: i32| {
+                        event(synth8, CONTROL | channel, param.controller(), canonical(position as u8, positions));
+                    };
+                    let at = patch.position(param).into();
+                    all.extend(switch(&name, positions.into(), at, |position| position.to_string(), set));
+                }
+                Kind::Switch => {
+                    let set = move |synth8: &mut Synth8, position: i32| {
+                        event(synth8, CONTROL | channel, param.controller(), if position == 0 { 0 } else { 127 });
+                    };
+                    all.extend(switch(&name, 2, patch.on(param).into(), |position| position.to_string(), set));
+                }
             }
         }
     }
@@ -253,39 +228,41 @@ fn changes(synth8: &Synth8) -> Vec<Change<Synth8>> {
 
     // The messages. A controller's place before the change is given by
     // a message before the keys, as a slider's is by the patch.
-    let controller = |number: u8| move |synth8: &mut Synth8, value: i32| synth8.event(CONTROL, number, value as u8);
+    let controller = |number: u8| move |synth8: &mut Synth8, value: i32| event(synth8, CONTROL, number, value as u8);
     all.extend(continuous("modulation wheel (1)", (0, 127), wheel, controller(1)));
     all.extend(continuous("portamento time (5)", (0, 127), 40, controller(5)));
     all.extend(continuous("volume (7)", (0, 127), 127, controller(7)));
     all.extend(continuous("balance (8)", (0, 127), 64, controller(8)));
-    for (name, number) in [("pedal (64)", 64), ("portamento (65)", 65)] {
+    all.extend(continuous("expression (11)", (0, 127), 127, controller(11)));
+    all.extend(continuous("VCO bend depth (41)", (0, 127), 21, controller(41)));
+    for (name, number) in [("pedal (64)", 64), ("portamento (118)", 118)] {
         all.extend(switch(name, 2, 0, on_off, move |synth8: &mut Synth8, value| {
-            synth8.event(CONTROL, number, if value == 0 { 0 } else { 127 });
+            event(synth8, CONTROL, number, if value == 0 { 0 } else { 127 });
         }));
     }
     all.extend(continuous("pitch bend", (0, 0x3fff), 0x2000, |synth8: &mut Synth8, value: i32| {
-        synth8.event(PITCH_BEND, (value & 0x7f) as u8, (value >> 7) as u8);
+        event(synth8, PITCH_BEND, (value & 0x7f) as u8, (value >> 7) as u8);
     }));
     let message = |name: &str, status: u8, data1: u8, data2: u8| {
-        Change::new(name, "sent", move |synth8: &mut Synth8| synth8.event(status, data1, data2))
+        Change::new(name, "sent", move |synth8: &mut Synth8| event(synth8, status, data1, data2))
     };
     all.push(message("all sound off (120)", CONTROL, 120, 0));
     all.push(Change::starting("all sound off (120), then a key", "sent", |synth8: &mut Synth8| {
-        synth8.event(CONTROL, 120, 0);
-        synth8.event(NOTE_ON, 64, 100);
+        event(synth8, CONTROL, 120, 0);
+        event(synth8, NOTE_ON, 64, 100);
     }));
     all.push(message("reset all controllers (121)", CONTROL, 121, 0));
     all.push(message("all notes off (123)", CONTROL, 123, 0));
     all.push(message("note off", NOTE_OFF, 60, 0));
     let strike = |name: &str, key: u8| {
-        Change::starting(name, "sent", move |synth8: &mut Synth8| synth8.event(NOTE_ON, key, 100))
+        Change::starting(name, "sent", move |synth8: &mut Synth8| event(synth8, NOTE_ON, key, 100))
     };
     all.push(strike("note on, the key again", 60));
     all.push(strike("note on, a key below", 31));
     all.push(strike("note on, a key above", 100));
     all.push(Change::starting("note on, nine more keys", "sent", |synth8: &mut Synth8| {
         for key in [40, 47, 54, 61, 68, 75, 82, 89, 94] {
-            synth8.event(NOTE_ON, key, 100);
+            event(synth8, NOTE_ON, key, 100);
         }
     }));
     // What the instrument does not take: nothing may move.
@@ -293,6 +270,8 @@ fn changes(synth8: &Synth8) -> Vec<Change<Synth8>> {
     all.push(message("channel pressure (ignored)", CHANNEL_PRESSURE, 127, 0));
     all.push(message("program change (ignored)", PROGRAM, 5, 0));
     all.push(message("controller 74 (ignored)", CONTROL, 74, 127));
+    all.push(message("portamento switch 65 (ignored)", CONTROL, 65, 127));
+    all.push(message("cutoff on channel 3 (ignored)", CONTROL | 2, 3, 0));
     all.push(Change::new("release_all", "called", Synth8::release_all));
     all.push(Change::new("reset", "called", Synth8::reset));
     all
@@ -347,15 +326,15 @@ fn no_control_steps_the_signal_but_the_switches_that_do() {
 
 #[test]
 fn all_sound_off_takes_the_sound_out_and_leaves_silence() {
-    all_sound_off_silences(&sounds(), &|synth8: &mut Synth8| synth8.event(CONTROL, 120, 0), 256 + 64);
+    all_sound_off_silences(&sounds(), &|synth8: &mut Synth8| event(synth8, CONTROL, 120, 0), 256 + 64);
 }
 
 #[test]
 fn all_sound_off_leaves_the_pedal_where_it_is() {
-    all_sound_off_leaves_the_pedal(&|| instrument(KeyMode::Whole, &bright(), &bright(), 0), &Synth8::event);
+    all_sound_off_leaves_the_pedal(&|| instrument(KeyMode::Whole, &bright(), &bright(), 0), &event);
 }
 
 #[test]
 fn messages_that_come_during_all_sound_off_are_taken_after_it() {
-    messages_after_all_sound_off_are_taken(&|| instrument(KeyMode::Whole, &bright(), &bright(), 0), &Synth8::event);
+    messages_after_all_sound_off_are_taken(&|| instrument(KeyMode::Whole, &bright(), &bright(), 0), &event);
 }

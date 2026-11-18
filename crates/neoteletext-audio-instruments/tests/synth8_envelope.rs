@@ -17,8 +17,9 @@
 mod support;
 
 use neoteletext_audio_instruments::synth8::law::{KEY_FOLLOW, KEY_FOLLOW_ONE};
+use neoteletext_audio_instruments::synth8::patch::{slider_byte, vca_lfo_mod_value};
 use neoteletext_audio_instruments::synth8::{Param, Patch, Synth8};
-use support::{A2, C0, C5, NOTE_ON, cents, instrument, peaks, pitch, play, render, samples, square};
+use support::{A2, C0, C5, NOTE_ON, ON, cents, instrument, lfo_wave, peaks, pitch, play, render, samples, square};
 
 /// The window the amplifier's level is read in, in seconds.
 const WINDOW: f64 = 0.0025;
@@ -42,8 +43,9 @@ fn passes(levels: &[f64], from: usize, mark: f64, rising: bool) -> f64 {
 #[test]
 fn the_attack_is_a_millisecond_a_tenth_of_a_second_and_six_seconds() {
     // Roland's specifications: from 1 ms. Service notes, adjustment 20:
-    // 100 ms at "around 4-5" (4.5 is 115 of 255), 6 s at the top.
-    for (slider, seconds) in [(115u8, 0.1), (255, 6.0)] {
+    // 100 ms at "around 4-5" (4.5 is value 57, byte 114 of 255), 6 s at
+    // the top.
+    for (slider, seconds) in [(57u8, 0.1), (ON, 6.0)] {
         let levels = levels(&square().with(Param::Env2Attack, slider), A2, seconds * 1.2, 0.0);
         let half = passes(&levels, 0, 0.5, true);
         let whole = passes(&levels, 0, 0.995, true);
@@ -62,20 +64,20 @@ fn the_attack_is_a_millisecond_a_tenth_of_a_second_and_six_seconds() {
 fn the_decay_and_the_release_fall_to_a_tenth_in_their_times() {
     // Roland's specifications: 1 ms to 10 s. Own choice: the time is the
     // fall to a tenth; own choice of the law: 131 ms at 4.5.
-    let decaying = square().with(Param::Env2Sustain, 0).with(Param::Env2Decay, 255);
+    let decaying = square().with(Param::Env2Sustain, 0).with(Param::Env2Decay, 127);
     let found = passes(&levels(&decaying, A2, 10.6, 0.0), 4, 0.1, false);
     println!("decay at 10: a tenth after {found:.2} s");
     assert!((found / 10.0 - 1.0).abs() < 0.03);
-    for (slider, seconds) in [(115u8, 0.131), (255, 10.0)] {
+    for (slider, seconds) in [(57u8, 0.131), (ON, 10.0)] {
         let levels = levels(&square().with(Param::Env2Release, slider), A2, 0.2, seconds * 1.1);
         let found = passes(&levels, samples(0.2) / samples(WINDOW), 0.1, false) - 0.2;
         println!("release at {slider}: a tenth after {found:.3} s, for {seconds} s");
         assert!((found / seconds - 1.0).abs() < 0.06);
     }
     // The sustain is the slider's share of the peak.
-    let sustained = levels(&square().with(Param::Env2Sustain, 128).with(Param::Env2Decay, 60), A2, 1.0, 0.0);
+    let sustained = levels(&square().with(Param::Env2Sustain, 64).with(Param::Env2Decay, 30), A2, 1.0, 0.0);
     let level = sustained[sustained.len() - 4];
-    assert!((level - 128.0 / 255.0).abs() < 0.01, "{level}");
+    assert!((level - f64::from(slider_byte(64)) / 255.0).abs() < 0.01, "{level}");
 }
 
 /// The share of each 35 µs in which the envelope runs on a key: the
@@ -112,13 +114,13 @@ fn with_the_key_follow_on_higher_keys_have_shorter_times() {
     // Owner's manual, printed page 3: the attack, decay and release are
     // "shortened in proportion to the height of any pitch". The attack at
     // 4.5 and the release at 4.5, at the keyboard's ends.
-    let patch = square().with(Param::Env2Attack, 115).with(Param::Env2Release, 115);
+    let patch = square().with(Param::Env2Attack, 57).with(Param::Env2Release, 57);
     let times = |patch: &Patch, key: u8| {
         let levels = levels(patch, key, 0.4, 0.5);
         (passes(&levels, 0, 0.5, true), passes(&levels, samples(0.4) / samples(WINDOW), 0.1, false) - 0.4)
     };
     let off = (times(&patch, C0), times(&patch, C5));
-    let followed = patch.with(Param::Env2KeyFollow, 1);
+    let followed = patch.with(Param::Env2KeyFollow, ON);
     let on = (times(&followed, C0), times(&followed, C5));
     println!(
         "off: attack to half {:.4} s and {:.4} s, release {:.3} s and {:.3} s",
@@ -136,8 +138,8 @@ fn with_the_key_follow_on_higher_keys_have_shorter_times() {
 /// The low-frequency oscillator's rate, from the pitch it moves: the
 /// crossings of the pitch's own mean, the pitch read every 5 ms.
 fn lfo_rate(patch: &Patch, seconds: f64) -> f64 {
-    let mut synth8 = instrument(&patch.with(Param::VcoLfoMod, 128 + 40));
-    synth8.event(NOTE_ON, A2 + 24, 100);
+    let mut synth8 = instrument(&patch.with(Param::VcoLfoMod, 40));
+    let _ = synth8.event(NOTE_ON, A2 + 24, 100);
     render(&mut synth8, 0.3);
     let signal = render(&mut synth8, seconds);
     let track: Vec<f64> = signal.chunks(samples(0.005)).map(|chunk| cents(1760.0, pitch(chunk))).collect();
@@ -150,16 +152,16 @@ fn the_low_frequency_oscillator_runs_from_a_twentieth_of_a_hertz_to_thirty() {
     // Roland's specifications for the foot: 0.05 Hz. Service notes,
     // adjustment 21, for the top: three cycles in 100 ms, 30 Hz, with
     // the RATE slider drawn at 10. Between them the law is exponential:
-    // 0.05 Hz x 600^(128 / 255) = 1.240 Hz at the middle.
-    for (slider, hertz) in [(128u8, 1.240), (255, 30.0)] {
+    // 0.05 Hz x 600^(129 / 255) = 1.256 Hz at the value 64, byte 129.
+    for (slider, hertz) in [(64u8, 1.256), (ON, 30.0)] {
         let found = lfo_rate(&square().with(Param::LfoRate, slider), 3.0);
         println!("rate at {slider}: {found:.3} Hz, for {hertz} Hz");
         assert!((found / hertz - 1.0).abs() < 0.03);
     }
     // At 0 a square holds each half for ten seconds.
-    let slow = square().with(Param::LfoWave, 2).with(Param::VcoLfoMod, 255);
+    let slow = square().with(Param::LfoWave, lfo_wave(2)).with(Param::VcoLfoMod, 127);
     let mut synth8 = instrument(&slow);
-    synth8.event(NOTE_ON, A2, 100);
+    let _ = synth8.event(NOTE_ON, A2, 100);
     let track: Vec<f64> = (0..20).map(|_| pitch(&render(&mut synth8, 1.0)[samples(0.5)..])).collect();
     let high = track.iter().filter(|&&hertz| hertz > 600.0).count();
     println!("rate at 0: the upper half lasts {high} s, then the lower");
@@ -175,9 +177,9 @@ fn the_shapes_are_a_sine_a_falling_sawtooth_a_square_and_steps() {
     // The pitch through two seconds at 1.9 Hz, in cents from the note,
     // every 10 ms.
     let track = |wave: u8| {
-        let patch = square().with(Param::LfoWave, wave).with(Param::LfoRate, 138).with(Param::VcoLfoMod, 128 + 40);
+        let patch = square().with(Param::LfoWave, lfo_wave(wave)).with(Param::LfoRate, 69).with(Param::VcoLfoMod, 40);
         let mut synth8 = instrument(&patch);
-        synth8.event(NOTE_ON, A2 + 24, 100);
+        let _ = synth8.event(NOTE_ON, A2 + 24, 100);
         render(&mut synth8, 0.2);
         render(&mut synth8, 2.0).chunks(samples(0.01)).map(|chunk| cents(1760.0, pitch(chunk))).collect::<Vec<f64>>()
     };
@@ -211,9 +213,9 @@ fn the_delay_is_four_seconds_at_its_top() {
     // Roland's specifications: 0 to 4 s. Service notes, adjustment 21:
     // "modulated approx. 4 sec after the key first depressed". The
     // oscillator's swing of the pitch in each half second.
-    let patch = square().with(Param::LfoDelay, 255).with(Param::LfoRate, 200).with(Param::VcoLfoMod, 128 + 40);
+    let patch = square().with(Param::LfoDelay, 127).with(Param::LfoRate, 100).with(Param::VcoLfoMod, 40);
     let mut synth8 = instrument(&patch);
-    synth8.event(NOTE_ON, A2 + 24, 100);
+    let _ = synth8.event(NOTE_ON, A2 + 24, 100);
     let swings: Vec<f64> = (0..14)
         .map(|_| {
             let track: Vec<f64> =
@@ -236,7 +238,7 @@ fn a_shorter_delay_set_while_waiting_shortens_the_wait() {
     // the panel's DELAY TIME is brought down to 0.2, 80 ms: the
     // modulation is there within its rise, not after the 4 s that were
     // running. The oscillator's swing of the pitch in each half second.
-    let slow = square().with(Param::LfoDelay, 255).with(Param::LfoRate, 200).with(Param::VcoLfoMod, 128 + 40);
+    let slow = square().with(Param::LfoDelay, 127).with(Param::LfoRate, 100).with(Param::VcoLfoMod, 40);
     let swings = |synth8: &mut Synth8| -> Vec<f64> {
         (0..3)
             .map(|_| {
@@ -251,16 +253,16 @@ fn a_shorter_delay_set_while_waiting_shortens_the_wait() {
     steady.event(NOTE_ON, A2 + 24, 100);
     let full = swings(&mut steady)[2];
     let mut synth8 = instrument(&slow);
-    synth8.event(NOTE_ON, A2 + 24, 100);
+    let _ = synth8.event(NOTE_ON, A2 + 24, 100);
     render(&mut synth8, 0.1);
-    synth8.set_patch(&slow.with(Param::LfoDelay, 5));
+    synth8.set_patch(&slow.with(Param::LfoDelay, 2));
     let found = swings(&mut synth8);
     println!("the swing in cents, each half second after the delay is shortened: {found:.0?}; in full {full:.0}");
     assert!(found.iter().all(|&swing| swing > 0.95 * full), "{found:?} against {full}");
     // A longer delay set while waiting does not start the wait again,
     // and none at all ends it.
-    let mut synth8 = instrument(&slow.with(Param::LfoDelay, 64));
-    synth8.event(NOTE_ON, A2 + 24, 100);
+    let mut synth8 = instrument(&slow.with(Param::LfoDelay, 32));
+    let _ = synth8.event(NOTE_ON, A2 + 24, 100);
     render(&mut synth8, 0.1);
     synth8.set_patch(&slow);
     render(&mut synth8, 3.0);
@@ -281,9 +283,9 @@ fn the_oscillator_moves_the_amplifier_by_its_switch() {
     // second.
     let swing = |position: u8| {
         let patch = square()
-            .with(Param::LfoWave, 2)
-            .with(Param::LfoRate, 138)
-            .with(Param::VcaLfoMod, 128 + position * 42 + position / 3);
+            .with(Param::LfoWave, lfo_wave(2))
+            .with(Param::LfoRate, 69)
+            .with(Param::VcaLfoMod, vca_lfo_mod_value(position));
         let levels = peaks(&play(&patch, A2, 1.5, 0.0)[samples(0.2)..], 0.02);
         let (high, low) =
             (levels.iter().copied().fold(f64::MIN, f64::max), levels.iter().copied().fold(f64::MAX, f64::min));

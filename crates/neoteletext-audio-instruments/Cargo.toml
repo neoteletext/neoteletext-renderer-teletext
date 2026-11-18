@@ -34,9 +34,14 @@ synthd = ["analog"]
 # synth53, synth52 and synth51, made
 # from the analogue building blocks (TODO-6433), codec 16. Not on by default.
 synth53 = ["analog"]
+# Each family's interface module, its tables and checks without its
+# synthesis: which messages it takes, its patch's packer and check, its bank
+# image's builder and reader and its tracker (server.md, SRV-87 and SRV-88).
+# No allocation, no floating point, no synthesis code.
+interface = []
 # synth8, made from the analogue building blocks (TODO-6435), codec 17. Not
 # on by default.
-synth8 = ["analog"]
+synth8 = ["analog", "interface"]
 # synth80, made from the analogue building blocks (TODO-6434), codec 18. Not
 # on by default.
 synth80 = ["analog"]

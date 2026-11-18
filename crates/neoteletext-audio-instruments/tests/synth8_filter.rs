@@ -18,9 +18,11 @@
 #[path = "synth8_support.rs"]
 mod support;
 
+use neoteletext_audio_instruments::synth8::patch::slider_byte;
 use neoteletext_audio_instruments::synth8::{Param, Patch};
 use support::{
-    A2, C0, C2, C4, bin_hertz, cents, component, decibels, pitch, play, rms, samples, second, spectrum, square,
+    A2, C0, C2, C4, ON, bin_hertz, cents, component, decibels, pitch, play, rms, samples, second, spectrum, square,
+    vco1_range, vco2_wave,
 };
 
 /// Samples of a spectrum: 1.4 s.
@@ -34,8 +36,11 @@ const RESONANCE_TOP: f64 = 3.95;
 /// resonance at the top, and the middle of the spectrum's peak, each bin
 /// taken with its neighbours over a twentieth of an octave.
 fn ringing(patch: &Patch, key: u8) -> f64 {
-    let patch =
-        patch.with(Param::MixVco1, 0).with(Param::MixVco2, 255).with(Param::Vco2Wave, 3).with(Param::VcfResonance, 255);
+    let patch = patch
+        .with(Param::MixVco1, 0)
+        .with(Param::MixVco2, 127)
+        .with(Param::Vco2Wave, vco2_wave(3))
+        .with(Param::VcfResonance, 127);
     let (mut sums, runs) = (vec![0.0f64; LENGTH / 2], 3usize);
     let signal = play(&patch, key, 0.3 + (runs * LENGTH) as f64 / support::RATE, 0.0);
     for run in 0..runs {
@@ -58,13 +63,16 @@ fn ringing(patch: &Patch, key: u8) -> f64 {
 
 /// The cutoff the law gives for a slider's byte, a key and a key follow
 /// in hundredths: 36.8 Hz at 0, 8.966 octaves to 255, about middle C.
+/// The slider is given as its control change's value, whose byte of 0 to
+/// 255 the law is in (`synth8.md`, S8-21 item 1).
 fn law(slider: u8, key: u8, follow: f64) -> f64 {
-    36.8 * (8.966 * f64::from(slider) / 255.0 + follow / 100.0 * (f64::from(key) - 60.0) / 12.0).exp2()
+    let byte = slider_byte(slider);
+    36.8 * (8.966 * f64::from(byte) / 255.0 + follow / 100.0 * (f64::from(key) - 60.0) / 12.0).exp2()
 }
 
-/// A slider's byte for a position of its scale of 0 to 10.
+/// A slider's value for a position of its scale of 0 to 10.
 fn position(tenths: u32) -> u8 {
-    ((255 * tenths + 50) / 100) as u8
+    ((127 * tenths + 50) / 100) as u8
 }
 
 #[test]
@@ -102,11 +110,11 @@ fn the_key_follow_tracks_the_keyboard_and_turns_about_middle_c() {
     assert!(((high / low).log2() - 2.0).abs() < 0.06);
     // Owner's manual: the key follow's "center point is center C": there
     // the slider changes nothing.
-    let unfollowed = ringing(&followed.with(Param::VcfKeyFollow, 128), C2);
+    let unfollowed = ringing(&followed.with(Param::VcfKeyFollow, 0), C2);
     assert!(cents(unfollowed, low).abs() < 40.0);
     // At its top, the specifications' 120%; and half way to 7.5, half
     // of all.
-    let most = followed.with(Param::VcfKeyFollow, 255);
+    let most = followed.with(Param::VcfKeyFollow, 127);
     let octaves = (ringing(&most, C4) / ringing(&most, C2)).log2();
     println!("at the slider's top: {octaves:.3} octaves for two");
     assert!((octaves - 2.4).abs() < 0.06);
@@ -114,11 +122,8 @@ fn the_key_follow_tracks_the_keyboard_and_turns_about_middle_c() {
     let octaves = (ringing(&half, C4) / ringing(&half, C2)).log2();
     println!("at 3.7: {octaves:.3} octaves for two");
     assert!((octaves - 1.0).abs() < 0.06);
-    // Upside down, the table's other half: as far the other way.
-    let down = followed.with(Param::VcfKeyFollow, 128 - 95);
-    let octaves = (ringing(&down, C4) / ringing(&down, C2)).log2();
-    println!("upside down at 7.5: {octaves:.3} octaves for two");
-    assert!((octaves + 2.0).abs() < 0.06);
+    // The table's other half, the key follow upside down, is no value of
+    // the controller (`synth8.md`, S8-21 item 2): value 0 is none.
 }
 
 #[test]
@@ -127,13 +132,13 @@ fn the_envelope_moves_the_cutoff_six_octaves_at_its_top() {
     // slider is measured, which stays in hearing: three octaves, from
     // the envelope at full sustain.
     let base = Patch::DEFAULT.with(Param::VcfCutoff, position(40));
-    let (without, with) = (ringing(&base, A2), ringing(&base.with(Param::VcfEnvMod, 128 + 64), A2));
+    let (without, with) = (ringing(&base, A2), ringing(&base.with(Param::VcfEnvMod, 64), A2));
     let octaves = (with / without).log2();
     println!("ENV MOD at half: {octaves:.3} octaves (64 of 127 steps of six: 3.024)");
     assert!((octaves - 6.0 * 64.0 / 127.0).abs() < 0.06);
     // Upside down, the envelope moves it down as far.
     let down = ringing(
-        &base.with(Param::VcfCutoff, position(80)).with(Param::VcfEnvMod, 128 + 64).with(Param::Env1Polarity, 1),
+        &base.with(Param::VcfCutoff, position(80)).with(Param::VcfEnvMod, 64).with(Param::Env1Polarity, ON),
         A2,
     );
     let octaves = (down / ringing(&base.with(Param::VcfCutoff, position(80)), A2)).log2();
@@ -152,7 +157,8 @@ fn the_two_slopes_are_two_poles_and_four() {
     };
     let hertz = |key: u8| 440.0 * ((f64::from(key) - 69.0) / 12.0).exp2();
     let poles = |key: u8| -10.0 * (1.0 + (hertz(key) / law(cutoff, key, 0.0)).powi(2)).log10();
-    for (slope, count, name) in [(0u8, 4.0, "24 dB"), (1, 2.0, "12 dB")] {
+    // The switch's first position is −12 dB (S8-21 item 5).
+    for (slope, count, name) in [(ON, 4.0, "24 dB"), (0, 2.0, "12 dB")] {
         let found = decibels(level(slope, A2 + 24), level(slope, C0));
         let wanted = count * (poles(A2 + 24) - poles(C0));
         println!("{name} an octave: {found:.2} dB two octaves above the cutoff, for {wanted:.2} dB");
@@ -166,7 +172,7 @@ fn the_resonance_at_its_top_rings_and_does_not_oscillate() {
     // of a square wave, dying to a quarter before the next edge. With
     // no oscillator in the mixer the filter is silent.
     let silent =
-        Patch::DEFAULT.with(Param::MixVco1, 0).with(Param::VcfResonance, 255).with(Param::VcfCutoff, position(60));
+        Patch::DEFAULT.with(Param::MixVco1, 0).with(Param::VcfResonance, 127).with(Param::VcfCutoff, position(60));
     let level = rms(&play(&silent, A2, 1.0, 0.0)[samples(0.5)..]);
     println!("no oscillator, the resonance at 10: {level:.6} of full scale");
     assert!(level < 1.0e-4);
@@ -174,7 +180,10 @@ fn the_resonance_at_its_top_rings_and_does_not_oscillate() {
     // A square of 32.7 Hz at 16' leaves 15 ms between edges; the cutoff
     // at 6 rings at 1.5 kHz. The ringing's size is half the swing within
     // one of its cycles, the square's own level being flat there.
-    let patch = square().with(Param::Vco1Range, 0).with(Param::VcfResonance, 255).with(Param::VcfCutoff, position(60));
+    let patch = square()
+        .with(Param::Vco1Range, vco1_range(0))
+        .with(Param::VcfResonance, 127)
+        .with(Param::VcfCutoff, position(60));
     let signal = play(&patch, C0, 1.0, 0.0);
     let steady = &signal[samples(0.5)..];
     let ring = law(position(60), A2, 0.0) * (RESONANCE_TOP / 4.0f64).powf(0.25);
@@ -214,7 +223,7 @@ fn the_high_pass_filter_is_off_at_its_foot_and_one_pole_above() {
     let flat = level(0, A2);
     // At 2.09 kHz and 1.05 kHz, below the top's 5 kHz, one pole takes
     // 8.3 dB and 13.8 dB.
-    let (octave, two) = (decibels(level(255, A2 + 27), flat), decibels(level(255, A2 + 15), flat));
+    let (octave, two) = (decibels(level(ON, A2 + 27), flat), decibels(level(ON, A2 + 15), flat));
     println!("the slider at 10: {octave:.2} dB at 2.09 kHz, {two:.2} dB at 1.05 kHz");
     let pole = |hertz: f64| -10.0 * (1.0 + (5_000.0 / hertz).powi(2)).log10();
     let (upper, lower) = (440.0 * (27.0f64 / 12.0).exp2(), 440.0 * (15.0f64 / 12.0).exp2());
@@ -229,7 +238,7 @@ fn the_high_pass_filter_is_off_at_its_foot_and_one_pole_above() {
         let signal = play(&second(0).with(Param::HpfCutoff, slider), C0, 1.3, 0.0)[samples(0.25)..].to_vec();
         component(&signal, lowest)
     };
-    let foot = decibels(tone(255), tone(0));
+    let foot = decibels(tone(ON), tone(0));
     println!("the slider at 10: {foot:.2} dB at {lowest:.1} Hz, for {:.2} dB", pole(lowest));
     assert!((foot - pole(lowest)).abs() < 0.6);
 }
@@ -243,8 +252,8 @@ fn the_low_pass_filter_is_the_synth106s() {
     use neoteletext_audio_instruments::synth106::{Model, Patch as Synth106Patch, Slider, Synth106};
 
     // synth60's law: 6.94 Hz at 0 and 17.2 octaves to 127; its
-    // slider at 53 is 1,006 Hz. synth8's at 136 is 1,012 Hz.
-    let (synth106_slider, synth8_slider) = (53u8, 136u8);
+    // slider at 53 is 1,006 Hz. synth8's at 68, its byte 137, is 1,021 Hz.
+    let (synth106_slider, synth8_slider) = (53u8, 68u8);
     let synth106_cutoff = 6.94 * (17.2 * f64::from(synth106_slider) / 127.0).exp2();
     let synth8_cutoff = law(synth8_slider, A2, 0.0);
     println!("cutoffs: synth60 {synth106_cutoff:.0} Hz, synth8 {synth8_cutoff:.0} Hz");
