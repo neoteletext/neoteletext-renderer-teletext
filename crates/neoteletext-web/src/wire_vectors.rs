@@ -48,9 +48,12 @@ pub fn bytes_of(hexadecimal: &str) -> Option<([u8; MOST_VECTOR_BYTES], usize)> {
 }
 
 /// The room for the longest value: a `rules` row's table. The longest the
-/// table holds is the default table of page-rules.md RULE-53 with its
-/// wheel rule, 229 bytes; `every_value_fits` holds that each row fits.
-pub const MOST_VECTOR_BYTES: usize = 256;
+/// table holds is the music player's table of page-rules.md RULE-93, 1,111
+/// bytes; `every_value_fits` holds that each row fits. It is well below the
+/// longest table a page may have (RULE-57), so that a reader of the table
+/// keeps a small buffer.
+pub const MOST_VECTOR_BYTES: usize = 2048;
+const _: () = assert!(MOST_VECTOR_BYTES <= neoteletext_rules::limits::MAX_TABLE_BYTES);
 const _: () = assert!(MOST_VECTOR_BYTES >= neoteletext_core::consts::PACKET_BYTES);
 /// Hexadecimal.
 const HEX_RADIX: u32 = 16;
