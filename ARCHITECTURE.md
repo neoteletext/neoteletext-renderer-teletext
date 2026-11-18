@@ -163,7 +163,7 @@ Each module named below is one concept. Since the reorganisation of 24 October 2
   - the optional glyph line cache;
   - change tracking, including the rows that flash or conceal.
 - **Must not know about:** pixel formats, screens, buffering strategy, timing of display.
-- **Key functions:** `cell_line()`, `render_row()`, `render_line()`, `changed_rows()`, `palette()`, `flash_unit()`.
+- **Key functions:** `cell_line()`, `render_row()`, `render_line()`, `changed_rows()`, `palette()`, `flash_unit()`, `FlashPhase::at_tick()`, `next_flash_tick()`.
 - **Requirements:** RND-011 to RND-028, RND-030 to RND-041.
 
 ### L5 Output adapters — `neoteletext-image`, text output in `neoteletext-cli`
@@ -342,7 +342,7 @@ Field groups shared with the presentation layer are foundation types in `types`:
 
 | What | Where |
 |---|---|
-| The presentation level | `config::PresentationLevel` (`is_enhanced`, `is_level35`) in `Config::level`. The Level 1 Flash code keeps the SAA5050's timing of decision E.12 at every level (`flash_visible`, `FlashRate::Level1`). The timing of the Additional Flash Functions (decision E.48) is `FLASH_CYCLE_US`, `FLASH_UNITS`, `FLASH_SLOW_ON_UNITS`, `FLASH_FAST_HALF_UNITS`, `FLASH_PHASES` and `FLASH_FAST_OFF_UNITS` in `consts`. |
+| The presentation level | `config::PresentationLevel` (`is_enhanced`, `is_level35`) in `Config::level`. The Level 1 Flash code keeps the SAA5050's timing of decision E.12 at every level (`flash_visible`, `FlashRate::Level1`). Everything shown is timed in ticks of the presentation clock (`PRESENTATION_TICKS_PER_SECOND`, `FLASH_SHOWN_TICKS`, `FLASH_HIDDEN_TICKS`; `FlashPhase::at_tick`). The timing of the Additional Flash Functions (decision E.48) is `FLASH_UNIT_TICKS`, `FLASH_UNITS`, `FLASH_SLOW_ON_UNITS`, `FLASH_FAST_HALF_UNITS`, `FLASH_PHASES` and `FLASH_FAST_OFF_UNITS` in `consts`. |
 | Page-level presentation data | `colour::resolve(&PresentationSources, level, &base) -> PagePresentation`: `colour_map`, `default_screen`, `default_row`, `black_background_substitution`, `remapping` (`Remapping::foreground` and `background` give the index of a Level 1 colour). The caller fills `PresentationSources` with the page's X/28/0 (only for a displayed page), X/28/4, M/29/0, M/29/4 and the POP link's `FallbackFields`. |
 | Colours | `ColourIndex` (0 to 31), `colour_index(clut, entry)`, `ColourMap` (`DEFAULT` from Table 30, `entry`, `rgb888`, `set_cluts`, `is_transparent`). |
 | A cell | `level1::Cell`: `foreground` and `background` are Colour Map indices; `attributes: CellAttributes` packs `width`, `flash_mode`, `flash_rate`, `underline`, `invert`, `font` and `source`, read with those methods and set with the matching `with_*` methods. G3 characters are `Glyph::Char` of `CharSet::G3`. |

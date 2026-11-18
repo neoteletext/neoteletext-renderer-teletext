@@ -14,8 +14,8 @@ fn default_profile_matches_req_prf_001() {
     assert!(config.double_start_box && config.black_colour_codes && config.rounding);
     assert_eq!(config.row24, Row24Policy::AnnexH);
     assert_eq!(config.cell_mode, CellMode::Saa5050, "12 by 20 cells");
-    assert_eq!(config.flash_shown_us, 960_000);
-    assert_eq!(config.flash_hidden_us, 320_000);
+    assert_eq!(config.flash_shown_ticks, 57, "ANIM-1: 950 ms");
+    assert_eq!(config.flash_hidden_ticks, 19, "ANIM-1: 317 ms");
 }
 
 /// REQ-PRF-006: each profile selects its level, the levels are ordered

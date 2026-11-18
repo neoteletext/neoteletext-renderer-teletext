@@ -34,7 +34,7 @@ pub use changes::ChangeTracker;
 pub use colours::{
     background_index, border_index, fill_palette, foreground_index, palette_colour, palette_mode_allowed,
 };
-pub use flash::{FlashPhase, flash_on, flash_unit, flash_visible};
+pub use flash::{FlashPhase, FlashRates, flash_on, flash_unit, flash_visible, next_flash_tick};
 pub use options::{ColourMode, RenderOptions};
 use raster::CELL_LAST_HALF_DOT;
 pub use raster::cell_line;

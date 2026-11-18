@@ -17,7 +17,6 @@ use crate::config::{CellMode, Config};
 use crate::consts::FLASH_UNITS;
 use crate::level1::{Cell, CellAttributes, FlashRate, Grid};
 use crate::render::test_grids::*;
-use crate::types::Instant;
 use std::vec;
 use std::vec::Vec;
 
@@ -33,14 +32,16 @@ const OFF_UNITS: [(FlashRate, [u8; 4]); 3] = [
 #[test]
 fn flash_timing_is_three_to_one() {
     let config = Config::default();
-    assert!(flash_visible(Instant(0), &config));
-    assert!(flash_visible(Instant(959_999), &config));
-    assert!(!flash_visible(Instant(960_000), &config));
-    assert!(flash_visible(Instant(1_280_000), &config));
+    // ANIM-1: 57 ticks shown and 19 hidden, a cycle of 76 ticks.
+    assert!(flash_visible(0, &config));
+    assert!(flash_visible(56, &config));
+    assert!(!flash_visible(57, &config));
+    assert!(!flash_visible(75, &config));
+    assert!(flash_visible(76, &config));
     // REQ-GEN-006: a configuration with no flash period has nothing to
     // divide by, and shows flashing characters steadily.
-    let steady = Config { flash_shown_us: 0, flash_hidden_us: 0, ..Config::default() };
-    assert!([0, 1, 960_000, u64::MAX].iter().all(|&time| flash_visible(Instant(time), &steady)));
+    let steady = Config { flash_shown_ticks: 0, flash_hidden_ticks: 0, ..Config::default() };
+    assert!([0, 1, 57, u32::MAX].iter().all(|&tick| flash_visible(tick, &steady)));
 }
 
 /// REQ-RND-040, decision E.48: every rate and phase in every unit.
@@ -61,15 +62,61 @@ fn flash_rates_follow_decision_e48_in_every_unit() {
     assert_eq!(FlashPhase::at_unit(12), FlashPhase::at_unit(0));
 }
 
-/// REQ-RND-040: the caller's time to the flash unit, computed once per
-/// frame.
+/// REQ-RND-040, ANIM-1 (REQ-6529): the caller's tick to the flash unit,
+/// five ticks a unit, computed once per frame.
 #[test]
-fn flash_unit_from_time() {
-    let unit = |us| flash_unit(Instant(us));
-    assert_eq!((unit(0), unit(83_333), unit(83_334)), (0, 0, 1));
-    assert_eq!((unit(999_999), unit(1_000_000), unit(1_500_000)), (11, 0, 6));
-    assert_eq!(unit(u64::MAX), unit(u64::MAX % 1_000_000));
-    assert_eq!(FlashPhase::at(Instant(250_000), &Config::default()), FlashPhase::at_unit(3));
+fn flash_unit_from_the_tick() {
+    assert_eq!((flash_unit(0), flash_unit(4), flash_unit(5)), (0, 0, 1));
+    assert_eq!((flash_unit(59), flash_unit(60), flash_unit(90)), (11, 0, 6));
+    assert_eq!(flash_unit(u32::MAX), flash_unit(u32::MAX % 60));
+    assert_eq!(FlashPhase::at_tick(15, &Config::default()), FlashPhase::at_unit(3));
+    for tick in 0..120 {
+        assert_eq!(u32::from(flash_unit(tick)), tick % 60 / 5, "tick {tick}");
+    }
+}
+
+/// ANIM-1 (REQ-6529): every flash phase by tick. Each rate of the
+/// Additional Flash Functions is on in exactly the ticks of its "on"
+/// units, and the Level 1 flash in ticks 0 to 56 of each 76.
+#[test]
+fn every_flash_phase_by_tick() {
+    let config = Config::default();
+    // 1,140 ticks is the least common multiple of the two cycles, 76 and 60.
+    for tick in 0..2 * 1_140 {
+        let phase = FlashPhase::at_tick(tick, &config);
+        assert_eq!(phase.is_on(FlashRate::Level1), tick % 76 < 57, "Level 1, tick {tick}");
+        let unit = (tick % 60 / 5) as u8;
+        assert_eq!(phase.is_on(FlashRate::Slow), unit <= 8, "slow, tick {tick}");
+        for (rate, off) in OFF_UNITS {
+            assert_eq!(phase.is_on(rate), !off.contains(&unit), "{rate:?}, tick {tick}");
+        }
+        assert_eq!(phase, FlashPhase::at_tick(tick + 1_140, &config), "the phase is a function of the tick alone");
+    }
+}
+
+/// ANIM-1 (REQ-6529): the next tick at which a page's flashing cells
+/// change, so that a decoder wakes twice a cycle for a slow flash and not
+/// sixty times a second.
+#[test]
+fn the_next_flash_tick_follows_the_rates_a_grid_uses() {
+    let config = Config::default();
+    let mut grid = Grid::EMPTY;
+    assert!(FlashRates::of(&grid).is_empty());
+    assert_eq!(next_flash_tick(0, &config, FlashRates::of(&grid)), None, "nothing flashes");
+    grid.cells[1][0] = Cell { glyph: text(b'X'), flash: true, ..Cell::BLANK };
+    let level_1 = FlashRates::of(&grid);
+    assert!(level_1.has(FlashRate::Level1) && !level_1.has(FlashRate::Slow));
+    let wakes: Vec<u32> =
+        core::iter::successors(Some(0), |&tick| next_flash_tick(tick, &config, level_1)).take(5).collect();
+    assert_eq!(wakes, vec![0, 57, 76, 133, 152], "twice in each cycle of 76 ticks");
+    grid.cells[1][0].attributes = CellAttributes::DEFAULT.with_flash_rate(FlashRate::Slow);
+    let slow = FlashRates::of(&grid);
+    let wakes: Vec<u32> =
+        core::iter::successors(Some(0), |&tick| next_flash_tick(tick, &config, slow)).take(5).collect();
+    assert_eq!(wakes, vec![0, 45, 60, 105, 120], "units 9 and 0 of each second");
+    let steady = Config { flash_shown_ticks: 0, flash_hidden_ticks: 0, ..Config::default() };
+    assert_eq!(next_flash_tick(0, &steady, level_1), None, "a steady Level 1 flash never changes");
+    assert_eq!(next_flash_tick(u32::MAX, &config, level_1), None, "the tick counter has ended");
 }
 
 /// REQ-RND-040, REQ-L25-027: an incremental run of phases 1, 2, 3, 1, ...
@@ -102,31 +149,29 @@ fn incremental_and_decremental_runs() {
     }
 }
 
-/// Decisions E.12 and E.48: the Level 1 Flash code keeps the SAA5050's
-/// timing at every level, 960 ms shown and 320 ms hidden, and the phase
-/// changes for it at those moments, not with the units.
+/// Decisions E.12 and E.48, ANIM-1: the Level 1 Flash code keeps the
+/// SAA5050's timing at every level, in whole ticks (57 shown, 19 hidden),
+/// and the phase changes for it at those ticks, not with the units.
 #[test]
 fn the_level_1_flash_follows_the_saa5050_timing_at_every_level() {
     let config = Config::default();
-    for (us, shown) in
-        [(0, true), (800_000, true), (959_999, true), (960_000, false), (1_279_999, false), (1_280_000, true)]
-    {
-        let phase = FlashPhase::at(Instant(us), &config);
-        assert_eq!(phase.is_on(FlashRate::Level1), shown, "{us} microseconds");
+    for (tick, shown) in [(0, true), (48, true), (56, true), (57, false), (75, false), (76, true)] {
+        let phase = FlashPhase::at_tick(tick, &config);
+        assert_eq!(phase.is_on(FlashRate::Level1), shown, "tick {tick}");
     }
-    assert!(!FlashPhase::at(Instant(800_000), &config).is_on(FlashRate::Slow), "unit 9 still times the slow rate");
+    assert!(!FlashPhase::at_tick(48, &config).is_on(FlashRate::Slow), "unit 9 still times the slow rate");
     let mut grid = Grid::EMPTY;
     grid.cells[3][0] = Cell { glyph: text(b'X'), foreground: RED, background: BLUE, flash: true, ..Cell::BLANK };
-    let at = |us| RenderOptions {
+    let at = |tick| RenderOptions {
         mode: CellMode::Saa5050,
         rounding: true,
         reveal: false,
-        colour: ColourMode::Resolved(FlashPhase::at(Instant(us), &config)),
+        colour: ColourMode::Resolved(FlashPhase::at_tick(tick, &config)),
         underline: true,
     };
     let mut tracker = ChangeTracker::new();
     tracker.changed_rows(&grid, at(0));
-    assert_eq!(tracker.changed_rows(&grid, at(800_000)), 0, "750 ms is not an edge of this flash");
-    assert_eq!(tracker.changed_rows(&grid, at(960_000)), 1 << 3, "hidden");
-    assert_eq!(tracker.changed_rows(&grid, at(1_280_000)), 1 << 3, "shown");
+    assert_eq!(tracker.changed_rows(&grid, at(48)), 0, "unit 9 is not an edge of this flash");
+    assert_eq!(tracker.changed_rows(&grid, at(57)), 1 << 3, "hidden");
+    assert_eq!(tracker.changed_rows(&grid, at(76)), 1 << 3, "shown");
 }

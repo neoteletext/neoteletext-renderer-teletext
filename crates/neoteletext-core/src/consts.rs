@@ -21,7 +21,8 @@ mod packets;
 mod pages;
 mod signal;
 mod spacing_attributes;
-mod timing;
+// Named in animation.md ANIM-1 as `consts::timing`, so the path is public.
+pub mod timing;
 mod triplets;
 
 pub use audio::*;

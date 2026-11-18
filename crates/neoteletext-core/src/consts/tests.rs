@@ -26,8 +26,23 @@ fn page_geometry_is_consistent() {
 #[test]
 fn flash_units_agree_with_decisions_e12_and_e48() {
     assert_eq!(FLASH_FAST_OFF_UNITS * FLASH_PHASES, FLASH_FAST_HALF_UNITS);
-    let slow_off = u64::from(FLASH_UNITS - FLASH_SLOW_ON_UNITS);
-    assert_eq!(u64::from(FLASH_SLOW_ON_UNITS) * FLASH_FIELDS_HIDDEN, slow_off * FLASH_FIELDS_SHOWN);
+    let slow_off = u32::from(FLASH_UNITS - FLASH_SLOW_ON_UNITS);
+    assert_eq!(u32::from(FLASH_SLOW_ON_UNITS) * FLASH_HIDDEN_TICKS, slow_off * FLASH_SHOWN_TICKS);
+}
+
+/// ANIM-1 (REQ-6529): tick n is due n × 50,000 ÷ 3 microseconds after the
+/// clock's start, and the tick of a time is the last one due by then.
+#[test]
+fn presentation_ticks_and_microseconds_agree() {
+    assert_eq!(PRESENTATION_TICKS_PER_SECOND, 60);
+    assert_eq!((FLASH_SHOWN_TICKS, FLASH_HIDDEN_TICKS, FLASH_UNIT_TICKS), (57, 19, 5));
+    for (tick, due) in [(0, 0), (1, 16_666), (2, 33_333), (3, 50_000), (60, 1_000_000), (57, 950_000)] {
+        assert_eq!(presentation_tick_due_us(tick), due, "tick {tick}");
+        assert_eq!(presentation_tick_at_us(due), tick);
+        assert_eq!(presentation_tick_at_us(due.saturating_sub(1)), tick.saturating_sub(1));
+    }
+    assert_eq!(presentation_tick_due_us(u32::MAX), u64::from(u32::MAX) * 50_000 / 3);
+    assert_eq!(presentation_tick_at_us(u64::MAX), u32::MAX);
 }
 
 /// Decision E.43: the Colour Map's transparent entry is the renderer's

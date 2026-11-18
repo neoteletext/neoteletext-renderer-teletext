@@ -236,7 +236,7 @@ The library's `neoteletext_core::config::Config` holds every setting below. `neo
 | `rom_variant` | REQ-PRF-003: the SAA5246A ROM variant whose sets C12 to C14 choose among | None |
 | `parity_policy` | E.8 | Keep the last good character |
 | `rolling_header` | E.11 | On |
-| `flash_shown_us`, `flash_hidden_us` | E.12: 0.75 hertz, 3 to 1 | 960 ms, 320 ms |
+| `flash_shown_ticks`, `flash_hidden_ticks` | E.12: 3 to 1, in ticks of one sixtieth of a second | 57 ticks (950 ms), 19 ticks (317 ms) |
 | `rounding` | REQ-RND-012 | On |
 | `double_start_box` | E.17 | On |
 | `black_colour_codes` | E.18 | On |

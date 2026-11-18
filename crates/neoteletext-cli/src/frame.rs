@@ -3,9 +3,7 @@
 
 use neoteletext_core::config::Config;
 use neoteletext_core::level1::Zoom;
-#[cfg(feature = "view")]
-use neoteletext_core::render::ColourMode;
-use neoteletext_core::render::{FlashPhase, RenderOptions};
+use neoteletext_core::render::{ColourMode, FlashPhase, RenderOptions};
 
 /// The settings of one frame (decision E.55, REQ-RND-040): the colour mode
 /// of the presentation level with its flash phase of decision E.48, and,
@@ -33,14 +31,22 @@ impl Frame {
         }
     }
 
-    /// The frame at a time on the decoder's clock. In the resolved mode
-    /// only the flash phase changes it. Only the viewer animates.
+    /// The frame at a time on the decoder's clock, which the viewer uses
+    /// as its presentation clock (animation.md ANIM-1): the frame of the
+    /// last tick due by then.
     #[cfg(feature = "view")]
     #[must_use]
     pub fn at(config: &Config, reveal: bool, now: neoteletext_core::types::Instant) -> Self {
-        let options = RenderOptions::for_level(config, reveal, FlashPhase::at(now, config));
+        Self::at_tick(config, reveal, neoteletext_core::consts::presentation_tick_at_us(now.0))
+    }
+
+    /// The frame at a tick of the presentation clock (ANIM-1). In the
+    /// resolved mode only the flash phase changes it.
+    #[must_use]
+    pub fn at_tick(config: &Config, reveal: bool, tick: u32) -> Self {
+        let options = RenderOptions::for_level(config, reveal, FlashPhase::at_tick(tick, config));
         let flash_visible =
-            options.colour != ColourMode::Palette || neoteletext_core::render::flash_visible(now, config);
+            options.colour != ColourMode::Palette || neoteletext_core::render::flash_visible(tick, config);
         Self { options, flash_visible, zoom: Zoom::Off }
     }
 }
@@ -89,8 +95,9 @@ mod tests {
     }
 
     /// Decision E.48 as the owner changed it: the Level 1 Flash code keeps
-    /// the SAA5050's timing of decision E.12 at every level, 960 ms shown
-    /// and 320 ms hidden.
+    /// the SAA5050's timing of decision E.12 at every level, in whole ticks
+    /// of the presentation clock: 57 shown (950 ms) and 19 hidden (317 ms),
+    /// animation.md ANIM-1.
     #[test]
     fn a_level_1_flash_keeps_the_saa5050_timing_at_every_level() {
         use neoteletext_core::level1::{Cell, Glyph};
@@ -108,7 +115,7 @@ mod tests {
             let config = Config { level, ..Config::default() };
             let shown =
                 |us| raster(&grid, Frame::at(&config, false, Instant(us)), one, Rgba::TRANSPARENT).indices[20 * 480];
-            for (us, colour) in [(0, 3), (800_000, 3), (959_999, 3), (960_000, 4), (1_279_999, 4), (1_280_000, 3)] {
+            for (us, colour) in [(0, 3), (800_000, 3), (949_999, 3), (950_000, 4), (1_266_665, 4), (1_266_667, 3)] {
                 assert_eq!(shown(us), colour, "{level:?} at {us} microseconds");
             }
         }

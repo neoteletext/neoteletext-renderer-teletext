@@ -3,8 +3,8 @@
 //! PRF). Changing the configuration never requires re-acquiring pages.
 
 use crate::consts::{
-    COLOUR_MAP_ENTRIES, DESIGNATION_LATIN_ENGLISH, FIELD_PERIOD_US, FLASH_FIELDS_HIDDEN, FLASH_FIELDS_SHOWN,
-    MOMENTARY_REVEAL_US, NATIONAL_INDEX_MASK, PAGE_COMPLETION_TIMEOUT_US, RomVariantSets, SAA5246A_ROM_VARIANTS,
+    COLOUR_MAP_ENTRIES, DESIGNATION_LATIN_ENGLISH, FLASH_HIDDEN_TICKS, FLASH_SHOWN_TICKS, MOMENTARY_REVEAL_US,
+    NATIONAL_INDEX_MASK, PAGE_COMPLETION_TIMEOUT_US, RomVariantSets, SAA5246A_ROM_VARIANTS,
 };
 use crate::types::Rgb12;
 
@@ -228,10 +228,11 @@ pub struct Config {
     pub parity_policy: ParityPolicy,
     /// Roll incoming headers while searching (decision E.11).
     pub rolling_header: bool,
-    /// Microseconds a flashing character is shown (decision E.12).
-    pub flash_shown_us: u64,
-    /// Microseconds a flashing character is hidden (decision E.12).
-    pub flash_hidden_us: u64,
+    /// Ticks of the presentation clock a character with the Level 1 Flash
+    /// attribute is shown (decision E.12; animation.md ANIM-1).
+    pub flash_shown_ticks: u32,
+    /// Ticks it is hidden. With both 0, flashing characters show steadily.
+    pub flash_hidden_ticks: u32,
     /// Round alphanumeric glyphs in the 12-by-20 mode (REQ-RND-012).
     pub rounding: bool,
     /// Require two consecutive Start Box codes (decision E.17).
@@ -282,11 +283,6 @@ pub struct Config {
     pub user_colours: Option<&'static [Rgb12; COLOUR_MAP_ENTRIES]>,
 }
 
-/// Flash shown and hidden durations derived from decision E.12's field
-/// counts at 50 fields per second.
-const FLASH_SHOWN_US: u64 = FLASH_FIELDS_SHOWN * FIELD_PERIOD_US;
-const FLASH_HIDDEN_US: u64 = FLASH_FIELDS_HIDDEN * FIELD_PERIOD_US;
-
 /// Microseconds a page may go unreceived before it is stale: 60 seconds, a
 /// generous multiple of the longest normal magazine cycle.
 const DEFAULT_STALE_AFTER_US: u64 = 60_000_000;
@@ -306,8 +302,8 @@ impl Config {
             rom_variant: None,
             parity_policy: ParityPolicy::KeepLastGood,
             rolling_header: true,
-            flash_shown_us: FLASH_SHOWN_US,
-            flash_hidden_us: FLASH_HIDDEN_US,
+            flash_shown_ticks: FLASH_SHOWN_TICKS,
+            flash_hidden_ticks: FLASH_HIDDEN_TICKS,
             rounding: true,
             double_start_box: true,
             black_colour_codes: true,
