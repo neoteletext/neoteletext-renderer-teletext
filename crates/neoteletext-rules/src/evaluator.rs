@@ -554,7 +554,10 @@ impl Evaluator {
     ///   the sounds, the tracked values, the newest metered report, the
     ///   sub-page shown). It is taken once: every later event of the
     ///   interval and steps 3 to 6 of tick `t` read the same one, and what
-    ///   changes in the world after it is seen by tick `t + 1`.
+    ///   changes in the world after it is seen by tick `t + 1`. The one
+    ///   exception is the metered values, which steps 3 to 5 read from
+    ///   the newest report at the tick, so that a key's arrival never
+    ///   makes a meter a tick late.
     /// - RULE-8: the keys and the pointer are as every event that arrived
     ///   before this one left them, this one included, in arrival order.
     /// - RULE-5 step 2: events are handled in arrival order. One given
@@ -637,7 +640,11 @@ impl Evaluator {
         if self.closed {
             return;
         }
-        self.open(world);
+        if self.opened {
+            self.refresh_metered();
+        } else {
+            self.open(world);
+        }
         self.run_events(world);
         self.run_timers();
         if self.tick == 0 {
@@ -716,6 +723,21 @@ impl Evaluator {
 
     /// Reads one value that is not input state, as a tick begins.
     fn read_snapshot(&self, value: Value, world: &dyn World) -> i32 {
+        if value.space == SPACE_SYNTH && !Self::is_metered(value) {
+            let sound = self.sounds.get(usize::from(value.a)).copied().unwrap_or_default();
+            // RULE-28: another family's sound, or none, reads 0.
+            if !sound.playing || sound.family != value.family() || sound.variant != value.variant() {
+                return 0;
+            }
+            return world.synth(value.a, value.part(), value.class(), value.d);
+        }
+        self.read_held(value)
+    }
+
+    /// Reads one value from what the evaluator itself holds: every value
+    /// but input state and a synthesizer's tracked values, which the
+    /// world gives.
+    fn read_held(&self, value: Value) -> i32 {
         match value.space {
             SPACE_VARIABLE => self.snapshot.variables.get(usize::from(value.a)).copied().unwrap_or(0),
             SPACE_TIMER => {
@@ -750,12 +772,39 @@ impl Evaluator {
                 if !sound.playing || sound.family != value.family() || sound.variant != value.variant() {
                     return 0;
                 }
-                match value.class() {
-                    CLASS_ENVELOPE_STAGE | CLASS_ENVELOPE_LEVEL | CLASS_VOICES => self.read_metered(value),
-                    class => world.synth(value.a, value.part(), class, value.d),
-                }
+                if Self::is_metered(value) { self.read_metered(value) } else { 0 }
             }
             _ => 0,
+        }
+    }
+
+    /// Whether a value is metered by the sound helper (RULE-33): a
+    /// channel's `level`, and a local sound's envelope stage, envelope
+    /// level and voice count.
+    const fn is_metered(value: Value) -> bool {
+        match value.space {
+            SPACE_SOUND => value.b == SOUND_LEVEL,
+            SPACE_SYNTH => matches!(value.class(), CLASS_ENVELOPE_STAGE | CLASS_ENVELOPE_LEVEL | CLASS_VOICES),
+            _ => false,
+        }
+    }
+
+    /// Reads the metered values again, of the newest report (RULE-7 as
+    /// revised): at a tick whose snapshot an arrival took, steps 3 to 5
+    /// read the newest report at the tick, so that a meter is not a tick
+    /// late because a key arrived. Every other value stays as the
+    /// snapshot took it, the sounds a metered value is read through among
+    /// them.
+    fn refresh_metered(&mut self) {
+        for slot in 0..self.index.values.len() {
+            let Some(value) = self.index.values.get(slot).copied() else { continue };
+            if !Self::is_metered(value) {
+                continue;
+            }
+            let reading = self.read_held(value);
+            if let Some(held) = self.readings.get_mut(slot) {
+                *held = reading;
+            }
         }
     }
 

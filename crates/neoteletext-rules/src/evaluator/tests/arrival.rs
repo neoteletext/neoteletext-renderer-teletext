@@ -145,9 +145,10 @@ fn key_state_on_arrival_follows_arrival_order() {
 }
 
 /// RULE-7 as revised (REQ-6526): the snapshot of a tick is taken once,
-/// when the first event of its interval arrives; a metered report, a
-/// sound started and a sub-page shown after it are seen by the next tick,
-/// by the tick's own `becomes` rules as by later arrivals.
+/// when the first event of its interval arrives; a metered report and a
+/// sub-page shown after it are not seen by the interval's later arrivals.
+/// The tick's own `becomes` rule reads the newest metered report at the
+/// tick, the one exception, and the next interval sees both.
 #[test]
 fn the_world_after_the_snapshot_is_seen_by_the_next_tick() {
     let level = Value::sound(0, SOUND_LEVEL);
@@ -168,12 +169,16 @@ fn the_world_after_the_snapshot_is_seen_by_the_next_tick() {
     evaluator.push_now(press_key(3, 'b'), &mut world);
     evaluator.tick(&mut world);
     assert_eq!(world.log.iter().filter(|out| matches!(out, Out::Sound(_))).count(), 0);
-    assert_eq!(world.take_rules(), [2, 2], "tick 1 read the level and the sub-page of its snapshot");
+    assert_eq!(
+        world.take_rules(),
+        [2, 2, 1],
+        "tick 1's arrivals read the sub-page and the level of its snapshot; its `becomes` the newest level"
+    );
     evaluator.push_now(press_key(4, 'a'), &mut world);
     evaluator.push_now(press_key(5, 'b'), &mut world);
     assert_eq!(world.log, [Out::Sound(NOTE_ON_SOUND)]);
     evaluator.tick(&mut world);
-    assert_eq!(world.take_rules(), [1], "tick 2 sees both: the level, and rule 2 off");
+    assert_eq!(world.take_rules(), [0_u8; 0], "tick 2's arrivals see both: the level, and rule 2 off");
 }
 
 /// RULE-5 step 2, RULE-96 (REQ-6526): events are handled in arrival
