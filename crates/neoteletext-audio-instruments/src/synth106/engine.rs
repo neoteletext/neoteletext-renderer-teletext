@@ -845,38 +845,53 @@ impl Synth106 {
 
     /// A tick, and at its turn a frame: the voices take what the keys
     /// and the controls ask.
+    ///
+    /// A key that went down since the last tick is taken at this tick,
+    /// and does not wait for the frame's turn. synth106's frame is 200
+    /// samples, 4.2 ms, and a note that waited for it began up to that
+    /// much after its key and at a different delay for each key: with a
+    /// local sound (page-rules.md RULE-62, RULE-64) a note on given
+    /// before a block of 128 samples first sounded in the block after.
+    /// With nothing sounding, the frames are counted afresh from this
+    /// tick, so the note begins as it does at a frame's turn, with whole
+    /// frames after it, only sooner. With other voices sounding, their
+    /// frames keep their turn and the new voice alone is given a frame
+    /// now: its envelope's first step is then shorter than a frame, by
+    /// the part of the frame already gone.
     fn control(&mut self) {
         let lfo = self.lfo.tick();
         let vibrato = self.vibrato.tick();
+        if self.frame_wait != 0 {
+            let keys = *self.allocator.voices();
+            let struck =
+                |key: &crate::analog::allocator::Voice, seen: u32| key.stage != Stage::Rest && seen != key.triggers;
+            let any_struck = keys.iter().zip(&self.triggers).any(|(key, seen)| struck(key, *seen));
+            let others_rest = keys
+                .iter()
+                .zip(&self.triggers)
+                .zip(&self.voices)
+                .all(|((key, seen), voice)| key.stage == Stage::Rest || (struck(key, *seen) && voice.silent()));
+            if any_struck && others_rest {
+                self.frame_wait = 0;
+            } else if any_struck {
+                let controls = self.controls(lfo, vibrato);
+                for index in 0..VOICES {
+                    let now =
+                        keys.get(index).zip(self.triggers.get(index)).is_some_and(|(key, seen)| struck(key, *seen));
+                    if now {
+                        self.frame_voice(index, controls);
+                    }
+                }
+            }
+        }
         if self.frame_wait == 0 {
             self.frame_wait = match self.model {
                 Model::Synth106 => FRAME_TICKS,
                 Model::Synth60 => 1,
             };
-            // The bender's whole travel either way is so many keys.
-            let range = law::cents(i32::from(self.bend_range_cents));
-            let bend = law::share_of(range, self.bend, PITCH_BEND_CENTRE);
-            let wheel = law::share(law::cents(WHEEL_CENTS), self.wheel);
-            let controls = Controls { lfo, pitch: bend.saturating_add(mul_high(wheel, vibrato) << 2) };
-            let keys = *self.allocator.voices();
-            for (index, ((voice, key), seen)) in self.voices.iter_mut().zip(&keys).zip(&mut self.triggers).enumerate() {
-                if key.stage == Stage::Rest {
-                    continue;
-                }
-                if *seen != key.triggers {
-                    *seen = key.triggers;
-                    voice.start(sounding_key(key.key), &self.settings);
-                }
-                if !key.gate() {
-                    voice.release();
-                }
-                voice.frame(&self.settings, controls);
-                if key.stage == Stage::Released && voice.silent() {
-                    if voice.cutting() {
-                        voice.empty(&self.settings);
-                    }
-                    self.allocator.finished(index);
-                }
+            let controls = self.controls(lfo, vibrato);
+            for index in 0..VOICES {
+                self.frame_voice(index, controls);
             }
         }
         self.frame_wait = self.frame_wait.saturating_sub(1);
@@ -884,6 +899,41 @@ impl Synth106 {
             if key.stage != Stage::Rest {
                 voice.tick(&self.settings, self.law, self.smoothing);
             }
+        }
+    }
+
+    /// What every voice is given at a frame, from the oscillators' places
+    /// at this tick.
+    fn controls(&self, lfo: i32, vibrato: i32) -> Controls {
+        // The bender's whole travel either way is so many keys.
+        let range = law::cents(i32::from(self.bend_range_cents));
+        let bend = law::share_of(range, self.bend, PITCH_BEND_CENTRE);
+        let wheel = law::share(law::cents(WHEEL_CENTS), self.wheel);
+        Controls { lfo, pitch: bend.saturating_add(mul_high(wheel, vibrato) << 2) }
+    }
+
+    /// One voice's frame: it starts if its key was struck since it last
+    /// looked, lets go if its key is up, takes its control voltages, and
+    /// is given back to the keys once it is silent.
+    fn frame_voice(&mut self, index: usize, controls: Controls) {
+        let Some(key) = self.allocator.voices().get(index).copied() else { return };
+        let (Some(voice), Some(seen)) = (self.voices.get_mut(index), self.triggers.get_mut(index)) else { return };
+        if key.stage == Stage::Rest {
+            return;
+        }
+        if *seen != key.triggers {
+            *seen = key.triggers;
+            voice.start(sounding_key(key.key), &self.settings);
+        }
+        if !key.gate() {
+            voice.release();
+        }
+        voice.frame(&self.settings, controls);
+        if key.stage == Stage::Released && voice.silent() {
+            if voice.cutting() {
+                voice.empty(&self.settings);
+            }
+            self.allocator.finished(index);
         }
     }
 
