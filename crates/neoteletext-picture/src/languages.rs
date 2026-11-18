@@ -361,14 +361,28 @@ fn centre(x: usize, y: usize, width: usize, height: usize) -> (i64, i64) {
     (across, up)
 }
 
+/// The entry of a colour map of [`NAPLPS_PALETTE_BITS`] bits that the
+/// `position`th colour of one SET COLOR from entry 0 loads: each colour
+/// after the first goes to the entry after the last by its bit-reversed
+/// increment (section 5.3.2.5.1), so the `position`th goes to `position`
+/// with its bits reversed.
+fn entry_at(position: u8) -> u8 {
+    position.reverse_bits() >> (u8::BITS - NAPLPS_PALETTE_BITS)
+}
+
 /// The picture as NAPLPS: SO, a four-byte domain, the colour map set from
-/// entry 0 in colour mode 1 (SELECT COLOR then one SET COLOR), and each
-/// rectangle filled in its entry from the centre of its bottom-left pixel
-/// to that of its top-right.
+/// entry 0 in colour mode 1 (SELECT COLOR then one SET COLOR, its colours
+/// in the order of the entries they load, up to the last entry used), and
+/// each rectangle filled in its entry from the centre of its bottom-left
+/// pixel to that of its top-right.
 fn naplps_of(picture: &Indexed) -> Vec<u8> {
     let mut out = vec![SHIFT_OUT, DOMAIN, DOMAIN_FOUR_BYTES, SELECT_COLOR, DATA_BIT, SET_COLOR];
-    for &colour in &picture.palette {
-        colour_operand(colour, &mut out);
+    let positions = (0..1_u8 << NAPLPS_PALETTE_BITS).map(|position| (position, usize::from(entry_at(position))));
+    let last =
+        positions.clone().filter(|&(_, entry)| entry < picture.palette.len()).map(|(position, _)| position).max();
+    for (_, entry) in positions.take_while(|&(position, _)| Some(position) <= last) {
+        // An entry no colour of the picture uses is loaded black.
+        colour_operand(picture.palette.get(entry).copied().unwrap_or_default(), &mut out);
     }
     let mut pen = None;
     let mask = (1_i64 << COORDINATE_BITS) - 1;
@@ -387,14 +401,17 @@ fn naplps_of(picture: &Indexed) -> Vec<u8> {
 }
 
 /// Whether `bytes`, drawn by the NAPLPS renderer on the picture's canvas,
-/// give every pixel its index.
+/// give every pixel its index and every index its colour, exactly: a
+/// four-byte colour operand carries each primary's eight bits.
 fn naplps_draws(bytes: &[u8], picture: &Indexed) -> bool {
     let (Ok(width), Ok(height)) = (u32::try_from(picture.width), u32::try_from(picture.height)) else { return false };
     let Ok(mut canvas) = naplps::Canvas::new(width, height) else { return false };
     let mut terminal = naplps::Terminal::new(NAPLPS_PALETTE_BITS);
     terminal.feed(&mut canvas, bytes);
     terminal.finish(&mut canvas);
-    canvas.pixels() == picture.indices.as_slice()
+    let colours_match =
+        (0_u8..).zip(&picture.palette).all(|(index, colour)| terminal.palette().colour(index) == *colour);
+    canvas.pixels() == picture.indices.as_slice() && colours_match
 }
 
 /// Converts the picture in `bytes` to NAPLPS (PAR-9): fitted to the 480 by

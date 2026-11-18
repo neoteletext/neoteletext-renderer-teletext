@@ -96,6 +96,64 @@ fn a_photograph_fits_the_output_bound_in_both_languages() {
     }
 }
 
+/// The mean squared error, per colour component on 0 to 255, of the
+/// photograph's ReGIS and NAPLPS against the picture as fitted, before its
+/// colours were reduced (PAR-9): measured on 19 November 2026 with the
+/// default options and sixteen colours, rounded up to a whole level. The
+/// error is the colour reduction's, since each output draws exactly the
+/// reduced picture; a change of the quantiser or the fit that makes it
+/// worse fails here, and one that makes it better lowers the baseline.
+const REGIS_PHOTOGRAPH_MSE: u64 = 54;
+/// See [`REGIS_PHOTOGRAPH_MSE`].
+const NAPLPS_PHOTOGRAPH_MSE: u64 = 74;
+
+/// The mean squared error, per component, of `drawn`'s colours against
+/// `fitted`'s, rounded up.
+fn mean_squared_error(fitted: &Raster, width: usize, height: usize, drawn: impl Fn(usize, usize) -> [u8; 3]) -> u64 {
+    let mut sum = 0_u64;
+    for y in 0..height {
+        for x in 0..width {
+            let expected = fitted.pixel(x, y).unwrap();
+            for (a, b) in drawn(x, y).iter().zip(expected) {
+                sum += u64::from(a.abs_diff(b)).pow(2);
+            }
+        }
+    }
+    sum.div_ceil((width * height * 3) as u64)
+}
+
+// PAR-9: the photograph's output, drawn by each renderer, is measured
+// against the picture as fitted; the mean squared error is the recorded
+// baseline and must not grow.
+#[test]
+fn a_photograph_draws_within_its_measured_error() {
+    let options = PictureOptions::default();
+    let photograph = photograph();
+    let picture = decode::decode(&photograph, &options.options).unwrap();
+    let regis_fitted = fitted(&picture, &options.options, REGIS_WIDTH, REGIS_HEIGHT, 1.0);
+    let regis = to_regis(&photograph, &options).unwrap();
+    let mut screen = regis::Screen::new();
+    let mut terminal = regis::Terminal::new();
+    let _ = terminal.feed(&mut screen, &regis);
+    let _ = terminal.finish(&mut screen);
+    let shown = screen.displayed();
+    let regis_error = mean_squared_error(&regis_fitted, REGIS_WIDTH, REGIS_HEIGHT, |x, y| {
+        terminal.palette().colour(shown.pixel(x as u32, y as u32).unwrap())
+    });
+    let naplps_fitted = fitted(&picture, &options.options, NAPLPS_WIDTH, NAPLPS_HEIGHT, NAPLPS_WIDEN);
+    let naplps = to_naplps(&photograph, &options).unwrap();
+    let mut canvas = naplps::Canvas::new(NAPLPS_WIDTH as u32, NAPLPS_HEIGHT as u32).unwrap();
+    let mut terminal = naplps::Terminal::new(NAPLPS_PALETTE_BITS);
+    terminal.feed(&mut canvas, &naplps);
+    terminal.finish(&mut canvas);
+    let naplps_error = mean_squared_error(&naplps_fitted, NAPLPS_WIDTH, NAPLPS_HEIGHT, |x, y| {
+        terminal.palette().colour(canvas.pixels()[y * NAPLPS_WIDTH + x])
+    });
+    println!("mean squared error: regis {regis_error}, naplps {naplps_error}");
+    assert!(regis_error <= REGIS_PHOTOGRAPH_MSE, "regis {regis_error}");
+    assert!(naplps_error <= NAPLPS_PHOTOGRAPH_MSE, "naplps {naplps_error}");
+}
+
 // PAR-9: colours outside 2 to 16 are refused.
 #[test]
 fn colours_outside_two_to_sixteen_are_refused() {
