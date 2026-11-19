@@ -33,6 +33,7 @@ fuzz_target!(|data: &[u8]| {
         upscale: !bit(2, 1),
         focus: if bit(2, 2) { Focus::Detail } else { Focus::Align },
         keep_header: bit(2, 3),
+        keep_footer: bit(2, 4),
         objects: false,
     };
     if let Ok(page) = convert(picture, &options) {

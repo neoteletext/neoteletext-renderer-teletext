@@ -178,6 +178,16 @@ commit_steps() {
     step "clippy, warnings as errors (REQ-GEN-006)"
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+    # The fuzz targets are a workspace of their own, which the clippy above
+    # never reads. Built only by the full gate's fuzzing on the Linux host,
+    # two targets stopped compiling and went through the commit and push
+    # gates unseen (TODO-6855): a fuzz target is code, and compiles clean
+    # on every commit like the rest.
+    step "clippy of the fuzz workspace with its pinned nightly, warnings as errors: every fuzz target compiles (REQ-TST-040)"
+    rustup toolchain list | grep "^$FUZZ_NIGHTLY" >/dev/null ||
+        fail "the fuzz nightly $FUZZ_NIGHTLY is not installed, so this gate cannot run; run scripts/tools.sh to install it"
+    (cd fuzz && cargo "+$FUZZ_NIGHTLY" clippy --all-targets --quiet -- -D warnings)
+
     step "the no-panic lint list is the same in every crate root (REQ-SEC-003, DEVELOPMENT.md section 6)"
     check_no_panic_lists
 
