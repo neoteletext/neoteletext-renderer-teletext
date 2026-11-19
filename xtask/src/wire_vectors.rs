@@ -1,7 +1,8 @@
 //! `wire-vectors`: the rows of neoteletext-common's `wire-vectors.tsv` that
 //! the page rule table and animation added, at push protocol 10
 //! (page-rules.md RULE-85, animation.md ANIM-23), and those renderer parity
-//! added (renderer-parity.md PAR-44), written from the engine's own
+//! added (renderer-parity.md PAR-44), and those of tab thumbnails'
+//! snapshot request (tab-thumbnails.md section 3), written from the engine's own
 //! encoders so that their bytes are never typed by hand. The rows are
 //! printed in the table's form, and a test holds that the copy of the table
 //! the engine keeps has exactly these rows of these kinds, and of the kinds
@@ -24,6 +25,7 @@ use neoteletext_rules::table::{SOUND_LEVEL, Table, Target, Value, default_send_a
 use neoteletext_web::records::{animate, body_check, commands, frame, naplps_objects, rules, sheet, sprites};
 
 mod parity;
+mod snapshot;
 
 /// The kinds of row this command writes every row of, in the order the
 /// table has them.
@@ -31,7 +33,7 @@ mod parity;
 const KINDS: [&str; 8] =
     ["rules", "command", "rule_event", "page_state", "rules_fault", "records", "object", "picture_text"];
 /// The kinds of row this command writes some rows of: renderer parity's
-/// HELLO and WELCOME (PAR-44) among rows written before the engine wrote
+/// HELLO and WELCOME (PAR-44) and the snapshot's (REQ-6879) among rows written before the engine wrote
 /// any, which its wire-vector test holds to the engine's reader and writer.
 #[cfg(test)]
 const SOME_OF_KINDS: [&str; 2] = ["input", "record"];
@@ -475,7 +477,9 @@ fn object(rows: &mut Vec<Row>) -> Result<(), String> {
 pub fn rows() -> Result<Vec<Row>, String> {
     let mut rows = Vec::new();
     parity::hello(&mut rows)?;
+    snapshot::hello(&mut rows)?;
     parity::welcome(&mut rows)?;
+    snapshot::welcome(&mut rows)?;
     images(&mut rows)?;
     parity::group_table(&mut rows)?;
     command_bodies(&mut rows)?;

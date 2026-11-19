@@ -46,7 +46,27 @@ pub const REGIS_CAP: u32 = 1 << 23;
 /// receiver drops the NAPLPS and `NAPLPS_OBJECTS` records on a connection
 /// whose WELCOME did not agree it.
 pub const NAPLPS_CAP: u32 = 1 << 24;
+/// Capability: the receiver asks for one page as a stranger sees it and
+/// nothing else (REQ-6879 item 1, DEC-6875 item 3; neoteletext-common
+/// `docs/tab-thumbnails.md` section 3). A channel that agrees it creates no
+/// viewer, sends no viewer-state challenge, tells its program no connection
+/// exists (the program may be asked to draw the page for no one in
+/// particular, a request that names no connection and no viewer), answers
+/// one SELECT with that page or DENIED, and closes. The lowest free bit:
+/// 23 and 24 are the picture languages'. A receiver that offers it closes
+/// at once, with a normal close, when WELCOME does not agree it
+/// ([`crate::snapshot::welcome_agrees_snapshot`]), so a channel that does
+/// not know the bit, and so never agrees it, makes no viewer of it.
+pub const SNAPSHOT_CAP: u32 = 1 << 25;
+/// What a snapshot receiver offers (REQ-6879 item 2): SNAPSHOT, SELECT and
+/// both picture languages; never CURSOR, TOUCH, RESUME or AGENT, so that
+/// HELLO carries no user agent text and nothing can be resumed.
+pub const SNAPSHOT_OFFER: u32 = SNAPSHOT_CAP | SELECT_CAP | REGIS_CAP | NAPLPS_CAP;
 /// Every capability defined.
-pub const ALL_CAPS: u32 = CURSOR_CAP | AGENT | TOUCH_CAP | RESUME_CAP | SELECT_CAP | REGIS_CAP | NAPLPS_CAP;
+pub const ALL_CAPS: u32 =
+    CURSOR_CAP | AGENT | TOUCH_CAP | RESUME_CAP | SELECT_CAP | REGIS_CAP | NAPLPS_CAP | SNAPSHOT_CAP;
 // A retired bit is never a capability.
 const _: () = assert!(ALL_CAPS & (RETIRED_MODE_BITS | RETIRED_ECHO_BIT | RETIRED_PAGE_BIT) == 0);
+// A snapshot receiver offers nothing that identifies or resumes it
+// (REQ-6879 item 2).
+const _: () = assert!(SNAPSHOT_OFFER & (CURSOR_CAP | TOUCH_CAP | RESUME_CAP | AGENT) == 0);

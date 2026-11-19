@@ -81,15 +81,21 @@ fn input(vector: &Vector<'_>) {
         .unwrap_or_else(|error| panic!("{}: {error:?}", vector.name));
     assert_eq!(read.join(", "), vector.meaning, "{}", vector.name);
     if !vector.name.starts_with("skipped") {
-        let mut items = 0;
+        // Each item writes back to its own bytes, one after another: the
+        // snapshot request is HELLO then SELECT in one message (REQ-6879).
+        let mut written = Vec::new();
         read_message(&message, &mut |item| {
             let mut out = [0; neoteletext_input::MAX_MESSAGE];
             let length = write(&item, &mut out).unwrap();
-            assert_eq!(out[..length], message[..], "{} writes back", vector.name);
-            items += 1;
+            written.extend_from_slice(&out[..length]);
         })
         .unwrap();
-        assert_eq!(items, 1, "{}", vector.name);
+        assert_eq!(written, message, "{} writes back", vector.name);
+    }
+    if vector.name == "hello_snapshot" {
+        let mut out = [0; neoteletext_input::MAX_MESSAGE];
+        let length = neoteletext_input::snapshot::write_request(0x100, SUBCODE_ANY, &mut out).unwrap();
+        assert_eq!(out[..length], message[..], "the snapshot request's writer");
     }
 }
 

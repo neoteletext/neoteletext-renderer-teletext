@@ -8,6 +8,8 @@
 //! - [`event`]: the input stream, receiver to channel, over [`wire`]'s
 //!   primitives, with [`keys`]' functional codes and [`names`]' W3C table.
 //! - [`caps`]: the capabilities a receiver offers and a channel agrees.
+//! - [`snapshot`]: the request a receiver sends for one page as a stranger
+//!   sees it, and its test of WELCOME (REQ-6879).
 //! - [`cursor`] and [`control`]: the channel's records, of the audio
 //!   profile's frame on the same independent data lines.
 //! - [`session`]: a receiver's side of one session, the rate limit with it,
@@ -85,6 +87,7 @@ pub mod names;
 pub mod pace;
 pub mod rules;
 pub mod session;
+pub mod snapshot;
 pub mod state;
 pub mod wire;
 
