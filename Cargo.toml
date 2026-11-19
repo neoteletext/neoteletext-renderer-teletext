@@ -58,11 +58,11 @@ embedded-io = { version = "0.7.1", default-features = false }
 # the application crates' picture drawing. Pinned at their `parity-2`
 # commits through `file://` sources until those are pushed, then at the
 # same commits on GitHub (TODO-6786).
-regis = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2" }
-regis-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2" }
-regis-minify = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2" }
-naplps = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "016a83cb0859343154db06a7661b500c542d0946" }
-naplps-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "016a83cb0859343154db06a7661b500c542d0946" }
+regis = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "e4e6c6ae7634728c8dddaa28bdc5c3a9eee61110" }
+regis-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "e4e6c6ae7634728c8dddaa28bdc5c3a9eee61110" }
+regis-minify = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "e4e6c6ae7634728c8dddaa28bdc5c3a9eee61110" }
+naplps = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "c65f5898c68eb8d73528a58618a6582944d85d2e" }
+naplps-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "c65f5898c68eb8d73528a58618a6582944d85d2e" }
 
 [workspace.lints.rust]
 # REQ-SEC-015: only the C interface crate (REQ-GEN-018) may contain unsafe

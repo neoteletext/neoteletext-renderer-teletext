@@ -519,7 +519,7 @@ dependencies = [
 [[package]]
 name = "naplps"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=016a83cb0859343154db06a7661b500c542d0946#016a83cb0859343154db06a7661b500c542d0946"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=c65f5898c68eb8d73528a58618a6582944d85d2e#c65f5898c68eb8d73528a58618a6582944d85d2e"
 
 [[package]]
 name = "neoteletext-app"
@@ -799,12 +799,12 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 [[package]]
 name = "regis"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2#9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=e4e6c6ae7634728c8dddaa28bdc5c3a9eee61110#e4e6c6ae7634728c8dddaa28bdc5c3a9eee61110"
 
 [[package]]
 name = "regis-minify"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2#9c1a162cc1a8d17d727e19fa9a2253dee7f8bcc2"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=e4e6c6ae7634728c8dddaa28bdc5c3a9eee61110#e4e6c6ae7634728c8dddaa28bdc5c3a9eee61110"
 dependencies = [
  "regis",
 ]

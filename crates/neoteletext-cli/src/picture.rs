@@ -287,6 +287,14 @@ fn draw_naplps_with(bytes: &[u8], fonts: &Fonts, objects: Option<&ObjectLayer>) 
             terminal.set_objects(&objects.objects).map_err(|error| format!("the NAPLPS objects: {error:?}"))?;
             let mut presented = naplps::Canvas::new(width, lines).map_err(|error| format!("{error:?}"))?;
             terminal.compose(&canvas, &mut presented).map_err(|error| format!("{error:?}"))?;
+            // A compose that met the renderer's per-compose work bound
+            // (naplps::limits::MAX_COMPOSE_WORK, DEC-6851) shows only the
+            // objects it paid for, as the browser does.
+            let (spent, stopped) = terminal.compose_work();
+            if stopped {
+                findings.lines.push(format!("the objects' drawing stopped at the work bound, after {spent} units"));
+                findings.refused = true;
+            }
             presented
         }
         None => canvas,
