@@ -334,11 +334,21 @@ const REGIS_UNIT_WIDTH_STEP: u32 = 8;
 const REGIS_UNIT_WIDTH: u32 = REGIS_SHAPED_WIDTH.div_ceil(REGIS_UNIT_WIDTH_STEP) * REGIS_UNIT_WIDTH_STEP;
 const _: () = assert!(REGIS_UNIT_WIDTH <= REGIS_CELL, "the unit cell fits its display cell");
 /// The NAPLPS cell of PAR-10: 1/40 of the unit screen wide and 20 raster
-/// lines high, written at a three-byte operand's precision (eight bits of
-/// fraction); row `r` drawn from the foot of its raster lines 20 r to
+/// lines high; row `r` drawn from the foot of its raster lines 20 r to
 /// 20 r + 19, the field's origin being its lower left corner.
 const NAPLPS_ROW_LINES: u32 = 20;
-const NAPLPS_FRACTION_BITS: u32 = 8;
+/// Multi-value operands are written in four bytes, after DOMAIN selects
+/// them (ANSI X3.110-1983 section 5.3.2.2.3, Table 5; DEC-6849, as the
+/// kits write them): three bits of each axis a byte (Figure 11), twelve an
+/// axis, the first the sign, so eleven of fraction, a step of 1/2048 of
+/// the unit screen. At the default three bytes the field's width 1/40 was
+/// 6/256, 11.25 dots of the 12-dot cell, and NAPLPS advances by the field
+/// after each character, so the 40th character of a row was drawn 29 dots
+/// left of its cell; in four bytes it is 51/2048, 11.95 dots (TODO-6852).
+const NAPLPS_OPERAND_BYTES: u32 = 4;
+const NAPLPS_AXIS_BITS_PER_BYTE: u32 = 3;
+const NAPLPS_AXIS_BYTE_MASK: u64 = (1 << NAPLPS_AXIS_BITS_PER_BYTE) - 1;
+const NAPLPS_FRACTION_BITS: u32 = NAPLPS_OPERAND_BYTES * NAPLPS_AXIS_BITS_PER_BYTE - 1;
 /// The unit screen's height, 25/32 of its width, as the NAPLPS renderer
 /// maps it onto its canvas.
 const UNIT_HEIGHT_NUMERATOR: u64 = 25;
@@ -349,6 +359,14 @@ const UNIT_HEIGHT_DENOMINATOR: u64 = 32;
 const SHIFT_OUT: u8 = 0x0E;
 const SHIFT_IN: u8 = 0x0F;
 const NAPLPS_RESET_CLEAR: [u8; 3] = [0x20, 0x48, 0x40];
+/// DOMAIN (section 5.3.2.2): its fixed-format byte (Figure 14) gives
+/// single-value operands of one byte (b2 b1 zero), multi-value operands of
+/// [`NAPLPS_OPERAND_BYTES`] (b5 b4 b3, the length less one) and two
+/// dimensions (b6 zero); then the logical pel, (0, 0), in that length.
+const NAPLPS_DOMAIN: u8 = 0x21;
+const NAPLPS_MULTI_VALUE_LENGTH_SHIFT: u32 = 2;
+const NAPLPS_DOMAIN_FORMAT: u8 = DATA_BIT | ((NAPLPS_OPERAND_BYTES as u8 - 1) << NAPLPS_MULTI_VALUE_LENGTH_SHIFT);
+const _: () = assert!(NAPLPS_DOMAIN_FORMAT == 0x4C, "DOMAIN 2/1 4/12, as PAR-40 gives the kits' builder");
 const NAPLPS_TEXT: u8 = 0x22;
 const NAPLPS_POINT_SET: u8 = 0x24;
 const DATA_BIT: u8 = 0x40;
@@ -427,25 +445,28 @@ pub fn regis_page(rows: &[Vec<neoteletext_formats::picture_text::Stretch>]) -> R
     Ok(out)
 }
 
-/// A unit-screen fraction `numerator / denominator` as a three-byte
-/// operand's nine bits, the first the sign.
-fn nine_bits(numerator: u64, denominator: u64) -> u64 {
+/// A unit-screen fraction `numerator / denominator` as an operand's axis
+/// of [`NAPLPS_FRACTION_BITS`] bits of fraction after the sign, held one
+/// step short of the unit (the sign bit leaves the unit itself out).
+fn axis(numerator: u64, denominator: u64) -> u64 {
     let scaled = numerator.saturating_mul(1 << NAPLPS_FRACTION_BITS);
     scaled.saturating_add(denominator / 2).checked_div(denominator).unwrap_or(0).min((1 << NAPLPS_FRACTION_BITS) - 1)
 }
 
-/// A two-dimensional three-byte operand of `x` and `y` (nine bits each,
-/// three a byte, high bits first: section 5.3.2.2.5).
+/// A two-dimensional operand of `x` and `y` in [`NAPLPS_OPERAND_BYTES`]
+/// bytes, three bits of each a byte, high bits first (section 5.3.2.2.5,
+/// Figure 11).
 fn operand(x: u64, y: u64, out: &mut Vec<u8>) {
-    for shift in [6_u32, 3, 0] {
-        let part = |value: u64| u8::try_from((value >> shift) & 0b111).unwrap_or(0);
-        out.push(DATA_BIT | (part(x) << 3) | part(y));
+    for byte in (0..NAPLPS_OPERAND_BYTES).rev() {
+        let shift = byte.saturating_mul(NAPLPS_AXIS_BITS_PER_BYTE);
+        let part = |value: u64| u8::try_from((value >> shift) & NAPLPS_AXIS_BYTE_MASK).unwrap_or(0);
+        out.push(DATA_BIT | (part(x) << NAPLPS_AXIS_BITS_PER_BYTE) | part(y));
     }
 }
 
-/// A page of rows as a NAPLPS picture (PAR-10): the screen cleared, the
-/// field of PAR-10, each row a text part at its place, SO before each
-/// PDI.
+/// A page of rows as a NAPLPS picture (PAR-10): the screen cleared,
+/// DOMAIN selecting four-byte operands, the field of PAR-10, each row a
+/// text part at its place, SO before each PDI.
 ///
 /// # Errors
 ///
@@ -455,10 +476,13 @@ pub fn naplps_page(rows: &[Vec<neoteletext_formats::picture_text::Stretch>]) -> 
     let unit_lines = lines.saturating_mul(UNIT_HEIGHT_DENOMINATOR);
     let mut out = vec![SHIFT_OUT];
     out.extend_from_slice(&NAPLPS_RESET_CLEAR);
+    // After RESET, which restores the default domain (section 5.3.2.9).
+    out.extend_from_slice(&[NAPLPS_DOMAIN, NAPLPS_DOMAIN_FORMAT]);
+    operand(0, 0, &mut out);
     out.push(NAPLPS_TEXT);
     out.extend_from_slice(&NAPLPS_TEXT_FORMAT);
     let field_high = u64::from(NAPLPS_ROW_LINES).saturating_mul(UNIT_HEIGHT_NUMERATOR);
-    operand(nine_bits(1, u64::from(TEXT_COLUMNS)), nine_bits(field_high, unit_lines), &mut out);
+    operand(axis(1, u64::from(TEXT_COLUMNS)), axis(field_high, unit_lines), &mut out);
     let first = u64::try_from(NAPLPS_FIRST_LINE).unwrap_or(0);
     for (row, stretches) in (FIRST_TEXT_ROW..).zip(rows) {
         // The point is the character field's origin, its lower left corner
@@ -471,7 +495,7 @@ pub fn naplps_page(rows: &[Vec<neoteletext_formats::picture_text::Stretch>]) -> 
         let up = lines.saturating_sub(1).saturating_sub(line).saturating_mul(UNIT_HEIGHT_NUMERATOR);
         out.push(SHIFT_OUT);
         out.push(NAPLPS_POINT_SET);
-        operand(0, nine_bits(up, unit_lines), &mut out);
+        operand(0, axis(up, unit_lines), &mut out);
         out.push(SHIFT_IN);
         neoteletext_formats::picture_text::naplps(stretches, &mut out).map_err(|error| error.to_string())?;
     }
@@ -1106,6 +1130,37 @@ mod tests {
         assert!(lines.iter().all(|line| (1..=2).contains(&row_of(line))), "{lines:?}");
         assert!(lines.iter().any(|line| row_of(line) == 1), "{lines:?}");
         assert!(lines.iter().any(|line| row_of(line) == 2), "{lines:?}");
+    }
+
+    // PAR-10, TODO-6852, DEC-6849: the field is 51/2048 of the unit screen
+    // wide in four-byte operands, 11.95 dots, so a row's characters keep to
+    // their cells along its 40 columns, the 40th 39 × 0.047 = 1.83 dots
+    // short, two once rounded to the canvas (and a dot from column 21).
+    // At three bytes it was 6/256, three quarters of a dot short a
+    // character, and the 40th character was drawn 29 dots left of its cell.
+    #[test]
+    fn naplps_text_pages_keep_each_character_in_its_column() {
+        let rows = wrap(&"H".repeat(40), None).unwrap();
+        let (raster, found) = draw(Language::Naplps, &naplps_page(&rows).unwrap(), &Fonts::default()).unwrap();
+        assert!(!found.refused, "{found:?}");
+        let background = raster.indices[0];
+        let lit: Vec<usize> = (0..raster.width)
+            .filter(|&x| raster.indices.chunks(raster.width).any(|row| row[x] != background))
+            .collect();
+        // Each H is a run of lit dots apart from the next.
+        let mut lefts = vec![lit[0]];
+        lefts.extend(lit.windows(2).filter(|pair| pair[1] > pair[0] + 1).map(|pair| pair[1]));
+        assert_eq!(lefts.len(), 40, "{lefts:?}");
+        let bearing = lefts[0];
+        // 1/40 is no binary fraction: four bytes leave the line's end two dots short.
+        let most_drift = 2;
+        for (column, left) in lefts.iter().enumerate() {
+            let cell = CELL_WIDTH * column + bearing;
+            assert!(
+                left.abs_diff(cell) <= most_drift,
+                "column {column} drawn from dot {left}, its cell's from {cell}: {lefts:?}"
+            );
+        }
     }
 
     // PAR-31: a ReGIS picture is stacked between rows 0 and 24 at its
