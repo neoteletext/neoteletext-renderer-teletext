@@ -519,7 +519,7 @@ dependencies = [
 [[package]]
 name = "naplps"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=60338575eca7e7489dcf6f57e120465a2a1e2958#60338575eca7e7489dcf6f57e120465a2a1e2958"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=a96be84e03fc064c5aa76eb87862c46e3f507ea0#a96be84e03fc064c5aa76eb87862c46e3f507ea0"
 
 [[package]]
 name = "neoteletext-app"
