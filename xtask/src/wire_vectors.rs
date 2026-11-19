@@ -24,6 +24,7 @@ use neoteletext_rules::state::{PageState, SequenceState, TableState, TimerState}
 use neoteletext_rules::table::{SOUND_LEVEL, Table, Target, Value, default_send_all};
 use neoteletext_web::records::{animate, body_check, commands, frame, naplps_objects, rules, sheet, sprites};
 
+mod magazine;
 mod parity;
 mod snapshot;
 
@@ -478,8 +479,10 @@ pub fn rows() -> Result<Vec<Row>, String> {
     let mut rows = Vec::new();
     parity::hello(&mut rows)?;
     snapshot::hello(&mut rows)?;
+    magazine::hello(&mut rows)?;
     parity::welcome(&mut rows)?;
     snapshot::welcome(&mut rows)?;
+    magazine::welcome(&mut rows)?;
     images(&mut rows)?;
     parity::group_table(&mut rows)?;
     command_bodies(&mut rows)?;

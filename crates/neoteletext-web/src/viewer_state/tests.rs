@@ -18,10 +18,36 @@ fn hex(text: &str) -> Vec<u8> {
 }
 
 fn signed(lifetime: Lifetime, challenge: &[u8; CHALLENGE_BYTES], identity: &str) -> Result<Vec<u8>, StateError> {
+    signed_under(neoteletext_input::VERSION, lifetime, challenge, identity)
+}
+
+fn signed_under(
+    version: u32,
+    lifetime: Lifetime,
+    challenge: &[u8; CHALLENGE_BYTES],
+    identity: &str,
+) -> Result<Vec<u8>, StateError> {
     let identity = ChannelIdentity::read(identity)?;
     let mut out = [0_u8; MAX_SIGNED_BYTES];
-    let length = signed_bytes(Algorithm::Ed25519, lifetime, challenge, &identity, &mut out)?;
+    let length = signed_bytes(version, Algorithm::Ed25519, lifetime, challenge, &identity, &mut out)?;
     Ok(out[..length].to_vec())
+}
+
+/// VS-203 item 2, DEC-6953 item 2: the bytes name the connection's version,
+/// so a proof made under version 10 is no proof under 11, and a version not
+/// spoken signs nothing.
+#[test]
+fn the_signed_bytes_name_the_connections_version() {
+    let challenge = counting_challenge();
+    let under = |version| signed_under(version, Lifetime::Visit, &challenge, "https://example.org/news/");
+    let (newest, oldest) = (under(11).unwrap(), under(10).unwrap());
+    let version_at = SIGNED_DOMAIN.len() + 1;
+    assert_eq!((newest[version_at], oldest[version_at]), (11, 10));
+    assert_eq!(newest[..version_at], oldest[..version_at]);
+    assert_eq!(newest[version_at + 1..], oldest[version_at + 1..]);
+    for version in [0, 9, 12, 266] {
+        assert_eq!(under(version), Err(StateError::Version), "{version}");
+    }
 }
 
 /// VS-203: the signed bytes are exactly the domain and a zero byte, the
@@ -32,14 +58,13 @@ fn signed(lifetime: Lifetime, challenge: &[u8; CHALLENGE_BYTES], identity: &str)
 fn the_signed_bytes_are_exactly_vs_203s() {
     // "NeoTeletext viewer state v1", 0; then the version, written in below.
     let mut expected = hex("4e656f54656c65746578742076696577657220737461746520763100");
-    expected.push(SIGNED_VERSION);
+    expected.push(u8::try_from(neoteletext_input::VERSION).unwrap());
     // Ed25519, remembered; the challenge 0 to 31; 25 bytes of identity.
     expected.extend(hex("0101000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0019\
          68747470733a2f2f6578616d706c652e6f72672f6e6577732f"));
     let bytes = signed(Lifetime::Remembered, &counting_challenge(), "https://example.org/news/").unwrap();
     assert_eq!(bytes, expected);
     assert_eq!(bytes.len(), SIGNED_PREFIX_BYTES + "https://example.org/news/".len());
-    assert_eq!(SIGNED_VERSION, u8::try_from(neoteletext_input::VERSION).unwrap(), "the push protocol's version");
 }
 
 /// VS-203: changing any one field changes the bytes, so a proof for one

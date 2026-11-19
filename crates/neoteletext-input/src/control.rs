@@ -12,7 +12,7 @@ use neoteletext_audio::record::{RecordError, framed_length, record_length, split
 use neoteletext_core::packet::Packet;
 
 use crate::TOKEN_BYTES;
-use crate::caps::{ALL_CAPS, RESUME_CAP, RETIRED_ECHO_BIT, RETIRED_MODE_BITS};
+use crate::caps::{ALL_CAPS, RESUME_CAP, RETIRED_ECHO_BIT, RETIRED_MODE_BITS, agreeable};
 use crate::carriage::input_record;
 use crate::event::{EVENT, FIRST_EXTENSION, LAST_EXTENSION};
 use crate::wire::{Reader, WireError, Writer};
@@ -113,7 +113,9 @@ pub fn read_body(body: &[u8]) -> Result<Control<'_>, ControlError> {
             // An older channel may still agree the input modes' bits and
             // echo's.
             let caps = reader.uv()? & !(RETIRED_MODE_BITS | RETIRED_ECHO_BIT);
-            if caps & !ALL_CAPS != 0 {
+            // A bit no capability is, or SNAPSHOT agreed with magazine
+            // music (REQ-6927 item 4).
+            if caps & !ALL_CAPS != 0 || !agreeable(caps) {
                 return Err(ControlError::BadValue("caps"));
             }
             let resume = if caps & RESUME_CAP == 0 { None } else { Some(read_resumption(&mut reader)?) };
@@ -256,10 +258,10 @@ mod tests {
     }
 
     // Renderer parity PAR-1 (REQ-6761): WELCOME agreeing each picture bit
-    // round-trips; bit 26, which no capability is, is refused (bit 25 is
-    // SNAPSHOT's, REQ-6879).
+    // round-trips; bit 27, which no capability is, is refused (bit 25 is
+    // SNAPSHOT's, REQ-6879, and bit 26 magazine music's, REQ-6927).
     #[test]
-    fn welcome_agrees_the_picture_bits_and_refuses_bit_26() {
+    fn welcome_agrees_the_picture_bits_and_refuses_bit_27() {
         for caps in [REGIS_CAP, NAPLPS_CAP, REGIS_CAP | NAPLPS_CAP | CURSOR_CAP] {
             let control = Control::Welcome { version: 3, caps, resume: None };
             let mut body = [0; MAX_BODY];
@@ -270,7 +272,39 @@ mod tests {
             read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x0C]),
             Ok(Control::Welcome { version: 3, caps: REGIS_CAP | NAPLPS_CAP, resume: None })
         );
-        assert_eq!(read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x20]), Err(ControlError::BadValue("caps")));
+        assert_eq!(read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x40]), Err(ControlError::BadValue("caps")));
+    }
+
+    // REQ-6927 items 1 and 4: bit 26 is MAGAZINE_SOUND_CAP, 67,108,864, a
+    // capability and no retired bit; a WELCOME agreeing it is read, and one
+    // agreeing it with SNAPSHOT (bit 25) is refused, read or written.
+    #[test]
+    fn welcome_agrees_magazine_sound_at_bit_26_but_never_with_snapshot() {
+        use crate::caps::{
+            MAGAZINE_SOUND_CAP, RETIRED_ECHO_BIT, RETIRED_MODE_BITS, RETIRED_PAGE_BIT, SELECT_CAP, SNAPSHOT_CAP,
+            SNAPSHOT_OFFER, caps_of,
+        };
+        assert_eq!(MAGAZINE_SOUND_CAP, 67_108_864);
+        assert_eq!(MAGAZINE_SOUND_CAP, 1 << 26);
+        assert_eq!(ALL_CAPS & MAGAZINE_SOUND_CAP, MAGAZINE_SOUND_CAP);
+        assert_eq!(ALL_CAPS & (RETIRED_MODE_BITS | RETIRED_ECHO_BIT | RETIRED_PAGE_BIT), 0);
+        assert_eq!(SNAPSHOT_OFFER & MAGAZINE_SOUND_CAP, 0);
+        // Version 11 has it and version 10 has not (REQ-6927 item 2).
+        assert_eq!(caps_of(11), ALL_CAPS);
+        assert_eq!(caps_of(10), ALL_CAPS & !MAGAZINE_SOUND_CAP);
+        let agreed = Control::Welcome { version: 11, caps: SELECT_CAP | MAGAZINE_SOUND_CAP, resume: None };
+        let mut body = [0; MAX_BODY];
+        let length = write_body(&agreed, &mut body).unwrap();
+        assert_eq!(read_body(&body[..length]), Ok(agreed));
+        assert_eq!(
+            read_body(&[0xFF, WELCOME, 11, 0x80, 0x80, 0x80, 0x20])
+                .map(|control| control == Control::Welcome { version: 11, caps: MAGAZINE_SOUND_CAP, resume: None }),
+            Ok(true)
+        );
+        // Bits 25 and 26 together: 0x0600_0000.
+        assert_eq!(read_body(&[0xFF, WELCOME, 11, 0x80, 0x80, 0x80, 0x30]), Err(ControlError::BadValue("caps")));
+        let both = Control::Welcome { version: 11, caps: SNAPSHOT_CAP | MAGAZINE_SOUND_CAP, resume: None };
+        assert_eq!(write_body(&both, &mut body), Err(ControlError::BadValue("caps")));
     }
 
     // REQ-INT-111, decision E.125: an older channel's mode records and mode
@@ -316,7 +350,10 @@ mod tests {
     fn welcome_carries_the_session_with_resume() {
         let token = [7_u8; TOKEN_BYTES];
         for taken in [None, Some(0xFFFF), Some(1)] {
-            let welcome = Control::Welcome { version: 3, caps: ALL_CAPS, resume: Some(Resumption { token, taken }) };
+            // Every capability that may be agreed together: SNAPSHOT is
+            // never agreed with magazine music (REQ-6927 item 4).
+            let caps = ALL_CAPS & !crate::caps::SNAPSHOT_CAP;
+            let welcome = Control::Welcome { version: 3, caps, resume: Some(Resumption { token, taken }) };
             let mut out = [0_u8; MAX_BODY];
             let length = write_body(&welcome, &mut out).unwrap();
             assert_eq!(read_body(&out[..length]), Ok(welcome));

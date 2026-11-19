@@ -325,6 +325,14 @@ pub enum Event<'a> {
         /// The host.
         host: &'a str,
     },
+    /// The push connection is about to be reported open, and speaks this
+    /// version of the input protocol (DEC-6953 items 1 and 2): the one its
+    /// WebSocket subprotocol named, `neoteletext_input::OLDEST_VERSION` to
+    /// `neoteletext_input::VERSION`. It comes just before
+    /// [`Event::PushConnected`]; the port tells its input session
+    /// (`SessionOf::set_version`) before the session writes HELLO, and
+    /// signs a viewer-state proof under it.
+    PushVersion(u32),
     /// The push connection is open.
     PushConnected,
     /// A request on the fetch connection was answered (REQ-WEB-033): for a

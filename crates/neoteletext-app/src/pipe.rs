@@ -152,6 +152,10 @@ pub enum Notice {
     /// Keys may go to the channel now (true) or not (false): its push
     /// WebSocket opened or closed, and its descriptor declares input.
     Input(bool),
+    /// The input protocol version the push connection speaks (DEC-6953
+    /// items 1 and 2), sent before the [`Notice::Input`] that says keys may
+    /// go: a port tells its input session before the session writes HELLO.
+    PushVersion(u32),
     /// A part of page `0xMPP`'s list of sub-pages (REQ-1888), read and
     /// checked by the fetcher: its rows' sub-codes, in the list's ascending
     /// order, at most [`MAX_LIST_ROWS`].

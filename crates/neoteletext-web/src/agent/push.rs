@@ -7,7 +7,7 @@ use super::{Event, Failure, Output, PushPhase, PushProblem, PushStop, Sink, User
 use crate::bytes::{Overflow, Writer};
 use crate::consts::{
     CRLF, OPCODE_PING, PUSH_PING_AFTER_US, PUSH_PONG_WITHIN_US, PUSH_RETRY_FIRST_US, PUSH_RETRY_MAX_US,
-    PUSH_SUBPROTOCOL, ROUND_TRIP_EVERY_US, STATUS_CLIENT_ERROR_FIRST, STATUS_SERVER_ERROR_FIRST,
+    PUSH_SUBPROTOCOLS, ROUND_TRIP_EVERY_US, STATUS_CLIENT_ERROR_FIRST, STATUS_SERVER_ERROR_FIRST,
     STATUS_SWITCHING_PROTOCOLS, STATUS_TOO_MANY_REQUESTS,
 };
 use crate::http::{self, ResponseHead};
@@ -23,7 +23,7 @@ fn handshake_stop(head: &ResponseHead) -> Option<PushStop> {
     match head.status {
         STATUS_SWITCHING_PROTOCOLS => {
             let named = head.websocket_protocol.as_ref().map(crate::bytes::TextBuf::as_bytes);
-            (named != Some(PUSH_SUBPROTOCOL.as_bytes())).then_some(PushStop::WrongProtocol)
+            named.and_then(crate::consts::push_version).is_none().then_some(PushStop::WrongProtocol)
         }
         STATUS_TOO_MANY_REQUESTS => None,
         status => (STATUS_CLIENT_ERROR_FIRST..STATUS_SERVER_ERROR_FIRST)
@@ -73,7 +73,9 @@ impl<R: RandomSource> UserAgent<'_, R> {
         // No `Cookie` header: viewer state is proven on the connection
         // itself, never in a header (VS-201, VS-116).
         let written = (|| -> Result<(), Overflow> {
-            let subprotocol = Some(PUSH_SUBPROTOCOL);
+            // Every version spoken, the newest first: the channel answers
+            // with the one the connection speaks (DEC-6953 item 1).
+            let subprotocol = Some(PUSH_SUBPROTOCOLS);
             ws::write_handshake_headers(&mut writer, &url, &self.push.key, self.named_as.as_bytes(), subprotocol)?;
             writer.put(CRLF)
         })();
@@ -184,7 +186,15 @@ impl<R: RandomSource> UserAgent<'_, R> {
                 return false;
             }
         };
-        let accepted = ws::check_handshake(&head, &self.push.key, Some(PUSH_SUBPROTOCOL));
+        // The channel names one of the subprotocols offered, and that name
+        // is the connection's version (DEC-6953 item 1).
+        let named = head.websocket_protocol.as_ref().map(crate::bytes::TextBuf::as_bytes);
+        let version = named.and_then(crate::consts::push_version);
+        let answered = named.and_then(|name| core::str::from_utf8(name).ok()).filter(|_| version.is_some());
+        // A name not offered checks against none, which a response that
+        // names one never matches.
+        let accepted = ws::check_handshake(&head, &self.push.key, answered);
+        let accepted = if answered.is_some() { accepted } else { Err(ws::WsError::Handshake) };
         if let Err(problem) = accepted.map_err(PushProblem::WebSocket) {
             match handshake_stop(&head) {
                 Some(stop) => self.push_stop(stop, sink),
@@ -199,6 +209,8 @@ impl<R: RandomSource> UserAgent<'_, R> {
         // A sending never continues on another connection (DOC-1952).
         self.links = crate::records::links::Sending::new();
         self.subpage_list = crate::records::subpages::Sending::new();
+        self.push.version = version.unwrap_or(neoteletext_input::VERSION);
+        event(sink, Event::PushVersion(self.push.version));
         event(sink, Event::PushConnected);
         // REQ-6880 item 2: a snapshot sends its request and nothing else.
         match self.config.snapshot {

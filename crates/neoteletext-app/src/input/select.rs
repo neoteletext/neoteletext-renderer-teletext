@@ -61,6 +61,11 @@ impl Selecting {
                     source.send_input(message);
                 }
             }
+            Notice::PushVersion(version) => {
+                // A version not spoken changes nothing: the channel's
+                // WELCOME then names another and is refused.
+                self.input.set_version(*version);
+            }
             Notice::Input(false) => {
                 self.sent = false;
                 self.input.close();

@@ -548,10 +548,10 @@ fn hello_offers_the_picture_bits_at_23_and_24() {
     assert_eq!((REGIS_CAP, NAPLPS_CAP), (1 << 23, 1 << 24));
     let hello = Item::Event(Event::Hello { version: crate::VERSION, caps: REGIS_CAP | NAPLPS_CAP, agent: None });
     assert_eq!(bytes(&hello), [0xFF, 0x09, crate::VERSION.try_into().unwrap(), 0x80, 0x80, 0x80, 0x0C]);
-    let unknown = [0xFF, 0x09, 0x03, 0x80, 0x80, 0x80, 0x20];
+    let unknown = [0xFF, 0x09, 0x03, 0x80, 0x80, 0x80, 0x40];
     assert_eq!(
         read(&unknown),
-        Ok(Some((Item::Event(Event::Hello { version: 3, caps: 1 << 26, agent: None }), unknown.len())))
+        Ok(Some((Item::Event(Event::Hello { version: 3, caps: 1 << 27, agent: None }), unknown.len())))
     );
 }
 

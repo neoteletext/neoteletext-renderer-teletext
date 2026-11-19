@@ -16,7 +16,9 @@ use neoteletext_input::event::{
     Action, Device, Event, Item, KeyCode, MouseAction, PAGE_STATE, RULE_EVENT, RULES_FAULT, Select, read_message, write,
 };
 use neoteletext_input::rules::RuleBody;
-use neoteletext_web::consts::{PUSH_SUBPROTOCOL, close_says_stop};
+use neoteletext_web::consts::{
+    PUSH_SUBPROTOCOL, PUSH_SUBPROTOCOL_OLDEST, PUSH_SUBPROTOCOLS, close_says_stop, push_version,
+};
 use neoteletext_web::records::denied::{self, DeniedRecord};
 use neoteletext_web::records::redirect::{self, RedirectRecord};
 use neoteletext_web::records::{ChannelRecord, Read, RecordReader};
@@ -386,9 +388,26 @@ fn every_row_of_the_wire_vectors_holds() {
         kinds.insert(vector.kind);
         match vector.kind {
             "version" if vector.name == "input" => assert_eq!(vector.value, VERSION.to_string()),
+            // REQ-6927 item 2, DEC-6953 item 1: the oldest version spoken,
+            // and what a receiver offers.
+            "version" if vector.name == "oldest_input" => {
+                assert_eq!(vector.value, neoteletext_input::OLDEST_VERSION.to_string());
+            }
+            "version" if vector.name == "oldest_subprotocol" => {
+                assert_eq!(vector.value, PUSH_SUBPROTOCOL_OLDEST);
+                let oldest = neoteletext_input::OLDEST_VERSION;
+                assert_eq!(PUSH_SUBPROTOCOL_OLDEST, format!("neottx.{oldest}"), "the name says the version");
+                assert_eq!(push_version(vector.value.as_bytes()), Some(oldest));
+            }
+            "version" if vector.name == "subprotocols" => {
+                assert_eq!(vector.value, PUSH_SUBPROTOCOLS);
+                assert_eq!(PUSH_SUBPROTOCOLS, format!("{PUSH_SUBPROTOCOL}, {PUSH_SUBPROTOCOL_OLDEST}"));
+            }
             "version" => {
+                assert_eq!(vector.name, "subprotocol");
                 assert_eq!(vector.value, PUSH_SUBPROTOCOL);
                 assert_eq!(PUSH_SUBPROTOCOL, format!("neottx.{VERSION}"), "the name says the version");
+                assert_eq!(push_version(vector.value.as_bytes()), Some(VERSION));
             }
             "close" => {
                 let says = if close_says_stop(vector.value.parse().unwrap()) { "stop" } else { "retry" };

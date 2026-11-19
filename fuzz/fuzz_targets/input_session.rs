@@ -8,7 +8,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use neoteletext_input::caps::{RESUME_CAP, SELECT_CAP};
+use neoteletext_input::caps::{MAGAZINE_SOUND_CAP, RESUME_CAP, SELECT_CAP};
 use neoteletext_input::control::Resumption;
 use neoteletext_input::event::{Device, Event, Item, Mouse, MouseAction, Point, Stamp, read_message};
 use neoteletext_input::pace::{Offer, PERIOD_WHOLE_US, Pacer};
@@ -16,7 +16,7 @@ use neoteletext_input::session::{ResumableSession, Welcomed};
 use neoteletext_input::{MAX_MESSAGE, TOKEN_BYTES};
 
 fuzz_target!(|data: &[u8]| {
-    let mut session = ResumableSession::new(SELECT_CAP);
+    let mut session = ResumableSession::new(SELECT_CAP | MAGAZINE_SOUND_CAP);
     let mut pacer = Pacer::new();
     let mut now_ms = 0_u32;
     let mut now_us = 0_u64;
@@ -30,16 +30,28 @@ fuzz_target!(|data: &[u8]| {
         now_us = now_us.saturating_add(u64::from(value) % 40_000);
         match op & 0x0F {
             0 => {
+                // Any version a channel's subprotocol might name: only one
+                // spoken is taken (REQ-6927 item 2, DEC-6953).
+                let spoken = session.set_version(u32::from(value % 14));
+                assert_eq!(spoken, neoteletext_input::speaks(u32::from(value % 14)));
+                let version = session.version();
+                assert!(neoteletext_input::speaks(version));
                 let length = session.open(now_ms, None, &mut out).expect("the first message fits");
-                read_message(&out[..length], &mut |_| {}).expect("it reads");
+                read_message(&out[..length], &mut |item| {
+                    if let Item::Event(Event::Hello { version: said, caps, .. }) = item {
+                        // HELLO names the connection's version and offers
+                        // bit 26 under version 11 alone.
+                        assert_eq!(said, version);
+                        assert_eq!(caps & MAGAZINE_SOUND_CAP != 0, version >= 11);
+                    }
+                })
+                .expect("it reads");
             }
             1 => session.close(),
             2 => {
                 let taken = (value & 1 == 1).then_some(value >> 1);
                 let resume = Some(Resumption { token: [op; TOKEN_BYTES], taken });
-                if let Ok(Welcomed::Resumed) =
-                    session.welcome(neoteletext_input::VERSION, SELECT_CAP | RESUME_CAP, resume)
-                {
+                if let Ok(Welcomed::Resumed) = session.welcome(session.version(), SELECT_CAP | RESUME_CAP, resume) {
                     let mut again = Vec::new();
                     session.resend(&mut |message| again.push(message.to_vec()));
                     // What goes again is the end of what was sent, whole messages in order.

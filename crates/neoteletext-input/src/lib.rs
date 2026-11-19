@@ -83,6 +83,7 @@ pub mod event;
 pub mod held;
 pub mod keys;
 mod limits;
+pub mod magazine;
 pub mod names;
 pub mod pace;
 pub mod rules;

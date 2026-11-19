@@ -9,10 +9,27 @@ use crate::{control, wire};
 /// table in its second form: record types 21 to 33, the events
 /// `RULE_EVENT`, `PAGE_STATE` and `RULES_FAULT`, the OBJECT record's tag 9,
 /// the Cue Point event in a block, and the rule that a viewer's input
-/// travels only inside a `RULE_EVENT`. Every other version is refused both
-/// ways; version 9, the first form's, was never deployed and is not kept
-/// (DEC-6522, DEC-6587, RULE-49).
-pub const VERSION: u32 = 10;
+/// travels only inside a `RULE_EVENT`; version 9, the first form's, was
+/// never deployed and is not kept (DEC-6522, DEC-6587, RULE-49). Version 11
+/// is version 10 with capability bit 26,
+/// [`MAGAZINE_SOUND_CAP`](crate::caps::MAGAZINE_SOUND_CAP), and what it
+/// gates (REQ-6927 items 1 and 2), and nothing else. It is the newest
+/// version spoken; [`OLDEST_VERSION`] is the oldest, and the WebSocket
+/// subprotocol the channel answers with says which of them a connection
+/// speaks (DEC-6953 item 1). Every other version is refused both ways.
+pub const VERSION: u32 = 11;
+/// The oldest protocol version spoken (REQ-6927 item 2, DEC-6953 item 1):
+/// a receiver still connects to a channel of this version, and a channel
+/// still takes a receiver of it.
+pub const OLDEST_VERSION: u32 = 10;
+const _: () = assert!(OLDEST_VERSION <= VERSION);
+
+/// Whether `version` is a protocol version this crate speaks:
+/// [`OLDEST_VERSION`] to [`VERSION`].
+#[must_use]
+pub const fn speaks(version: u32) -> bool {
+    version >= OLDEST_VERSION && version <= VERSION
+}
 /// The most bytes in one binary message (DOC-1918, REQ-INT-101): room
 /// for a SELECT with the longest page parameters (DEC-1715).
 pub const MAX_MESSAGE: usize = 8192;
