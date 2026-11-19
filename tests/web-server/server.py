@@ -26,8 +26,9 @@ import sys
 import threading
 import time
 
-# REQ-WEB-012: the session lives in a cookie whose value starts with a
-# format version.
+# The session cookie this server sets, whose value starts with a format
+# version, is one a receiver must never send back (REQ-501, VS-201): it
+# tests that NeoTeletext keeps no cookies (REQ-502, DEC-6471).
 SESSION_VERSION = "v1"
 # The push connection's subprotocol: PUSH_SUBPROTOCOL in the engine, which
 # the client insists on (DOC-1917).

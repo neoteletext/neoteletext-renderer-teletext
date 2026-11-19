@@ -36,7 +36,7 @@
 | Miri | The Rust interpreter that detects undefined behaviour, used here to test on 32-bit and big-endian targets. |
 | HTTP, TLS | The web's request protocol, and the encryption layer beneath HTTPS and secure WebSockets. |
 | WebSocket | A two-way message connection opened from an HTTP request. |
-| Cookie | A small value a web server asks the client to store and send back, used here for sessions. |
+| Cookie | A small value a web server asks the client to store and send back. NeoTeletext keeps none (DEC-6471, 18 November 2026): a receiver sends no `Cookie` header and ignores every `Set-Cookie`, and a viewer is known to a channel only by viewer state, a key the browser makes for that one channel and proves on its push connection. |
 | JSON | JavaScript Object Notation, the text format of the service descriptor. |
 | Origin | The scheme, host and port of a web address: the unit of web security (REQ-WEB-015). |
 | User agent | The web term for a browser or other client acting for the user. neoteletext is a deliberately minimal one (REQ-WEB-014). |

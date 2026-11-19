@@ -14,14 +14,13 @@ This is the whole of a port (REQ-ARCH-009, decision E.29). A port supplies the i
 | A network transport | Implement `neoteletext_web::port::Transport` (connect, send, non-blocking receive, close; TLS is yours). | Only for web sources |
 | Random bytes | Implement `neoteletext_web::port::RandomSource`: the WebSocket handshake key and every frame mask (RFC 6455 sections 4.1 and 5.3). Use a cryptographic generator, since RFC 6455 requires masks an attacker cannot predict. The web agent takes one whatever its features. | Only for web sources |
 | An audio sink | Implement `neoteletext_audio::port::VoiceSink`, and pass each packet to `neoteletext_audio::receiver::Receiver::push_packet` before the decoder; on a desktop, `neoteletext-audio-mix` mixes for you (area AUD, `audio-platforms.md`). | Only for sound |
-| Cookie storage | Implement `neoteletext_web::port::CookieStorage`. Store saved cookies as secrets (REQ-SEC-013). | Optional |
-| Device keys | Implement `neoteletext_web::dbsc::DeviceKeys`: create a key pair bound to the device, sign with it, and never let the private key leave the device's store (REQ-WEB-017, decision E.110). | Only with the feature `dbsc` |
+| Viewer state | Nothing, to answer every channel's challenge stateless, as `neottx` does (REQ-426, VS-501). A port that lets a channel know its viewer holds one key pair per channel itself, as the browser's trusted core does, and signs the bytes `neoteletext_web::viewer_state::signed_bytes` builds (neoteletext-common's `docs/viewer-state.md` VS-203); the engine holds no key and signs nothing. There is no cookie storage and no device-key interface: cookies and Device Bound Session Credentials were removed (DEC-6471, 18 November 2026). | Optional |
 
 A complete minimal port is `crates/neoteletext-core/examples/minimal_port.rs`, under 100 lines; it needs the core features `level15` and `render`.
 
 ## Choosing what to compile in
 
-Every crate's optional areas are Cargo features. The defaults are each crate's optional areas of function; `std`, `alloc`, the formatting of `error-trait`, the writers' `encode` and `write-text`, the profiles and the features a decision leaves off (`dbsc`, and the core's `objects` and `additional-flash-functions`) are never default (REQ-1642 rule 5, DEC-2397). A small port turns the defaults off and names what it uses:
+Every crate's optional areas are Cargo features. The defaults are each crate's optional areas of function; `std`, `alloc`, the formatting of `error-trait`, the writers' `encode` and `write-text`, the profiles and the features a decision leaves off (the core's `objects` and `additional-flash-functions`) are never default (REQ-1642 rule 5, DEC-2397). A small port turns the defaults off and names what it uses:
 
 ```toml
 neoteletext-core = { version = "...", default-features = false, features = ["level15", "render"] }
@@ -32,7 +31,7 @@ neoteletext-formats = { version = "...", default-features = false }  # T42 only
 |---|---|
 | `neoteletext-core` | `level15`, `level25`, `render`, `viewer`, `extended-sets`; the capabilities of Levels 2.5 and 3.5 `nonspacing-attributes`, `level25-32colors`, `level35-32colors` (default, decision E.105), `objects`, `additional-flash-functions` (not default); the glyph line cache `glyph-cache` (not default, REQ-392); and the profiles `classic` (Level 1.5 alone, DEC-1757) and `modern-classic` |
 | `neoteletext-formats` | `transport`, `sliced`, `pages`, `tti`, `ep1`, `edittf`, `dump`, `check`, `bdf` (default); `alloc`, `std`, `write-text` |
-| `neoteletext-web` | `push`, `cookies` (default); `dbsc`, `error-trait`, `alloc`, `std` |
+| `neoteletext-web` | `push` (default); `error-trait`, `alloc`, `std` |
 
 `level25` alone gives the enhancement processor's non-spacing attributes and characters. Each other capability of Levels 2.5 and 3.5 is a feature of its own (decision E.71); a capability left out is ignored in the page data, never an error. [capabilities.md](capabilities.md) explains the mechanism, which capabilities the profile keeps and why. The `modern-classic` profile keeps the classic display with objects, and leaves out the 32-colour palette and the additional flash functions:
 
@@ -111,7 +110,6 @@ Every security setting defaults to the safer choice (REQ-SEC-020); a port that c
 | Setting | Default | The risk of changing it |
 |---|---|---|
 | `Config::allowed_local` (`neottx --allow-local`) | Empty: no local-network address may be contacted (REQ-SEC-006). | Each address allowed can be reached by any web service the receiver opens, so a hostile page can make the receiver probe or use a router, printer or other device at that address. Allow one test server's address, never a range. |
-| `Config::persist_cookies` | Off: cookies live for the run only (REQ-SEC-013). | Saved cookies identify the user to every service across runs, and are secrets on the device: a port that saves them must store them as secrets and offer a wipe. |
 | `Config::redirects_within_channel` | On: a redirect that leaves the channel is reported as `Event::RedirectToOtherChannel`, not followed (REQ-WEB-021). | Turned off, a channel can send the receiver to another site's content without the viewer confirming it; `neottx` turns it off only for a service opened by its descriptor, whose origin is the channel. |
 | `Config::proxied` (`neottx --proxy`) | Off: connections are direct. | The proxy sees every host the receiver contacts, and the local-network check can then judge only the host's name, not the address the proxy resolves it to. Set it only for a proxy the user chose. |
 | `Config::tls_available` | On: HTTPS addresses are used. | A port without TLS cannot open HTTPS services at all (they are reported unreachable); it does not fall back to plain HTTP. Turn it off only when the port has no TLS. |

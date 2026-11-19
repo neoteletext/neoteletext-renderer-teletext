@@ -23,7 +23,7 @@ The standards clauses and tables each module is written from (REQ-DOC-005 and RE
 | `neoteletext-core::controls` | Table 29 (the reserved column mode the control triplet uses, DOC-1844); decision E.127 |
 | `neoteletext-formats` | Clauses 5.2 and 7.1 (T42 packets); EN 300 472 clauses 4 to 4.4 (teletext in DVB), EN 301 775, EN 300 468 and ISO/IEC 13818-1 clauses 2.4.3.3, 2.4.3.6 and 2.4.4 (transport streams and PES); the TTI page file and its Link Extension as the protocol document defines them (`neoteletext-common/PROTOCOL.html`); the BDF format, Adobe's Glyph Bitmap Distribution Format 2.1, for `bdf` |
 | `neoteletext-slicer` | Clauses 5.2, 5.4, 6.1, 6.3 and 7.1 of EN 300 706 (the data signal and the packet's clock run-in and framing code, as the slicer cites them) |
-| `neoteletext-web` | RFC 9110 and RFC 9112 (HTTP), RFC 6455 (WebSocket), RFC 6265 (cookies), RFC 3986 (addresses), RFC 8259 (JSON), RFC 3174 (SHA-1), RFC 4648 (base64), RFC 1928 (SOCKS5), RFC 9651 (structured fields, for `dbsc`); the zxnet feed as recorded in `research/` |
+| `neoteletext-web` | RFC 9110 and RFC 9112 (HTTP), RFC 6455 (WebSocket), RFC 3986 (addresses), RFC 8259 (JSON), RFC 3174 (SHA-1), RFC 4648 (base64), RFC 1928 (SOCKS5); neoteletext-common's `docs/viewer-state.md` (viewer state's records, signed bytes and key identifier, DEC-6471); the zxnet feed as recorded in `research/` |
 | `neoteletext-opus` | RFC 6716 (the Opus codec) with its errata of RFC 8251, bit-exact with libopus 1.5.2's fixed-point decoder (decision E.123) |
 | `neoteletext-image::png` | PNG specification (ISO/IEC 15948) sections 5, 9, 11; RFC 1950 (zlib) and RFC 1951 (deflate, fixed Huffman codes section 3.2.6) |
 | `neoteletext-image::palette` | Table 30 (CLUT 0) |
