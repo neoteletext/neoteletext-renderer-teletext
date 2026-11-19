@@ -486,10 +486,11 @@ pub enum Event<'a> {
     },
 }
 
-/// What lay under a pointer on a page the ReGIS renderer draws (DEC-6335
-/// item 1): the receiver looks it up in the picture it is showing, so the
-/// channel need not know where it drew what, nor which of its pictures the
-/// viewer was looking at.
+/// What lay under a pointer on a page the ReGIS or the NAPLPS renderer
+/// draws (DEC-6335 item 1; for NAPLPS, `drawing` is the object and the
+/// places are raster dots, RAS-5): the receiver looks it up in the picture
+/// it is showing, so the channel need not know where it drew what, nor
+/// which of its pictures the viewer was looking at.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Pick {
     /// The page on screen.
@@ -502,7 +503,9 @@ pub struct Pick {
     /// See `x`.
     pub y: i32,
     /// The place in the picture, in its pixels from the top left, each
-    /// below [`MAX_PICK_POSITION`].
+    /// below [`MAX_PICK_POSITION`]: for a NAPLPS picture a dot of the 480
+    /// by 500 teletext raster, the same dots the page's objects are given
+    /// in (RAS-5, DEC-6853).
     pub picture_x: u32,
     /// See `picture_x`.
     pub picture_y: u32,

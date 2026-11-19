@@ -39,8 +39,12 @@ pub const SELECT_CAP: u32 = 1 << 22;
 pub const REGIS_CAP: u32 = 1 << 23;
 /// Capability: the receiver draws a sub-page's NAPLPS from the NAPLPS record
 /// (type 17), with `NAPLPS_OBJECTS`, `DRAWING_LINKS` and `REGIS_CURSOR` for
-/// its objects, on the teletext raster of REQ-5819 (renderer parity PAR-1,
-/// REQ-6761, DEC-6667).
+/// its objects, on the 480 by 460 dots from line 20 of the teletext raster
+/// (REQ-5819, DEC-6857), every NeoTeletext coordinate of the page being a
+/// dot of that raster (DEC-6853): neoteletext-common
+/// `docs/naplps-raster.md` RAS-9, renderer parity PAR-1, REQ-6761. A
+/// receiver drops the NAPLPS and `NAPLPS_OBJECTS` records on a connection
+/// whose WELCOME did not agree it.
 pub const NAPLPS_CAP: u32 = 1 << 24;
 /// Every capability defined.
 pub const ALL_CAPS: u32 = CURSOR_CAP | AGENT | TOUCH_CAP | RESUME_CAP | SELECT_CAP | REGIS_CAP | NAPLPS_CAP;

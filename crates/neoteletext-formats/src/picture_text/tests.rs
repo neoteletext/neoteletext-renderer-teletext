@@ -303,10 +303,12 @@ fn regis_text_draws_the_provided_glyphs_of_every_set() {
 }
 
 /// `bytes` drawn by the NAPLPS renderer with set `set` given (blank, or
-/// the engine's glyphs): the canvas and the diagnostics.
+/// the engine's glyphs) on the receiver's canvas of 480 by 460 (RAS-11,
+/// DEC-6857): the canvas and the diagnostics.
 fn naplps_drawn(set: u8, blank: bool, bytes: &[u8]) -> (Vec<u8>, naplps::Diagnostics) {
+    use naplps::limits::{RECEIVER_CANVAS_HEIGHT, RECEIVER_CANVAS_WIDTH};
     let glyphs = GlyphSet::noto_teletext();
-    let mut canvas = naplps::Canvas::new(640, 480).unwrap();
+    let mut canvas = naplps::Canvas::new(RECEIVER_CANVAS_WIDTH, RECEIVER_CANVAS_HEIGHT).unwrap();
     let mut terminal = naplps::Terminal::new(4);
     terminal.set_teletext_set(set, bitmap(&glyphs, set, blank)).unwrap();
     if set != G2_LATIN {
@@ -314,8 +316,10 @@ fn naplps_drawn(set: u8, blank: bool, bytes: &[u8]) -> (Vec<u8>, naplps::Diagnos
     }
     terminal.feed(&mut canvas, bytes);
     terminal.finish(&mut canvas);
-    let pixels =
-        (0..480).flat_map(|y| (0..640).map(move |x| (x, y))).map(|(x, y)| canvas.pixel(x, y).unwrap_or(0)).collect();
+    let pixels = (0..RECEIVER_CANVAS_HEIGHT)
+        .flat_map(|y| (0..RECEIVER_CANVAS_WIDTH).map(move |x| (x, y)))
+        .map(|(x, y)| canvas.pixel(x, y).unwrap_or(0))
+        .collect();
     (pixels, terminal.diagnostics())
 }
 
