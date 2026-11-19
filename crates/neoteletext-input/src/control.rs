@@ -256,9 +256,10 @@ mod tests {
     }
 
     // Renderer parity PAR-1 (REQ-6761): WELCOME agreeing each picture bit
-    // round-trips; bit 25, which no capability is, is refused.
+    // round-trips; bit 26, which no capability is, is refused (bit 25 is
+    // SNAPSHOT's, REQ-6879).
     #[test]
-    fn welcome_agrees_the_picture_bits_and_refuses_bit_25() {
+    fn welcome_agrees_the_picture_bits_and_refuses_bit_26() {
         for caps in [REGIS_CAP, NAPLPS_CAP, REGIS_CAP | NAPLPS_CAP | CURSOR_CAP] {
             let control = Control::Welcome { version: 3, caps, resume: None };
             let mut body = [0; MAX_BODY];
@@ -269,7 +270,7 @@ mod tests {
             read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x0C]),
             Ok(Control::Welcome { version: 3, caps: REGIS_CAP | NAPLPS_CAP, resume: None })
         );
-        assert_eq!(read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x10]), Err(ControlError::BadValue("caps")));
+        assert_eq!(read_body(&[0xFF, WELCOME, 3, 0x80, 0x80, 0x80, 0x20]), Err(ControlError::BadValue("caps")));
     }
 
     // REQ-INT-111, decision E.125: an older channel's mode records and mode
