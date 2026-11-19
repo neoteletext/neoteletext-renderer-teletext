@@ -43,10 +43,12 @@ fn four_quarters_are_four_rectangles_in_each_language() {
     assert!(regis_draws(&regis, &regis_canvas));
     let regis_text = String::from_utf8_lossy(&regis);
     assert_eq!(regis_text.matches("F(").count(), 4, "{regis_text}");
-    let naplps_canvas = indexed(&quarters(240, 231), &stretched(4), NAPLPS_WIDTH, NAPLPS_HEIGHT, NAPLPS_WIDEN).unwrap();
+    let naplps_canvas = indexed(&quarters(240, 230), &stretched(4), NAPLPS_WIDTH, NAPLPS_HEIGHT, NAPLPS_WIDEN).unwrap();
     assert_eq!(rectangles(&naplps_canvas).len(), 4);
-    let naplps = to_naplps(&quarters(240, 231), &stretched(4)).unwrap();
+    let naplps = to_naplps(&quarters(240, 230), &stretched(4)).unwrap();
     assert!(naplps_draws(&naplps, &naplps_canvas));
+    // RAS-6: SO, then DOMAIN selecting six-byte operands and its pel (0, 0).
+    assert_eq!(naplps[..9], [0x0E, 0x21, 0x54, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40]);
     let mut palette = naplps_canvas.palette.clone();
     palette.sort_unstable();
     let mut expected = QUARTERS.to_vec();
@@ -61,7 +63,7 @@ fn thin_rectangles_draw() {
     let lines = png(800, 480, |x, y| if x == 10 || y == 20 { [255, 255, 255] } else { [0, 0, 0] });
     let canvas = indexed(&lines, &options, REGIS_WIDTH, REGIS_HEIGHT, 1.0).unwrap();
     assert!(regis_draws(&regis_of(&canvas), &canvas));
-    let lines = png(480, 462, |x, y| if x == 10 || y == 20 { [255, 255, 255] } else { [0, 0, 0] });
+    let lines = png(480, 460, |x, y| if x == 10 || y == 20 { [255, 255, 255] } else { [0, 0, 0] });
     let canvas = indexed(&lines, &options, NAPLPS_WIDTH, NAPLPS_HEIGHT, NAPLPS_WIDEN).unwrap();
     assert!(naplps_draws(&naplps_of(&canvas), &canvas));
 }
@@ -104,8 +106,11 @@ fn a_photograph_fits_the_output_bound_in_both_languages() {
 /// reduced picture; a change of the quantiser or the fit that makes it
 /// worse fails here, and one that makes it better lowers the baseline.
 const REGIS_PHOTOGRAPH_MSE: u64 = 54;
-/// See [`REGIS_PHOTOGRAPH_MSE`].
-const NAPLPS_PHOTOGRAPH_MSE: u64 = 74;
+/// See [`REGIS_PHOTOGRAPH_MSE`]. Measured again on 19 November 2026 when
+/// the NAPLPS canvas became 480 by 460 (DEC-6857): 76, from 74 on 480 by
+/// 462, the fitted picture two lines shorter and so quantised a little
+/// differently; the output still draws the reduced picture exactly.
+const NAPLPS_PHOTOGRAPH_MSE: u64 = 76;
 
 /// The mean squared error, per component, of `drawn`'s colours against
 /// `fitted`'s, rounded up.

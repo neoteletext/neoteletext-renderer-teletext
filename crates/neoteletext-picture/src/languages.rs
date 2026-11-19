@@ -29,11 +29,14 @@ pub const MAX_PICTURE_COLOURS: u8 = 16;
 const REGIS_WIDTH: usize = 800;
 const REGIS_HEIGHT: usize = 480;
 const _: () = assert!(REGIS_WIDTH == regis::SCREEN_WIDTH as usize && REGIS_HEIGHT == regis::SCREEN_HEIGHT as usize);
-/// The NAPLPS canvas: the 480 dots and 462 lines of the teletext raster a
-/// NAPLPS picture is drawn on (DEC-6667, REQ-5819), each dot 16/13 as wide
-/// as it is high (DEC-2049).
-const NAPLPS_WIDTH: usize = 480;
-const NAPLPS_HEIGHT: usize = 462;
+/// The NAPLPS canvas: the receiver's 480 dots and 460 lines, the display
+/// area on lines 20 to 479 of the teletext raster (neoteletext-common
+/// `docs/naplps-raster.md` RAS-11; DEC-6857, REQ-5819), each dot 16/13 as
+/// wide as it is high (DEC-2049). Canvas pixel (x, y) is raster dot
+/// (x, y + [`NAPLPS_FIRST_LINE`]).
+const NAPLPS_WIDTH: usize = naplps::limits::RECEIVER_CANVAS_WIDTH as usize;
+const NAPLPS_HEIGHT: usize = naplps::limits::RECEIVER_CANVAS_HEIGHT as usize;
+const NAPLPS_FIRST_LINE: usize = naplps::limits::DISPLAY_FIRST_LINE as usize;
 const NAPLPS_DOT_WIDE: f64 = 16.0;
 const NAPLPS_DOT_HIGH: f64 = 13.0;
 /// The NAPLPS colour map the output is checked with: four bits, sixteen
@@ -289,12 +292,18 @@ pub fn to_regis(bytes: &[u8], options: &PictureOptions) -> Result<Vec<u8>, Error
 
 /// SO: the PDI set into the in-use table (section 4.3).
 const SHIFT_OUT: u8 = 0x0E;
+/// Multi-value operands are six bytes (RAS-6, DEC-6856 item 8): eighteen
+/// bits a coordinate, a step of 1/131072 of the unit screen, as every
+/// NeoTeletext writer of NAPLPS writes them.
+const MULTI_BYTES: u8 = 6;
 /// DOMAIN (section 5.3.2.2), and its fixed-format byte: one-byte single
-/// values, four-byte multi-values, two dimensions (sections 5.3.2.2.2 to
-/// 5.3.2.2.4).
+/// values, multi-values of [`MULTI_BYTES`] bytes (b5 b4 b3, the length
+/// less one), two dimensions (sections 5.3.2.2.2 to 5.3.2.2.4; Figure 14);
+/// then the logical pel, (0, 0), in that length (section 5.3.2.2.6).
 const DOMAIN: u8 = 0x21;
-const MULTI_BYTES: usize = 4;
-const DOMAIN_FOUR_BYTES: u8 = DATA_BIT | ((MULTI_BYTES as u8 - 1) << 2);
+const MULTI_LENGTH_SHIFT: u32 = 2;
+const DOMAIN_FORMAT: u8 = DATA_BIT | ((MULTI_BYTES - 1) << MULTI_LENGTH_SHIFT);
+const _: () = assert!(DOMAIN_FORMAT == 0x54, "DOMAIN 2/1 5/4, as RAS-6 gives every writer");
 /// SET COLOR and SELECT COLOR (sections 5.3.2.5 and 5.3.2.6).
 const SET_COLOR: u8 = 0x3C;
 const SELECT_COLOR: u8 = 0x3E;
@@ -302,47 +311,23 @@ const SELECT_COLOR: u8 = 0x3E;
 const RECT_SET_FILLED: u8 = 0x33;
 /// Bit 7 marks an operand byte as data (section 5.3.1).
 const DATA_BIT: u8 = 0x40;
-/// Bits of a coordinate in a two-dimensional multi-value operand of
-/// `MULTI_BYTES` bytes, three a byte, the first the sign; and of a colour
-/// primary, two a byte (section 5.3.2.2.5, 5.3.2.5.1).
-const COORDINATE_BITS: u32 = 3 * MULTI_BYTES as u32;
+/// A colour operand's bits a primary, two a byte (section 5.3.2.5.1), of
+/// which a primary's eight bits are the first and the rest zero (RAS-6);
+/// the renderer keeps a primary's first eight, so each is read back exactly.
 const PRIMARY_BITS: u32 = 2 * MULTI_BYTES as u32;
-const _: () = assert!(PRIMARY_BITS == u8::BITS, "four-byte colours carry each primary exactly");
-/// The unit screen's height, 25/32 of its width, as the NAPLPS renderer
-/// maps it to its canvas.
-const UNIT_HEIGHT_NUMERATOR: i64 = 25;
-const UNIT_HEIGHT_DENOMINATOR: i64 = 32;
+const PRIMARY_PAD: u32 = PRIMARY_BITS - u8::BITS;
 /// SELECT COLOR's one-byte operand names entry `n` of sixteen as `n` in its
 /// top four of six bits (section 5.3.2.6).
 const ENTRY_SHIFT: u32 = 2;
 
-/// A unit-screen value of `numerator / denominator` as a two's complement
-/// fraction of `COORDINATE_BITS` bits, one the sign.
-fn fraction(numerator: i64, denominator: i64) -> i64 {
-    let scale = 1_i64 << (COORDINATE_BITS - 1);
-    let rounded = numerator
-        .saturating_mul(scale)
-        .saturating_mul(2)
-        .saturating_add(denominator)
-        .div_euclid(denominator.saturating_mul(2).max(1));
-    rounded & ((1_i64 << COORDINATE_BITS) - 1)
-}
-
-/// A two-dimensional multi-value operand of `MULTI_BYTES` bytes.
-fn point(x: i64, y: i64, out: &mut Vec<u8>) {
-    for byte in (0..MULTI_BYTES).rev() {
-        let shift = u32::try_from(byte).unwrap_or(0).saturating_mul(3);
-        let part = |value: i64| u8::try_from((value >> shift) & 0b111).unwrap_or(0);
-        out.push(DATA_BIT | (part(x) << 3) | part(y));
-    }
-}
-
-/// A colour operand of `MULTI_BYTES` bytes: green, red, blue, two bits of
+/// A colour operand of [`MULTI_BYTES`] bytes: green, red, blue, two bits of
 /// each a byte, high bits first (section 5.3.2.5.1).
 fn colour_operand([red, green, blue]: [u8; 3], out: &mut Vec<u8>) {
-    for byte in (0..MULTI_BYTES).rev() {
-        let shift = u32::try_from(byte).unwrap_or(0).saturating_mul(2);
-        let pair = |value: u8| (value >> shift) & 0b11;
+    let widen = |value: u8| u16::from(value) << PRIMARY_PAD;
+    let (red, green, blue) = (widen(red), widen(green), widen(blue));
+    for byte in (0..u32::from(MULTI_BYTES)).rev() {
+        let shift = byte.saturating_mul(2);
+        let pair = |value: u16| u8::try_from((value >> shift) & 0b11).unwrap_or(0);
         let (g, r, b) = (pair(green), pair(red), pair(blue));
         out.push(
             DATA_BIT | ((g >> 1) << 5) | ((r >> 1) << 4) | ((b >> 1) << 3) | ((g & 1) << 2) | ((r & 1) << 1) | (b & 1),
@@ -350,15 +335,12 @@ fn colour_operand([red, green, blue]: [u8; 3], out: &mut Vec<u8>) {
     }
 }
 
-/// The unit-screen point of the centre of pixel `x`, `y` (from the top
-/// left) of a canvas `width` by `height`: x across the unit width, y up the
-/// unit height from the bottom line.
-fn centre(x: usize, y: usize, width: usize, height: usize) -> (i64, i64) {
+/// The operand's axis values of canvas pixel `x`, `y` (from the top left),
+/// the raster dot (x, y + 20), by the renderer's own mapping (RAS-2),
+/// rounded to the nearest step (RAS-6).
+fn dot_values(x: usize, y: usize) -> (i64, i64) {
     let to = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
-    let across = fraction(to(x), to(width));
-    let up = to(height).saturating_sub(1).saturating_sub(to(y));
-    let up = fraction(up.saturating_mul(UNIT_HEIGHT_NUMERATOR), to(height).saturating_mul(UNIT_HEIGHT_DENOMINATOR));
-    (across, up)
+    naplps::dot_steps(to(x), to(y.saturating_add(NAPLPS_FIRST_LINE)), 1, MULTI_BYTES, naplps::Rounding::Nearest)
 }
 
 /// The entry of a colour map of [`NAPLPS_PALETTE_BITS`] bits that the
@@ -370,13 +352,16 @@ fn entry_at(position: u8) -> u8 {
     position.reverse_bits() >> (u8::BITS - NAPLPS_PALETTE_BITS)
 }
 
-/// The picture as NAPLPS: SO, a four-byte domain, the colour map set from
+/// The picture as NAPLPS: SO, a six-byte domain, the colour map set from
 /// entry 0 in colour mode 1 (SELECT COLOR then one SET COLOR, its colours
 /// in the order of the entries they load, up to the last entry used), and
-/// each rectangle filled in its entry from the centre of its bottom-left
-/// pixel to that of its top-right.
+/// each rectangle filled in its entry as RAS-6's `rect` writes one: from
+/// its bottom-left dot, by the difference of its top-right dot's values
+/// and that corner's, so that it covers exactly its dots.
 fn naplps_of(picture: &Indexed) -> Vec<u8> {
-    let mut out = vec![SHIFT_OUT, DOMAIN, DOMAIN_FOUR_BYTES, SELECT_COLOR, DATA_BIT, SET_COLOR];
+    let mut out = vec![SHIFT_OUT, DOMAIN, DOMAIN_FORMAT];
+    naplps::multi_value_operand(0, 0, MULTI_BYTES, &mut out);
+    out.extend_from_slice(&[SELECT_COLOR, DATA_BIT, SET_COLOR]);
     let positions = (0..1_u8 << NAPLPS_PALETTE_BITS).map(|position| (position, usize::from(entry_at(position))));
     let last =
         positions.clone().filter(|&(_, entry)| entry < picture.palette.len()).map(|(position, _)| position).max();
@@ -385,24 +370,23 @@ fn naplps_of(picture: &Indexed) -> Vec<u8> {
         colour_operand(picture.palette.get(entry).copied().unwrap_or_default(), &mut out);
     }
     let mut pen = None;
-    let mask = (1_i64 << COORDINATE_BITS) - 1;
     for rect in rectangles(picture) {
         if pen != Some(rect.colour) {
             out.extend_from_slice(&[SELECT_COLOR, DATA_BIT | (rect.colour << ENTRY_SHIFT)]);
             pen = Some(rect.colour);
         }
-        let (left, bottom) = centre(rect.x0, rect.y1.saturating_sub(1), picture.width, picture.height);
-        let (right, top) = centre(rect.x1.saturating_sub(1), rect.y0, picture.width, picture.height);
+        let (left, bottom) = dot_values(rect.x0, rect.y1.saturating_sub(1));
+        let (right, top) = dot_values(rect.x1.saturating_sub(1), rect.y0);
         out.push(RECT_SET_FILLED);
-        point(left, bottom, &mut out);
-        point(right.wrapping_sub(left) & mask, top.wrapping_sub(bottom) & mask, &mut out);
+        naplps::multi_value_operand(left, bottom, MULTI_BYTES, &mut out);
+        naplps::multi_value_operand(right.saturating_sub(left), top.saturating_sub(bottom), MULTI_BYTES, &mut out);
     }
     out
 }
 
 /// Whether `bytes`, drawn by the NAPLPS renderer on the picture's canvas,
 /// give every pixel its index and every index its colour, exactly: a
-/// four-byte colour operand carries each primary's eight bits.
+/// six-byte colour operand carries each primary's eight bits.
 fn naplps_draws(bytes: &[u8], picture: &Indexed) -> bool {
     let (Ok(width), Ok(height)) = (u32::try_from(picture.width), u32::try_from(picture.height)) else { return false };
     let Ok(mut canvas) = naplps::Canvas::new(width, height) else { return false };
@@ -415,7 +399,8 @@ fn naplps_draws(bytes: &[u8], picture: &Indexed) -> bool {
 }
 
 /// Converts the picture in `bytes` to NAPLPS (PAR-9): fitted to the 480 by
-/// 462 teletext raster a NAPLPS picture is drawn on, whose dot is 16/13 as
+/// 460 display area of the teletext raster a NAPLPS picture is drawn on
+/// (RAS-11), whose dot is 16/13 as
 /// wide as it is high, reduced to `options.colours` entries of colour mode
 /// 1, written as filled rectangles and checked by drawing.
 ///
