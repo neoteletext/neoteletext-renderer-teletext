@@ -5,12 +5,13 @@
 //! joining data of the plain Arabic-script sets (PAR-3).
 //!
 //! A ReGIS picture is the VT340's 800 by 480 screen in its colour map; a
-//! NAPLPS picture is drawn on the 480 by 462 canvas and placed on the 480
-//! by 500 teletext raster from line 19 (REQ-5819, DEC-6667), the border
-//! lines in the terminal's screen colour.
+//! NAPLPS picture is drawn on the receiver's canvas of 480 by 460 and
+//! placed on the 480 by 500 teletext raster from line 20, teletext rows 1
+//! to 23 (neoteletext-common `docs/naplps-raster.md` RAS-11; REQ-5819,
+//! DEC-6857), rows 0 and 24 in the terminal's screen colour.
 
 use neoteletext_core::charset::CharRef;
-use neoteletext_core::consts::{CELL_HEIGHT, CELL_WIDTH, PAGE_WIDTH};
+use neoteletext_core::consts::{CELL_HEIGHT, CELL_WIDTH, PAGE_HEIGHT, PAGE_WIDTH};
 use neoteletext_core::glyphs::conformance::{FONT_SET_COUNT, FONT_SETS};
 use neoteletext_core::glyphs::{GlyphSet, JOINED_SETS, JoiningClass, joining};
 use neoteletext_image::palette::Rgba;
@@ -26,13 +27,18 @@ const LAST_CODE: u8 = 0x7F;
 /// The ReGIS screen.
 const REGIS_WIDTH: u32 = regis::SCREEN_WIDTH;
 const REGIS_HEIGHT: u32 = regis::SCREEN_HEIGHT;
-/// The NAPLPS picture's place on the teletext raster: 462 lines from line
-/// 19 (REQ-5819, DEC-6667).
-pub const NAPLPS_FIRST_LINE: usize = 19;
+/// The NAPLPS display area's place on the teletext raster, the renderer's
+/// own figures: 460 lines from line 20, teletext rows 1 to 23 (RAS-1,
+/// RAS-11; DEC-6857).
+pub const NAPLPS_FIRST_LINE: usize = naplps::limits::DISPLAY_FIRST_LINE as usize;
 /// See [`NAPLPS_FIRST_LINE`].
-pub const NAPLPS_LINES: usize = 462;
+pub const NAPLPS_LINES: usize = naplps::limits::DISPLAY_LINES as usize;
 /// The teletext raster's height: 25 rows of 20 lines.
-const RASTER_LINES: usize = 500;
+const RASTER_LINES: usize = PAGE_HEIGHT;
+// The renderer's raster is the engine's page (DEC-6853).
+const _: () = assert!(naplps::limits::RASTER_WIDTH as usize == PAGE_WIDTH);
+const _: () = assert!(naplps::limits::RASTER_HEIGHT as usize == RASTER_LINES);
+const _: () = assert!(naplps::limits::RECEIVER_CANVAS_HEIGHT as usize == NAPLPS_LINES);
 const _: () = assert!(NAPLPS_FIRST_LINE + NAPLPS_LINES <= RASTER_LINES);
 /// The colour map a NeoTeletext receiver gives the NAPLPS renderer: four
 /// bits, sixteen entries (the server's and the browser's).
@@ -259,8 +265,7 @@ fn draw_regis_titled(bytes: &[u8], fonts: &Fonts) -> Result<(Raster, Findings, O
 
 fn draw_naplps_with(bytes: &[u8], fonts: &Fonts, objects: Option<&ObjectLayer>) -> Result<(Raster, Findings), String> {
     let mut terminal = naplps_terminal(fonts)?;
-    let width = u32::try_from(PAGE_WIDTH).map_err(|_| "the raster's width".to_owned())?;
-    let lines = u32::try_from(NAPLPS_LINES).map_err(|_| "the picture's height".to_owned())?;
+    let (width, lines) = (naplps::limits::RECEIVER_CANVAS_WIDTH, naplps::limits::RECEIVER_CANVAS_HEIGHT);
     let mut canvas = naplps::Canvas::new(width, lines).map_err(|error| format!("{error:?}"))?;
     terminal.feed(&mut canvas, bytes);
     terminal.finish(&mut canvas);
@@ -333,26 +338,39 @@ const REGIS_UNIT_WIDTH_STEP: u32 = 8;
 /// (DEC-6818).
 const REGIS_UNIT_WIDTH: u32 = REGIS_SHAPED_WIDTH.div_ceil(REGIS_UNIT_WIDTH_STEP) * REGIS_UNIT_WIDTH_STEP;
 const _: () = assert!(REGIS_UNIT_WIDTH <= REGIS_CELL, "the unit cell fits its display cell");
-/// The NAPLPS cell of PAR-10: 1/40 of the unit screen wide and 20 raster
-/// lines high; row `r` drawn from the foot of its raster lines 20 r to
-/// 20 r + 19, the field's origin being its lower left corner.
+/// The NAPLPS cell of PAR-10 and RAS-8: one Noto cell, 12 dots by 20
+/// lines, row `r` drawn from the foot of its raster lines 20 r to 20 r +
+/// 19, the field's origin being its lower left corner.
 const NAPLPS_ROW_LINES: u32 = 20;
-/// Multi-value operands are written in four bytes, after DOMAIN selects
-/// them (ANSI X3.110-1983 section 5.3.2.2.3, Table 5; DEC-6849, as the
-/// kits write them): three bits of each axis a byte (Figure 11), twelve an
-/// axis, the first the sign, so eleven of fraction, a step of 1/2048 of
-/// the unit screen. At the default three bytes the field's width 1/40 was
-/// 6/256, 11.25 dots of the 12-dot cell, and NAPLPS advances by the field
-/// after each character, so the 40th character of a row was drawn 29 dots
-/// left of its cell; in four bytes it is 51/2048, 11.95 dots (TODO-6852).
-const NAPLPS_OPERAND_BYTES: u32 = 4;
-const NAPLPS_AXIS_BITS_PER_BYTE: u32 = 3;
-const NAPLPS_AXIS_BYTE_MASK: u64 = (1 << NAPLPS_AXIS_BITS_PER_BYTE) - 1;
-const NAPLPS_FRACTION_BITS: u32 = NAPLPS_OPERAND_BYTES * NAPLPS_AXIS_BITS_PER_BYTE - 1;
+const _: () = assert!(NAPLPS_ROW_LINES as usize == CELL_HEIGHT);
+/// Multi-value operands are written in six bytes, after DOMAIN selects
+/// them (ANSI X3.110-1983 section 5.3.2.2.3, Table 5; RAS-6, DEC-6856 item
+/// 8): eighteen bits an axis, a step of 1/131072 of the unit screen. Six is
+/// the fewest at which a whole row of 40 characters written as one run
+/// from one point keeps every character on its cell: at four bytes the
+/// field was 51/2048 of the unit screen, 11.95 dots, and the row's
+/// characters drifted up to two dots left by column 39 (TODO-6852); five
+/// bytes hold only runs of 27 (`docs/naplps-raster.md` section 11).
+const NAPLPS_OPERAND_BYTES: u8 = 6;
 /// The unit screen's height, 25/32 of its width, as the NAPLPS renderer
-/// maps it onto its canvas.
-const UNIT_HEIGHT_NUMERATOR: u64 = 25;
-const UNIT_HEIGHT_DENOMINATOR: u64 = 32;
+/// maps it onto its canvas (DEC-5766; RAS-2).
+const UNIT_HEIGHT_NUMERATOR: i64 = 25;
+const UNIT_HEIGHT_DENOMINATOR: i64 = 32;
+/// TEXT's character field (RAS-8 item 1): 1/40 of the unit screen across
+/// and a row's 20 of the display area's 460 lines up, each rounded down
+/// to a hair under one cell, so that the renderer, which covers the
+/// pixels whose centres lie inside the field, never covers a thirteenth
+/// dot or a twenty-first line.
+fn naplps_field() -> (i64, i64) {
+    use naplps::{Rounding, unit_steps};
+    let columns = i64::from(TEXT_COLUMNS);
+    let row_share = i64::from(NAPLPS_ROW_LINES).saturating_mul(UNIT_HEIGHT_NUMERATOR);
+    let display = UNIT_HEIGHT_DENOMINATOR.saturating_mul(i64::from(naplps::limits::DISPLAY_LINES));
+    (
+        unit_steps(1, columns, NAPLPS_OPERAND_BYTES, Rounding::Down),
+        unit_steps(row_share, display, NAPLPS_OPERAND_BYTES, Rounding::Down),
+    )
+}
 /// SO, SI, RESET clearing the screen to black, TEXT and POINT SET (ABS)
 /// (ANSI X3.110-1983 sections 4.3, 5.3.2.1, 5.3.2.3 and 5.3.3.1); a data
 /// byte has bit 7 set.
@@ -365,8 +383,8 @@ const NAPLPS_RESET_CLEAR: [u8; 3] = [0x20, 0x48, 0x40];
 /// dimensions (b6 zero); then the logical pel, (0, 0), in that length.
 const NAPLPS_DOMAIN: u8 = 0x21;
 const NAPLPS_MULTI_VALUE_LENGTH_SHIFT: u32 = 2;
-const NAPLPS_DOMAIN_FORMAT: u8 = DATA_BIT | ((NAPLPS_OPERAND_BYTES as u8 - 1) << NAPLPS_MULTI_VALUE_LENGTH_SHIFT);
-const _: () = assert!(NAPLPS_DOMAIN_FORMAT == 0x4C, "DOMAIN 2/1 4/12, as PAR-40 gives the kits' builder");
+const NAPLPS_DOMAIN_FORMAT: u8 = DATA_BIT | ((NAPLPS_OPERAND_BYTES - 1) << NAPLPS_MULTI_VALUE_LENGTH_SHIFT);
+const _: () = assert!(NAPLPS_DOMAIN_FORMAT == 0x54, "DOMAIN 2/1 5/4, as RAS-6 gives every writer");
 const NAPLPS_TEXT: u8 = 0x22;
 const NAPLPS_POINT_SET: u8 = 0x24;
 const DATA_BIT: u8 = 0x40;
@@ -445,57 +463,38 @@ pub fn regis_page(rows: &[Vec<neoteletext_formats::picture_text::Stretch>]) -> R
     Ok(out)
 }
 
-/// A unit-screen fraction `numerator / denominator` as an operand's axis
-/// of [`NAPLPS_FRACTION_BITS`] bits of fraction after the sign, held one
-/// step short of the unit (the sign bit leaves the unit itself out).
-fn axis(numerator: u64, denominator: u64) -> u64 {
-    let scaled = numerator.saturating_mul(1 << NAPLPS_FRACTION_BITS);
-    scaled.saturating_add(denominator / 2).checked_div(denominator).unwrap_or(0).min((1 << NAPLPS_FRACTION_BITS) - 1)
-}
-
-/// A two-dimensional operand of `x` and `y` in [`NAPLPS_OPERAND_BYTES`]
-/// bytes, three bits of each a byte, high bits first (section 5.3.2.2.5,
-/// Figure 11).
-fn operand(x: u64, y: u64, out: &mut Vec<u8>) {
-    for byte in (0..NAPLPS_OPERAND_BYTES).rev() {
-        let shift = byte.saturating_mul(NAPLPS_AXIS_BITS_PER_BYTE);
-        let part = |value: u64| u8::try_from((value >> shift) & NAPLPS_AXIS_BYTE_MASK).unwrap_or(0);
-        out.push(DATA_BIT | (part(x) << NAPLPS_AXIS_BITS_PER_BYTE) | part(y));
-    }
-}
-
-/// A page of rows as a NAPLPS picture (PAR-10): the screen cleared,
-/// DOMAIN selecting four-byte operands, the field of PAR-10, each row a
-/// text part at its place, SO before each PDI.
+/// A page of rows as a NAPLPS picture (PAR-10, RAS-8): the screen
+/// cleared, DOMAIN selecting six-byte operands, the field of RAS-8, each
+/// row one text part from the foot of its first cell, SO before each PDI.
+/// Every operand is the NAPLPS renderer's own mapping of a raster dot
+/// (RAS-2), so the characters land on the cells the renderer draws.
 ///
 /// # Errors
 ///
 /// The encoder's refusal of a row.
 pub fn naplps_page(rows: &[Vec<neoteletext_formats::picture_text::Stretch>]) -> Result<Vec<u8>, String> {
-    let lines = u64::try_from(NAPLPS_LINES).unwrap_or(1);
-    let unit_lines = lines.saturating_mul(UNIT_HEIGHT_DENOMINATOR);
+    use naplps::{Rounding, dot_steps, multi_value_operand};
     let mut out = vec![SHIFT_OUT];
     out.extend_from_slice(&NAPLPS_RESET_CLEAR);
     // After RESET, which restores the default domain (section 5.3.2.9).
     out.extend_from_slice(&[NAPLPS_DOMAIN, NAPLPS_DOMAIN_FORMAT]);
-    operand(0, 0, &mut out);
+    multi_value_operand(0, 0, NAPLPS_OPERAND_BYTES, &mut out);
     out.push(NAPLPS_TEXT);
     out.extend_from_slice(&NAPLPS_TEXT_FORMAT);
-    let field_high = u64::from(NAPLPS_ROW_LINES).saturating_mul(UNIT_HEIGHT_NUMERATOR);
-    operand(axis(1, u64::from(TEXT_COLUMNS)), axis(field_high, unit_lines), &mut out);
-    let first = u64::try_from(NAPLPS_FIRST_LINE).unwrap_or(0);
+    let (field_across, field_up) = naplps_field();
+    multi_value_operand(field_across, field_up, NAPLPS_OPERAND_BYTES, &mut out);
     for (row, stretches) in (FIRST_TEXT_ROW..).zip(rows) {
         // The point is the character field's origin, its lower left corner
         // (ANSI X3.110-1983 section 5.3.2.3.2, Figure 17): the field lies up
-        // and to the right of it, so the point is on the row's last raster
-        // line, 20 r + 19, for the field to cover lines 20 r to 20 r + 19.
-        // Counted up from the canvas's last line.
+        // and to the right of it, so the point is the dot of the row's
+        // first column on its last raster line, 20 r + 19, for the field
+        // to cover lines 20 r to 20 r + 19. Rounded down on both axes, so
+        // the origin is at or just short of that dot's centre (RAS-8 item 2).
         let foot = NAPLPS_ROW_LINES.saturating_mul(row).saturating_add(NAPLPS_ROW_LINES.saturating_sub(1));
-        let line = u64::from(foot).saturating_sub(first);
-        let up = lines.saturating_sub(1).saturating_sub(line).saturating_mul(UNIT_HEIGHT_NUMERATOR);
+        let (across, up) = dot_steps(0, i64::from(foot), 1, NAPLPS_OPERAND_BYTES, Rounding::Down);
         out.push(SHIFT_OUT);
         out.push(NAPLPS_POINT_SET);
-        operand(0, axis(up, unit_lines), &mut out);
+        multi_value_operand(across, up, NAPLPS_OPERAND_BYTES, &mut out);
         out.push(SHIFT_IN);
         neoteletext_formats::picture_text::naplps(stretches, &mut out).map_err(|error| error.to_string())?;
     }
@@ -948,8 +947,9 @@ fn page_row(page: &Raster, row: usize, (width, height): (usize, usize), offset: 
 /// A picture laid out with row 0 of its sub-page's teletext page above it
 /// and row 24 beneath, as the browser lays it out (PAR-7, PAR-31): a ReGIS
 /// picture stacked between the two rows, each at the picture's width; a
-/// NAPLPS picture, which is the teletext raster (DEC-6667), with row 0 over
-/// its lines 0 to 19 and row 24 over lines 480 to 499. `page` is the
+/// NAPLPS picture, which is the teletext raster (DEC-6853), with row 0 on
+/// its lines 0 to 19 and row 24 on lines 480 to 499, outside the display
+/// area of lines 20 to 479 (DEC-6857), so neither covers the picture. `page` is the
 /// sub-page's teletext page drawn whole, without transparency. The picture
 /// is given alone when the two palettes do not fit one image's 256 entries.
 #[must_use]
@@ -987,7 +987,12 @@ pub fn framed(language: Language, picture: &Raster, page: &Raster) -> Raster {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::indexing_slicing, reason = "a test panics on what it rules out")]
+    #![allow(
+        clippy::unwrap_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        reason = "a test panics on what it rules out, and does arithmetic on the page's own small figures"
+    )]
     use super::*;
 
     // PAR-8, TODO-6808: the largest picture a static sub-page carries, its
@@ -1032,15 +1037,19 @@ mod tests {
         assert!(raster.indices.iter().any(|&index| index != 0));
     }
 
-    // PAR-7: a NAPLPS picture lies on lines 19 to 480 of the raster, the
-    // border lines in the screen colour.
+    // PAR-7, RAS-11 (DEC-6857): a NAPLPS picture lies on lines 20 to 479
+    // of the raster, teletext rows 1 to 23; rows 0 and 24 are in the
+    // screen colour.
     #[test]
-    fn a_naplps_file_draws_on_the_raster_from_line_19() {
+    fn a_naplps_file_draws_on_the_raster_from_line_20() {
         // SO, RECT FILLED from (0, 0): the whole unit screen.
         let (raster, findings) = draw(Language::Naplps, &[0x0E, 0x31, 0x5B, 0x7F, 0x7F], &Fonts::default()).unwrap();
         assert_eq!((raster.width, raster.height), (480, 500));
-        assert_eq!(raster.indices[0], raster.indices[18 * 480], "the border");
-        assert_ne!(raster.indices[100 * 480 + 100], raster.indices[0], "the picture");
+        let border = raster.indices[0];
+        let lines = lines_drawn(&raster);
+        assert_eq!((lines.first(), lines.last()), (Some(&20), Some(&479)), "the picture on lines 20 to 479");
+        assert_eq!(lines.len(), 460);
+        assert!(raster.indices[..20 * 480].iter().chain(&raster.indices[480 * 480..]).all(|&index| index == border));
         assert!(!findings.refused);
     }
 
@@ -1132,40 +1141,74 @@ mod tests {
         assert!(lines.iter().any(|line| row_of(line) == 2), "{lines:?}");
     }
 
-    // PAR-10, TODO-6852, DEC-6849: the field is 51/2048 of the unit screen
-    // wide in four-byte operands, 11.95 dots, so a row's characters keep to
-    // their cells along its 40 columns, the 40th 39 × 0.047 = 1.83 dots
-    // short, two once rounded to the canvas (and a dot from column 21).
-    // At three bytes it was 6/256, three quarters of a dot short a
-    // character, and the 40th character was drawn 29 dots left of its cell.
-    #[test]
-    fn naplps_text_pages_keep_each_character_in_its_column() {
-        let rows = wrap(&"H".repeat(40), None).unwrap();
-        let (raster, found) = draw(Language::Naplps, &naplps_page(&rows).unwrap(), &Fonts::default()).unwrap();
-        assert!(!found.refused, "{found:?}");
-        let background = raster.indices[0];
-        let lit: Vec<usize> = (0..raster.width)
-            .filter(|&x| raster.indices.chunks(raster.width).any(|row| row[x] != background))
-            .collect();
-        // Each H is a run of lit dots apart from the next.
-        let mut lefts = vec![lit[0]];
-        lefts.extend(lit.windows(2).filter(|pair| pair[1] > pair[0] + 1).map(|pair| pair[1]));
-        assert_eq!(lefts.len(), 40, "{lefts:?}");
-        let bearing = lefts[0];
-        // 1/40 is no binary fraction: four bytes leave the line's end two dots short.
-        let most_drift = 2;
-        for (column, left) in lefts.iter().enumerate() {
-            let cell = CELL_WIDTH * column + bearing;
-            assert!(
-                left.abs_diff(cell) <= most_drift,
-                "column {column} drawn from dot {left}, its cell's from {cell}: {lefts:?}"
-            );
-        }
+    /// The code of row `row`, column `column` of RAS-8's full page: the G0
+    /// Latin English code 0x21 + ((r + c) mod 94).
+    fn full_page_code(row: u32, column: u32) -> u8 {
+        const FIRST: u32 = 0x21;
+        const PRINTABLE: u32 = 94;
+        u8::try_from(FIRST + (row + column) % PRINTABLE).unwrap()
     }
 
-    // PAR-31: a ReGIS picture is stacked between rows 0 and 24 at its
-    // width; a NAPLPS picture has them over its lines 0 to 19 and 480 to
-    // 499, the picture's palette first and the page's after it.
+    // RAS-8 (DEC-6857 item 3, DEC-6856 item 8; PAR-10, TODO-6852): the
+    // test every writer of NAPLPS text passes. write-text's page of rows 1
+    // to 23, each 40 characters of G0 Latin English (set 1 of FONT_SETS),
+    // drawn by the NAPLPS renderer on the receiver's 480 by 460 canvas
+    // with the engine's Noto Teletext glyphs, puts every character exactly
+    // on its 12 by 20 cell: glyph column k on dot 12 c + k and glyph line j
+    // on raster line 20 r + j, every one of the cell's 240 dots its glyph's
+    // (the drawing colour where the glyph is inked, the cleared screen's
+    // elsewhere), with no drift along a run; and nothing is written on rows
+    // 0 and 24. The four-byte writer of d333c79e drew the row's characters
+    // up to two dots left of their cells, and fails it.
+    #[test]
+    fn naplps_text_pages_keep_each_character_in_its_column() {
+        const LATIN_ENGLISH: u8 = 1;
+        assert_eq!(FONT_SETS[usize::from(LATIN_ENGLISH)].0, "G0-Latin-English");
+        assert_eq!(naplps_field(), (3_276, 4_452), "RAS-8 item 1");
+        let page: Vec<Vec<neoteletext_formats::picture_text::Stretch>> = (FIRST_TEXT_ROW..=LAST_TEXT_ROW)
+            .map(|row| {
+                let codes = (0..TEXT_COLUMNS).map(|column| full_page_code(row, column)).collect();
+                vec![neoteletext_formats::picture_text::Stretch { set: LATIN_ENGLISH, codes, ..Default::default() }]
+            })
+            .collect();
+        let (raster, found) = draw(Language::Naplps, &naplps_page(&page).unwrap(), &Fonts::default()).unwrap();
+        assert!(!found.refused, "{found:?}");
+        assert_eq!(found.lines, Vec::<String>::new(), "nothing passed over");
+        let glyphs = GlyphSet::noto_teletext();
+        let at = |x: usize, y: usize| raster.indices[y * raster.width + x];
+        let ink = |rows: &[u16; CELL_HEIGHT], dot: usize, line: usize| rows[line] >> (CELL_WIDTH - 1 - dot) & 1 != 0;
+        // The drawing colour and the cleared screen's, from the first cell.
+        let first = rows(&glyphs, LATIN_ENGLISH, full_page_code(1, 0));
+        let cell_dots = || (0..CELL_HEIGHT).flat_map(|line| (0..CELL_WIDTH).map(move |dot| (dot, line)));
+        let (inked, bare) = (
+            cell_dots().find(|&(dot, line)| ink(&first, dot, line)).unwrap(),
+            cell_dots().find(|&(dot, line)| !ink(&first, dot, line)).unwrap(),
+        );
+        let (drawing, cleared) = (at(inked.0, CELL_HEIGHT + inked.1), at(bare.0, CELL_HEIGHT + bare.1));
+        assert_ne!(drawing, cleared);
+        let mut wrong = Vec::new();
+        for row in FIRST_TEXT_ROW..=LAST_TEXT_ROW {
+            for column in 0..TEXT_COLUMNS {
+                let glyph = rows(&glyphs, LATIN_ENGLISH, full_page_code(row, column));
+                let (left, top) = (CELL_WIDTH * column as usize, CELL_HEIGHT * row as usize);
+                let right = cell_dots().all(|(dot, line)| {
+                    at(left + dot, top + line) == if ink(&glyph, dot, line) { drawing } else { cleared }
+                });
+                if !right {
+                    wrong.push((row, column));
+                }
+            }
+        }
+        assert_eq!(wrong, [], "every one of the 920 cells is exactly its glyph");
+        let border = raster.indices[0];
+        let outside = (0..CELL_HEIGHT).chain(RASTER_LINES - CELL_HEIGHT..RASTER_LINES);
+        assert!(outside.flat_map(|y| (0..PAGE_WIDTH).map(move |x| (x, y))).all(|(x, y)| at(x, y) == border));
+    }
+
+    // PAR-31, RAS-11: a ReGIS picture is stacked between rows 0 and 24 at
+    // its width; a NAPLPS picture has them on lines 0 to 19 and 480 to 499,
+    // wholly outside its display area of lines 20 to 479, the picture's
+    // palette first and the page's after it.
     #[test]
     fn a_picture_is_framed_by_its_page_rows() {
         let red = Rgba::opaque(255, 0, 0);
@@ -1190,9 +1233,10 @@ mod tests {
         };
         let framed_naplps = framed(Language::Naplps, &naplps, &page);
         assert_eq!((framed_naplps.width, framed_naplps.height), NAPLPS_FRAMED_SIZE);
-        assert_eq!(framed_naplps.indices[19 * PAGE_WIDTH], 2, "row 0 covers line 19");
+        assert_eq!(framed_naplps.indices[19 * PAGE_WIDTH], 2, "row 0 on line 19, its own last line");
         assert_eq!(framed_naplps.indices[20 * PAGE_WIDTH], 0, "the picture from line 20");
-        assert_eq!(framed_naplps.indices[480 * PAGE_WIDTH], 1, "row 24 covers line 480");
+        assert_eq!(framed_naplps.indices[479 * PAGE_WIDTH], 0, "the picture to line 479");
+        assert_eq!(framed_naplps.indices[480 * PAGE_WIDTH], 1, "row 24 from line 480, its own first line");
     }
 
     // PAR-8, PAR-17: a store keeps at most MAX_PICTURES_KEPT sub-pages'
