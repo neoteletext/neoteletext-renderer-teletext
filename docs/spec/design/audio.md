@@ -149,8 +149,8 @@ Every carriage delivers the same records. Integers are unsigned and big-endian, 
 
 | Offset | Bytes | Field |
 |---:|---:|---|
-| 0 | 1 | Profile version: `2` |
-| 1 | 1 | Record type: `1` OBJECT, `2` DATA, `3` CONTROL. Any other value: the record is discarded. |
+| 0 | 1 | Profile version: `2`, or `3` for a record only version 3 defines (§7.4): a CONTROL record that names a magazine, and MAGAZINE_MUSIC. A sender writes the lowest version that defines the record, so a receiver of version 2 reads everything else of a newer sender (DEC-6951). |
+| 1 | 1 | Record type: `1` OBJECT, `2` DATA, `3` CONTROL, `34` MAGAZINE_MUSIC (version 3 only). Any other value: the record is discarded. |
 | 2 | 2 | Body length L, at most 1 016 |
 | 4 | L | Body |
 | 4 + L | 4 | CRC-32 |
@@ -207,7 +207,7 @@ A repeated block is ignored. A block that differs from the stored one at the sam
 | 2 | Fade in milliseconds. Every change takes at least 5 ms (§10.2). |
 | 1 | Flags: bit 0 *progressive* (§8.2); bit 1 *loop*; bit 2 *after current* (§7.2); others 0 |
 | 1 | Duck: 0–6, the attenuations of EN 300 708 table 19, applied to the other channels (§10.3) |
-| 2 | Page: a page number in EN 300 706 form, `0x100` to `0x8FF`, binding the command to that page (§7.3); `0xFFFF` for the whole service |
+| 2 | Page: a page number in EN 300 706 form, `0x100` to `0x8FF`, binding the command to that page (§7.3); `0xFFFF` for the whole service; in a play of profile version 3, `0xFF01` to `0xFF08` for magazine 1 to 8 (§7.4) |
 
 Fields an operation doesn't use are zero.
 
@@ -316,6 +316,29 @@ A play whose page field is not `0xFFFF` is **armed** for that page:
 Page sounds play only while the user's **page sounds** setting is on (open decision 4). A play for the whole service (`0xFFFF`) plays once, on acceptance.
 
 Receiving data, reconnecting, or refreshing a page never starts a sound by itself.
+
+### 7.4 Magazine music
+
+The requirements are REQ-6925 and REQ-6926 (DEC-6924); the record forms are DEC-6951 and DEC-6952, and the gate DEC-6953.
+
+A play of profile version 3 whose page field is `0xFF00` plus a magazine number, 1 to 8, is **armed for that magazine**. It must name a live sound; a magazine play of a stored sound is refused.
+- It plays while the open page is any page of the magazine, the user's page sounds setting is on, and the open page's setting is not silent.
+- Moving between pages of the magazine does not stop, restart or fade it.
+- Leaving the magazine fades it out over 5 ms. Coming back starts it at the live sound's present block.
+- A stop of its channel disarms it, and so does any later command on the channel.
+- It is taken only on a connection that agreed the push protocol's capability bit 26; elsewhere the record is refused and counted. A page's rule table cannot start it.
+
+Each page and sub-page has a **magazine-music setting**, keyed on page number and sub-code together: play (the default), duck by a duck code 1 to 6, or silent. It travels in the MAGAZINE_MUSIC record (type 34, profile version 3), sent with the sub-page:
+
+| Bytes | Field |
+|---:|---|
+| 2 | Page number, `0x100` to `0x8FF` |
+| 2 | Sub-code: a sub-code of EN 300 706, and not `0x3F7F` |
+| 1 | Setting: `0` play; `1` to `6` duck by that code of EN 300 708 table 19; `0xFF` silent. Any other value: the record is discarded. |
+
+The setting gates the music and starts nothing. A receiver keeps the settings other than play of eight pages, the oldest giving way and never the open page's. A page sound with a duck code ducks the music as it ducks every other channel (§10.3); where the page's setting ducks it too, the deeper of the two holds, and they are not multiplied.
+
+A sink is told the magazine of each stream and each start, the music's level by its page, and whether the music is heard, so that a host with several views of one service can play one view's copy.
 
 ---
 

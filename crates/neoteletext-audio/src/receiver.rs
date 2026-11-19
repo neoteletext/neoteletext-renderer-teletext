@@ -27,6 +27,7 @@ mod file;
 ))]
 mod instruments;
 mod loss;
+mod magazine;
 #[cfg(feature = "opus")]
 mod opus;
 mod play;
@@ -34,6 +35,7 @@ mod send;
 
 #[cfg(feature = "idl")]
 pub use carriage::MessageError;
+pub use magazine::MagazineMusic;
 
 /// Counts of what the receiver met, for diagnostics (REQ-AUD-021).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -82,6 +84,12 @@ pub struct Statistics {
     /// with no page, looped or waiting for the current sound, or a third
     /// while [`crate::MOST_LOCAL_SOUNDS`] play.
     pub local_refused: u32,
+    /// Magazine music refused (REQ-6925 item 2, REQ-6927 item 3, REQ-6938
+    /// item 2): a CONTROL record naming a magazine or a `MAGAZINE_MUSIC`
+    /// record where the capability was not agreed
+    /// ([`Receiver::set_magazine_sound`]), a magazine play of a stored
+    /// sound, and a rule's command naming a magazine.
+    pub magazine_refused: u32,
 }
 
 /// The receiver of one audio service.
@@ -92,6 +100,13 @@ pub struct Receiver<'a, const OBJECTS: usize, const SLOTS: usize> {
     channels: [Channel; CHANNELS as usize],
     service: u8,
     opened: Option<u16>,
+    /// The sub-code of the page that is open (DEC-6599): 0000 for a port
+    /// that tells the page number alone.
+    opened_sub: u16,
+    /// Whether the connection agreed magazine music (REQ-6927 item 3).
+    magazine_sound: bool,
+    /// The pages' magazine-music settings (REQ-6926 item 1).
+    settings: magazine::Settings,
     page_sounds: bool,
     statistics: Statistics,
     /// The port's time, in milliseconds (REQ-AUD-014).
@@ -133,6 +148,9 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
             channels: [Channel::default(); CHANNELS as usize],
             service: 0,
             opened: None,
+            opened_sub: neoteletext_core::limits::SUBCODE_NONE,
+            magazine_sound: false,
+            settings: magazine::Settings::new(),
             page_sounds: true,
             statistics: Statistics::default(),
             now_ms: 0,
@@ -177,9 +195,11 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                     if let Some(heard) = self.heard.get_mut(usize::from(index)) {
                         *heard = play::Heard::Idle;
                     }
+                    magazine::music_changed(index, Some(play), None, sink);
                 }
             }
             sink.forget(entry.sound);
+            self.unlabel(entry.sound);
             self.store.set_at_sink(entry.sound, false);
             #[cfg(feature = "opus")]
             self.opus.release(entry.sound);
@@ -409,6 +429,11 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         for entry in self.store.entries().filter(|entry| entry.at_sink) {
             sink.forget(entry.sound);
         }
+        for (index, channel) in (0..CHANNELS).zip(&self.channels) {
+            magazine::music_changed(index, channel.playing, None, sink);
+        }
+        // Another service's pages have other settings.
+        self.settings = magazine::Settings::new();
         self.store.clear();
         #[cfg(feature = "idl")]
         self.reassembler.clear();
@@ -450,6 +475,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         for channel in &mut self.channels {
             channel.playing_page = None;
             channel.playing = None;
+            channel.labelled = None;
         }
         self.heard = [play::Heard::Idle; CHANNELS as usize];
         self.progress = [None; CHANNELS as usize];
@@ -519,6 +545,7 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                         let replaced = replaced.filter(|old| old.at_sink).map(|old| old.sound);
                         for sound in evicted.into_iter().chain([replaced]).flatten() {
                             sink.forget(sound);
+                            self.unlabel(sound);
                             #[cfg(feature = "opus")]
                             self.opus.release(sound);
                             #[cfg(any(
@@ -560,16 +587,41 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                 Stored::Repeat | Stored::Unknown => {}
             },
             Record::Control(control) => self.command(&control, sink),
+            Record::PageMusic(music) => self.set_page_music(music, sink),
         }
         self.render(sink);
         self.judge(sink);
     }
 
-    /// The user opened `page`, or none: page sounds follow it (REQ-AUD-012).
+    /// The user opened `page`, or none, for a port that knows no sub-code:
+    /// [`Receiver::open`] with sub-code 0000.
     pub fn open_page(&mut self, page: Option<u16>, sink: &mut dyn VoiceSink) {
-        if page == self.opened {
+        self.open(page, neoteletext_core::limits::SUBCODE_NONE, sink);
+    }
+
+    /// The user opened sub-page `sub` of `page`, or no page: page sounds
+    /// follow the page number (REQ-AUD-012), and magazine music follows the
+    /// page's magazine and the setting of that page and sub-code together
+    /// (REQ-6925 item 3, REQ-6926 items 1 and 3; DEC-6599). Music of the
+    /// page's magazine plays on unbroken from a page of the same magazine,
+    /// fades out when the magazine is left or the page is silent, and
+    /// starts at its live sound's present block when it may sound again.
+    /// `sub` is not read with no page.
+    pub fn open(&mut self, page: Option<u16>, sub: u16, sink: &mut dyn VoiceSink) {
+        if page == self.opened && sub == self.opened_sub {
             return;
         }
+        self.opened_sub = sub;
+        if page != self.opened {
+            self.open_number(page, sink);
+        }
+        self.follow_magazines(sink);
+        self.render(sink);
+    }
+
+    /// The page number that is open changed: page sounds follow it
+    /// (REQ-AUD-012).
+    fn open_number(&mut self, page: Option<u16>, sink: &mut dyn VoiceSink) {
         let left = self.opened;
         self.opened = page;
         for index in 0..CHANNELS {
@@ -582,7 +634,6 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
         if self.page_sounds {
             self.start_armed(sink);
         }
-        self.render(sink);
     }
 
     /// The page that was open in the view is open no longer although the
@@ -636,6 +687,9 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                 self.drop_waiting_page_play(index);
             }
         }
+        // Magazine music obeys the setting as a page sound does (REQ-6925
+        // item 5).
+        self.follow_magazines(sink);
         self.render(sink);
     }
 
@@ -669,13 +723,27 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
     /// is, but belongs to no sender's sequence, so `control.sequence` is not
     /// read and the channel's sequence is left as it was. The caller names
     /// the page the rule belongs to in `control.page`.
+    ///
+    /// A rule cannot start magazine music (REQ-6938 item 2): a command that
+    /// names a magazine is refused and counted.
     pub fn rule_command(&mut self, control: &Control, sink: &mut dyn VoiceSink) {
+        if control.magazine.is_some() {
+            bump(&mut self.statistics.magazine_refused);
+            return;
+        }
         self.perform(control, sink);
         self.render(sink);
         self.judge(sink);
     }
 
     fn command(&mut self, control: &Control, sink: &mut dyn VoiceSink) {
+        // Magazine music where its capability was not agreed is refused
+        // whole, and moves no channel's sequence (REQ-6927 item 3, DEC-6953
+        // item 5).
+        if control.magazine.is_some() && !self.magazine_sound {
+            bump(&mut self.statistics.magazine_refused);
+            return;
+        }
         let Some(channel) = self.channels.get_mut(usize::from(control.channel)) else { return };
         if !channel.accept(control.sequence) {
             bump(&mut self.statistics.stale_commands);
@@ -702,20 +770,31 @@ impl<'a, const OBJECTS: usize, const SLOTS: usize> Receiver<'a, OBJECTS, SLOTS> 
                     if self.opened == Some(page) && self.page_sounds {
                         self.try_start(index, play, sink);
                     }
+                } else if play.magazine.is_some() {
+                    // Armed for its magazine, and started only where the
+                    // gate lets it sound (REQ-6925 items 3 and 4).
+                    channel.armed = Some(play);
+                    if !self.refuse_stored_music(index, play) && self.music_percent(play).is_some() {
+                        self.try_start(index, play, sink);
+                    }
                 } else {
                     channel.armed = None;
                     self.try_start(index, play, sink);
                 }
+                // The channel's command may have disarmed magazine music it
+                // played: the latest command wins (DEC-610 item 1).
+                self.follow_magazines(sink);
             }
             Operation::Stop => {
                 channel.armed = None;
                 channel.waiting = None;
                 channel.playing_page = None;
-                channel.playing = None;
+                let was = channel.playing.take();
                 sink.stop(index, fade(control.fade_ms));
                 self.stop_streams(index, fade(control.fade_ms), sink);
                 self.end_progress(index);
                 self.end_local(index);
+                magazine::music_changed(index, was, None, sink);
             }
             Operation::Gain => sink.gain(index, control.gain, fade(control.fade_ms)),
         }

@@ -40,6 +40,20 @@ pub struct Start {
     /// Wait for the channel's current sound to end instead of replacing it.
     /// A channel holds one such waiting sound; a newer one replaces it.
     pub after_current: bool,
+    /// The magazine whose music this sound is, 1 to 8 (REQ-6925 item 6), or
+    /// `None` for a page's sound or the whole service's. A host that plays
+    /// several views of one service, as a browser's tabs are, tells
+    /// magazine music from the rest by it and plays one view's copy.
+    pub magazine: Option<u8>,
+    /// For magazine music, the level the open page's setting gives it, in
+    /// per cent of its gain (REQ-6926 item 1): 100 on a page that lets it
+    /// play, or one of [`crate::DUCK_PERCENT`] on a page that ducks it; 100
+    /// for every other sound. It lowers this sound itself, where
+    /// `duck_percent` lowers the other channels, and the sink holds this
+    /// sound at the lower of this and what another channel's `duck_percent`
+    /// asks, never both together (REQ-6926 item 4).
+    /// [`VoiceSink::music_level`] changes it while the sound plays.
+    pub music_percent: u8,
 }
 
 /// One IMA ADPCM block given undecoded to a sink that decodes IMA ADPCM
@@ -169,6 +183,36 @@ pub trait VoiceSink {
 
     /// Ramps the channel to a new gain.
     fn gain(&mut self, channel: u8, gain: u8, fade_ms: u16);
+
+    /// The stream of `sound` on audio channel `channel` is from here on the
+    /// music of magazine `magazine`, 1 to 8, or with `None` no magazine's
+    /// (REQ-6925 item 6): every sample given for that stream through
+    /// [`VoiceSink::stream_samples`] or [`VoiceSink::ima_stream`] after
+    /// this call carries that label, until the stream ends or is labelled
+    /// again. It comes after [`VoiceSink::stream`] began the stream and
+    /// before the first sample it labels; a stream never labelled is no
+    /// magazine's. The label says what the sender armed the sound for, not
+    /// that the receiver's view shows that magazine now: a host that plays
+    /// several views checks it against the view's own page. The provided
+    /// method ignores it, as a sink with one view may.
+    fn stream_magazine(&mut self, _channel: u8, _sound: SoundId, _magazine: Option<u8>) {}
+
+    /// The open page's setting changed the level of the magazine music
+    /// that audio channel `channel` plays (REQ-6926 items 1 and 5): it
+    /// ramps over `fade_ms` to `percent` per cent of its gain, 100 or one
+    /// of [`crate::DUCK_PERCENT`], held as [`Start::music_percent`] is. A
+    /// sink that ignores it plays the music unducked by its page; the
+    /// provided method ignores it.
+    fn music_level(&mut self, _channel: u8, _percent: u8, _fade_ms: u16) {}
+
+    /// Whether the music of magazine `magazine`, 1 to 8, armed on audio
+    /// channel `channel`, is heard on the page now open (REQ-6926 item 6):
+    /// `true` when its voice starts (the page is of the magazine, lets the
+    /// music play or ducks it, and the user's page sounds are on), `false`
+    /// when it stops for any reason. It is told at each change, so that a
+    /// host shows that music plays only where it is heard. The provided
+    /// method ignores it.
+    fn magazine_heard(&mut self, _channel: u8, _magazine: u8, _heard: bool) {}
 
     /// The `concealed` report (REQ-AUD-013): block `block` of a sound, of
     /// `samples` samples, was given as silence, or concealed by its decoder,

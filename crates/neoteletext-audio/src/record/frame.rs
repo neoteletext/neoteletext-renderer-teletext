@@ -3,7 +3,7 @@
 //! of a body's fields.
 
 use crate::crc::crc32_parts;
-use crate::{MAX_FRAMED_BODY, MAX_FRAMED_RECORD, PROFILE_VERSION, RECORD_CRC, RECORD_HEADER};
+use crate::{BASE_PROFILE_VERSION, MAX_FRAMED_BODY, MAX_FRAMED_RECORD, PROFILE_VERSION, RECORD_CRC, RECORD_HEADER};
 
 /// Why a record was refused. A refused record is discarded whole.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -53,6 +53,18 @@ pub const fn record_length(body: usize) -> usize {
 /// # Errors
 /// The frame's failures of REQ-AUD-003: the length, the CRC or the version.
 pub fn split(bytes: &[u8]) -> Result<(u8, &[u8]), RecordError> {
+    split_versioned(bytes).map(|(_, kind, body)| (kind, body))
+}
+
+/// Checks one whole record's frame as [`split`] does, and returns the
+/// profile version it names before its type and body: either
+/// [`BASE_PROFILE_VERSION`] or [`PROFILE_VERSION`]. A record means what its
+/// version defines, so what only the newer version defines is refused in a
+/// record of the older (REQ-6925 item 7).
+///
+/// # Errors
+/// As [`split`].
+pub fn split_versioned(bytes: &[u8]) -> Result<(u8, u8, &[u8]), RecordError> {
     if bytes.len() > MAX_FRAMED_RECORD {
         return Err(RecordError::TooLong);
     }
@@ -70,17 +82,29 @@ pub fn split(bytes: &[u8]) -> Result<(u8, &[u8]), RecordError> {
         return Err(RecordError::Crc);
     }
     let version = header.first().copied().unwrap_or(0);
-    if version != PROFILE_VERSION {
+    if !(BASE_PROFILE_VERSION..=PROFILE_VERSION).contains(&version) {
         return Err(RecordError::Version(version));
     }
-    Ok((header.get(1).copied().unwrap_or(0), body))
+    Ok((version, header.get(1).copied().unwrap_or(0), body))
 }
 
 /// Writes a record of type `kind` around `body` into `out` and returns its
 /// length, or `None` when the body is over [`MAX_FRAMED_BODY`] or `out` is
-/// short.
+/// short. The record names [`BASE_PROFILE_VERSION`], which every receiver
+/// reads; magazine music's two forms are written by [`write_version`].
 /// It allocates nothing.
 pub fn write(kind: u8, body: &[u8], out: &mut [u8]) -> Option<usize> {
+    write_version(BASE_PROFILE_VERSION, kind, body, out)
+}
+
+/// Writes a record as [`write`] does, naming profile version `version`:
+/// [`PROFILE_VERSION`] for a record only that version defines (REQ-6925
+/// item 7). `None` too when `version` is one no receiver reads.
+/// It allocates nothing.
+pub fn write_version(version: u8, kind: u8, body: &[u8], out: &mut [u8]) -> Option<usize> {
+    if !(BASE_PROFILE_VERSION..=PROFILE_VERSION).contains(&version) {
+        return None;
+    }
     if body.len() > MAX_FRAMED_BODY {
         return None;
     }
@@ -89,7 +113,7 @@ pub fn write(kind: u8, body: &[u8], out: &mut [u8]) -> Option<usize> {
     let (header, rest) = record.split_at_mut(RECORD_HEADER);
     let (target, crc) = rest.split_at_mut(body.len());
     let [high, low] = u16::try_from(body.len()).ok()?.to_be_bytes();
-    header.copy_from_slice(&[PROFILE_VERSION, kind, high, low]);
+    header.copy_from_slice(&[version, kind, high, low]);
     target.copy_from_slice(body);
     crc.copy_from_slice(&crc32_parts(header, target).to_be_bytes());
     Some(length)

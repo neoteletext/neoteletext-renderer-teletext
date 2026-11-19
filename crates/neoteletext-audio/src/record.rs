@@ -4,14 +4,15 @@
 //! in it is used.
 
 use crate::{
-    CHANNELS, Codec, DUCK_PERCENT, MAX_BODY, MAX_FADE_MS, MAX_GAIN, MOST_BANK_BYTES, MOST_BANKS,
-    MOST_EVENT_SOUND_BLOCKS, MOST_EVENT_SOUND_BYTES, SERVICE_SCOPE, sample_rate,
+    CHANNELS, Codec, DUCK_PERCENT, FIRST_MAGAZINE, LAST_MAGAZINE, MAGAZINE_SCOPE, MAX_BODY, MAX_FADE_MS, MAX_GAIN,
+    MOST_BANK_BYTES, MOST_BANKS, MOST_EVENT_SOUND_BLOCKS, MOST_EVENT_SOUND_BYTES, MUSIC_PLAY, MUSIC_SILENT,
+    PROFILE_VERSION, SERVICE_SCOPE, sample_rate,
 };
 use frame::Fields;
 
 mod frame;
 
-pub use frame::{RecordError, framed_length, record_length, split, write};
+pub use frame::{RecordError, framed_length, record_length, split, split_versioned, write, write_version};
 
 /// Record type: announce a sound.
 pub const TYPE_OBJECT: u8 = 1;
@@ -126,6 +127,12 @@ pub const TYPE_RUN: u8 = 32;
 /// Record type: a start or a stop of a sequence (RULE-103).
 pub const TYPE_SEQUENCE: u8 = 33;
 
+/// Record type: a page's magazine-music setting (REQ-6926 item 1,
+/// DEC-6952), read by this receiver. Only profile version 3 defines it, so
+/// it is written with [`write_version`] and refused in a record of version
+/// 2.
+pub const TYPE_MAGAZINE_MUSIC: u8 = 34;
+
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
 #[must_use]
@@ -183,6 +190,8 @@ pub const EVENT_BLOCK_LENGTH_BYTES: usize = 2;
 /// CONTROL's fields: channel, sequence, operation, handle, generation, gain,
 /// fade, flags, duck, page.
 pub const CONTROL_BYTES: usize = 1 + 2 + 1 + 1 + 2 + 1 + 2 + 1 + 1 + 2;
+/// `MAGAZINE_MUSIC`'s fields (DEC-6952 item 1): page, sub-code, setting.
+pub const MAGAZINE_MUSIC_BYTES: usize = 2 + 2 + 1;
 /// The longest label, in bytes of UTF-8 (REQ-AUD-004).
 pub const MAX_LABEL: usize = 64;
 /// The longest language tag.
@@ -411,8 +420,71 @@ pub struct Control {
     /// 0 to 6: the attenuation of EN 300 708 Table 19 applied to the other
     /// channels while this sound plays.
     pub duck: u8,
-    /// The page the command belongs to, or `None` for the whole service.
+    /// The page the command belongs to, or `None` for the whole service or
+    /// a magazine.
     pub page: Option<u16>,
+    /// The magazine a play belongs to, [`FIRST_MAGAZINE`] to
+    /// [`LAST_MAGAZINE`] (REQ-6925 item 1, DEC-6951): the page field's
+    /// [`MAGAZINE_SCOPE`] plus the magazine. `None` for a page's command
+    /// or the whole service's; when it is given, `page` is `None`. Only a
+    /// play in a record of profile version 3 names one.
+    pub magazine: Option<u8>,
+}
+
+/// What a page does to its magazine's music while it is open (REQ-6926
+/// item 1).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MusicSetting {
+    /// The music plays at its own gain: the setting of a page the sender
+    /// has said nothing of.
+    #[default]
+    Play,
+    /// The music is lowered by this duck code, 1 to 6, of EN 300 708
+    /// Table 19 ([`DUCK_PERCENT`]).
+    Duck(u8),
+    /// The music fades out.
+    Silent,
+}
+
+impl MusicSetting {
+    /// The setting a `MAGAZINE_MUSIC` record's setting byte names (DEC-6952
+    /// item 1): [`MUSIC_PLAY`], a duck code 1 to 6, or [`MUSIC_SILENT`];
+    /// `None` for any other byte.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            MUSIC_PLAY => Some(Self::Play),
+            MUSIC_SILENT => Some(Self::Silent),
+            // Duck code 0 is no ducking, which is play and is written so.
+            code if code > 0 && (code as usize) < DUCK_PERCENT.len() => Some(Self::Duck(code)),
+            _ => None,
+        }
+    }
+
+    /// The setting byte that names this setting; `None` for a duck code
+    /// outside 1 to 6.
+    #[must_use]
+    pub const fn code(self) -> Option<u8> {
+        match self {
+            Self::Play => Some(MUSIC_PLAY),
+            Self::Silent => Some(MUSIC_SILENT),
+            Self::Duck(code) if code > 0 && (code as usize) < DUCK_PERCENT.len() => Some(code),
+            Self::Duck(_) => None,
+        }
+    }
+}
+
+/// A `MAGAZINE_MUSIC` record (REQ-6926 item 1, DEC-6952): the setting of one
+/// sub-page, keyed on its page number and sub-code together (DEC-6599).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PageMusic {
+    /// The page number, 0x100 to 0x8FF.
+    pub page: u16,
+    /// The sub-code: no bit outside the thirteen of a sub-code, and not the
+    /// value that means any sub-page.
+    pub sub: u16,
+    /// What the page does to its magazine's music.
+    pub setting: MusicSetting,
 }
 
 /// One record.
@@ -424,6 +496,8 @@ pub enum Record<'a> {
     Data(Data<'a>),
     /// A command.
     Control(Control),
+    /// A page's magazine-music setting.
+    PageMusic(PageMusic),
 }
 
 /// Reads one whole record, exactly `bytes` long.
@@ -432,7 +506,10 @@ pub enum Record<'a> {
 /// Any failure of REQ-AUD-003 to REQ-AUD-006: the frame, the CRC, the type
 /// or any field.
 pub fn parse(bytes: &[u8]) -> Result<Record<'_>, RecordError> {
-    let (kind, body) = split(bytes)?;
+    let (version, kind, body) = split_versioned(bytes)?;
+    // What only profile version 3 defines is refused in a record of
+    // version 2, as a receiver of version 2 refuses it (DEC-6951 item 3).
+    let magazines = version >= PROFILE_VERSION;
     if body.len() > MAX_BODY {
         return Err(RecordError::TooLong);
     }
@@ -452,9 +529,14 @@ pub fn parse(bytes: &[u8]) -> Result<Record<'_>, RecordError> {
             Ok(Record::Data(data))
         }
         TYPE_CONTROL => {
-            let control = control(&mut fields)?;
+            let control = control(&mut fields, magazines)?;
             fields.end()?;
             Ok(Record::Control(control))
+        }
+        TYPE_MAGAZINE_MUSIC if magazines => {
+            let music = page_music(&mut fields)?;
+            fields.end()?;
+            Ok(Record::PageMusic(music))
         }
         other => Err(RecordError::UnknownType(other)),
     }
@@ -606,7 +688,21 @@ fn check_synthesizer(object: &mut Object<'_>, codec: Codec) -> Result<(), Record
     Ok(())
 }
 
-fn control(fields: &mut Fields<'_>) -> Result<Control, RecordError> {
+/// Reads a `MAGAZINE_MUSIC` record's body (DEC-6952 item 1).
+fn page_music(fields: &mut Fields<'_>) -> Result<PageMusic, RecordError> {
+    let page = fields.u16()?;
+    if !(FIRST_PAGE..=LAST_PAGE).contains(&page) {
+        return Err(RecordError::BadValue("page"));
+    }
+    let sub = fields.u16()?;
+    if !neoteletext_core::limits::is_sub_code(sub) || sub == neoteletext_core::limits::SUBCODE_ANY {
+        return Err(RecordError::BadValue("sub-code"));
+    }
+    let setting = MusicSetting::from_code(fields.u8()?).ok_or(RecordError::BadValue("setting"))?;
+    Ok(PageMusic { page, sub, setting })
+}
+
+fn control(fields: &mut Fields<'_>, magazines: bool) -> Result<Control, RecordError> {
     let channel = fields.u8()?;
     if channel >= CHANNELS {
         return Err(RecordError::BadValue("channel"));
@@ -636,12 +732,40 @@ fn control(fields: &mut Fields<'_>) -> Result<Control, RecordError> {
     if usize::from(duck) >= DUCK_PERCENT.len() {
         return Err(RecordError::BadValue("duck"));
     }
-    let page = match fields.u16()? {
-        SERVICE_SCOPE => None,
-        page if (FIRST_PAGE..=LAST_PAGE).contains(&page) && page & 0xFF <= 0x99 && page & 0x0F <= 9 => Some(page),
+    let scope = fields.u16()?;
+    let (page, magazine) = match scope {
+        SERVICE_SCOPE => (None, None),
+        page if (FIRST_PAGE..=LAST_PAGE).contains(&page) && page & 0xFF <= 0x99 && page & 0x0F <= 9 => {
+            (Some(page), None)
+        }
+        // A play of profile version 3 may belong to a magazine (REQ-6925
+        // item 1, DEC-6951); a stop or a set gain belongs to its channel.
+        _ if magazines && operation == Operation::Play => match magazine_of_scope(scope) {
+            Some(magazine) => (None, Some(magazine)),
+            None => return Err(RecordError::BadValue("page")),
+        },
         _ => return Err(RecordError::BadValue("page")),
     };
-    Ok(Control { channel, sequence, operation, handle, generation, gain, fade_ms, flags, duck, page })
+    Ok(Control { channel, sequence, operation, handle, generation, gain, fade_ms, flags, duck, page, magazine })
+}
+
+/// The magazine a CONTROL record's page field names, [`FIRST_MAGAZINE`] to
+/// [`LAST_MAGAZINE`], when it is [`MAGAZINE_SCOPE`] plus one of them
+/// (DEC-6951 item 1).
+fn magazine_of_scope(scope: u16) -> Option<u8> {
+    let magazine = u8::try_from(scope.checked_sub(MAGAZINE_SCOPE)?).ok()?;
+    (FIRST_MAGAZINE..=LAST_MAGAZINE).contains(&magazine).then_some(magazine)
+}
+
+/// The magazine of page `page`, a page number 0x100 to 0x8FF: its hundreds
+/// digit, [`FIRST_MAGAZINE`] to [`LAST_MAGAZINE`] (EN 300 706 clause 3.1);
+/// `None` for a value that is no page number.
+#[must_use]
+pub fn magazine_of_page(page: u16) -> Option<u8> {
+    if !(FIRST_PAGE..=LAST_PAGE).contains(&page) {
+        return None;
+    }
+    u8::try_from(page >> u8::BITS).ok()
 }
 
 #[cfg(test)]

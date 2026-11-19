@@ -22,8 +22,12 @@ pub struct Play {
     pub after_current: bool,
     /// The other channels' level while this plays, in per cent.
     pub duck_percent: u8,
-    /// The page the play belongs to, or `None` for the whole service.
+    /// The page the play belongs to, or `None` for the whole service or a
+    /// magazine.
     pub page: Option<u16>,
+    /// The magazine the play belongs to, 1 to 8 (REQ-6925): magazine music.
+    /// `None` for a page's play or the whole service's.
+    pub magazine: Option<u8>,
 }
 
 impl Play {
@@ -39,6 +43,7 @@ impl Play {
             after_current: control.flags & FLAG_AFTER_CURRENT != 0,
             duck_percent: DUCK_PERCENT.get(usize::from(control.duck)).copied().unwrap_or(100),
             page: control.page,
+            magazine: control.magazine,
         }
     }
 }
@@ -62,6 +67,12 @@ pub struct Channel {
     pub playing_page: Option<u16>,
     /// The play the channel last started, while it may still sound.
     pub playing: Option<Play>,
+    /// While the channel plays magazine music, the level the open page's
+    /// setting gives it, in per cent, as the sink was last told (REQ-6926).
+    pub music_percent: u8,
+    /// The stream at the sink, on this channel, that is labelled as a
+    /// magazine's music, and the magazine (REQ-6925 item 6).
+    pub labelled: Option<(SoundId, u8)>,
 }
 
 impl Channel {
