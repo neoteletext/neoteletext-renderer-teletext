@@ -207,8 +207,10 @@ pub struct Report {
 /// [`World::command`] and [`World::report`] are called as the commands
 /// run, in order.
 pub trait World {
-    /// The picture's width and height in pixels (RULE-13): 480 by 500 for
-    /// a teletext page, 800 by 480 for ReGIS, 640 by 480 for NAPLPS.
+    /// The picture's width and height in pixels (RULE-13): 480 by 500 dots
+    /// for a teletext page and for NAPLPS, whose every coordinate is a dot
+    /// of the same teletext raster (neoteletext-common
+    /// `docs/naplps-raster.md` RAS-5, DEC-6853), and 800 by 480 for ReGIS.
     fn picture(&self) -> (u16, u16);
     /// The state of one control or object of the page, or `None` when it
     /// does not exist there (RULE-12).

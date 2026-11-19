@@ -74,14 +74,15 @@ const DEFAULT_LAYER: u8 = 1;
 
 /// Whose picture the table's page is: its size in pixels, and how many of
 /// them one unit of an object's position is (ANIM-6: cells for a teletext
-/// sprite, pixels for a ReGIS drawing and a NAPLPS object).
+/// sprite, pixels for a ReGIS drawing, raster dots for a NAPLPS object).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
 pub enum Picture {
     /// A teletext page: 480 by 500 dots, positions in cells of 12 by 20.
     Teletext,
     /// A ReGIS picture: 800 by 480 pixels.
     Regis,
-    /// A NAPLPS picture: 640 by 480 pixels.
+    /// A NAPLPS picture: the teletext raster's 480 by 500 dots, positions in
+    /// dots (RAS-5, DEC-6853).
     Naplps,
 }
 
@@ -89,9 +90,8 @@ impl Picture {
     /// The picture's width and height (page-rules.md RULE-13).
     const fn size(self) -> (u16, u16) {
         match self {
-            Self::Teletext => (PAGE_WIDTH as u16, PAGE_HEIGHT as u16),
+            Self::Teletext | Self::Naplps => (PAGE_WIDTH as u16, PAGE_HEIGHT as u16),
             Self::Regis => (800, 480),
-            Self::Naplps => (640, 480),
         }
     }
 
@@ -640,4 +640,18 @@ pub fn rules_run(
         writeln!(out, "{line}").map_err(|error| (exit::INPUT, error.to_string()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod picture_tests {
+    use super::Picture;
+
+    /// RAS-5 (DEC-6853): a NAPLPS page's world is the teletext raster, 480
+    /// by 500, an object's position counted in dots.
+    #[test]
+    fn a_naplps_picture_is_the_raster_in_dots() {
+        assert_eq!(Picture::Naplps.size(), Picture::Teletext.size());
+        assert_eq!(Picture::Naplps.size(), (480, 500));
+        assert_eq!(Picture::Naplps.unit(), (1, 1));
+    }
 }

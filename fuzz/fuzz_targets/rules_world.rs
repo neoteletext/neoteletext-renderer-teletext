@@ -12,6 +12,11 @@ use neoteletext_rules::state::PageState;
 use neoteletext_rules::table::{Table, Target, Value};
 use neoteletext_rules::{Evaluator, decode};
 use neoteletext_web::records::body_check;
+use neoteletext_web::records::naplps_objects::{RASTER_HEIGHT, RASTER_WIDTH};
+
+/// A ReGIS picture's width and height in pixels (RULE-13; the ReGIS
+/// renderer's screen).
+const REGIS_PICTURE: (u16, u16) = (800, 480);
 
 /// The page every fuzzed table is for.
 pub const PAGE: u16 = 0x101;
@@ -54,8 +59,11 @@ impl<'a> FuzzWorld<'a> {
 }
 
 impl World for FuzzWorld<'_> {
+    /// RULE-13: a ReGIS picture of 800 by 480 pixels, or the teletext
+    /// raster of 480 by 500 dots that a teletext page and a NAPLPS picture
+    /// share (RAS-5, DEC-6853), chosen by the seed's first byte.
     fn picture(&self) -> (u16, u16) {
-        (800, 480)
+        if self.byte(0) & 1 == 0 { REGIS_PICTURE } else { (RASTER_WIDTH, RASTER_HEIGHT) }
     }
 
     fn target(&self, target: Target) -> Option<TargetState> {
