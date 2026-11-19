@@ -502,6 +502,19 @@ pub const DEFAULT_RESPONSE_TIMEOUT_US: u64 = 30 * MICROSECONDS_PER_SECOND;
 /// The longest `Retry-After` honoured: a server cannot silence the client
 /// for longer than this.
 pub const MAX_RETRY_AFTER_US: u64 = 600 * MICROSECONDS_PER_SECOND;
+/// The whole of one snapshot, from the open to its end (REQ-6880 item 5,
+/// neoteletext-common `docs/tab-thumbnails.md` section 4): the connect
+/// and response limits, the server's longest wait on its program's
+/// snapshot answer (`SNAPSHOT_ANSWER_MS`, 2,000 ms) and then on the page's
+/// description (`DESCRIPTION_WAIT_MS`, 2,000 ms), with room for a slow link,
+/// and above the server's own 10-second life of a snapshot connection
+/// (`SNAPSHOT_CONNECTION_MS`), so that the server's answer, a DENIED 503
+/// included, arrives before the agent gives up.
+pub const SNAPSHOT_TIME_LIMIT_US: u64 = 15 * MICROSECONDS_PER_SECOND;
+/// The server's life of a snapshot connection, `SNAPSHOT_CONNECTION_MS`
+/// (REQ-6882), which the snapshot's time limit must exceed.
+const SERVER_SNAPSHOT_CONNECTION_US: u64 = 10 * MICROSECONDS_PER_SECOND;
+const _: () = assert!(SNAPSHOT_TIME_LIMIT_US > SERVER_SNAPSHOT_CONNECTION_US);
 /// Page requests waiting for the fetch connection.
 pub const PAGE_QUEUE: usize = 16;
 /// Pages whose validators and freshness are remembered (REQ-WEB-004).

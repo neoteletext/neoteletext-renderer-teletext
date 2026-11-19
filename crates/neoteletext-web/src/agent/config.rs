@@ -6,6 +6,17 @@ use crate::consts::{
     DEFAULT_HEADER_LIMIT, DEFAULT_PAGE_LIMIT, DEFAULT_PUSH_LIMIT, DEFAULT_RESPONSE_TIMEOUT_US,
 };
 use crate::url::IpAddress;
+use neoteletext_core::types::{PageAddress, SubCode};
+
+/// The one page a snapshot asks for (REQ-6880, DEC-6875 item 3): a display
+/// page, and a sub-code, [`SubCode::ANY`] (3F7F) for the page as a whole.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SnapshotTarget {
+    /// The page, 100 to 8FF.
+    pub page: PageAddress,
+    /// The sub-code, or [`SubCode::ANY`] for the page as a whole.
+    pub sub: SubCode,
+}
 
 /// The agent's configuration. Every security setting defaults to the safer
 /// choice (REQ-SEC-020).
@@ -53,6 +64,18 @@ pub struct Config {
     /// network is then refused by what the agent can see of a host before
     /// it connects ([`crate::proxy::hidden_local`]), not by the peer.
     pub proxied: bool,
+    /// Snapshot mode (REQ-6880): the agent fetches this one page as a
+    /// stranger sees it and nothing else, then ends with
+    /// [`Event::SnapshotEnded`](super::Event::SnapshotEnded). It opens the
+    /// channel or service it is given once; for a live channel it opens one
+    /// push connection and sends the snapshot request itself
+    /// (`neoteletext_input::snapshot`), never reconnecting; for a static
+    /// channel it fetches the target's file and no bundle, contents or list.
+    /// It sends no conditional request and refuses every input message its
+    /// caller gives it, and it ends by
+    /// [`SNAPSHOT_TIME_LIMIT_US`](crate::consts::SNAPSHOT_TIME_LIMIT_US).
+    /// `None`, the default, changes nothing.
+    pub snapshot: Option<SnapshotTarget>,
 }
 
 impl Default for Config {
@@ -70,6 +93,7 @@ impl Default for Config {
             redirects_within_channel: true,
             product: None,
             proxied: false,
+            snapshot: None,
         }
     }
 }

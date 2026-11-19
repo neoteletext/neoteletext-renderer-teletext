@@ -140,6 +140,11 @@ impl Replay {
         }
     }
 
+    /// Whether the client holds `connection` open: it has not closed it.
+    pub fn is_connected(&self, connection: ConnectionId) -> bool {
+        self.connections.contains_key(&connection)
+    }
+
     /// Requests seen by the server for `host:port`.
     pub fn requests_to(&self, host_port: &str) -> Vec<Vec<u8>> {
         self.requests.iter().filter(|(h, _)| h == host_port).map(|(_, r)| r.clone()).collect()

@@ -11,8 +11,21 @@ use crate::port::{ConnectionId, NetInput, RandomSource};
 use crate::url::{Url, UrlError};
 
 impl<R: RandomSource> UserAgent<'_, R> {
-    /// Handles one input. Outputs go to `sink` before this returns.
+    /// Handles one input. Outputs go to `sink` before this returns. In
+    /// snapshot mode ([`Config::snapshot`](super::Config::snapshot)) only
+    /// the first open, the network and the clock are taken, every input
+    /// message is refused with [`Event::InputDropped`], and the snapshot ends
+    /// with [`Event::SnapshotEnded`] (REQ-6880).
     pub fn handle(&mut self, now: Instant, input: Input<'_>, sink: &mut Sink<'_>) {
+        if self.config.snapshot.is_some() {
+            self.handle_snapshot(now, input, sink);
+        } else {
+            self.handle_input(now, input, sink);
+        }
+    }
+
+    /// [`Self::handle`], once snapshot mode has let the input through.
+    pub(super) fn handle_input(&mut self, now: Instant, input: Input<'_>, sink: &mut Sink<'_>) {
         let ticked = matches!(input, Input::Tick);
         // REQ-RCH-010: what this input writes on the push connection goes in
         // one send when it is done, unless more messages of the same moment
@@ -117,6 +130,6 @@ impl<R: RandomSource> UserAgent<'_, R> {
         };
         let queue =
             (self.fetch.exchange.is_none() && self.queue.iter().any(Option::is_some)).then_some(self.next_fetch_at);
-        [self.fetch.deadline, push, queue].into_iter().flatten().min()
+        [self.fetch.deadline, push, queue, self.snapshot_deadline()].into_iter().flatten().min()
     }
 }

@@ -49,11 +49,12 @@ mod resource;
 mod response;
 mod secure;
 mod service;
+mod snapshot;
 
-pub use config::{Buffers, Config, Storage};
+pub use config::{Buffers, Config, SnapshotTarget, Storage};
 pub use events::{
-    Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, ResourceRole, Sink, Source,
-    Subscription,
+    Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, ResourceRole, Sink, SnapshotEnd,
+    Source, Subscription,
 };
 
 /// The bytes of one T42 packet (REQ-INP-002).
@@ -338,6 +339,8 @@ pub struct UserAgent<'m, R: RandomSource> {
     connecting: bool,
     subscribe_all: bool,
     subscribed: [Option<PageAddress>; MAX_SUBSCRIBED_PAGES],
+    /// Snapshot mode's progress (REQ-6880); idle without it.
+    snapshot: snapshot::Run,
 }
 
 fn event(sink: &mut Sink<'_>, event: Event<'_>) {
@@ -405,6 +408,7 @@ impl<'m, R: RandomSource> UserAgent<'m, R> {
             connecting: false,
             subscribe_all: true,
             subscribed: [None; MAX_SUBSCRIBED_PAGES],
+            snapshot: snapshot::Run::new(),
         }
     }
 

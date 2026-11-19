@@ -154,7 +154,10 @@ impl<R: RandomSource> UserAgent<'_, R> {
                 let Some(folder) = self.channel else { return true };
                 event(sink, Event::ChannelDefaults);
                 self.open_descriptor(now, Descriptor::channel_defaults(&folder), sink);
-                self.front_door = channel::file_url(&folder, ChannelFile::Bundle).ok();
+                // REQ-6880 item 3: a snapshot fetches no bundle.
+                if self.config.snapshot.is_none() {
+                    self.front_door = channel::file_url(&folder, ChannelFile::Bundle).ok();
+                }
                 true
             }
             Purpose::FrontDoor => {
@@ -219,6 +222,8 @@ impl<R: RandomSource> UserAgent<'_, R> {
             } else {
                 event(sink, Event::PushNotCompiledIn);
             }
+        } else if let Some(target) = self.config.snapshot {
+            self.enqueue_snapshot(target, sink);
         }
     }
 }

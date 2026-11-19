@@ -241,6 +241,29 @@ pub enum PushStop {
     WrongProtocol,
 }
 
+/// How a snapshot ended (REQ-6880): the last thing an agent in snapshot
+/// mode says, after which it has closed every connection and does nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SnapshotEnd {
+    /// The page arrived: on a live channel, its packets were given on and
+    /// the server closed normally after a page header; on a static channel,
+    /// its file was given on.
+    Answered,
+    /// The live channel's server answered with a DENIED record of this
+    /// status (DOC-1961), also given as [`Event::Denied`].
+    Denied(u16),
+    /// The live channel's WELCOME did not agree SNAPSHOT: the connection
+    /// was closed at once with a normal close, and nothing after WELCOME was
+    /// given on (REQ-6879 item 4).
+    NotOffered,
+    /// Anything else: the connection or a request failed, the time limit
+    /// passed ([`Failure::Timeout`]), the page is missing
+    /// ([`Failure::Status`] 404), or the server broke the snapshot's
+    /// protocol ([`Failure::Content`]: packets before WELCOME, or a
+    /// viewer-state record).
+    Failed(Failure),
+}
+
 /// An event for the viewer and the application.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event<'a> {
@@ -548,6 +571,9 @@ pub enum Event<'a> {
         /// [`FONT_MAX_FILE_BYTES`](neoteletext_core::consts::FONT_MAX_FILE_BYTES).
         bytes: &'a [u8],
     },
+    /// A snapshot ended (REQ-6880): given once, last, by an agent in
+    /// snapshot mode ([`Config::snapshot`](super::Config::snapshot)).
+    SnapshotEnded(SnapshotEnd),
     /// A resource could not be fetched, or its answer was not one its role
     /// takes.
     ResourceFailed {

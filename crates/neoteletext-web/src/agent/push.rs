@@ -133,7 +133,8 @@ impl<R: RandomSource> UserAgent<'_, R> {
     }
 
     pub(super) fn push_received(&mut self, now: Instant, mut input: &[u8], sink: &mut Sink<'_>) {
-        while !input.is_empty() {
+        // A snapshot that has found its end reads nothing more (REQ-6880).
+        while !input.is_empty() && !self.snapshot_ending() {
             match self.push.phase {
                 PushPhase::Handshake { .. } => {
                     let limit = self.config.header_limit.min(self.buffers.push_head.len());
@@ -199,7 +200,11 @@ impl<R: RandomSource> UserAgent<'_, R> {
         self.links = crate::records::links::Sending::new();
         self.subpage_list = crate::records::subpages::Sending::new();
         event(sink, Event::PushConnected);
-        self.send_subscribe(sink);
+        // REQ-6880 item 2: a snapshot sends its request and nothing else.
+        match self.config.snapshot {
+            Some(target) => self.send_snapshot_request(target, sink),
+            None => self.send_subscribe(sink),
+        }
         true
     }
 
@@ -275,6 +280,11 @@ impl<R: RandomSource> UserAgent<'_, R> {
     /// (REQ-WEB-005): a ping after a silence, or the end of the wait for its
     /// pong.
     pub(super) fn heartbeat_due(&self) -> Option<Instant> {
+        // A snapshot pings nothing: its time limit ends a silent connection
+        // (REQ-6880 items 2 and 5).
+        if self.config.snapshot.is_some() {
+            return None;
+        }
         let PushPhase::Open { heard, pinged } = self.push.phase else { return None };
         let after = |at: Instant, wait: u64| Instant(at.0.saturating_add(wait));
         Some(pinged.map_or_else(|| after(heard, PUSH_PING_AFTER_US), |pinged| after(pinged, PUSH_PONG_WITHIN_US)))

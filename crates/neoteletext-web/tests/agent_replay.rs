@@ -11,6 +11,10 @@
 )]
 
 mod common;
+// Snapshot mode (REQ-6880), on this file's harness.
+#[cfg(feature = "push")]
+#[path = "agent_replay/snapshot.rs"]
+mod snapshot;
 
 use std::string::{String, ToString};
 use std::vec::Vec;

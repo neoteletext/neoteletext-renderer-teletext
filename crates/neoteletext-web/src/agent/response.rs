@@ -102,7 +102,8 @@ impl<R: RandomSource> UserAgent<'_, R> {
                         self.live = true;
                         self.connecting = true;
                         event(sink, Event::ChannelConnecting);
-                    } else if channel {
+                    } else if channel && self.config.snapshot.is_none() {
+                        // REQ-6880 item 3: a snapshot fetches no bundle.
                         self.front_door =
                             self.channel.and_then(|folder| channel::file_url(&folder, ChannelFile::Bundle).ok());
                     }

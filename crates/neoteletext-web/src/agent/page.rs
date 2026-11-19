@@ -62,7 +62,7 @@ impl<R: RandomSource> UserAgent<'_, R> {
         self.catalogued.get(word).is_some_and(|slot| slot & bit != 0)
     }
 
-    fn set_catalogued(&mut self, page: PageAddress, catalogued: bool) {
+    pub(super) fn set_catalogued(&mut self, page: PageAddress, catalogued: bool) {
         let (word, bit) = Self::catalogue_slot(page);
         if let Some(slot) = self.catalogued.get_mut(word) {
             if catalogued {
@@ -109,6 +109,10 @@ impl<R: RandomSource> UserAgent<'_, R> {
                 PageFile::SubPage { t42, second: false } => {
                     self.second_try = Some((page, subcode, PageFile::SubPage { t42: !t42, second: true }));
                 }
+                // A snapshot of a sub-page whose own files are both missing
+                // asks for the page's file, once: the channel gives no
+                // sub-page files (REQ-6880 item 3).
+                PageFile::SubPage { second: true, .. } if self.snapshot_page_file(sink) => {}
                 // A sub-page that has gone from its page is not looked
                 // for in the page's own file, which holds the first
                 // sub-page only (REQ-1887).

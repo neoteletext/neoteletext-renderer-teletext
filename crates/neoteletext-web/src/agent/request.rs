@@ -264,7 +264,10 @@ impl<R: RandomSource> UserAgent<'_, R> {
             Purpose::SubPages { page, part } => Some((page, None, Cached::SubPages(part), None)),
             _ => None,
         };
+        // REQ-6880 item 4: a snapshot sends no conditional request, so that
+        // no validator a server gave can tie it to an earlier fetch.
         if let Some((page, subcode, file, t42)) = validated
+            && self.config.snapshot.is_none()
             && exchange.redirects == 0
             && let Some(entry) = self.cache.iter().flatten().find(|e| {
                 e.page == page && e.subcode == subcode && e.file == file && t42.is_none_or(|t42| e.t42 == t42)

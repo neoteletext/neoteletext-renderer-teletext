@@ -53,6 +53,9 @@ impl<R: RandomSource> UserAgent<'_, R> {
                 self.round_trip_pong(now, payload.get(..len).unwrap_or(&[]), sink);
             }
             Some(WsMessage::Close(code)) => {
+                if self.config.snapshot.is_some() {
+                    self.snapshot_closed(code);
+                }
                 // RFC 6455 section 5.5.1: answer with a close, then end.
                 self.send_push_close(code.unwrap_or(crate::consts::CLOSE_NORMAL), sink);
                 match code.filter(|&code| crate::consts::close_says_stop(code)) {
@@ -98,13 +101,22 @@ impl<R: RandomSource> UserAgent<'_, R> {
                 invalid = invalid.saturating_add(1);
                 continue;
             }
-            if decode_address(&packet).is_ok_and(|address| address.number == PACKET_HEADER) {
+            let header = decode_address(&packet).is_ok_and(|address| address.number == PACKET_HEADER);
+            // REQ-6879 item 4: a snapshot reads WELCOME before anything is
+            // given on, and gives on nothing once it has found its end.
+            if self.config.snapshot.is_some() && !self.snapshot_packet(&packet, header) {
+                return;
+            }
+            if header {
                 // A page frame begins: its LOG records are counted afresh
                 // (DOC-1956).
                 page = true;
                 self.push.log_lines = 0;
             }
             invalid = invalid.saturating_add(self.read_record(&packet, sink));
+            if self.snapshot_ending() {
+                return;
+            }
             // REQ-GEN-019: not `copy_within`, whose range check links a panic
             // path into the image.
             let place = self.buffers.push_message.get_mut(kept..kept.saturating_add(T42_PACKET));
@@ -132,6 +144,9 @@ impl<R: RandomSource> UserAgent<'_, R> {
             (Read::Invalid(packets), _) => return packets,
             (Read::Record(record), packets) => (record, packets),
         };
+        if self.config.snapshot.is_some() && !self.snapshot.record(&record) {
+            return 0;
+        }
         match record {
             ChannelRecord::Log(log) => {
                 if self.push.log_lines < MAX_LOG_LINES_PER_PAGE {
