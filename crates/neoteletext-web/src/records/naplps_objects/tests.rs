@@ -27,8 +27,8 @@ fn macro_object(number: u16, frames: &[u8]) -> NaplpsObject<'_> {
         order: -3,
         x: -10,
         y: 300,
-        width: 640,
-        height: 480,
+        width: 480,
+        height: 500,
         origin: (5, -6),
         cover: 0,
         looks: [0x21, 0, 0x7F],
@@ -75,9 +75,9 @@ fn a_naplps_objects_record_is_its_bytes() {
     let body: &[u8] = &[
         0x01, 0x60, 0x00, 0x01, 0x00, 0x09, 1, 0,
         // Object 301: a macro object, shown and detectable, layer 2,
-        // order −3, at (−10, 300), 640 by 480, origin (5, −6), two
+        // order −3, at dot (−10, 300), 480 by 500 dots, origin (5, −6), two
         // frames, no cover, looks 2/1, none and 7/15, reserved.
-        0x01, 0x2D, 1, 3, 2, 0xFD, 0xFF, 0xF6, 0x01, 0x2C, 0x02, 0x80, 0x01, 0xE0, 0x00, 0x05, 0xFF, 0xFA,
+        0x01, 0x2D, 1, 3, 2, 0xFD, 0xFF, 0xF6, 0x01, 0x2C, 0x01, 0xE0, 0x01, 0xF4, 0x00, 0x05, 0xFF, 0xFA,
         2, 0, 0x21, 0, 0x7F, 0,
         0x20, 0x7F,
     ];
@@ -102,9 +102,9 @@ fn anything_else_is_refused() {
         (NaplpsObject { layer: 0, ..good }, "layer 0"),
         (NaplpsObject { layer: 4, ..good }, "layer 4"),
         (NaplpsObject { width: 0, ..good }, "no width"),
-        (NaplpsObject { width: 641, ..good }, "wider than the picture"),
+        (NaplpsObject { width: 481, ..good }, "wider than the raster"),
         (NaplpsObject { height: 0, ..good }, "no height"),
-        (NaplpsObject { height: 481, ..good }, "taller than the picture"),
+        (NaplpsObject { height: 501, ..good }, "taller than the raster"),
         (NaplpsObject { cover: 1, ..good }, "a macro object with a cover"),
         (NaplpsObject { looks: [0x1F, 0, 0], ..good }, "a look below 2/0"),
         (NaplpsObject { looks: [0, 0, 0x80], ..good }, "a look above 7/15"),
@@ -160,7 +160,7 @@ fn a_naplps_objects_body_is_written_alone() {
     #[rustfmt::skip]
     let expected: &[u8] = &[
         0x01, 0x60, 0x00, 0x01, 0x00, 0x09, 1, 0,
-        0x01, 0x2D, 1, 3, 2, 0xFD, 0xFF, 0xF6, 0x01, 0x2C, 0x02, 0x80, 0x01, 0xE0, 0x00, 0x05, 0xFF, 0xFA,
+        0x01, 0x2D, 1, 3, 2, 0xFD, 0xFF, 0xF6, 0x01, 0x2C, 0x01, 0xE0, 0x01, 0xF4, 0x00, 0x05, 0xFF, 0xFA,
         2, 0, 0x21, 0, 0x7F, 0,
         0x20, 0x7F,
     ];
@@ -190,7 +190,7 @@ fn labels_and_a_title_are_their_bytes() {
     #[rustfmt::skip]
     let expected: &[u8] = &[
         0x01, 0x60, 0x00, 0x01, 0x00, 0x09, 2, TITLED,
-        0x01, 0x2D, 1, 3, 2, 0xFD, 0xFF, 0xF6, 0x01, 0x2C, 0x02, 0x80, 0x01, 0xE0, 0x00, 0x05, 0xFF, 0xFA,
+        0x01, 0x2D, 1, 3, 2, 0xFD, 0xFF, 0xF6, 0x01, 0x2C, 0x01, 0xE0, 0x01, 0xF4, 0x00, 0x05, 0xFF, 0xFA,
         1, 0, 0x21, 0, 0x7F, 4,
         0x20, b'P', b'l', b'a', b'y',
         0x00, 0x07, 2, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 255, 0, 0, 0, 0,
@@ -281,4 +281,18 @@ fn one_object_is_redefined_alone() {
     let mut both = body[..length].to_vec();
     both[7] = ONE;
     assert!(read(&both).is_err(), "ONE with two objects");
+}
+
+/// RAS-4 (DEC-6853, REQ-6529): an object's rectangle is in dots of the
+/// 480 by 500 teletext raster, so 480 by 500 is read and 481 or 501
+/// refused.
+#[test]
+fn an_object_is_at_most_the_raster() {
+    assert_eq!((RASTER_WIDTH, RASTER_HEIGHT), (480, 500));
+    let (page, subcode, generation) = place();
+    let written = |object: NaplpsObject<'_>| encode((page, subcode, generation), &[object], 3, 7, &mut |_| {});
+    let whole = NaplpsObject { width: RASTER_WIDTH, height: RASTER_HEIGHT, ..region(1) };
+    assert!(written(whole).is_ok());
+    assert!(written(NaplpsObject { width: RASTER_WIDTH + 1, ..whole }).is_err());
+    assert!(written(NaplpsObject { height: RASTER_HEIGHT + 1, ..whole }).is_err());
 }

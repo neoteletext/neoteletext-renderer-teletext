@@ -396,7 +396,7 @@ fn records(rows: &mut Vec<Row>) -> Result<(), String> {
         kind: "records",
         name: "naplps_objects",
         value: packets(|out| naplps_objects::encode((page, sub, 1), &[object], SERVICE, RECORD_ID, out))?,
-        meaning: "page 101 sub 0001 generation 1: macro object 301 at (100,50) 64 by 32, frame macro 2/0, pressed look 2/1",
+        meaning: "page 101 sub 0001 generation 1: macro object 301 at raster dot (100,50), 64 by 32 dots, frame macro 2/0, pressed look 2/1",
     });
     // TODO-6657 (DEC-6638 items 3 and 6): the same object with a label,
     // and the picture's title; then the object redefined alone.
@@ -414,7 +414,7 @@ fn records(rows: &mut Vec<Row>) -> Result<(), String> {
         kind: "records",
         name: "naplps_objects_one",
         value: packets(|out| naplps_objects::encode_contents((page, sub, 1), &one, SERVICE, RECORD_ID, out))?,
-        meaning: "page 101 sub 0001 generation 1: object 301 alone redefined at (200,50), labelled Play; the other objects and the title kept",
+        meaning: "page 101 sub 0001 generation 1: object 301 alone redefined at raster dot (200,50), labelled Play; the other objects and the title kept",
     });
     let bytes = sheet::SheetRecord {
         page,

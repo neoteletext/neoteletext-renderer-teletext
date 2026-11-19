@@ -22,9 +22,10 @@
 //! byte  3      flags: bit 0 shown, bit 1 detectable
 //! byte  4      layer: 1 to 3
 //! byte  5      order: -128 to 127
-//! bytes 6-9    x, y: the top left of its rectangle, in the picture's pixels
-//! bytes 10-13  width, height: 1 to 640, 1 to 480
-//! bytes 14-17  origin x, origin y: 0 for a region
+//! bytes 6-9    x, y: the raster dot of its rectangle's top left (480 by
+//!              500, origin at the top left, y down; DEC-6853)
+//! bytes 10-13  width, height: 1 to 480, 1 to 500, in dots and lines
+//! bytes 14-17  origin x, origin y: raster dots; 0 for a region
 //! byte  18     frames F: a macro object 1 to 16, a region 0
 //! byte  19     cover: a region's colour-map entry; a macro object 0
 //! bytes 20-22  hover, pressed and alternative look: a macro's code, or 0
@@ -36,6 +37,7 @@
 //! bytes 1-     T bytes of the title: UTF-8, no control character
 //! ```
 
+use neoteletext_core::consts::{PAGE_HEIGHT, PAGE_WIDTH};
 use neoteletext_core::packet::Packet;
 use neoteletext_core::types::{PageAddress, SubCode};
 use neoteletext_rules::limits::{MAX_FRAME, MAX_LAYER};
@@ -81,10 +83,21 @@ const DETECTABLE: u8 = 1 << 1;
 pub const FIRST_MACRO: u8 = 0x20;
 /// The last macro code: 7/15. The 96 macro names lie between.
 pub const LAST_MACRO: u8 = 0x7F;
-/// The picture's width in pixels (ANIM-11).
-pub const PICTURE_WIDTH: u16 = 640;
-/// The picture's height in pixels.
-pub const PICTURE_HEIGHT: u16 = 480;
+/// The teletext raster's width in dots, the widest object (ANIM-11,
+/// neoteletext-common `docs/naplps-raster.md` RAS-4): every NAPLPS
+/// coordinate NeoTeletext defines is a dot of the page's raster (DEC-6853).
+pub const RASTER_WIDTH: u16 = narrow(PAGE_WIDTH);
+/// The raster's height in lines, the tallest object (RAS-4).
+pub const RASTER_HEIGHT: u16 = narrow(PAGE_HEIGHT);
+
+/// `value` as a record's 16-bit field, at compile time; a raster that did
+/// not fit would fail the build here.
+const fn narrow(value: usize) -> u16 {
+    assert!(value <= u16::MAX as usize);
+    #[expect(clippy::cast_possible_truncation, reason = "the assertion above holds it to 16 bits")]
+    let narrowed = value as u16;
+    narrowed
+}
 
 /// What a NAPLPS object is (ANIM-11).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -132,16 +145,19 @@ pub struct NaplpsObject<'a> {
     pub layer: u8,
     /// Its order within the layer.
     pub order: i8,
-    /// The left of its rectangle, in the picture's pixels.
+    /// The raster dot of its rectangle's left (RAS-4).
     pub x: i16,
-    /// The top of its rectangle.
+    /// The raster line of its rectangle's top.
     pub y: i16,
-    /// Its rectangle's width, 1 to 640.
+    /// Its rectangle's width in dots, 1 to [`RASTER_WIDTH`]: dots `x` to
+    /// `x + width - 1`.
     pub width: u16,
-    /// Its rectangle's height, 1 to 480.
+    /// Its rectangle's height in lines, 1 to [`RASTER_HEIGHT`]: lines `y`
+    /// to `y + height - 1`.
     pub height: u16,
-    /// Where the rectangle's top left lies in the macro's own drawing;
-    /// (0, 0) for a region.
+    /// The raster dot at which the macro, drawn where the stream would
+    /// draw it, puts what is to be the rectangle's top left; (0, 0) for a
+    /// region.
     pub origin: (i16, i16),
     /// A region's colour-map entry while it is hidden; 0 for a macro
     /// object.
@@ -233,8 +249,8 @@ fn read_object(bytes: &[u8]) -> Result<(LabelledObject<'_>, &[u8]), RecordFault>
     let in_range = number != 0
         && flags & !(SHOWN | DETECTABLE) == 0
         && (1..=MAX_LAYER).contains(&layer)
-        && (1..=PICTURE_WIDTH).contains(&width)
-        && (1..=PICTURE_HEIGHT).contains(&height)
+        && (1..=RASTER_WIDTH).contains(&width)
+        && (1..=RASTER_HEIGHT).contains(&height)
         && looks.iter().all(|look| *look == 0 || is_macro(*look))
         && frames.iter().all(|frame| is_macro(*frame));
     if !of_its_kind || !in_range {
