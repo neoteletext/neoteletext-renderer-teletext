@@ -250,26 +250,51 @@ impl Mixer {
 
     /// Renders mono samples at the output rate, asking `source` for each
     /// pulled voice's samples as they are needed (RULE-62). It never
-    /// allocates or frees.
+    /// allocates or frees. The sum is clamped to the 16-bit range
+    /// (REQ-AUD-019).
     pub fn render_pulling(&mut self, out: &mut [i16], source: &mut dyn Pull) {
         self.trim_streams();
         let pulling = self.sounds.iter().any(Sound::is_pulled);
         let length = out.len();
         for (done, sample) in out.iter_mut().enumerate() {
-            self.update_ducks();
-            let mut sum: i32 = 0;
-            for index in 0..VOICES {
-                if pulling {
-                    self.feed(index, length.saturating_sub(done), source);
-                }
-                let value = self.voice_sample(index);
-                self.note_peak(index, value);
-                sum = sum.saturating_add(value);
-            }
-            let master = self.master.advance();
-            let mixed = scale(sum, master);
+            let mixed = self.mixed_sample(pulling, length.saturating_sub(done), source);
             *sample = i16::try_from(mixed.clamp(i32::from(i16::MIN), i32::from(i16::MAX))).unwrap_or(0);
         }
+    }
+
+    /// Renders as [`Mixer::render_pulling`] does, but hands over the sum
+    /// of the voices after the master volume as it is, not clamped: a
+    /// sample may lie outside the 16-bit range, by as much as the voices
+    /// sum to. For a port that sums several mixers and limits the whole
+    /// itself, which a clamp here would hide the peaks from (DEC-6950).
+    /// A port that plays the samples as they are calls
+    /// [`Mixer::render_pulling`], whose clamp REQ-AUD-019 requires. It
+    /// never allocates or frees.
+    pub fn render_pulling_unclamped(&mut self, out: &mut [i32], source: &mut dyn Pull) {
+        self.trim_streams();
+        let pulling = self.sounds.iter().any(Sound::is_pulled);
+        let length = out.len();
+        for (done, sample) in out.iter_mut().enumerate() {
+            *sample = self.mixed_sample(pulling, length.saturating_sub(done), source);
+        }
+    }
+
+    /// One output sample: the voices' sum after the master volume, not
+    /// clamped. `wanted` is how many samples of this buffer are still to
+    /// come, this one counted, for what a pulled voice is fed.
+    fn mixed_sample(&mut self, pulling: bool, wanted: usize, source: &mut dyn Pull) -> i32 {
+        self.update_ducks();
+        let mut sum: i32 = 0;
+        for index in 0..VOICES {
+            if pulling {
+                self.feed(index, wanted, source);
+            }
+            let value = self.voice_sample(index);
+            self.note_peak(index, value);
+            sum = sum.saturating_add(value);
+        }
+        let master = self.master.advance();
+        scale(sum, master)
     }
 
     /// One output sample of one voice, advancing it; a finished sound

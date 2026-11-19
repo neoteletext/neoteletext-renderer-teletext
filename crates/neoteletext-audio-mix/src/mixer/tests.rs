@@ -66,6 +66,31 @@ fn voices_sum_and_the_sum_is_clamped() {
     assert_eq!(render(&mut mixer, 500)[400], i16::MAX);
 }
 
+// Verifies DEC-6950: the unclamped render hands over the voices' sum as
+// it is, where the clamped render of the same voices stops at full scale.
+#[test]
+fn the_unclamped_render_hands_over_the_sum_beyond_the_16_bit_range() {
+    let mut mixer = Mixer::new(RATE);
+    constant(&mut mixer, (1, 1), 20_000, 2000);
+    constant(&mut mixer, (2, 1), 20_000, 2000);
+    mixer.start(0, start((1, 1), 100));
+    mixer.start(1, start((2, 1), 100));
+    let mut out = vec![0_i32; 500];
+    mixer.render_pulling_unclamped(&mut out, &mut pulled::Silence);
+    // Two voices of 20 000, give or take the filter's ripple.
+    assert!((39_800..=40_200).contains(&out[400]), "{}", out[400]);
+    // Within the range, it is the clamped render's sample exactly.
+    let mut quiet = Mixer::new(RATE);
+    let mut same = Mixer::new(RATE);
+    for mixer in [&mut quiet, &mut same] {
+        constant(mixer, (1, 1), 10_000, 2000);
+        mixer.start(0, start((1, 1), 50));
+    }
+    let mut wide = vec![0_i32; 500];
+    quiet.render_pulling_unclamped(&mut wide, &mut pulled::Silence);
+    assert_eq!(wide, render(&mut same, 500).into_iter().map(i32::from).collect::<Vec<_>>());
+}
+
 // Verifies REQ-AUD-015 and REQ-AUD-019.
 #[test]
 fn ducking_lowers_the_other_voices_by_table_19s_step() {
