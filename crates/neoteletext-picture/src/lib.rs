@@ -53,7 +53,9 @@ mod tti;
 pub use decode::{MAX_DECODE_BYTES, MAX_INPUT_BYTES, MAX_SIDE};
 pub use error::Error;
 #[cfg(feature = "picture-languages")]
-pub use languages::{MAX_PICTURE_OUTPUT_BYTES, PictureOptions, to_naplps, to_regis};
+pub use languages::{
+    MAX_PICTURE_COLOURS, MAX_PICTURE_OUTPUT_BYTES, MIN_PICTURE_COLOURS, PictureOptions, to_naplps, to_regis,
+};
 pub use options::{Align, Display, Fit, Focus, Level, Options, Place, Region, Rgb8, Smooth, parse_colour};
 pub use raster::Raster;
 pub use tti::PAGE_NUMBER;

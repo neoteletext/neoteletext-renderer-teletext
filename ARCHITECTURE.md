@@ -681,7 +681,7 @@ What each library crate may use of `neoteletext-core`, which `cargo xtask check-
 
 | Crate | May use of `neoteletext-core` |
 |---|---|
-| `neoteletext-formats` | Foundation, `packet`, `charset` (the page encoder's default second G0 set), `colour` (the Colour Map index a page author names) |
+| `neoteletext-formats` | Foundation, `packet`, `charset` (the page encoder's default second G0 set), `colour` (the Colour Map index a page author names), `glyphs` (only `glyphs::conformance`'s `FONT_SET_COUNT` and `font_set_of`, behind `picture-text`: a provided set's number in a picture is its place in `FONT_SETS`, REQ-6762, REQ-6668) |
 | `neoteletext-slicer` | Foundation, `packet`, `trace` (the slicer's trace entries) |
 | `neoteletext-web` | Foundation, `policy`, `config`, `packet` (the packet value, a packet's address and kind, rebuilding and cross-checking a packet; REQ-1462, REQ-INP-022) |
 | `neoteletext-image` | Foundation, `colour`, `render`, `glyphs`, `packet`, `acq`, `level1`, `compose`, `config` (the last five for `raster`'s picture of a whole page from its packets, for a program with no decoder of its own) |

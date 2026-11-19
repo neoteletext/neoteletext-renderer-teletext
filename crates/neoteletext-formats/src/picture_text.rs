@@ -9,7 +9,7 @@
 //! English for what it cannot show, right-to-left runs in visual order,
 //! the letters of EN 300 706 Table 44 in their joined forms, and the plain
 //! Arabic-script letters of group 1001 in their base forms, which the
-//! picture renderers join (PAR-13, PAR-14). [`regis`] and [`naplps`] write
+//! picture renderers join (PAR-13, PAR-14). [`regis()`] and [`naplps()`] write
 //! the stretches as each language's bytes, and [`measure`] says what they
 //! cost.
 //!
@@ -123,9 +123,9 @@ impl core::error::Error for PictureTextError {}
 pub struct Measured {
     /// The character cells it advances; a mark takes none.
     pub cells: u32,
-    /// The bytes [`regis`] writes for it.
+    /// The bytes [`regis()`] writes for it.
     pub regis_bytes: u32,
-    /// The bytes [`naplps`] writes for it.
+    /// The bytes [`naplps()`] writes for it.
     pub naplps_bytes: u32,
     /// The sets it uses, in order of first use.
     pub sets: Vec<u8>,
@@ -290,7 +290,7 @@ const REGIS_MARK_BYTES: usize = 1 + REGIS_SELECT_BYTES + REGIS_OVERLAY_TEXT.len(
 pub const MAX_REGIS_BYTES_PER_CHARACTER: usize = 32;
 const _: () = assert!(REGIS_SELECT_BYTES + REGIS_CHARACTER_BYTES + REGIS_MARK_BYTES <= MAX_REGIS_BYTES_PER_CHARACTER);
 const _: () = assert!(REGIS_MARK_BYTES == 19, "PAR-4: a mark takes at most 19 bytes");
-/// The most bytes [`regis`] writes for one run of [`stretches`].
+/// The most bytes [`regis()`] writes for one run of [`stretches`].
 pub const MAX_REGIS_PART_BYTES: usize = MAX_PART_CHARACTERS * MAX_REGIS_BYTES_PER_CHARACTER;
 const _: () = assert!(MAX_REGIS_PART_BYTES == 32_000);
 // The whole run within its bound: every character at its most, a gap and
@@ -419,7 +419,7 @@ const _: () = assert!(
     NAPLPS_OPENING_BYTES + NAPLPS_BLOCK_BYTES + NAPLPS_MARK_BYTES + NAPLPS_CLOSING_BYTES
         <= MAX_NAPLPS_BYTES_PER_CHARACTER
 );
-/// The most bytes [`naplps`] writes for one run of [`stretches`].
+/// The most bytes [`naplps()`] writes for one run of [`stretches`].
 pub const MAX_NAPLPS_PART_BYTES: usize = MAX_PART_CHARACTERS * MAX_NAPLPS_BYTES_PER_CHARACTER;
 const _: () = assert!(MAX_NAPLPS_PART_BYTES == 32_000);
 
