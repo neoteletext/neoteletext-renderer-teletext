@@ -329,7 +329,7 @@ fn play(channel: u8, sequence: u16, sound: &Sound) -> Vec<u8> {
         flags: 0,
         duck: 0,
         page: None,
-        magazine: None,
+        music: None,
     }
     .record()
 }
@@ -873,7 +873,7 @@ fn a_looped_sound_plays_on_in_one_stream() {
         flags: neoteletext_audio::record::FLAG_LOOP,
         duck: 0,
         page: control.page.filter(|_| false),
-        magazine: None,
+        music: None,
     }
     .record();
     receiver.push_record(&looped, &mut sink);
@@ -896,7 +896,7 @@ fn a_looped_sound_plays_on_in_one_stream() {
         flags: 0,
         duck: 0,
         page: None,
-        magazine: None,
+        music: None,
     }
     .record();
     let at = 3 * BLOCKS as u64 * BLOCK_MS;
@@ -934,7 +934,7 @@ fn play_on(channel: u8, sequence: u16, sound: &Sound, page: Option<u16>) -> Vec<
         flags: 0,
         duck: 0,
         page,
-        magazine: None,
+        music: None,
     }
     .record()
 }
@@ -1100,7 +1100,7 @@ fn a_local_sound_of_each_family_is_handed_to_the_sink_and_never_streamed() {
                 flags: 0,
                 duck: 0,
                 page: None,
-                magazine: None,
+                music: None,
             }
             .record()
         };
@@ -1152,7 +1152,7 @@ fn a_third_local_sound_and_a_play_with_no_page_are_refused_and_counted() {
             flags,
             duck: 0,
             page: Some(PAGE),
-            magazine: None,
+            music: None,
         };
         receiver.push_record(&play.record(), &mut sink);
     }
@@ -1179,7 +1179,7 @@ fn a_third_local_sound_and_a_play_with_no_page_are_refused_and_counted() {
             flags: 0,
             duck: 0,
             page: Some(PAGE),
-            magazine: None,
+            music: None,
         },
         &mut sink,
     );
@@ -1197,7 +1197,7 @@ fn a_third_local_sound_and_a_play_with_no_page_are_refused_and_counted() {
             flags: 0,
             duck: 0,
             page: Some(PAGE),
-            magazine: None,
+            music: None,
         },
         &mut sink,
     );
@@ -1511,7 +1511,7 @@ fn a_stored_sounds_cues_are_marked_at_their_place_in_the_stream() {
         flags: neoteletext_audio::record::FLAG_LOOP,
         duck: 0,
         page: None,
-        magazine: None,
+        music: None,
     };
     sink.cues.clear();
     receiver.push_record(&command.record(), &mut sink);

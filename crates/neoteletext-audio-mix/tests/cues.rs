@@ -84,7 +84,6 @@ impl VoiceSink for Output {
                 looped: false,
                 duck_percent: start.duck_percent,
                 after_current: start.after_current,
-                music_percent: start.music_percent,
             },
         );
     }
@@ -125,7 +124,7 @@ fn command(sequence: u16, operation: u8, flags: u8, fade_ms: u16) -> Vec<u8> {
         flags,
         duck: 0,
         page: None,
-        magazine: None,
+        music: None,
     }
     .record()
 }

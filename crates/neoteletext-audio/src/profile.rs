@@ -3,13 +3,13 @@
 //! sound's timing.
 
 /// The audio profile's version (REQ-AUD-003; REQ-6925 item 7): version 3
-/// is version 2 with magazine music, a CONTROL record that names a magazine
-/// and the `MAGAZINE_MUSIC` record of a page's setting. It is the highest
-/// version a record's first byte may name, and the one those two forms
-/// carry.
+/// is version 2 with music of a channel and of a magazine, a CONTROL record
+/// that names one of them and the `PAGE_MUSIC` record of a page's two
+/// switches. It is the highest version a record's first byte may name, and
+/// the one those two forms carry.
 pub const PROFILE_VERSION: u8 = 3;
 /// The version a record carries when version 2 of the profile already
-/// defined it, which is every record but magazine music's two forms: a
+/// defined it, which is every record but music's two forms: a
 /// receiver of version 2 refuses any other version, so a sender writes the
 /// lowest version that defines the record, and an older receiver reads all
 /// it understands of a newer sender (REQ-6927 item 2).
@@ -49,25 +49,27 @@ pub const SERVICE_SCOPE: u16 = 0xFFFF;
 pub const FIRST_MAGAZINE: u8 = 1;
 /// The last magazine of a service.
 pub const LAST_MAGAZINE: u8 = 8;
-/// The page field's value for a play that belongs to a magazine, less the
-/// magazine's number (REQ-6925 item 1, DEC-6951): magazine 1 is 0xFF01 and
-/// magazine 8 is 0xFF08. No page number reaches it, since the highest is
-/// 0x899, and it is not [`SERVICE_SCOPE`].
-pub const MAGAZINE_SCOPE: u16 = 0xFF00;
-const _: () = assert!(MAGAZINE_SCOPE + (LAST_MAGAZINE as u16) < SERVICE_SCOPE);
-/// The `MAGAZINE_MUSIC` record's setting byte for a page on which the
-/// magazine's music plays at its own gain (REQ-6926 item 1). The bytes 1 to
-/// 6 between this and [`MUSIC_SILENT`] are the duck codes of EN 300 708
-/// Table 19.
-pub const MUSIC_PLAY: u8 = 0;
-/// The `MAGAZINE_MUSIC` record's setting byte for a page on which the
-/// magazine's music is silent (REQ-6926 item 1).
-pub const MUSIC_SILENT: u8 = 0xFF;
-/// The pages whose magazine-music setting a receiver keeps (REQ-6926;
-/// REQ-6938 item 4): the settings other than play of the pages it was last
-/// sent, the oldest giving way. A channel sends a page's setting with the
-/// page each time it sends the page, so a setting that gave way is there
-/// again before its page is shown. Eight are 48 bytes.
+/// The page field's value for a play that is the channel's music (DEC-6951
+/// item 1; DEC-6924 as the owner ruled on 20 November 2026): heard on
+/// every page of the channel that does not switch it off, under magazine
+/// music and page sounds. With a magazine's number added, 1 to 8, it is that
+/// magazine's music: 0xFF01 for magazine 1 and 0xFF08 for magazine 8. No
+/// page number reaches it, since the highest is 0x899, and it is not
+/// [`SERVICE_SCOPE`], whose play sounds once and belongs to no level.
+pub const MUSIC_SCOPE: u16 = 0xFF00;
+const _: () = assert!(MUSIC_SCOPE + (LAST_MAGAZINE as u16) < SERVICE_SCOPE);
+/// The `PAGE_MUSIC` record's switch bit that turns the magazine's music off
+/// on its page (REQ-6926 item 1; DEC-6952). Both switches are on, the bits
+/// clear, on a page the sender has said nothing of.
+pub const PAGE_MUSIC_MAGAZINE_OFF: u8 = 1;
+/// The `PAGE_MUSIC` record's switch bit that turns the channel's music off
+/// on its page.
+pub const PAGE_MUSIC_CHANNEL_OFF: u8 = 2;
+/// The pages whose music switches a receiver keeps (REQ-6926; REQ-6938
+/// item 4): those with a switch off, of the pages it was last sent, the
+/// oldest giving way. A channel sends a page's switches with the page each
+/// time it sends the page, so a page's that gave way are there again before
+/// the page is shown. Eight are 64 bytes.
 pub const MOST_PAGE_MUSIC_SETTINGS: usize = 8;
 /// Blocks a live sound keeps (REQ-AUD-014): a ring, the newest replacing the
 /// oldest. 32 blocks of 512 bytes are 16 KB, about 2 seconds of 8 kHz IMA

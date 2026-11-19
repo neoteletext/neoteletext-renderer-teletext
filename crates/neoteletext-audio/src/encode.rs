@@ -17,11 +17,11 @@ use neoteletext_audio_instruments::midi::block::{BlockFault, BlockWriter, WriteE
 use neoteletext_audio_instruments::midi::{Message, TICKS_PER_BLOCK};
 
 use crate::record::{
-    DATA_FIXED, EVENT_BLOCK_LENGTH_BYTES, EVENT_DATA_FIXED, PageMusic, TAG_LABEL, TYPE_CONTROL, TYPE_DATA,
-    TYPE_MAGAZINE_MUSIC, TYPE_OBJECT, record_length, write, write_version,
+    DATA_FIXED, EVENT_BLOCK_LENGTH_BYTES, EVENT_DATA_FIXED, PageMusic, TAG_LABEL, TYPE_CONTROL, TYPE_DATA, TYPE_OBJECT,
+    TYPE_PAGE_MUSIC, record_length, scope_of_music, write, write_version,
 };
 use crate::{
-    Codec, MAGAZINE_SCOPE, MAX_BODY, MOST_BANK_BYTES, MOST_BANKS, MOST_EVENT_BLOCK_BYTES, MOST_EVENT_SOUND_BLOCKS,
+    Codec, MAX_BODY, MOST_BANK_BYTES, MOST_BANKS, MOST_EVENT_BLOCK_BYTES, MOST_EVENT_SOUND_BLOCKS,
     MOST_EVENT_SOUND_BYTES, PROFILE_VERSION, SERVICE_SCOPE, rate_code,
 };
 
@@ -839,12 +839,13 @@ pub struct Command {
     pub flags: u8,
     /// 0 to 6.
     pub duck: u8,
-    /// A page, or `None` for the whole service or a magazine.
+    /// A page, or `None` for the whole service or a level of music.
     pub page: Option<u16>,
-    /// The magazine a play belongs to, 1 to 8 (REQ-6925 item 1, DEC-6951);
-    /// `None` for a page's command or the whole service's. With it the
-    /// record is written as profile version 3 and `page` is not read.
-    pub magazine: Option<u8>,
+    /// The level of music a play is armed for, the channel's or a
+    /// magazine's (REQ-6925 item 1, DEC-6951); `None` for a page's command
+    /// or the whole service's. With it the record is written as profile
+    /// version 3 and `page` is not read.
+    pub music: Option<crate::port::Music>,
 }
 
 impl Command {
@@ -861,27 +862,28 @@ impl Command {
         body.extend_from_slice(&self.fade_ms.to_be_bytes());
         body.push(self.flags);
         body.push(self.duck);
-        let Some(magazine) = self.magazine else {
+        let Some(music) = self.music else {
             body.extend_from_slice(&self.page.unwrap_or(SERVICE_SCOPE).to_be_bytes());
             return frame(TYPE_CONTROL, &body);
         };
-        body.extend_from_slice(&MAGAZINE_SCOPE.saturating_add(u16::from(magazine)).to_be_bytes());
+        // A magazine that is none gives an empty record, which no receiver
+        // accepts.
+        let Some(scope) = scope_of_music(music) else { return Vec::new() };
+        body.extend_from_slice(&scope.to_be_bytes());
         frame_version(PROFILE_VERSION, TYPE_CONTROL, &body)
     }
 }
 
-/// The `MAGAZINE_MUSIC` record of a sub-page's setting (REQ-6926 item 1,
-/// DEC-6952), in profile version 3. A duck code outside 1 to 6 gives an
-/// empty record, which no receiver accepts; the reader checks the page and
+/// The `PAGE_MUSIC` record of a sub-page's two music switches (REQ-6926
+/// item 1, DEC-6952), in profile version 3. The reader checks the page and
 /// the sub-code.
 #[must_use]
 pub fn page_music(music: &PageMusic) -> Vec<u8> {
-    let Some(setting) = music.setting.code() else { return Vec::new() };
     let mut body = Vec::new();
     body.extend_from_slice(&music.page.to_be_bytes());
     body.extend_from_slice(&music.sub.to_be_bytes());
-    body.push(setting);
-    frame_version(PROFILE_VERSION, TYPE_MAGAZINE_MUSIC, &body)
+    body.push(music.switches());
+    frame_version(PROFILE_VERSION, TYPE_PAGE_MUSIC, &body)
 }
 
 /// A record: header, body and CRC-32 (REQ-AUD-003). A body longer than

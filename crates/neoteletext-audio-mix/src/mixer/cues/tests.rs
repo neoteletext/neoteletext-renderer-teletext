@@ -18,7 +18,7 @@ use std::vec::Vec;
 const RATE: u32 = 8_000;
 
 fn start(key: (u8, u16), gain: u8) -> Start {
-    Start { key, gain, fade_ms: 5, looped: false, duck_percent: 100, after_current: false, music_percent: 100 }
+    Start { key, gain, fade_ms: 5, looped: false, duck_percent: 100, after_current: false }
 }
 
 fn constant(mixer: &mut Mixer, key: (u8, u16), value: i16, samples: usize) {
@@ -58,18 +58,8 @@ fn hear(
 ) -> (Vec<i16>, Vec<(usize, HeardCue)>) {
     let mut mixer = Mixer::new(device_hz);
     mixer.stream((7, 1), STREAM_RATE);
-    mixer.start(
-        2,
-        Start {
-            key: (7, 1),
-            gain: 100,
-            fade_ms: 0,
-            looped: false,
-            duck_percent: 100,
-            after_current: false,
-            music_percent: 100,
-        },
-    );
+    mixer
+        .start(2, Start { key: (7, 1), gain: 100, fade_ms: 0, looped: false, duck_percent: 100, after_current: false });
     let blocks: Vec<&[i16]> = stream.chunks(STREAM_BLOCK).collect();
     let (mut given, mut out, mut heard) = (0, Vec::new(), Vec::new());
     let mut buffers = 0;
@@ -159,18 +149,8 @@ fn cue_marks_are_bounded_and_a_stopped_sound_forgets_them() {
     mixer.stream_samples((7, 1), &vec![1_000; 48_000]);
     render(&mut mixer, 480);
     assert_eq!(count(&mut mixer), Vec::<u8>::new());
-    mixer.start(
-        0,
-        Start {
-            key: (7, 1),
-            gain: 100,
-            fade_ms: 0,
-            looped: false,
-            duck_percent: 100,
-            after_current: false,
-            music_percent: 100,
-        },
-    );
+    mixer
+        .start(0, Start { key: (7, 1), gain: 100, fade_ms: 0, looped: false, duck_percent: 100, after_current: false });
     render(&mut mixer, 480);
     assert_eq!(count(&mut mixer), (0..MAX_PENDING_CUE_MARKS as u8).collect::<Vec<u8>>(), "all 32, in order, once");
     render(&mut mixer, 480);
@@ -185,36 +165,16 @@ fn cue_marks_are_bounded_and_a_stopped_sound_forgets_them() {
     assert_eq!(count(&mut mixer), Vec::<u8>::new());
     assert!(mixer.active(), "still fading");
     // Its marks are forgotten, not held: played again, it reports none.
-    mixer.start(
-        0,
-        Start {
-            key: (7, 1),
-            gain: 100,
-            fade_ms: 0,
-            looped: false,
-            duck_percent: 100,
-            after_current: false,
-            music_percent: 100,
-        },
-    );
+    mixer
+        .start(0, Start { key: (7, 1), gain: 100, fade_ms: 0, looped: false, duck_percent: 100, after_current: false });
     render(&mut mixer, 480);
     assert_eq!(count(&mut mixer), Vec::<u8>::new());
 
     // A sound replaced on its voice forgets its marks too.
     mixer.stream((8, 1), STREAM_RATE);
     mixer.stream_samples((8, 1), &vec![1_000; 48_000]);
-    mixer.start(
-        1,
-        Start {
-            key: (8, 1),
-            gain: 100,
-            fade_ms: 0,
-            looped: false,
-            duck_percent: 100,
-            after_current: false,
-            music_percent: 100,
-        },
-    );
+    mixer
+        .start(1, Start { key: (8, 1), gain: 100, fade_ms: 0, looped: false, duck_percent: 100, after_current: false });
     assert!(mixer.stream_cue((8, 1), 30_000, 3));
     mixer.start(1, start((1, 1), 100));
     render(&mut mixer, 48_000);
@@ -223,18 +183,8 @@ fn cue_marks_are_bounded_and_a_stopped_sound_forgets_them() {
     // The port forgets a paused page's marks.
     mixer.stream((6, 1), STREAM_RATE);
     mixer.stream_samples((6, 1), &vec![1_000; 48_000]);
-    mixer.start(
-        3,
-        Start {
-            key: (6, 1),
-            gain: 100,
-            fade_ms: 0,
-            looped: false,
-            duck_percent: 100,
-            after_current: false,
-            music_percent: 100,
-        },
-    );
+    mixer
+        .start(3, Start { key: (6, 1), gain: 100, fade_ms: 0, looped: false, duck_percent: 100, after_current: false });
     assert!(mixer.stream_cue((6, 1), 100, 4));
     assert!(mixer.stream_cue((6, 1), 30_000, 5));
     mixer.forget_cues((6, 1));
@@ -253,15 +203,7 @@ fn a_stream_on_two_voices_reports_a_cue_for_each() {
     for voice in [0, 3] {
         mixer.start(
             voice,
-            Start {
-                key: (7, 1),
-                gain: 100,
-                fade_ms: 0,
-                looped: false,
-                duck_percent: 100,
-                after_current: false,
-                music_percent: 100,
-            },
+            Start { key: (7, 1), gain: 100, fade_ms: 0, looped: false, duck_percent: 100, after_current: false },
         );
     }
     assert!(mixer.stream_cue((7, 1), 29_000, 9));

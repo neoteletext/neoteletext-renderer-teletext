@@ -22,9 +22,6 @@ pub use pulled::{LOCAL_BLOCK_SAMPLES, PULLED_LOOKAHEAD_SAMPLES, PULLED_RATE_HZ, 
 /// Voices, one for each channel of the audio profile.
 pub const VOICES: usize = 4;
 
-/// A level that lowers nothing, in per cent.
-const FULL_PERCENT: u8 = 100;
-
 /// Fraction bits of a source position.
 const FRACTION_BITS: u32 = 32;
 /// Shift from a position's fraction to a filter phase.
@@ -45,12 +42,6 @@ pub struct Start {
     pub duck_percent: u8,
     /// Wait for the voice's current sound to end.
     pub after_current: bool,
-    /// This sound's own level by its page's setting, in per cent of its
-    /// gain (REQ-6926 item 1): below 100 for magazine music on a page that
-    /// ducks it, and 100 for every other sound. The voice is held at the
-    /// lower of this and what another voice's `duck_percent` asks, never
-    /// both together (REQ-6926 item 4).
-    pub music_percent: u8,
 }
 
 /// Four voices mixed to mono at one output rate.
@@ -89,10 +80,6 @@ struct Playing {
     /// Other voices' level while this plays, in per cent.
     duck_percent: u8,
     fade_ms: u16,
-    /// Its own level by its page's setting, in per cent (REQ-6926).
-    music_percent: u8,
-    /// The ramp to `music_percent` when it last changed, in milliseconds.
-    music_fade_ms: u16,
     /// Stopping: it ends when its gain reaches zero.
     stopping: bool,
 }
@@ -221,19 +208,6 @@ impl Mixer {
             && !playing.stopping
         {
             playing.gain.to(level(percent), u32::from(fade_ms), rate);
-        }
-    }
-
-    /// Ramps the level a voice's sound holds by its page's setting to
-    /// `percent` of its gain over `fade_ms` (REQ-6926 items 1 and 5): what
-    /// [`Start::music_percent`] set when it started. The voice is held at
-    /// the lower of it and what another voice's ducking asks.
-    pub fn music_level(&mut self, voice: usize, percent: u8, fade_ms: u16) {
-        if let Some(playing) = self.voices.get_mut(voice).and_then(|slot| slot.playing.as_mut())
-            && !playing.stopping
-        {
-            playing.music_percent = percent.min(FULL_PERCENT);
-            playing.music_fade_ms = fade_ms;
         }
     }
 
@@ -404,9 +378,7 @@ impl Mixer {
     }
 
     /// Sets each voice's duck ramp toward the lowest level any other
-    /// sounding voice asks for, or its own sound's level by its page's
-    /// setting when that is lower: the deeper of the two holds, and they
-    /// are never multiplied (REQ-6926 item 4).
+    /// sounding voice asks for.
     fn update_ducks(&mut self) {
         let rate = self.rate_hz;
         let asks: [Option<(u8, u16)>; VOICES] = core::array::from_fn(|index| {
@@ -423,13 +395,8 @@ impl Mixer {
                 .filter(|&(other, _)| other != index)
                 .filter_map(|(_, ask)| *ask)
                 .min_by_key(|&(percent, _)| percent);
-            let own = voice
-                .playing
-                .filter(|playing| !playing.stopping && playing.music_percent < FULL_PERCENT)
-                .map(|playing| (playing.music_percent, playing.music_fade_ms));
-            let deepest = [strongest, own].into_iter().flatten().min_by_key(|&(percent, _)| percent);
             let (target, fade) =
-                deepest.map_or((UNITY, MIN_RAMP_MS), |(percent, fade)| (level(percent), u32::from(fade)));
+                strongest.map_or((UNITY, MIN_RAMP_MS), |(percent, fade)| (level(percent), u32::from(fade)));
             let mut ramp = voice.duck.unwrap_or(Ramp::at(UNITY));
             if ramp.target() != target {
                 ramp.to(target, fade, rate);
@@ -481,8 +448,6 @@ fn begin(start: &Start, source: Source, output_rate: u32) -> Playing {
         gain,
         duck_percent: start.duck_percent,
         fade_ms: start.fade_ms,
-        music_percent: start.music_percent.min(FULL_PERCENT),
-        music_fade_ms: start.fade_ms,
         stopping: false,
     };
     set_step(&mut playing, nominal);

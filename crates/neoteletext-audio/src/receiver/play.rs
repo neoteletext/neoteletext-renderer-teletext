@@ -12,7 +12,7 @@
 ))]
 use super::instruments::Begun;
 use super::loss::Progress;
-use super::magazine::music_changed;
+use super::music::music_changed;
 use super::{MS_PER_SECOND, Receiver, duration_ms};
 use crate::control::Play;
 use crate::port::{LocalStart, Start, VoiceSink};
@@ -22,9 +22,11 @@ use crate::{CHANNELS, PROGRESSIVE_BUFFER_MS};
 impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// Starts a play now if its sound is ready, or keeps it waiting.
     pub(super) fn try_start(&mut self, index: u8, play: Play, sink: &mut dyn VoiceSink) {
-        // Magazine music is a live sound, and sounds only where its gate
-        // lets it (REQ-6925 items 2 and 3).
-        let Some(music_percent) = self.starting_percent(index, play) else { return };
+        // Music is a live sound, and sounds only where its gate lets it
+        // (REQ-6925 items 2 and 3).
+        if !self.may_start(index, play) {
+            return;
+        }
         let ready = self
             .store
             .entry(play.sound.handle)
@@ -92,21 +94,21 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                 return;
             }
             self.store.set_at_sink(entry.sound, true);
-            self.played(index, play, &entry, start_ms, music_percent, sink);
+            self.played(index, play, &entry, start_ms, sink);
             // The playing is a stream of its own, begun just now.
             if let Some(channel) = self.channels.get_mut(usize::from(index)) {
                 channel.labelled = None;
             }
-            self.label(index, entry.sound, play.magazine, sink);
+            self.label(index, entry.sound, play.music, sink);
             if begun == Begun::Started {
-                sink.start(index, start_of(play, music_percent));
+                sink.start(index, start_of(play));
             }
             return;
         }
         if !play.after_current {
             self.stop_streams(index, play.fade_ms, sink);
         }
-        self.played(index, play, &entry, start_ms, music_percent, sink);
+        self.played(index, play, &entry, start_ms, sink);
         if entry.live {
             let bit = 1_u8.checked_shl(u32::from(index)).unwrap_or(0);
             if entry.streams & bit == 0 {
@@ -119,7 +121,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
                 }
             }
             // Labelled before its samples are given (REQ-6925 item 6).
-            self.label(index, entry.sound, play.magazine, sink);
+            self.label(index, entry.sound, play.music, sink);
             if !entry.at_sink {
                 // Join at the newest block: a live sound is heard as it is now.
                 self.store.set_at_sink(entry.sound, true);
@@ -130,7 +132,7 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
         } else if !entry.at_sink {
             self.send_sound(&entry, sink);
         }
-        sink.start(index, start_of(play, music_percent));
+        sink.start(index, start_of(play));
     }
 
     /// Starts a local sound on channel `index` (page-rules.md, RULE-60):
@@ -230,19 +232,10 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     /// Records a play just started on channel `index`: it is what the channel
     /// plays, followed for loss, and heard to its end at a time the receiver
     /// knows for a stored sound played once from a known start.
-    fn played(
-        &mut self,
-        index: u8,
-        play: Play,
-        entry: &Entry,
-        start_ms: Option<u64>,
-        music_percent: u8,
-        sink: &mut dyn VoiceSink,
-    ) {
+    fn played(&mut self, index: u8, play: Play, entry: &Entry, start_ms: Option<u64>, sink: &mut dyn VoiceSink) {
         if let Some(channel) = self.channels.get_mut(usize::from(index)) {
             channel.waiting = None;
             channel.playing_page = play.page;
-            channel.music_percent = music_percent;
             let was = channel.playing.replace(play);
             music_changed(index, was, Some(play), sink);
         }
@@ -292,9 +285,9 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     pub(super) fn start_waiting(&mut self, sink: &mut dyn VoiceSink) {
         for index in 0..CHANNELS {
             if let Some(play) = self.channels.get(usize::from(index)).and_then(|channel| channel.waiting) {
-                // Magazine music waits only while its gate lets it sound;
-                // `try_start` gives it up otherwise (REQ-6925 item 3).
-                if play.magazine.is_some() || play.page.is_none() || (self.page_sounds && play.page == self.opened) {
+                // Music waits only while its gate lets it sound; `try_start`
+                // gives it up otherwise (REQ-6925 item 3).
+                if play.music.is_some() || play.page.is_none() || (self.page_sounds && play.page == self.opened) {
                     self.try_start(index, play, sink);
                 } else {
                     self.drop_waiting_page_play(index);
@@ -332,9 +325,8 @@ impl<const OBJECTS: usize, const SLOTS: usize> Receiver<'_, OBJECTS, SLOTS> {
     }
 }
 
-/// The sink's start of `play`, magazine music at `music_percent` of its
-/// gain by its page's setting.
-fn start_of(play: Play, music_percent: u8) -> Start {
+/// The sink's start of `play`.
+fn start_of(play: Play) -> Start {
     Start {
         sound: play.sound,
         gain: play.gain,
@@ -342,8 +334,7 @@ fn start_of(play: Play, music_percent: u8) -> Start {
         looped: play.looped,
         duck_percent: play.duck_percent,
         after_current: play.after_current,
-        magazine: play.magazine,
-        music_percent,
+        music: play.music,
     }
 }
 

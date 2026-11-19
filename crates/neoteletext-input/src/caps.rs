@@ -58,12 +58,12 @@ pub const NAPLPS_CAP: u32 = 1 << 24;
 /// ([`crate::snapshot::welcome_agrees_snapshot`]), so a channel that does
 /// not know the bit, and so never agrees it, makes no viewer of it.
 pub const SNAPSHOT_CAP: u32 = 1 << 25;
-/// Capability: the receiver plays magazine music and applies a page's
-/// magazine-music setting (REQ-6927 item 1, DEC-6924 item 9): a channel
-/// that agrees it may send a CONTROL record naming a magazine, the blocks
-/// of that magazine's live sound and the `MAGAZINE_MUSIC` record of a page's
-/// setting, and sends none of them on a connection whose WELCOME did not
-/// agree it. It is offered only under protocol version 11
+/// Capability: the receiver plays the channel's music and a magazine's and
+/// applies a page's two music switches (REQ-6927 item 1, DEC-6924 item 9):
+/// a channel that agrees it may send a CONTROL record naming a level of
+/// music, the blocks of that music's live sound and the `PAGE_MUSIC` record
+/// of a page's switches, and sends none of them on a connection whose
+/// WELCOME did not agree it. It is offered only under protocol version 11
 /// ([`caps_of`]), and never agreed with [`SNAPSHOT_CAP`]
 /// ([`agreeable`]).
 pub const MAGAZINE_SOUND_CAP: u32 = 1 << 26;

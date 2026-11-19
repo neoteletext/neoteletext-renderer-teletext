@@ -13,7 +13,7 @@ use std::vec::Vec;
 const RATE: u32 = 8_000;
 
 fn start(key: SoundKey, gain: u8) -> Start {
-    Start { key, gain, fade_ms: 5, looped: false, duck_percent: 100, after_current: false, music_percent: 100 }
+    Start { key, gain, fade_ms: 5, looped: false, duck_percent: 100, after_current: false }
 }
 
 fn constant(mixer: &mut Mixer, key: SoundKey, value: i16, samples: usize) {
@@ -105,56 +105,10 @@ fn ducking_lowers_the_other_voices_by_table_19s_step() {
     assert!((2_400..=2_600).contains(&out[399]), "{}", out[399]);
 }
 
-// Verifies REQ-6926 items 1 and 5: a page that ducks the magazine's music
-// holds it at exactly Table 19's step, and a page that lets it play brings
-// it back.
-#[test]
-fn a_pages_setting_lowers_its_music_by_table_19s_step_and_lets_it_return() {
-    let mut mixer = Mixer::new(RATE);
-    constant(&mut mixer, (1, 1), 10_000, 8000);
-    // Duck code 2 is 8 dB, 40 per cent.
-    mixer.start(0, Start { music_percent: 40, ..start((1, 1), 100) });
-    let out = render(&mut mixer, 400);
-    assert!((3_900..=4_100).contains(&out[399]), "{}", out[399]);
-    mixer.music_level(0, 100, 5);
-    let out = render(&mut mixer, 400);
-    assert!((9_900..=10_000).contains(&out[399]), "{}", out[399]);
-    mixer.music_level(0, 13, 5);
-    let out = render(&mut mixer, 400);
-    assert!((1_250..=1_350).contains(&out[399]), "{}", out[399]);
-}
-
-// Verifies REQ-6926 item 4: a page sound's duck code ducks the music with
-// no setting, the deeper of it and the page's setting holds (never the two
-// multiplied), and the music returns to the page's own setting when the
-// page sound ends.
-#[test]
-fn a_page_sounds_duck_and_the_pages_setting_hold_the_deeper_of_the_two() {
-    let mut mixer = Mixer::new(RATE);
-    constant(&mut mixer, (1, 1), 10_000, 16_000);
-    constant(&mut mixer, (2, 1), 0, 800);
-    // The music on a page that ducks it by code 1 (63 per cent).
-    mixer.start(0, Start { music_percent: 63, ..start((1, 1), 100) });
-    render(&mut mixer, 400);
-    // A page sound of 100 ms with duck code 3 (25 per cent).
-    mixer.start(1, Start { duck_percent: 25, ..start((2, 1), 100) });
-    let out = render(&mut mixer, 400);
-    // 25 per cent, not 25 per cent of 63.
-    assert!((2_400..=2_600).contains(&out[399]), "{}", out[399]);
-    // The page sound has ended: back to the page's 63 per cent.
-    let out = render(&mut mixer, 1200);
-    assert!((6_200..=6_400).contains(&out[1199]), "{}", out[1199]);
-    // A page sound with a shallower duck than the page's setting changes
-    // nothing: the setting is the deeper.
-    constant(&mut mixer, (3, 1), 0, 8000);
-    mixer.music_level(0, 13, 5);
-    mixer.start(1, Start { duck_percent: 40, ..start((3, 1), 100) });
-    let out = render(&mut mixer, 400);
-    assert!((1_250..=1_350).contains(&out[399]), "{}", out[399]);
-}
-
-// Verifies REQ-6925 item 3: a voice started again on a live sound whose
-// samples kept coming joins at what is written now, not where it stopped.
+// Verifies REQ-6925 item 3 and DEC-6924 item 2: a voice started again on
+// a live sound whose samples kept coming joins at what is written now, not
+// where it stopped, which is how music of an outer level resumes at its
+// live point.
 #[test]
 fn a_voice_started_again_on_a_live_sound_joins_at_its_present_samples() {
     let mut mixer = Mixer::new(RATE);

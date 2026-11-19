@@ -1,7 +1,7 @@
 //! A channel's command state (REQ-AUD-010 to REQ-AUD-012): the latest
 //! command wins, in constant memory.
 
-use crate::port::SoundId;
+use crate::port::{Music, SoundId};
 use crate::record::{Control, FLAG_AFTER_CURRENT, FLAG_LOOP, FLAG_PROGRESSIVE};
 use crate::{DUCK_PERCENT, MIN_FADE_MS, serial_newer};
 
@@ -23,11 +23,11 @@ pub struct Play {
     /// The other channels' level while this plays, in per cent.
     pub duck_percent: u8,
     /// The page the play belongs to, or `None` for the whole service or a
-    /// magazine.
+    /// level of music.
     pub page: Option<u16>,
-    /// The magazine the play belongs to, 1 to 8 (REQ-6925): magazine music.
-    /// `None` for a page's play or the whole service's.
-    pub magazine: Option<u8>,
+    /// The level of music the play is armed for (REQ-6925): the channel's
+    /// or a magazine's. `None` for a page's play or the whole service's.
+    pub music: Option<Music>,
 }
 
 impl Play {
@@ -43,7 +43,7 @@ impl Play {
             after_current: control.flags & FLAG_AFTER_CURRENT != 0,
             duck_percent: DUCK_PERCENT.get(usize::from(control.duck)).copied().unwrap_or(100),
             page: control.page,
-            magazine: control.magazine,
+            music: control.music,
         }
     }
 }
@@ -67,12 +67,9 @@ pub struct Channel {
     pub playing_page: Option<u16>,
     /// The play the channel last started, while it may still sound.
     pub playing: Option<Play>,
-    /// While the channel plays magazine music, the level the open page's
-    /// setting gives it, in per cent, as the sink was last told (REQ-6926).
-    pub music_percent: u8,
-    /// The stream at the sink, on this channel, that is labelled as a
-    /// magazine's music, and the magazine (REQ-6925 item 6).
-    pub labelled: Option<(SoundId, u8)>,
+    /// The stream at the sink, on this channel, that is labelled as music,
+    /// and its level (REQ-6925 item 6).
+    pub labelled: Option<(SoundId, Music)>,
 }
 
 impl Channel {

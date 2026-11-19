@@ -45,7 +45,7 @@ pub fn sound(options: &SoundOptions, input: &Path, output: &Path, no_sandbox: bo
         flags: if options.looped && !options.live { LOOP } else { 0 },
         duck: 0,
         page: Some(page),
-        magazine: None,
+        music: None,
     };
     let source = match codec {
         Codec::Opus => Source::Opus(read_ogg_opus(&bytes).map_err(|error| refused(ogg_refusal(error)))?),
