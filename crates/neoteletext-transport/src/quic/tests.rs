@@ -326,6 +326,10 @@ fn two_websockets_share_one_connection_and_carry_their_own_bytes() {
         [(b"localhost".to_vec(), b"/ch/push".to_vec()), (b"localhost".to_vec(), b"/ch/push?second".to_vec())]
     );
     assert_eq!(connection.peer(), server.address);
+    // A copy of the handle is the same connection; another connection to
+    // the same server is not.
+    assert!(connection.is(&connection.clone()));
+    assert!(!connection.is(&connect(&server)));
 }
 
 /// REQ-6985 item 2: the ALPN protocol `h3` alone, and no early data. That

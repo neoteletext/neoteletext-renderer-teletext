@@ -373,6 +373,12 @@ impl Http3Connection {
         self.peer
     }
 
+    /// Whether `other` is a handle of this same connection.
+    #[must_use]
+    pub fn is(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
+    }
+
     /// Asks for a WebSocket on the connection (RFC 9220 section 3). The
     /// request goes when the connection is ready, and at once when it is
     /// already. `None` when the connection is lost, holds [`MAX_STREAMS`],
