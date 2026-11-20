@@ -208,8 +208,10 @@ pub fn response(fields: Vec<Field>) -> Result<Response, Error> {
     Ok(Response { status, fields: rest })
 }
 
-/// Whether `value` may be written as a field's value: [`is_value`]'s
-/// rule, for what this endpoint sends.
+/// Whether `value` may be written as a field's value: free of NUL, line
+/// feed and carriage return (RFC 9114 section 4.2) and of white space at
+/// either end (RFC 9110 section 5.5), the rule a received value is read by,
+/// for what this endpoint sends.
 #[must_use]
 pub fn writable(value: &[u8]) -> bool {
     is_value(value)
