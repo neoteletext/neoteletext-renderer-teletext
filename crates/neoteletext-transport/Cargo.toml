@@ -15,6 +15,16 @@ neoteletext-web = { workspace = true, features = ["std"] }
 # dependency here must not add to what that process links.
 rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1.0.3"
+# HTTP/3's frames, QPACK and the extended CONNECT, read and written by the
+# engine's own crate (REQ-6986).
+neoteletext-http3.workspace = true
+# QUIC (REQ-6985, DEC-6979): the state machine alone, driven by this
+# crate's threads; no asynchronous runtime. Over the rustls and ring above;
+# without its defaults `log` (the fetcher links no logging) and `bloom`
+# (a server's token filter). MIT OR Apache-2.0, pure Rust but for ring.
+quinn-proto = { version = "0.11.19", default-features = false, features = ["rustls-ring"] }
+# The buffers quinn-proto's interface takes and gives. MIT.
+bytes = { version = "1.11", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

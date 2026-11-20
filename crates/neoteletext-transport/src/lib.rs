@@ -9,7 +9,10 @@
 //!   Layer Security as every connection has it;
 //! - [`open_tunnel`], [`first_address`] and [`connect_within_limit`]: a
 //!   socket opened with one limit on each step, through the proxy or
-//!   directly.
+//!   directly;
+//! - [`quic`]: an HTTP/3 connection over QUIC, shared by its owners, on
+//!   which each opens a WebSocket as a stream (REQ-6985). Never through a
+//!   proxy: a program with one configured asks for no QUIC connection.
 //!
 //! Which addresses a program may reach is not here: that is each program's
 //! rule, and `neottx`, the qrkeyboard client and the browser differ in it.
@@ -35,6 +38,7 @@
 )]
 
 mod connection;
+pub mod quic;
 mod reach;
 mod tls;
 

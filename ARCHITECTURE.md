@@ -480,7 +480,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | `neoteletext-http3` | HTTP/3 without input or output (REQ-6986): QUIC's variable-length integers, RFC 9114's frames, stream types and SETTINGS, RFC 9204's QPACK with no dynamic table, and the extended CONNECT of RFC 9220 at either end; it reads byte slices and writes byte vectors, so `neoteletext-transport` and the NeoTeletext server read a peer's bytes with the same code | `no_std` with `alloc`, no dependency |
 | `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages, and to ReGIS and NAPLPS (`picture-languages`, linking `regis`, `regis-minify` and `naplps`) | `std`, sans-IO |
 | `neoteletext-picture-cli` | L9: the program `neottx-picture` | `std` |
-| `neoteletext-transport` | L9: a client's sockets: the reader thread, the TLS pump, the blocking writes and the connection through a proxy, shared by `neoteletext-app`, `neoteletext-qrkeyboard` and the browser's fetcher (DEC-1905) | `std` |
+| `neoteletext-transport` | L9: a client's sockets: the reader thread, the TLS pump, the blocking writes and the connection through a proxy, shared by `neoteletext-app`, `neoteletext-qrkeyboard` and the browser's fetcher (DEC-1905); and a client's HTTP/3 connection over QUIC, on which each WebSocket is a stream (REQ-6985, DEC-6988: `quinn-proto` driven by this crate's threads, with `neoteletext-http3`) | `std` |
 | `neoteletext-app` | L9: the application layer of `neottx` and any other viewer program: sessions, inputs, live mode's two processes, sandboxing | `std` |
 | `neoteletext-cli` | L9 (and text output of L5) | `std` |
 | `neoteletext-ffi` | L9: the C interface (Phase 2) | The only crate with `unsafe` |
@@ -580,6 +580,7 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `connection`: an open connection: its reader thread, what it read taken plain or through TLS, and the blocking writes.
 - `tls`: the client configuration, Mozilla's roots and the handshake over any blocking stream.
 - `reach`: a socket within the connect limit, direct or through the proxy.
+- `quic`: `Http3Connection`, one QUIC connection carrying HTTP/3 that its owners share (neoteletext-common's DEC-6979): a thread waits on its UDP socket and another drives `quinn-proto` and its timers; `open_websocket` sends an extended CONNECT (RFC 9220) and gives a `WebSocketStream`, whose content is the WebSocket's bytes in DATA frames. Its bounds are the module's constants. Never through a proxy.
 
 **`neoteletext-qrkeyboard`**
 - `crypto/`: SPAKE2 pairing and sealed frames.
