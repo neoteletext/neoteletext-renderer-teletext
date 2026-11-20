@@ -159,6 +159,9 @@ pub mod header {
     /// `Link` (RFC 8288 section 3), read for discovery's pointers alone
     /// (REQ-2476).
     pub const LINK: &[u8] = b"Link";
+    /// `Alt-Svc` (RFC 7838 section 3), read for an `h3` entry alone
+    /// (REQ-6983).
+    pub const ALT_SVC: &[u8] = b"Alt-Svc";
     /// `Retry-After` (RFC 9110 section 10.2.3).
     pub const RETRY_AFTER: &[u8] = b"Retry-After";
     /// `Upgrade` (RFC 9110 section 7.8).
@@ -408,6 +411,22 @@ pub const SHA256_HEX_DIGITS: usize = 2 * SHA256_DIGEST_BYTES;
 /// The deepest JSON nesting the reader accepts (RFC 8259 section 9 allows
 /// a limit).
 pub const MAX_JSON_DEPTH: usize = 16;
+
+// ---------------------------------------------------------------------------
+// Alt-Svc (REQ-6983)
+// ---------------------------------------------------------------------------
+
+/// The longest `Alt-Svc` value read (REQ-6983). A server that names
+/// HTTP/3 sends a few tens of bytes (`h3=":443"; ma=86400`), and one that
+/// lists every draft version a few hundred; 512 holds those, and a longer
+/// value names nothing.
+pub const MAX_ALT_SVC_BYTES: usize = 512;
+/// The most entries of an `Alt-Svc` value looked at (REQ-6983): servers
+/// list `h3` first, then at most a handful of older versions.
+pub const MAX_ALT_SVC_ENTRIES: usize = 8;
+/// How long an alternative service is fresh when its entry has no `ma`:
+/// 24 hours (RFC 7838 section 3.1).
+pub const ALT_SVC_DEFAULT_MAX_AGE_SECONDS: u32 = 24 * 60 * 60;
 
 // ---------------------------------------------------------------------------
 // Service descriptor (REQ-WEB-002)

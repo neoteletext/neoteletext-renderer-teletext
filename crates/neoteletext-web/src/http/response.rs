@@ -5,6 +5,7 @@
 
 use super::head::{self, HeadError};
 use super::{Framing, HttpError, MediaType};
+use crate::alt_svc::{self, AltSvc};
 use crate::bytes::{TextBuf, copy_prefix, parse_decimal, split_once, trim_ows};
 use crate::consts::{
     CHUNKED, CONNECTION_CLOSE, CONNECTION_UPGRADE, HTTP_MAJOR, HTTP_MINOR_0, HTTP_MINOR_1, IDENTITY,
@@ -114,6 +115,9 @@ pub struct ResponseHead {
     /// `Sec-WebSocket-Protocol`, as the server named it; empty when longer
     /// than any name this client asks for, so that it matches none.
     pub websocket_protocol: Option<TextBuf<MAX_SUBPROTOCOL_LENGTH>>,
+    /// What the first `Alt-Svc` field named (REQ-6983), when the response
+    /// has one.
+    pub alt_svc: Option<AltSvc>,
 }
 
 /// True when a comma-separated header value contains `token`, ignoring
@@ -197,6 +201,9 @@ fn read_header(
         head.websocket_extensions = true;
     } else if is(header::SEC_WEBSOCKET_PROTOCOL) {
         head.websocket_protocol = Some(TextBuf::from_bytes(value).unwrap_or_default());
+    } else if is(header::ALT_SVC) && head.alt_svc.is_none() {
+        // REQ-6983: the first is read, and any after it ignored.
+        head.alt_svc = Some(alt_svc::read(value));
     }
     Ok(())
 }
@@ -283,6 +290,7 @@ pub fn parse_head(bytes: &[u8]) -> Result<ResponseHead, HttpError> {
         websocket_accept: None,
         websocket_extensions: false,
         websocket_protocol: None,
+        alt_svc: None,
     };
     let mut framing = FramingHeaders::default();
     for field in parsed.fields() {

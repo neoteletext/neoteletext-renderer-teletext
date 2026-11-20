@@ -87,6 +87,7 @@ pub mod user_agent;
 
 pub mod viewer_state;
 
+pub mod alt_svc;
 pub mod http;
 pub mod ws;
 
