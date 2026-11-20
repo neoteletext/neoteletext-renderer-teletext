@@ -48,6 +48,8 @@ neoteletext-app = { path = "../crates/neoteletext-app", default-features = false
 # (REQ-SEC-003).
 neoteletext-qrkeyboard = { path = "../crates/neoteletext-qrkeyboard" }
 neoteletext-picture = { path = "../crates/neoteletext-picture" }
+# The HTTP/3 layer's readers, at either end (REQ-6986).
+neoteletext-http3 = { path = "../crates/neoteletext-http3" }
 
 [workspace]
 members = ["."]
@@ -472,6 +474,20 @@ bench = false
 [[bin]]
 name = "frame_records"
 path = "fuzz_targets/frame_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http3_reader"
+path = "fuzz_targets/http3_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http3_client"
+path = "fuzz_targets/http3_client.rs"
 test = false
 doc = false
 bench = false

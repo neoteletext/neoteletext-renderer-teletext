@@ -15,8 +15,10 @@ const DATA_FILES: &[&str] = &["consts.rs", "consts/", "limits.rs", "charset/", "
 /// Crates that hold no teletext, whose literals are another standard's
 /// values: the instruments' crate reads synthesizer patches and MIDI, where
 /// a byte such as 0x55 is a manufacturer's data byte (Roland's Juno-106
-/// owner's manual, MIDI Implementation 3.1), not the clock run-in.
-const NOT_TELETEXT: &[&str] = &["crates/neoteletext-audio-instruments/"];
+/// owner's manual, MIDI Implementation 3.1), not the clock run-in; and the
+/// HTTP/3 crate holds RFC 7541 appendix B's Huffman code, where 0x27 is the
+/// code of a letter, not the framing code.
+const NOT_TELETEXT: &[&str] = &["crates/neoteletext-audio-instruments/", "crates/neoteletext-http3/"];
 /// Teletext values that must only appear in the constants module
 /// (REQ-GEN-014), and the numbers of area NUM, which only `limits` writes
 /// (REQ-NUM-031): the null sub-code, the last sub-page's and the last

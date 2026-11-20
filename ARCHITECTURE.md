@@ -477,6 +477,7 @@ Each boundary is one narrow type. Nothing reaches past its neighbour.
 | `neoteletext-audio-instruments` | Audio: the profile's instruments (REQ-6412), synth6581, synth7 and five analogue synthesizers (synth106, synthD, synth53, synth8 and synth80), each rendered from its own input to samples; `neoteletext-audio` plays them behind its `synth6581` and `synth7` features and the feature of each synthesizer | `no_std`, no allocation, integer only |
 | `neoteletext-opus` | Audio: the Opus decoder of the audio profile (decision E.123) | `no_std`, no allocation, integer only |
 | `neoteletext-rules` | Page rules (section 3, "Page rules"): the rule table's codec, checks and evaluator, and the animation operations | `no_std`, no allocation, integer only, no dependency |
+| `neoteletext-http3` | HTTP/3 without input or output (REQ-6986): QUIC's variable-length integers, RFC 9114's frames, stream types and SETTINGS, RFC 9204's QPACK with no dynamic table, and the extended CONNECT of RFC 9220 at either end; it reads byte slices and writes byte vectors, so `neoteletext-transport` and the NeoTeletext server read a peer's bytes with the same code | `no_std` with `alloc`, no dependency |
 | `neoteletext-picture` | Pictures (section 3, "Pictures"): pictures to pages, and to ReGIS and NAPLPS (`picture-languages`, linking `regis`, `regis-minify` and `naplps`) | `std`, sans-IO |
 | `neoteletext-picture-cli` | L9: the program `neottx-picture` | `std` |
 | `neoteletext-transport` | L9: a client's sockets: the reader thread, the TLS pump, the blocking writes and the connection through a proxy, shared by `neoteletext-app`, `neoteletext-qrkeyboard` and the browser's fetcher (DEC-1905) | `std` |
@@ -567,6 +568,13 @@ Where each crate's code lives, one sentence per directory (the reorganisation of
 - `keys/`: the one-byte key codes and the United States layout.
 - `session/`: the acknowledged count and the messages kept to send again, the filter of what goes and the rate limit.
 - `pace/`: the tests of the pointer's pace (`pace.rs`; `contacts.rs` numbers the contacts).
+
+**`neoteletext-http3`**
+- `varint`, `frame`, `settings`, `stream`: the integers, the frames read as a stream's bytes arrive, the SETTINGS payload, and the control stream and a request stream's order of frames.
+- `qpack/`: field sections with the static table and the Huffman code; a reference to the dynamic table is a connection error.
+- `message`: a request's control data and a response's, each read strictly.
+- `client`: the extended CONNECT that opens a WebSocket, the streams a server opens read from their first byte, and a WebSocket's stream once answered.
+- `limits`, `error`: every bound, and the codes of RFC 9114 section 8.1.
 
 **`neoteletext-transport`**
 - `connection`: an open connection: its reader thread, what it read taken plain or through TLS, and the blocking writes.
@@ -691,6 +699,7 @@ What each library crate may use of `neoteletext-core`, which `cargo xtask check-
 | `neoteletext-audio-instruments` | — |
 | `neoteletext-opus` | — |
 | `neoteletext-rules` | — |
+| `neoteletext-http3` | — |
 | `neoteletext-picture` | Foundation (the page's geometry, attributes, triplet fields and the Colour Map's defaults) |
 
 The application crates use whatever they need of it.

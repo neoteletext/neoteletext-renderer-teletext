@@ -567,6 +567,7 @@ dependencies = [
  "neoteletext-audio-instruments",
  "neoteletext-core",
  "neoteletext-formats",
+ "neoteletext-http3",
  "neoteletext-input",
  "neoteletext-opus",
  "neoteletext-picture",
@@ -575,6 +576,10 @@ dependencies = [
  "neoteletext-slicer",
  "neoteletext-web",
 ]
+
+[[package]]
+name = "neoteletext-http3"
+version = "0.1.0"
 
 [[package]]
 name = "neoteletext-image"

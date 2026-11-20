@@ -53,6 +53,9 @@ const PERMITTED: &[(&str, &[&str])] = &[
     // page-rules.md RULE-56: no dependency of any kind, not even another
     // engine crate.
     ("neoteletext-rules", &[]),
+    // REQ-6986: no dependency of any kind, so the server links the same
+    // readers as every client.
+    ("neoteletext-http3", &[]),
 ];
 
 /// `cargo tree`'s output for `krate`: its resolved normal dependencies with

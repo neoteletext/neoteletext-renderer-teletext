@@ -141,6 +141,7 @@ const BUILDS: &[Build] = &[
     // The page rule table (page-rules.md RULE-56).
     Build { package: "neoteletext-rules", features: "" },
     Build { package: "neoteletext-rules", features: "error-trait" },
+    Build { package: "neoteletext-http3", features: "" },
     Build { package: "neoteletext-transport", features: "" },
     Build { package: "neoteletext-qrkeyboard", features: "" },
     // The picture converter and its program (DEC-2325): the converter with

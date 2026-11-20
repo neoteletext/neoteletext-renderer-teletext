@@ -5,6 +5,7 @@ members = [
     "crates/neoteletext-formats",
     "crates/neoteletext-slicer",
     "crates/neoteletext-web",
+    "crates/neoteletext-http3",
     "crates/neoteletext-image",
     "crates/neoteletext-picture",
     "crates/neoteletext-picture-cli",
@@ -48,6 +49,7 @@ neoteletext-opus = { path = "crates/neoteletext-opus" }
 neoteletext-input = { path = "crates/neoteletext-input" }
 neoteletext-rules = { path = "crates/neoteletext-rules" }
 neoteletext-transport = { path = "crates/neoteletext-transport" }
+neoteletext-http3 = { path = "crates/neoteletext-http3" }
 neoteletext-qrkeyboard = { path = "crates/neoteletext-qrkeyboard" }
 neoteletext-app = { path = "crates/neoteletext-app", default-features = false }
 # Decision E.38: the only external crate a microcontroller crate may use.

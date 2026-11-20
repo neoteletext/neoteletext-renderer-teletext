@@ -849,6 +849,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "neoteletext-http3"
+version = "0.1.0"
+
+[[package]]
 name = "neoteletext-image"
 version = "0.1.0"
 dependencies = [

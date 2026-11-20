@@ -38,7 +38,7 @@ const WORKSPACE_PREFIX: &str = "neoteletext-";
 const APPLICATION_CRATES: &[(&str, &[&str])] = &[
     // The clients' sockets, threads and TLS, which neoteletext-web as a
     // library may not hold (DEC-1905).
-    ("neoteletext-transport", &["neoteletext-web"]),
+    ("neoteletext-transport", &["neoteletext-web", "neoteletext-http3"]),
     // A phone as a keyboard through qrkeyboard's relay (decision E.93):
     // sockets, TLS and cryptography, for desktop programs only.
     ("neoteletext-qrkeyboard", &["neoteletext-web", "neoteletext-transport"]),
@@ -98,6 +98,8 @@ const LIBRARY_CRATES: &[&str] = &[
     "neoteletext-rules",
     // The picture converter (DEC-2325 item 1, REQ-2327).
     "neoteletext-picture",
+    // HTTP/3 without input or output (REQ-6986).
+    "neoteletext-http3",
 ];
 
 fn report(violations: &[String]) -> Result<(), String> {
