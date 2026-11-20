@@ -53,8 +53,8 @@ mod snapshot;
 
 pub use config::{Buffers, Config, SnapshotTarget, Storage};
 pub use events::{
-    Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, ResourceRole, Sink, SnapshotEnd,
-    Source, Subscription,
+    Event, Failure, Input, InputMessage, Output, PageBytes, PushProblem, PushStop, PushStream, ResourceRole, Sink,
+    SnapshotEnd, Source, Subscription,
 };
 
 /// The bytes of one T42 packet (REQ-INP-002).
@@ -270,6 +270,12 @@ struct PushConnection {
     invalid: u64,
     /// LOG records given on since the last page frame (REQ-INP-026).
     log_lines: usize,
+    /// The port asked for the push connection to be opened as a stream it
+    /// presents (REQ-6984).
+    over_stream: bool,
+    /// The connection being opened is such a stream: the port's answer is
+    /// awaited, not a TCP connection's.
+    opening_stream: bool,
 }
 
 /// The web user agent, with random numbers from `R`.
@@ -399,6 +405,8 @@ impl<'m, R: RandomSource> UserAgent<'m, R> {
                 round_trip: RoundTrip::default(),
                 invalid: 0,
                 log_lines: 0,
+                over_stream: false,
+                opening_stream: false,
             },
             records: crate::records::RecordReader::new(),
             index: crate::records::index::Progress::new(),

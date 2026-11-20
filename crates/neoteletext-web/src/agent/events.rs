@@ -4,6 +4,7 @@
 
 use neoteletext_core::types::{Instant, PageAddress, SubCode};
 
+use crate::alt_svc::AltSvc;
 use crate::descriptor::DescriptorError;
 use crate::http::{HttpError, MediaType, Method};
 use crate::port::{ConnectionId, NetInput, NetOutput, Security};
@@ -14,7 +15,7 @@ use crate::records::redirect::RedirectRecord;
 use crate::records::state::{StateChallenge, StateEnd};
 use crate::records::subpages::SubPagesRecord;
 use crate::subpages::PartNumber;
-use crate::url::UrlError;
+use crate::url::{IpAddress, UrlError};
 use crate::ws::WsError;
 use neoteletext_formats::log::LogLine;
 
@@ -107,6 +108,36 @@ pub enum Input<'a> {
     /// [`Event::RoundTrip`] (REQ-RCH-016): on while keys go to the channel,
     /// off otherwise.
     MeasureRoundTrip(bool),
+    /// Whether the agent's next push connections are opened as streams the
+    /// port presents (REQ-6984): off in a new agent. On, a secure push
+    /// address is asked for with [`Output::OpenPushStream`] in place of
+    /// [`Output::Connect`], and the port answers with
+    /// [`Input::PushStream`].
+    PushOverStream(bool),
+    /// The port's answer to [`Output::OpenPushStream`] (REQ-6984).
+    PushStream(PushStream<'a>),
+}
+
+/// What came of a push stream the agent asked its port to open
+/// (REQ-6984).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PushStream<'a> {
+    /// The server answered the extended CONNECT (RFC 9220 section 3). The
+    /// stream is the push WebSocket only when the agent accepts the
+    /// answer: a status of 200 with the push subprotocol.
+    Answered {
+        /// The address the connection carrying the stream reached, held
+        /// to the rule of a TCP peer (REQ-SEC-006).
+        peer: IpAddress,
+        /// The answer's `:status`.
+        status: u16,
+        /// The answer's one `sec-websocket-protocol`, if it had one.
+        subprotocol: Option<&'a [u8]>,
+    },
+    /// No stream could be opened: the agent opens the push connection
+    /// over HTTP/1.1 at once, and asks for no stream again until told to
+    /// with [`Input::PushOverStream`].
+    Unavailable,
 }
 
 /// One message of the input profile for the push WebSocket
@@ -278,6 +309,10 @@ pub enum Event<'a> {
         /// The descriptor came over HTTPS.
         secure: bool,
     },
+    /// The answer that brought the descriptor or a channel's settings
+    /// carried an `Alt-Svc` field, and this is what it named (REQ-6983);
+    /// given before [`Event::ServiceReady`]. The agent acts on none of it.
+    AlternativeService(AltSvc),
     /// The descriptor was fetched but is not valid (REQ-WEB-002).
     DescriptorRejected(DescriptorError),
     /// The descriptor could not be fetched.
@@ -625,6 +660,26 @@ pub enum Output<'a> {
     Close {
         /// Which connection.
         connection: ConnectionId,
+    },
+    /// Open the push WebSocket as a stream (REQ-6984): the port sends an
+    /// extended CONNECT with these on a connection of its own (RFC 9220
+    /// section 3), and answers with [`Input::PushStream`]. From an
+    /// accepted answer the stream is [`ConnectionId::Push`]: its content
+    /// is what [`Output::Send`] gives and `NetInput::Received` takes.
+    OpenPushStream {
+        /// The host, without brackets: the name the certificate is
+        /// checked against.
+        host: &'a str,
+        /// The push address's port.
+        port: u16,
+        /// The push address's authority, for `:authority`.
+        authority: &'a [u8],
+        /// Its path and query, for `:path`.
+        path: &'a str,
+        /// The subprotocol to offer.
+        subprotocol: &'a str,
+        /// What the agent names itself as, for `user-agent`.
+        user_agent: &'a [u8],
     },
     /// The next time the agent needs an [`Input::Tick`].
     Timer {

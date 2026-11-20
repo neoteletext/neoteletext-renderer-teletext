@@ -3,17 +3,17 @@
 
 use neoteletext_core::types::Instant;
 
-use super::{Event, Failure, Output, PushPhase, PushProblem, PushStop, Sink, UserAgent, event};
+use super::{Event, Failure, Output, PushPhase, PushProblem, PushStop, PushStream, Sink, UserAgent, event};
 use crate::bytes::{Overflow, Writer};
 use crate::consts::{
     CRLF, OPCODE_PING, PUSH_PING_AFTER_US, PUSH_PONG_WITHIN_US, PUSH_RETRY_FIRST_US, PUSH_RETRY_MAX_US,
-    PUSH_SUBPROTOCOL, ROUND_TRIP_EVERY_US, STATUS_CLIENT_ERROR_FIRST, STATUS_SERVER_ERROR_FIRST,
+    PUSH_SUBPROTOCOL, ROUND_TRIP_EVERY_US, STATUS_CLIENT_ERROR_FIRST, STATUS_OK, STATUS_SERVER_ERROR_FIRST,
     STATUS_SWITCHING_PROTOCOLS, STATUS_TOO_MANY_REQUESTS,
 };
 use crate::http::{self, ResponseHead};
 use crate::port::{ConnectionId, RandomSource, Security};
 use crate::url::IpAddress;
-use crate::ws::{self, FrameReader};
+use crate::ws::{self, FrameReader, WsError};
 
 /// Why a handshake's answer means no attempt will ever do better (DOC-1920),
 /// or `None` when it may: a client error but for a limit, or
@@ -47,12 +47,81 @@ impl<R: RandomSource> UserAgent<'_, R> {
             PushPhase::Connecting { deadline: Instant(now.0.saturating_add(self.config.connect_timeout_us)) };
         self.push.healthy = false;
         self.forget_push_writes();
+        // REQ-6984 item 2: HTTP/3 has no plain form, so only a secure
+        // address is ever a stream.
+        self.push.opening_stream = self.push.over_stream && url.is_secure();
+        if self.push.opening_stream {
+            sink(Output::OpenPushStream {
+                host: url.host_text(),
+                port: url.port(),
+                authority: url.authority(),
+                path: url.target(),
+                subprotocol: PUSH_SUBPROTOCOL,
+                user_agent: self.named_as.as_bytes(),
+            });
+            return;
+        }
         let security = if url.is_secure() { Security::Tls } else { Security::Plain };
         sink(Output::Connect { connection: ConnectionId::Push, host: url.host_text(), port: url.port(), security });
     }
 
+    /// The port says whether push connections are opened as streams it
+    /// presents (REQ-6984 item 1); the next connection is opened so.
+    pub(super) const fn push_over_stream(&mut self, on: bool) {
+        self.push.over_stream = on;
+    }
+
+    /// The port's answer to [`Output::OpenPushStream`] (REQ-6984 items 3
+    /// and 4).
+    pub(super) fn push_stream(&mut self, now: Instant, answer: PushStream<'_>, sink: &mut Sink<'_>) {
+        if !matches!(self.push.phase, PushPhase::Connecting { .. }) || !self.push.opening_stream {
+            return;
+        }
+        let Some(url) = self.push.url else { return };
+        self.push.opening_stream = false;
+        let (peer, status, subprotocol) = match answer {
+            PushStream::Unavailable => {
+                // The channel has not failed, a transport has: HTTP/1.1 at
+                // once, with no wait and nothing counted against it.
+                self.push.over_stream = false;
+                self.push.phase = PushPhase::Idle;
+                self.push_connect(now, sink);
+                return;
+            }
+            PushStream::Answered { peer, status, subprotocol } => (peer, status, subprotocol),
+        };
+        if self.peer_blocked(peer) {
+            event(sink, Event::Blocked { connection: ConnectionId::Push, host: url.host_text() });
+            self.push_lost(now, Some(PushProblem::Failure(Failure::Blocked)), true, sink);
+            return;
+        }
+        self.remember_secure(url.host_text());
+        // RFC 8441 section 5: the 200 stands for the 101, and there is no
+        // `Sec-WebSocket-Accept`. Any other answer is treated as the same
+        // answer to an HTTP/1.1 handshake (DOC-1920).
+        let named = subprotocol == Some(PUSH_SUBPROTOCOL.as_bytes());
+        let stop = match status {
+            STATUS_OK if named => {
+                self.push.frames = FrameReader::new();
+                self.push_opened(now, sink);
+                return;
+            }
+            STATUS_OK => Some(PushStop::WrongProtocol),
+            STATUS_TOO_MANY_REQUESTS => None,
+            status => (STATUS_CLIENT_ERROR_FIRST..STATUS_SERVER_ERROR_FIRST)
+                .contains(&status)
+                .then_some(PushStop::Refused(status)),
+        };
+        match stop {
+            Some(stop) => self.push_stop(stop, sink),
+            None => self.push_lost(now, Some(PushProblem::WebSocket(WsError::Handshake)), true, sink),
+        }
+    }
+
     pub(super) fn push_connected(&mut self, now: Instant, peer: IpAddress, sink: &mut Sink<'_>) {
-        if !matches!(self.push.phase, PushPhase::Connecting { .. }) {
+        // A stream is answered by `Input::PushStream`, never by a TCP
+        // connection's opening.
+        if !matches!(self.push.phase, PushPhase::Connecting { .. }) || self.push.opening_stream {
             return;
         }
         let Some(url) = self.push.url else { return };
@@ -192,6 +261,13 @@ impl<R: RandomSource> UserAgent<'_, R> {
             }
             return false;
         }
+        self.push_opened(now, sink);
+        true
+    }
+
+    /// The push WebSocket is open, by an accepted 101 or by an accepted
+    /// stream (REQ-6984 item 5): from here both are one.
+    fn push_opened(&mut self, now: Instant, sink: &mut Sink<'_>) {
         self.push.phase = PushPhase::Open { heard: now, pinged: None };
         self.push.invalid = 0;
         self.push.log_lines = 0;
@@ -205,7 +281,6 @@ impl<R: RandomSource> UserAgent<'_, R> {
             Some(target) => self.send_snapshot_request(target, sink),
             None => self.send_subscribe(sink),
         }
-        true
     }
 
     /// The push half of [`Self::tick`]: the backoff, the set-up's time

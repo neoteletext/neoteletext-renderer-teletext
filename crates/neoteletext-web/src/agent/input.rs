@@ -59,6 +59,9 @@ impl<R: RandomSource> UserAgent<'_, R> {
             Input::Send(message) => self.send_input(message, sink),
             Input::MeasureRoundTrip(on) => self.measure_round_trip(on),
             Input::FetchResource { role, address } => self.request_resource(role, address, sink),
+            Input::PushOverStream(on) => self.push_over_stream(on),
+            Input::PushStream(answer) if cfg!(feature = "push") => self.push_stream(now, answer, sink),
+            Input::PushStream(_) => {}
         }
         self.dispatch(now, sink);
         if !more {

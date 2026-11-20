@@ -15,6 +15,11 @@ mod common;
 #[cfg(feature = "push")]
 #[path = "agent_replay/snapshot.rs"]
 mod snapshot;
+// The push connection opened as a stream the port presents (REQ-6984), and
+// the Alt-Svc report (REQ-6983), on this file's harness.
+#[cfg(feature = "push")]
+#[path = "agent_replay/push_stream.rs"]
+mod push_stream;
 
 use std::string::{String, ToString};
 use std::vec::Vec;
@@ -63,6 +68,12 @@ struct Harness {
     pump: Pump<Replay>,
     now: Instant,
     out: Vec<Rec>,
+    /// How this port answers a push stream the agent asks for (REQ-6984):
+    /// the status and subprotocol of the server's answer, or `None` when no
+    /// stream can be opened.
+    stream_answer: Option<(u16, Option<Vec<u8>>)>,
+    /// A push stream was asked for and is not yet answered.
+    stream_asked: bool,
 }
 
 fn record(output: Output<'_>) -> Rec {
@@ -76,6 +87,11 @@ fn record(output: Output<'_>) -> Rec {
         },
         Output::Event(event) => Rec::Event(format!("{event:?}")),
         Output::Timer { at } => Rec::Timer(at),
+        Output::OpenPushStream { host, port, authority, path, subprotocol, user_agent } => Rec::Event(format!(
+            "OpenPushStream {{ host: {host}, port: {port}, authority: {}, path: {path}, subprotocol: {subprotocol}, user_agent: {} }}",
+            String::from_utf8_lossy(authority),
+            String::from_utf8_lossy(user_agent)
+        )),
         other => panic!("network output reached the application: {other:?}"),
     }
 }
@@ -84,14 +100,37 @@ impl Harness {
     fn new(config: Config, replay: Replay) -> Self {
         let storage: &'static mut Storage = Box::leak(Box::new(Storage::new()));
         let agent = UserAgent::new(config, storage.buffers(), Counter(0));
-        Self { agent: Box::new(agent), pump: Pump::new(replay), now: Instant(1_000 * SECOND), out: Vec::new() }
+        Self {
+            agent: Box::new(agent),
+            pump: Pump::new(replay),
+            now: Instant(1_000 * SECOND),
+            out: Vec::new(),
+            stream_answer: None,
+            stream_asked: false,
+        }
     }
 
     fn handle(&mut self, input: Input<'_>) {
-        let Self { agent, pump, out, now } = self;
-        agent.handle(*now, input, &mut |output| match output.net() {
-            Some(net) => pump.execute(net),
-            None => out.push(record(output)),
+        let Self { agent, pump, out, now, stream_asked, .. } = self;
+        agent.handle(*now, input, &mut |output| {
+            if let Some(net) = output.net() {
+                pump.execute(net);
+                return;
+            }
+            // A port opens the stream on a connection of its own; here the
+            // replay transport's push connection stands for it, with no
+            // handshake on it.
+            if let Output::OpenPushStream { host, port, .. } = output {
+                pump.execute(neoteletext_web::port::NetOutput::Connect {
+                    connection: ConnectionId::Push,
+                    host,
+                    port,
+                    security: Security::Tls,
+                });
+                pump.transport.carry_websocket(ConnectionId::Push);
+                *stream_asked = true;
+            }
+            out.push(record(output));
         });
     }
 
@@ -102,8 +141,25 @@ impl Harness {
             for connection in [ConnectionId::Fetch, ConnectionId::Push] {
                 if let Some(input) = self.pump.poll(connection, &mut buffer) {
                     let input = copy_net(input);
-                    self.handle(Input::Net(input.as_net()));
                     progressed = true;
+                    // The stream's connection opening, or failing to, is
+                    // the port's to turn into the stream's answer.
+                    if connection == ConnectionId::Push && self.stream_asked && input.kind <= 1 {
+                        self.stream_asked = false;
+                        let answer = self.stream_answer.clone();
+                        match (input.peer, &answer) {
+                            (Some(peer), Some((status, subprotocol))) => {
+                                self.handle(Input::PushStream(neoteletext_web::agent::PushStream::Answered {
+                                    peer,
+                                    status: *status,
+                                    subprotocol: subprotocol.as_deref(),
+                                }));
+                            }
+                            _ => self.handle(Input::PushStream(neoteletext_web::agent::PushStream::Unavailable)),
+                        }
+                        continue;
+                    }
+                    self.handle(Input::Net(input.as_net()));
                 }
             }
             if !progressed {

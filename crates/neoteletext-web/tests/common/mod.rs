@@ -133,6 +133,14 @@ impl Replay {
         }
     }
 
+    /// `connection` carries a WebSocket's bytes from its first: it was
+    /// opened as a stream (REQ-6984), so no HTTP/1.1 handshake comes on it.
+    pub fn carry_websocket(&mut self, connection: ConnectionId) {
+        if let Some(conn) = self.connections.get_mut(&connection) {
+            conn.upgraded = true;
+        }
+    }
+
     /// The server drops `connection`.
     pub fn drop_connection(&mut self, connection: ConnectionId) {
         if let Some(conn) = self.connections.get_mut(&connection) {

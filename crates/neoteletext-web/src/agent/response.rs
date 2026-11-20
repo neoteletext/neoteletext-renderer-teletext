@@ -95,6 +95,11 @@ impl<R: RandomSource> UserAgent<'_, R> {
             };
             match parsed {
                 Ok(descriptor) => {
+                    // REQ-6983: reported for the port to act on, before
+                    // the service is said to be open.
+                    if let Some(named) = head.alt_svc {
+                        event(sink, Event::AlternativeService(named));
+                    }
                     self.open_descriptor(now, descriptor, sink);
                     if channel && self.push.url.is_some() {
                         // REQ-WEB-018 (DEC-1467): a live channel's
