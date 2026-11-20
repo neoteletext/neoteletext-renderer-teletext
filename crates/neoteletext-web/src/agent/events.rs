@@ -108,10 +108,12 @@ pub enum Input<'a> {
     /// [`Event::RoundTrip`] (REQ-RCH-016): on while keys go to the channel,
     /// off otherwise.
     MeasureRoundTrip(bool),
-    /// Whether the agent's next push connections are opened as streams the
-    /// port presents (REQ-6984): off in a new agent. On, a secure push
-    /// address is asked for with [`Output::OpenPushStream`] in place of
-    /// [`Output::Connect`], and the port answers with
+    /// Whether the port can present the push connection as an opened
+    /// stream (REQ-6984): off in a new agent. On, the push connection is
+    /// asked for with [`Output::OpenPushStream`] in place of
+    /// [`Output::Connect`] where its address is secure and the answer that
+    /// brought the open service's descriptor named HTTP/3 on that address's
+    /// own port, for as long as it said (REQ-6983); the port answers with
     /// [`Input::PushStream`].
     PushOverStream(bool),
     /// The port's answer to [`Output::OpenPushStream`] (REQ-6984).
@@ -311,7 +313,8 @@ pub enum Event<'a> {
     },
     /// The answer that brought the descriptor or a channel's settings
     /// carried an `Alt-Svc` field, and this is what it named (REQ-6983);
-    /// given before [`Event::ServiceReady`]. The agent acts on none of it.
+    /// given before [`Event::ServiceReady`]. The agent keeps it for one
+    /// thing: whether a push stream may be asked for (REQ-6984).
     AlternativeService(AltSvc),
     /// The descriptor was fetched but is not valid (REQ-WEB-002).
     DescriptorRejected(DescriptorError),

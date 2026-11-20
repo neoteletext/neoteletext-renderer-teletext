@@ -16,6 +16,10 @@ fn accepted() -> (u16, Option<Vec<u8>>) {
     (200, Some(PUSH_SUBPROTOCOL.as_bytes().to_vec()))
 }
 
+/// The field with which the settings' answer names HTTP/3 on the channel's
+/// own port.
+const NAMED: &str = "Alt-Svc: h3=\":443\"";
+
 /// A harness whose live channel at `https://site.example/live/` answers its
 /// settings with `headers`, with streams asked for or not, answered with
 /// `answer`.
@@ -58,7 +62,8 @@ fn a_settings_answers_alt_svc_is_reported_before_the_channel_opens() {
     assert_eq!(named, [&"AlternativeService(Http3 { port: 443, max_age_seconds: 3600 })"], "the first field, once");
     let at = |prefix: &str| events.iter().position(|event| event.starts_with(prefix)).unwrap();
     assert!(at("AlternativeService") < at("ServiceReady"), "{events:?}");
-    // The agent acts on none of it: the push connection is the HTTP/1.1 one.
+    // The port has not said it can present a stream: the push connection
+    // is the HTTP/1.1 one.
     assert!(asked(&records).is_empty() && upgrades(&mut harness) == 1, "{records:?}");
 }
 
@@ -83,7 +88,7 @@ fn no_alt_svc_reports_nothing_and_a_malformed_one_names_nothing() {
 /// as a masked frame, and pages arrive on it.
 #[test]
 fn a_stream_is_asked_for_and_an_accepted_answer_opens_the_push_connection() {
-    let mut harness = secure_live(&[], true, Some(accepted()));
+    let mut harness = secure_live(&[NAMED], true, Some(accepted()));
     let records = harness.open_channel("https://site.example/live/");
     let user_agent =
         String::from_utf8_lossy(neoteletext_web::user_agent::UserAgentString::of(None).as_bytes()).to_string();
@@ -112,7 +117,7 @@ fn a_stream_is_asked_for_and_an_accepted_answer_opens_the_push_connection() {
 /// the retry asks for a stream again.
 #[test]
 fn the_heartbeat_and_the_retry_run_on_a_stream_as_over_http_1() {
-    let mut harness = secure_live(&[], true, Some(accepted()));
+    let mut harness = secure_live(&[NAMED], true, Some(accepted()));
     harness.open_channel("https://site.example/live/");
     let before = stream_frames(&mut harness).len();
     harness.advance(PUSH_PING_AFTER_US);
@@ -135,7 +140,7 @@ fn the_heartbeat_and_the_retry_run_on_a_stream_as_over_http_1() {
 /// reached is held to the rule of a TCP peer.
 #[test]
 fn a_stream_to_a_local_peer_is_refused() {
-    let mut harness = secure_live(&[], true, Some(accepted()));
+    let mut harness = secure_live(&[NAMED], true, Some(accepted()));
     harness.open_channel("https://site.example/live/");
     // The settings and the first stream came from a public address; the
     // next stream's connection reaches a private one.
@@ -156,7 +161,7 @@ fn a_stream_to_a_local_peer_is_refused() {
 #[test]
 fn other_answers_stop_or_retry_as_an_http_1_handshake_does() {
     let outcome = |answer: (u16, Option<&[u8]>)| {
-        let mut harness = secure_live(&[], true, Some((answer.0, answer.1.map(<[u8]>::to_vec))));
+        let mut harness = secure_live(&[NAMED], true, Some((answer.0, answer.1.map(<[u8]>::to_vec))));
         let records = harness.open_channel("https://site.example/live/");
         assert!(!has_event(&records, "PushConnected"), "{answer:?}: {records:?}");
         assert!(!harness.replay().is_connected(ConnectionId::Push), "{answer:?}: the stream is closed");
@@ -179,7 +184,7 @@ fn other_answers_stop_or_retry_as_an_http_1_handshake_does() {
 /// stream is asked for again until the port says so.
 #[test]
 fn an_unavailable_stream_falls_back_to_http_1_at_once() {
-    let mut harness = secure_live(&[], true, None);
+    let mut harness = secure_live(&[NAMED], true, None);
     harness.replay().reply(SECURE, Reply::WebSocket(Vec::new()));
     harness.replay().reply(SECURE, Reply::WebSocket(Vec::new()));
     let records = harness.open_channel("https://site.example/live/");
@@ -234,5 +239,56 @@ fn an_answer_to_no_request_is_ignored() {
     let records = harness.take();
     assert!(events(&records).is_empty(), "{records:?}");
     assert!(harness.replay().is_connected(ConnectionId::Push), "the HTTP/1.1 connection stands");
+    assert_eq!(upgrades(&mut harness), 1);
+}
+
+/// REQ-6984 item 2, DEC-6979 item 3: a stream is asked for only when the
+/// server named HTTP/3 on the push address's own port with its settings.
+/// With no field, another port, another host, `clear` or a malformed
+/// field, the push connection is the HTTP/1.1 one, though the port can
+/// present a stream.
+#[test]
+fn a_stream_is_asked_for_only_where_the_server_named_http_3_on_its_own_port() {
+    for headers in [
+        &[][..],
+        &["Alt-Svc: h3=\":8443\""],
+        &["Alt-Svc: h3=\"other.example:443\""],
+        &["Alt-Svc: clear"],
+        &["Alt-Svc: h2=\":443\""],
+        &["Alt-Svc: h3=:443"],
+        &["Alt-Svc: h3=\":443\"; ma=0"],
+    ] {
+        let mut harness = secure_live(headers, true, Some(accepted()));
+        harness.replay().reply(SECURE, Reply::WebSocket(Vec::new()));
+        let records = harness.open_channel("https://site.example/live/");
+        assert!(asked(&records).is_empty(), "{headers:?}: {records:?}");
+        assert!(has_event(&records, "PushConnected"), "{headers:?}: {records:?}");
+        assert_eq!(upgrades(&mut harness), 1, "{headers:?}");
+    }
+}
+
+/// REQ-6983, REQ-6984 item 2: what the server named is fresh for as long
+/// as it said (RFC 7838 section 3.1); a reconnection after that is over
+/// HTTP/1.1.
+#[test]
+fn a_named_http_3_is_used_only_while_it_is_fresh() {
+    let mut harness = secure_live(&["Alt-Svc: h3=\":443\"; ma=30"], true, Some(accepted()));
+    harness.replay().reply(SECURE, Reply::WebSocket(Vec::new()));
+    let records = harness.open_channel("https://site.example/live/");
+    assert_eq!(asked(&records).len(), 1, "{records:?}");
+    // Lost within the thirty seconds: a stream again.
+    harness.replay().drop_connection(ConnectionId::Push);
+    harness.settle();
+    harness.advance(2 * SECOND);
+    assert_eq!(asked(&harness.take()).len(), 1);
+    // Lost after them: the HTTP/1.1 handshake.
+    harness.advance(30 * SECOND);
+    harness.replay().inject(ConnectionId::Push, &server_frame(0xA, b""));
+    harness.replay().drop_connection(ConnectionId::Push);
+    harness.settle();
+    harness.take();
+    harness.advance(PUSH_RETRY_MAX_US);
+    let later = harness.take();
+    assert!(asked(&later).is_empty(), "{later:?}");
     assert_eq!(upgrades(&mut harness), 1);
 }

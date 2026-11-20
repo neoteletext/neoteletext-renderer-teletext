@@ -51,6 +51,9 @@ impl<R: RandomSource> UserAgent<'_, R> {
         self.second_try = None;
         self.live = false;
         self.connecting = false;
+        // What the last service's answer named is not the next one's
+        // (REQ-6983).
+        self.push.http3 = None;
         self.index = crate::records::index::Progress::new();
         self.forget_catalogues();
     }
@@ -153,6 +156,7 @@ impl<R: RandomSource> UserAgent<'_, R> {
             Purpose::Descriptor { channel: true } if missing => {
                 let Some(folder) = self.channel else { return true };
                 event(sink, Event::ChannelDefaults);
+                self.http3_named(now, None);
                 self.open_descriptor(now, Descriptor::channel_defaults(&folder), sink);
                 // REQ-6880 item 3: a snapshot fetches no bundle.
                 if self.config.snapshot.is_none() {

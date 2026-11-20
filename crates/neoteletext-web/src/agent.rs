@@ -276,6 +276,11 @@ struct PushConnection {
     /// The connection being opened is such a stream: the port's answer is
     /// awaited, not a TCP connection's.
     opening_stream: bool,
+    /// The port on which the answer that brought the open service's
+    /// descriptor named HTTP/3 on its own host, and until when that is
+    /// fresh (REQ-6983): a stream is asked for only on it, and only until
+    /// then.
+    http3: Option<(u16, Instant)>,
 }
 
 /// The web user agent, with random numbers from `R`.
@@ -407,6 +412,7 @@ impl<'m, R: RandomSource> UserAgent<'m, R> {
                 log_lines: 0,
                 over_stream: false,
                 opening_stream: false,
+                http3: None,
             },
             records: crate::records::RecordReader::new(),
             index: crate::records::index::Progress::new(),

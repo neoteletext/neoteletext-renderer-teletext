@@ -4,11 +4,12 @@
 use neoteletext_core::types::Instant;
 
 use super::{Event, Failure, Output, PushPhase, PushProblem, PushStop, PushStream, Sink, UserAgent, event};
+use crate::alt_svc::AltSvc;
 use crate::bytes::{Overflow, Writer};
 use crate::consts::{
-    CRLF, OPCODE_PING, PUSH_PING_AFTER_US, PUSH_PONG_WITHIN_US, PUSH_RETRY_FIRST_US, PUSH_RETRY_MAX_US,
-    PUSH_SUBPROTOCOL, ROUND_TRIP_EVERY_US, STATUS_CLIENT_ERROR_FIRST, STATUS_OK, STATUS_SERVER_ERROR_FIRST,
-    STATUS_SWITCHING_PROTOCOLS, STATUS_TOO_MANY_REQUESTS,
+    CRLF, MICROSECONDS_PER_SECOND, OPCODE_PING, PUSH_PING_AFTER_US, PUSH_PONG_WITHIN_US, PUSH_RETRY_FIRST_US,
+    PUSH_RETRY_MAX_US, PUSH_SUBPROTOCOL, ROUND_TRIP_EVERY_US, STATUS_CLIENT_ERROR_FIRST, STATUS_OK,
+    STATUS_SERVER_ERROR_FIRST, STATUS_SWITCHING_PROTOCOLS, STATUS_TOO_MANY_REQUESTS,
 };
 use crate::http::{self, ResponseHead};
 use crate::port::{ConnectionId, RandomSource, Security};
@@ -47,9 +48,12 @@ impl<R: RandomSource> UserAgent<'_, R> {
             PushPhase::Connecting { deadline: Instant(now.0.saturating_add(self.config.connect_timeout_us)) };
         self.push.healthy = false;
         self.forget_push_writes();
-        // REQ-6984 item 2: HTTP/3 has no plain form, so only a secure
-        // address is ever a stream.
-        self.push.opening_stream = self.push.over_stream && url.is_secure();
+        // REQ-6984 item 2: a stream only when the port has said it can
+        // present one, the server named HTTP/3 on this very port with its
+        // settings (DEC-6979 item 3) and that is still fresh; and never for
+        // an address that is not secure, HTTP/3 having no plain form.
+        let named = self.push.http3.is_some_and(|(port, until)| port == url.port() && now < until);
+        self.push.opening_stream = self.push.over_stream && url.is_secure() && named;
         if self.push.opening_stream {
             sink(Output::OpenPushStream {
                 host: url.host_text(),
@@ -65,10 +69,25 @@ impl<R: RandomSource> UserAgent<'_, R> {
         sink(Output::Connect { connection: ConnectionId::Push, host: url.host_text(), port: url.port(), security });
     }
 
-    /// The port says whether push connections are opened as streams it
-    /// presents (REQ-6984 item 1); the next connection is opened so.
+    /// The port says whether push connections may be opened as streams it
+    /// presents (REQ-6984 item 1); the next connection is opened so, where
+    /// the server named HTTP/3.
     pub(super) const fn push_over_stream(&mut self, on: bool) {
         self.push.over_stream = on;
+    }
+
+    /// What the answer that brought the open service's descriptor named
+    /// in `Alt-Svc`, if it had the field (REQ-6983): HTTP/3 on a port of
+    /// its own host is remembered for as long as the answer said, and
+    /// anything else forgets it.
+    pub(super) fn http3_named(&mut self, now: Instant, named: Option<AltSvc>) {
+        self.push.http3 = match named {
+            Some(AltSvc::Http3 { port, max_age_seconds }) => {
+                let fresh_us = u64::from(max_age_seconds).saturating_mul(MICROSECONDS_PER_SECOND);
+                Some((port, Instant(now.0.saturating_add(fresh_us))))
+            }
+            Some(AltSvc::Clear | AltSvc::None) | None => None,
+        };
     }
 
     /// The port's answer to [`Output::OpenPushStream`] (REQ-6984 items 3

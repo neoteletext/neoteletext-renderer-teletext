@@ -100,6 +100,7 @@ impl<R: RandomSource> UserAgent<'_, R> {
                     if let Some(named) = head.alt_svc {
                         event(sink, Event::AlternativeService(named));
                     }
+                    self.http3_named(now, head.alt_svc);
                     self.open_descriptor(now, descriptor, sink);
                     if channel && self.push.url.is_some() {
                         // REQ-WEB-018 (DEC-1467): a live channel's
