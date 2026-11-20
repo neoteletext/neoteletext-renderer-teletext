@@ -47,12 +47,16 @@ use quinn_proto::{
 /// under a second; five seconds is a path that does not.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long the connection lasts with no packet from the peer (RFC 9000
-/// section 10.1).
-pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-/// How often a quiet connection sends a packet that asks for an answer:
-/// under a third of [`IDLE_TIMEOUT`], so two may be lost before the
-/// connection is, and a dead path is found within the timeout.
-pub const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
+/// section 10.1). It is also how long a server that restarted, or went
+/// without a word, goes unnoticed: a new server process cannot reset a
+/// connection it never knew, where over TCP it would refuse the next
+/// segment at once. Fifteen seconds keeps that short and still rides out
+/// a network's brief gap.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How often a quiet connection sends a packet that asks for an answer: a
+/// third of [`IDLE_TIMEOUT`], so two may be lost before the connection
+/// is, and a dead path is found within the timeout.
+pub const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(5);
 const _: () = assert!(KEEP_ALIVE_INTERVAL.as_millis() * 3 <= IDLE_TIMEOUT.as_millis());
 /// The unidirectional streams the server may have open: its control stream
 /// and its two QPACK streams (RFC 9114 section 6.2), with room for streams
