@@ -275,7 +275,7 @@ fn fitted_cutoff(signal: &[f64], note: f64, q: f64) -> f64 {
             fails, BRASS 1 resting 2.92 octaves above its note for the recordings' 1.39 to 2.00"]
 fn brass_1_rests_where_a_real_instruments_does() {
     // Twelve keys of one real synth80's BRASS 1, each held 12 s
-    // (`~/devel/teletext-reference/synthesizers/synth80/recordings/`,
+    // (`~/devel/synthesizer-reference/synth80/recordings/`,
     // measured by `validation/table.py`). The low-pass filter's cutoff
     // from 9.5 s on, in octaves above the note, on the keys 39, 42, 57,
     // 60, 63, 65, 69, 70, 76, 79, 80 and 88:

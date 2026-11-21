@@ -145,7 +145,7 @@
 //!   of 127 is taken as the most the detector can pass, in a straight
 //!   line below (own choice), and a pressure of 127 as the firm pressure
 //!   the after-touch is trimmed with
-//!   (`~/devel/teletext-reference/synthesizers/synth80/validation/`).
+//!   (`~/devel/synthesizer-reference/synth80/validation/`).
 //! - **The resonance between its ends** follows the same recordings and
 //!   not a document ([`law::damping`]). What the drawings do say is that
 //!   the chip has the mean of a filter's own lever and the overall

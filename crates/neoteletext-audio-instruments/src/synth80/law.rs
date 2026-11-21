@@ -250,7 +250,7 @@ pub const Q_TOP: u64 = 5 << 28;
 /// which no document read draws, made by twelve recordings of a real
 /// instrument's BRASS 1, whose low-pass resonance row stands at 5.19 V:
 /// their filters' peaks fit a Q of 1.8 to 3.3, 2.7 in the middle
-/// (`~/devel/teletext-reference/synthesizers/cs-80/validation/table.py`).
+/// (`~/devel/synthesizer-reference/cs-80/validation/table.py`).
 /// That fit is not met where the overall lever rests: the owner's manual
 /// has its "Nominal setting ... always with the lever up for minimum
 /// additional resonance" (page 38, item 8, and the diagram on page 31),

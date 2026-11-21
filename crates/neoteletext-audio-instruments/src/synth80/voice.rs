@@ -209,7 +209,7 @@ const STROKE_HARDEST: (i32, i32) = (79, 85);
 /// stands at the top: a stroke's voltage drains away in 3.3 s
 /// ([`TOUCH_HOLD`]) and its level with it, and the recordings'
 /// fundamentals fall 3.0 to 5.3 dB from 1 s to 10 s after the key, 4.0 dB
-/// in the mean (`~/devel/teletext-reference/synthesizers/cs-80/validation/`,
+/// in the mean (`~/devel/synthesizer-reference/cs-80/validation/`,
 /// `h1.py`). By this law, the hardest stroke taken as 7.9 V and the
 /// overall RESONANCE lever at its foot, the same notes fall 5.3 to 5.6 dB
 /// here, 5.4 dB in the mean, of which 2.3 dB are the amplifier's envelope
