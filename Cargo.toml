@@ -60,9 +60,9 @@ embedded-io = { version = "0.7.1", default-features = false }
 # the application crates' picture drawing. Pinned at their `parity-2`
 # commits through `file://` sources until those are pushed, then at the
 # same commits on GitHub (TODO-6786).
-regis = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "72ae60b9af9a2e20d811ea2bdf651c3c272fc626" }
-regis-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "72ae60b9af9a2e20d811ea2bdf651c3c272fc626" }
-regis-minify = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "72ae60b9af9a2e20d811ea2bdf651c3c272fc626" }
+regis = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "5cab7d74219f3d6def0d04a929565dcb91356c8b" }
+regis-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "5cab7d74219f3d6def0d04a929565dcb91356c8b" }
+regis-minify = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-regis", rev = "5cab7d74219f3d6def0d04a929565dcb91356c8b" }
 naplps = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "60e8816088bb9e1eec21caab7dff23bb6945bbf9" }
 naplps-fonts = { git = "file:///Users/andrewstuart/devel/neoteletext-renderer-naplps", rev = "60e8816088bb9e1eec21caab7dff23bb6945bbf9" }
 

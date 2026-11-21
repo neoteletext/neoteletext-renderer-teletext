@@ -1336,17 +1336,17 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "regis"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=72ae60b9af9a2e20d811ea2bdf651c3c272fc626#72ae60b9af9a2e20d811ea2bdf651c3c272fc626"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=5cab7d74219f3d6def0d04a929565dcb91356c8b#5cab7d74219f3d6def0d04a929565dcb91356c8b"
 
 [[package]]
 name = "regis-fonts"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=72ae60b9af9a2e20d811ea2bdf651c3c272fc626#72ae60b9af9a2e20d811ea2bdf651c3c272fc626"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=5cab7d74219f3d6def0d04a929565dcb91356c8b#5cab7d74219f3d6def0d04a929565dcb91356c8b"
 
 [[package]]
 name = "regis-minify"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=72ae60b9af9a2e20d811ea2bdf651c3c272fc626#72ae60b9af9a2e20d811ea2bdf651c3c272fc626"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=5cab7d74219f3d6def0d04a929565dcb91356c8b#5cab7d74219f3d6def0d04a929565dcb91356c8b"
 dependencies = [
  "regis",
 ]
