@@ -11,7 +11,7 @@ use crate::event::{Device, Event, Item, KeyCode, needs};
 
 impl<const KEPT: usize> SessionOf<KEPT> {
     /// `item` as it goes under the capabilities agreed, or `None` when it
-    /// does not go. Under protocol version 10 a viewer's input goes only
+    /// does not go. Since protocol version 10 a viewer's input goes only
     /// inside a `RULE_EVENT` (RULE-46): a receiver encodes what this gives
     /// as that event's body, and [`SessionOf::send`] takes the
     /// `RULE_EVENT`.

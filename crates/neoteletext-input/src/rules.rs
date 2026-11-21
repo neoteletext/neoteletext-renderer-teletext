@@ -4,7 +4,7 @@
 //! extension events of the input stream ([`crate::event::RULE_EVENT`],
 //! [`crate::event::PAGE_STATE`], [`crate::event::RULES_FAULT`]).
 //!
-//! Under push protocol 10 a `RULE_EVENT` is the only way a viewer's input
+//! Since push protocol 10 a `RULE_EVENT` is the only way a viewer's input
 //! reaches a channel (REQ-6523): KEY, MOUSE, WHEEL, PASTE, COMPOSE, TOUCH,
 //! `FOCUS_IN`, `FOCUS_OUT`, HOVER, PICK, `DRAWING_HOVER` and raw text are
 //! carried inside one, exactly as push protocol 8 encoded them, and are a

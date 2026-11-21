@@ -169,13 +169,14 @@ fn a_rule_event_out_of_range_is_refused() {
     assert_eq!(read(&shorter), Err(InputError::BadValue("rule event")));
 }
 
-/// RULE-46, RULE-49 (REQ-6528): under protocol version 10 a viewer's input
+/// RULE-46, RULE-49 (REQ-6528): from protocol version 10 on (now 11,
+/// DEC-7031 item 7) a viewer's input
 /// at the top level of the stream is a protocol fault; inside a
 /// `RULE_EVENT` it is read; the session's own events stay at the top
 /// level.
 #[test]
 fn a_bare_input_event_is_a_protocol_fault() {
-    assert_eq!(crate::VERSION, 10);
+    assert_eq!(crate::VERSION, 11);
     let key = bytes(&key_a());
     for bare in [key.clone(), bytes(&press()), bytes(&pick()), b"text".to_vec(), bytes(&Item::Event(Event::FocusIn))] {
         assert_eq!(read_message(&bare, &mut |_| {}), Err(InputError::Bare), "{bare:?}");

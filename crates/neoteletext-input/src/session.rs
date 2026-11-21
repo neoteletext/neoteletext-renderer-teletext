@@ -75,7 +75,7 @@ pub enum SendError {
     /// ([`SessionOf::resend`]), so the stream keeps its order.
     ResendFirst,
     /// The item could not be encoded; or, with [`InputError::Bare`], it is
-    /// a viewer's input outside a `RULE_EVENT` (RULE-46), which under
+    /// a viewer's input outside a `RULE_EVENT` (RULE-46), which since
     /// protocol version 10 a receiver never writes at the top level of the
     /// stream.
     Input(InputError),

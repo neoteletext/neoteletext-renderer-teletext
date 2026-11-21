@@ -9,10 +9,13 @@ use crate::{control, wire};
 /// table in its second form: record types 21 to 33, the events
 /// `RULE_EVENT`, `PAGE_STATE` and `RULES_FAULT`, the OBJECT record's tag 9,
 /// the Cue Point event in a block, and the rule that a viewer's input
-/// travels only inside a `RULE_EVENT`. Every other version is refused both
+/// travels only inside a `RULE_EVENT`. Version 11 is version 10 with
+/// painting as a show (DEC-7031 item 7): the rule table's trigger 22,
+/// `painted`, which a receiver of version 10 would refuse a whole table
+/// for, and record type 34, PAINT. Every other version is refused both
 /// ways; version 9, the first form's, was never deployed and is not kept
 /// (DEC-6522, DEC-6587, RULE-49).
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 /// The most bytes in one binary message (DOC-1918, REQ-INT-101): room
 /// for a SELECT with the longest page parameters (DEC-1715).
 pub const MAX_MESSAGE: usize = 8192;
