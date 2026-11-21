@@ -4,10 +4,11 @@
 //! one at a time.
 //!
 //! - **An event** ([`Evaluator::handle`]: an input event, a record the
-//!   server sent that the evaluator carries out, a cue heard or a state
-//!   query) is handled at once, in arrival order, while the budgets of the
-//!   present tick allow; otherwise it waits, with every event after it, for
-//!   the next tick step (RULE-5, DEC-6635 items 1 and 4).
+//!   server sent that the evaluator carries out, a cue heard, a painting
+//!   finished (DEC-7031 item 4) or a state query) is handled at once, in
+//!   arrival order, while the budgets of the present tick allow; otherwise
+//!   it waits, with every event after it, for the next tick step (RULE-5,
+//!   DEC-6635 items 1 and 4).
 //! - **The tick step** ([`Evaluator::tick`]) handles what time drives: the
 //!   `open` rules at page tick 0, the timers, the sequences, the `becomes`
 //!   rules and the cycling of frames (DEC-6635 item 2).
@@ -267,6 +268,13 @@ pub enum Event<'a> {
         /// The cue's number.
         number: u8,
     },
+    /// The painting of the page's whole picture ([`Target::PAGE`]) or of
+    /// one ReGIS numbered drawing ([`Target::object`]) finished (DEC-7031
+    /// item 4, REQ-7026). The receiver gives it; no command causes it.
+    Painted {
+        /// What was painted.
+        target: Target,
+    },
     /// A state query (RULE-47), answered at once through
     /// [`World::page_state`].
     Query(u32),
@@ -278,6 +286,7 @@ enum Queued {
     Input(InputEvent),
     Command { kind: u8, body: [u8; command::MAX_BODY_BYTES], length: u8 },
     Cue { channel: u8, number: u8 },
+    Painted(Target),
     Query(u32),
 }
 
@@ -315,6 +324,8 @@ pub struct Counters {
     pub starts_skipped: u32,
     /// Cues handled (RULE-109).
     pub cues: u32,
+    /// Paintings finished that were handled (DEC-7031 item 4).
+    pub painted: u32,
     /// Reports made.
     pub reports: u32,
 }
@@ -603,6 +614,7 @@ impl Evaluator {
                 Queued::Command { kind, body: held, length }
             }
             Event::Cue { channel, number } => Queued::Cue { channel, number },
+            Event::Painted { target } => Queued::Painted(target),
             Event::Query(identifier) => Queued::Query(identifier),
         };
         if self.stepped && self.queue_length == 0 && self.try_handle(&queued, world, true) {
@@ -656,6 +668,7 @@ impl Evaluator {
         match *queued {
             Queued::Input(event) => self.decide_input(&event, &*world, &mut keep),
             Queued::Cue { channel, number } => self.decide_cue(channel, number, &*world, &mut keep),
+            Queued::Painted(target) => self.decide_painted(target, &*world, &mut keep),
             Queued::Command { kind, body, length } => {
                 let body = body.get(..usize::from(length)).unwrap_or(&[]);
                 commands = 1;
@@ -699,6 +712,7 @@ impl Evaluator {
                 world.page_state(&state);
             }
             Queued::Cue { .. } => self.counters.cues = self.counters.cues.saturating_add(1),
+            Queued::Painted(_) => self.counters.painted = self.counters.painted.saturating_add(1),
             Queued::Input(_) => {}
         }
         for firing in firings.iter() {
@@ -1057,6 +1071,31 @@ impl Evaluator {
             let Some(occurred) = rule.triggers.iter().find_map(occurs) else { continue };
             for place in 0..rule.row_count() {
                 let fired = self.fired_of(index, place, occurred, None);
+                if self.holds(index, &fired, world) {
+                    keep(Firing { group: rule.group, fired });
+                }
+            }
+        }
+    }
+
+    /// The decide phase of a painting's end (DEC-7031 item 4): each rule,
+    /// in rule order, and each of its rows, in row order, with a `painted`
+    /// trigger that names `target` for that row, whose condition holds. A
+    /// target written as a constant names it for every row of its rule; one
+    /// given by the row's `p`, for the rows whose `p` gives its number. The
+    /// firing's target is the event's.
+    fn decide_painted(&self, target: Target, world: &dyn World, keep: &mut dyn FnMut(Firing)) {
+        for index in 0..self.table.rules.len() {
+            let Some(rule) = self.table.rules.get(index) else { continue };
+            for place in 0..rule.row_count() {
+                let row = self.table.row_of(rule, place);
+                let names = |trigger: &Trigger| {
+                    trigger.painted().and_then(|named| named.resolve(&row)).is_some_and(|named| named == target)
+                };
+                if !rule.triggers.iter().any(names) {
+                    continue;
+                }
+                let fired = self.fired_of(index, place, (0, target, 0), None);
                 if self.holds(index, &fired, world) {
                     keep(Firing { group: rule.group, fired });
                 }

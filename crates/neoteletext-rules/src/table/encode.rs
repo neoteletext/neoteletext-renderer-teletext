@@ -91,9 +91,10 @@ fn write_trigger(trigger: &Trigger, writer: &mut Writer<'_>) -> Result<(), Fault
             write_trigger_target(*target, writer)?;
             writer.u8(*button)
         }
-        Trigger::Enter { target } | Trigger::Leave { target } | Trigger::Wheel { target } => {
-            write_trigger_target(*target, writer)
-        }
+        Trigger::Enter { target }
+        | Trigger::Leave { target }
+        | Trigger::Wheel { target }
+        | Trigger::Painted { target } => write_trigger_target(*target, writer),
         Trigger::Move { target, held } => {
             write_trigger_target(*target, writer)?;
             writer.u8(if *held { MOVE_HELD } else { 0 })

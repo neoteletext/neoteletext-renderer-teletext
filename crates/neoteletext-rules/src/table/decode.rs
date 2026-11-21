@@ -190,6 +190,7 @@ fn read_trigger(reader: &mut Reader<'_>) -> Result<Trigger, Fault> {
         trigger_code::EVERY => Trigger::Every { timer: reader.u8()?, ticks: reader.u32()? },
         trigger_code::AFTER => Trigger::After { timer: reader.u8()?, ticks: reader.u32()? },
         trigger_code::CUE => Trigger::Cue { channel: reader.u8()?, number: reader.u8()? },
+        trigger_code::PAINTED => Trigger::Painted { target: read_trigger_target(reader)? },
         _ => return Err(Fault::Range("trigger kind")),
     })
 }

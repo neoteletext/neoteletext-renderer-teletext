@@ -122,6 +122,39 @@ fn check_trigger_target(target: TriggerTarget, table: &Table, rule: &Rule) -> Re
     Ok(())
 }
 
+/// Whether a `painted` trigger may name `target` (DEC-7031 item 4): the
+/// page's whole picture, or one object, a ReGIS numbered drawing. "Any
+/// object", a control and a rectangle are refused.
+fn is_paintable(target: Target) -> bool {
+    match target.kind {
+        TargetKind::Page => target.number == 0,
+        TargetKind::Object => target.number >= 1,
+        TargetKind::Control | TargetKind::Rect => false,
+    }
+}
+
+/// Checks a `painted` trigger's target (DEC-7031 item 4): written in the
+/// table, or an object whose number is a constant that with every row's
+/// `p` is 1 to 65,535.
+fn check_painted_target(target: TriggerTarget, table: &Table, rule: &Rule) -> Result<(), Fault> {
+    if !target.from_row {
+        let named = Target { kind: target.kind, number: target.number };
+        return if is_paintable(named) { Ok(()) } else { Err(Fault::Range("painted target")) };
+    }
+    if rule.rows.is_none() {
+        return Err(Fault::Shape("row parameter in a rule without rows"));
+    }
+    if target.kind != TargetKind::Object {
+        return Err(Fault::Range("painted target"));
+    }
+    for row in rows_of(table, rule) {
+        if !target.resolve(&row).is_some_and(is_paintable) {
+            return Err(Fault::Range("row's parameter as a target's number"));
+        }
+    }
+    Ok(())
+}
+
 /// Whether `code` can be the code of a key of `kind`: a Unicode scalar
 /// value for a character or a physical key. A named key's code is the
 /// caller's to check (RULE-56).
@@ -162,6 +195,7 @@ fn check_trigger(trigger: &Trigger, table: &Table, rule: &Rule) -> Result<(), Fa
         check_trigger_target(target, table, rule)?;
     }
     match *trigger {
+        Trigger::Painted { target } => check_painted_target(target, table, rule),
         Trigger::Press { button, .. } | Trigger::Release { button, .. } => check_button(button),
         Trigger::Every { timer, ticks } | Trigger::After { timer, ticks } => {
             if usize::from(timer) >= TIMERS && timer != PAGE_TIMER {
