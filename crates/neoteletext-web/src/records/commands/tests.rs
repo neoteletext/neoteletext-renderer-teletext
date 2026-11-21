@@ -110,6 +110,7 @@ fn play() -> Control {
         flags: neoteletext_audio::record::FLAG_LOOP,
         duck: 0,
         page: Some(PAGE),
+        music: None,
     }
 }
 

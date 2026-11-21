@@ -256,6 +256,14 @@ impl Typing {
         self.drawn.filter(|_| self.on())
     }
 
+    /// The input protocol version the push connection speaks (DEC-6953
+    /// item 2), told before the connection is said to be open.
+    pub(super) fn speak(&mut self, version: u32) {
+        // A version not spoken changes nothing: the channel's WELCOME
+        // then names another and is refused.
+        self.input.set_version(version);
+    }
+
     /// The push connection opened or closed: a new session (REQ-INT-106).
     pub(super) fn connection(&mut self, source: &mut dyn Source, open: bool, clock_ms: u32) {
         self.open = open;

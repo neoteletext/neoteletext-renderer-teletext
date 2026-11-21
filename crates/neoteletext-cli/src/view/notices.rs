@@ -74,6 +74,9 @@ impl ViewState {
                     self.adopt_initial(address);
                 }
             }
+            // The channel named the connection's version: HELLO says it
+            // (DEC-6953 item 2).
+            Notice::PushVersion(version) => self.typing.speak(version),
             Notice::Input(open) => {
                 let clock_ms = now_ms(self.start);
                 self.typing.connection(source, open, clock_ms);

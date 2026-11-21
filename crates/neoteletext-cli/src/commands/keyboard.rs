@@ -21,7 +21,7 @@ use neoteletext_qrkeyboard::config::{Layout, ScreenConfig};
 use neoteletext_qrkeyboard::net::{self, Incoming, WebSocket};
 use neoteletext_qrkeyboard::qr::{Correction, Matrix};
 use neoteletext_qrkeyboard::screen::{Event as ScreenEvent, Screen};
-use neoteletext_web::consts::PUSH_SUBPROTOCOL;
+use neoteletext_web::consts::PUSH_SUBPROTOCOL_OLDEST;
 use neoteletext_web::records::{ChannelRecord, Read, RecordReader};
 use std::time::{Duration, Instant};
 
@@ -86,6 +86,8 @@ impl Channel {
             records: RecordReader::new(),
             rules: PageRules::new(),
         };
+        // The connection asked for the oldest version's subprotocol.
+        channel.session.set_version(neoteletext_input::OLDEST_VERSION);
         let mut out = [0_u8; MAX_MESSAGE];
         let now_ms = channel.now_ms();
         let length =
@@ -307,7 +309,10 @@ pub fn keyboard(options: &KeyboardOptions) -> Result<(), Failure> {
     }
     // The channel's bytes end the screen's wait as the relay's do, so one
     // wait serves both sockets (decision E.106).
-    let socket = WebSocket::connect(&url, Some(PUSH_SUBPROTOCOL), proxy.as_ref(), Some(screen.waker()))
+    // The bridge offers no capability, so it needs nothing a newer version
+    // adds, and asks for the oldest, which every channel speaks (DEC-6953
+    // item 1).
+    let socket = WebSocket::connect(&url, Some(PUSH_SUBPROTOCOL_OLDEST), proxy.as_ref(), Some(screen.waker()))
         .map_err(|error| (exit::INPUT, format!("{}: {error}", options.channel)))?;
     let mut channel = Channel::open(socket)?;
     loop {

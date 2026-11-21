@@ -637,3 +637,42 @@ fn a_session_that_keeps_nothing_never_offers_resume() {
     let resume = Some(Resumption { token: TOKEN, taken: None });
     assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Err(WelcomeError::Caps));
 }
+
+// REQ-6927 items 1 and 2, DEC-6953 items 1 to 3: the protocol is version 11;
+// a session told its connection is version 10 says 10 in HELLO, does not
+// offer bit 26 and takes a WELCOME of version 10, which never agrees it;
+// on a connection of version 11 it offers bit 26 and takes it agreed.
+#[test]
+fn a_session_speaks_its_connections_version_and_offers_bit_26_only_under_11() {
+    use crate::caps::{MAGAZINE_SOUND_CAP, SELECT_CAP};
+    assert_eq!((VERSION, crate::OLDEST_VERSION), (11, 10));
+    let offered = SELECT_CAP | MAGAZINE_SOUND_CAP;
+
+    let mut session = Session::new(offered);
+    assert_eq!(session.version(), 11);
+    assert_eq!(opening(&mut session, 0, None), [Event::Hello { version: 11, caps: offered, agent: None }]);
+    assert_eq!(session.welcome(10, SELECT_CAP, None), Err(WelcomeError::Version(10)), "not the connection's");
+    assert_eq!(session.state(), State::Refused);
+    let mut session = Session::new(offered);
+    opening(&mut session, 0, None);
+    assert_eq!(session.welcome(11, offered, None), Ok(Welcomed::New));
+    assert_eq!(session.caps() & MAGAZINE_SOUND_CAP, MAGAZINE_SOUND_CAP);
+
+    // A channel of version 10.
+    let mut session = Session::new(offered);
+    assert!(session.set_version(10));
+    assert_eq!(opening(&mut session, 0, None), [Event::Hello { version: 10, caps: SELECT_CAP, agent: None }]);
+    assert_eq!(session.welcome(10, SELECT_CAP, None), Ok(Welcomed::New));
+    assert_eq!(session.caps() & MAGAZINE_SOUND_CAP, 0);
+    // The version outlives the connection, until the next is told.
+    session.close();
+    assert_eq!(opening(&mut session, 0, None), [Event::Hello { version: 10, caps: SELECT_CAP, agent: None }]);
+    // A channel of version 10 that agreed bit 26 all the same is refused.
+    assert_eq!(session.welcome(10, offered, None), Err(WelcomeError::Caps));
+
+    // A version not spoken changes nothing.
+    let mut session = Session::new(offered);
+    assert!(!session.set_version(9));
+    assert!(!session.set_version(12));
+    assert_eq!(session.version(), 11);
+}

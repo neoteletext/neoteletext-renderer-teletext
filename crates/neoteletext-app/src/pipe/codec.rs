@@ -43,10 +43,14 @@ const LIVE_LIST_REFUSED: u8 = b'!';
 const LINKS: u8 = b'H';
 const FONT: u8 = b'#';
 const REOPEN: u8 = b'<';
+const PUSH_VERSION: u8 = b'^';
+/// The highest input protocol version a frame may name: what one byte
+/// holds, as the bytes a viewer-state proof signs carry it (VS-203 item 2).
+const MOST_PUSH_VERSION: u32 = u8::MAX as u32;
 
 /// Every kind a frame may have. A kind written by [`write`] and missing here
 /// fails `every_frame_written_has_a_listed_kind`, so none is added unlisted.
-pub(super) const KINDS: [u8; 34] = [
+pub(super) const KINDS: [u8; 35] = [
     PACKET,
     TTI,
     T42,
@@ -81,6 +85,7 @@ pub(super) const KINDS: [u8; 34] = [
     LINKS,
     FONT,
     REOPEN,
+    PUSH_VERSION,
 ];
 
 /// Kinds once used and never to be used again, so that an old peer's frame
@@ -267,6 +272,7 @@ pub fn write(out: &mut dyn Write, frame: &Frame) -> io::Result<()> {
             put(out, DENIED, &buffer)
         }
         Frame::Notice(Notice::PushStopped(why)) => put(out, PUSH_STOPPED, why.as_bytes()),
+        Frame::Notice(Notice::PushVersion(version)) => put(out, PUSH_VERSION, &version.to_be_bytes()),
         Frame::Notice(Notice::ServiceName(name)) => put(out, SERVICE_NAME, name.as_bytes()),
         Frame::Notice(Notice::Bundle(mpp)) => put(out, BUNDLE, &mpp.to_be_bytes()),
         Frame::Notice(Notice::Aliases(aliases)) => {
@@ -491,6 +497,16 @@ fn notice_frame(kind: u8, payload: &[u8]) -> io::Result<Frame> {
             Frame::Notice(Notice::Aliases(aliases))
         }
         REFRESH => Frame::Notice(Notice::Refresh(u32::from_be_bytes(payload.try_into().map_err(|_| invalid())?))),
+        PUSH_VERSION => {
+            let version = u32::from_be_bytes(payload.try_into().map_err(|_| invalid())?);
+            // Each side validates what it receives (REQ-431): a version is
+            // one byte of HELLO and of a signed proof, and never zero.
+            // Whether it is one spoken is the input session's to say.
+            if version == 0 || version > MOST_PUSH_VERSION {
+                return Err(invalid());
+            }
+            Frame::Notice(Notice::PushVersion(version))
+        }
         SUB_PAGES => Frame::Notice(Notice::SubPages(list_part(&mut cursor)?)),
         INDEX => {
             let generation = cursor.u16()?;

@@ -317,7 +317,41 @@ pub const INVALID_PACKET_REPORT_SECONDS: u64 = 20;
 /// DEC-1759 lesson 14): `neottx.` and the input protocol's
 /// version, `neoteletext_input::VERSION`. The wire vectors' test asserts
 /// that the two agree, and the server imports this one.
-pub const PUSH_SUBPROTOCOL: &str = "neottx.10";
+pub const PUSH_SUBPROTOCOL: &str = "neottx.11";
+/// The subprotocol of the oldest version still spoken,
+/// `neoteletext_input::OLDEST_VERSION` (REQ-6927 item 2, DEC-6953 item 1).
+pub const PUSH_SUBPROTOCOL_OLDEST: &str = "neottx.10";
+/// What a receiver offers in `Sec-WebSocket-Protocol` (DEC-6953 item 1):
+/// every subprotocol it speaks, the newest first. A channel answers with
+/// the newest of them it speaks, and the name it answers with is the
+/// connection's version ([`push_version`]).
+pub const PUSH_SUBPROTOCOLS: &str = "neottx.11, neottx.10";
+// A response's subprotocol is kept in room for one name.
+const _: () = assert!(PUSH_SUBPROTOCOL_OLDEST.len() == PUSH_SUBPROTOCOL.len());
+
+/// The protocol version a push subprotocol's name says (DEC-6953 item 1):
+/// `neoteletext_input::VERSION` for [`PUSH_SUBPROTOCOL`],
+/// `neoteletext_input::OLDEST_VERSION` for [`PUSH_SUBPROTOCOL_OLDEST`], and
+/// `None` for any other name, which is another server's or a version not
+/// spoken.
+#[must_use]
+pub fn push_version(name: &[u8]) -> Option<u32> {
+    if name == PUSH_SUBPROTOCOL.as_bytes() {
+        Some(neoteletext_input::VERSION)
+    } else if name == PUSH_SUBPROTOCOL_OLDEST.as_bytes() {
+        Some(neoteletext_input::OLDEST_VERSION)
+    } else {
+        None
+    }
+}
+
+/// The subprotocol a channel answers a request with, whose
+/// `Sec-WebSocket-Protocol` value is `offered` (DEC-6953 item 1): the
+/// newest it speaks of those offered, or `None` when none is.
+#[must_use]
+pub fn push_subprotocol_for(offered: &[u8]) -> Option<&'static str> {
+    [PUSH_SUBPROTOCOL, PUSH_SUBPROTOCOL_OLDEST].into_iter().find(|name| crate::ws::offers_subprotocol(offered, name))
+}
 /// The first of the close codes that say stop (DOC-1919,
 /// DEC-1759 lesson 10): the fault will be there on the next attempt, so a
 /// receiver does not try again. A code of this range nobody has defined yet

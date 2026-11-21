@@ -5,7 +5,9 @@
 //! handshake on it, and answers as the test scripted.
 
 use super::*;
-use neoteletext_web::consts::{PUSH_PING_AFTER_US, PUSH_PONG_WITHIN_US, PUSH_RETRY_MAX_US, PUSH_SUBPROTOCOL};
+use neoteletext_web::consts::{
+    PUSH_PING_AFTER_US, PUSH_PONG_WITHIN_US, PUSH_RETRY_MAX_US, PUSH_SUBPROTOCOL, PUSH_SUBPROTOCOLS,
+};
 
 /// The secure host the live channel is on, as the replay keys its replies.
 const SECURE: &str = "site.example:443";
@@ -95,7 +97,7 @@ fn a_stream_is_asked_for_and_an_accepted_answer_opens_the_push_connection() {
     assert_eq!(
         asked(&records),
         [format!(
-            "OpenPushStream {{ host: site.example, port: 443, authority: site.example, path: /live/push, subprotocol: {PUSH_SUBPROTOCOL}, user_agent: {user_agent} }}"
+            "OpenPushStream {{ host: site.example, port: 443, authority: site.example, path: /live/push, subprotocol: {PUSH_SUBPROTOCOLS}, user_agent: {user_agent} }}"
         )
         .as_str()]
     );

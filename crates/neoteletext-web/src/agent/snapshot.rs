@@ -15,7 +15,7 @@
 use neoteletext_core::packet::Packet;
 use neoteletext_core::types::Instant;
 use neoteletext_input::control::{Control, FRAGMENT_DATA, from_packet};
-use neoteletext_input::snapshot::{welcome_agrees_snapshot, write_request};
+use neoteletext_input::snapshot::{welcome_agrees_snapshot, write_request_of};
 
 use super::{
     Event, Failure, Input, Link, Output, PushPhase, PushProblem, PushStop, Sink, SnapshotEnd, SnapshotTarget, Source,
@@ -271,7 +271,7 @@ impl<R: RandomSource> UserAgent<'_, R> {
             return;
         }
         let mut request = [0_u8; REQUEST_ROOM];
-        let written = write_request(target.page.mpp(), target.sub.value(), &mut request);
+        let written = write_request_of(self.push.version, target.page.mpp(), target.sub.value(), &mut request);
         let sent = written.is_ok_and(|length| {
             let bytes = request.get(..length).unwrap_or(&[]);
             self.send_push_frame(OPCODE_BINARY, bytes, sink)

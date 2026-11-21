@@ -63,7 +63,7 @@ fn a_push_handshake_names_its_subprotocol_and_no_origin() {
     let mut writer = Writer::new(&mut buffer);
     write_handshake_headers(&mut writer, &url, &key, b"NeoTeletext/0.1 (macOS)", Some(PUSH_SUBPROTOCOL)).unwrap();
     let text = core::str::from_utf8(writer.written()).unwrap();
-    assert!(text.ends_with("Sec-WebSocket-Protocol: neottx.10\r\n"), "{text}");
+    assert!(text.ends_with("Sec-WebSocket-Protocol: neottx.11\r\n"), "{text}");
     assert!(!text.to_ascii_lowercase().contains("origin"), "{text}");
 }
 
@@ -77,11 +77,11 @@ fn a_handshake_must_name_the_subprotocol_asked_for() {
         let head = http::parse_head(text.as_bytes()).unwrap();
         (check_handshake(&head, &key, Some(PUSH_SUBPROTOCOL)), check_handshake(&head, &key, None))
     };
-    assert_eq!(head_naming("Sec-WebSocket-Protocol: neottx.10\r\n"), (Ok(()), Err(WsError::Handshake)));
+    assert_eq!(head_naming("Sec-WebSocket-Protocol: neottx.11\r\n"), (Ok(()), Err(WsError::Handshake)));
     assert_eq!(head_naming(""), (Err(WsError::Handshake), Ok(())));
     assert_eq!(head_naming("Sec-WebSocket-Protocol: neottx.6\r\n").0, Err(WsError::Handshake));
     assert_eq!(head_naming("Sec-WebSocket-Protocol: NEOTTX.7\r\n").0, Err(WsError::Handshake));
-    let long = "Sec-WebSocket-Protocol: neottx.10 and a good deal more\r\n";
+    let long = "Sec-WebSocket-Protocol: neottx.11 and a good deal more\r\n";
     assert_eq!(head_naming(long), (Err(WsError::Handshake), Err(WsError::Handshake)));
 }
 
@@ -97,12 +97,37 @@ fn accepting_head(headers: &str) -> std::string::String {
 /// matched exactly.
 #[test]
 fn a_server_reads_what_a_client_offers() {
-    assert!(offers_subprotocol(b"neottx.10", PUSH_SUBPROTOCOL));
-    assert!(offers_subprotocol(b"chat, neottx.10 ,other", PUSH_SUBPROTOCOL));
-    for refused in
-        [&b""[..], b"neottx.8", b"neottx.9", b"neottx.1", b"NEOTTX.10", b"neottx.100", b"neottx.10x", b"chat"]
-    {
+    use crate::consts::{PUSH_SUBPROTOCOL_OLDEST, PUSH_SUBPROTOCOLS, push_subprotocol_for, push_version};
+    assert!(offers_subprotocol(b"neottx.11", PUSH_SUBPROTOCOL));
+    assert!(offers_subprotocol(b"chat, neottx.11 ,other", PUSH_SUBPROTOCOL));
+    for refused in [
+        &b""[..],
+        b"neottx.8",
+        b"neottx.9",
+        b"neottx.10",
+        b"neottx.1",
+        b"NEOTTX.11",
+        b"neottx.110",
+        b"neottx.11x",
+        b"chat",
+    ] {
         assert!(!offers_subprotocol(refused, PUSH_SUBPROTOCOL), "{refused:?}");
+    }
+    // REQ-6927 item 2, DEC-6953 item 1: a receiver offers both versions,
+    // the newest first; a channel answers the newest offered that it
+    // speaks, and a receiver of version 10, which offers 10 alone, is
+    // answered 10. A channel of version 10 finds its own name in the list.
+    assert_eq!(PUSH_SUBPROTOCOLS, std::format!("{PUSH_SUBPROTOCOL}, {PUSH_SUBPROTOCOL_OLDEST}"));
+    assert_eq!(push_subprotocol_for(PUSH_SUBPROTOCOLS.as_bytes()), Some(PUSH_SUBPROTOCOL));
+    assert_eq!(push_subprotocol_for(b"neottx.10"), Some(PUSH_SUBPROTOCOL_OLDEST));
+    assert_eq!(push_subprotocol_for(b"neottx.10, neottx.11"), Some(PUSH_SUBPROTOCOL), "the newest, whatever the order");
+    assert_eq!(push_subprotocol_for(b"neottx.9, chat"), None);
+    assert!(offers_subprotocol(PUSH_SUBPROTOCOLS.as_bytes(), PUSH_SUBPROTOCOL_OLDEST));
+    assert_eq!(push_version(b"neottx.11"), Some(neoteletext_input::VERSION));
+    assert_eq!(push_version(b"neottx.10"), Some(neoteletext_input::OLDEST_VERSION));
+    assert_eq!((neoteletext_input::VERSION, neoteletext_input::OLDEST_VERSION), (11, 10));
+    for unknown in [&b"neottx.9"[..], b"neottx.12", b"neottx.11, neottx.10", b""] {
+        assert_eq!(push_version(unknown), None, "{unknown:?}");
     }
 }
 

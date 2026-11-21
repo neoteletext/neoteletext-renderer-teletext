@@ -91,7 +91,7 @@ fn a_snapshot_of_a_live_channel_sends_hello_and_select_and_nothing_more() {
         "the request, then the close answered"
     );
     // HELLO, then SELECT 100: the wire vector `input hello_snapshot`.
-    assert_eq!(request(target), [0xFF, 0x09, 0x0A, 0x80, 0x80, 0x80, 0x1E, 0xFF, 0x40, 3, b'1', b'0', b'0']);
+    assert_eq!(request(target), [0xFF, 0x09, 0x0B, 0x80, 0x80, 0x80, 0x1E, 0xFF, 0x40, 3, b'1', b'0', b'0']);
     let delivered = pages(&records);
     assert_eq!(delivered.len(), 2, "{records:?}");
     assert!(matches!(delivered[1], Rec::Page { source: Source::Push, bytes, .. } if *bytes == a_page()));

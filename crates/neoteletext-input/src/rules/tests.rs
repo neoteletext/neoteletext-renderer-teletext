@@ -175,7 +175,7 @@ fn a_rule_event_out_of_range_is_refused() {
 /// level.
 #[test]
 fn a_bare_input_event_is_a_protocol_fault() {
-    assert_eq!(crate::VERSION, 10);
+    assert_eq!(crate::OLDEST_VERSION, 10, "the oldest version spoken has the rule");
     let key = bytes(&key_a());
     for bare in [key.clone(), bytes(&press()), bytes(&pick()), b"text".to_vec(), bytes(&Item::Event(Event::FocusIn))] {
         assert_eq!(read_message(&bare, &mut |_| {}), Err(InputError::Bare), "{bare:?}");

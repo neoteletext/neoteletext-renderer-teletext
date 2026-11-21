@@ -124,6 +124,7 @@ fn command(sequence: u16, operation: u8, flags: u8, fade_ms: u16) -> Vec<u8> {
         flags,
         duck: 0,
         page: None,
+        music: None,
     }
     .record()
 }

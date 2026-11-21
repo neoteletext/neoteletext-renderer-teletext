@@ -7,7 +7,7 @@
 
 use neoteletext_audio::encode::{Command, LiveEncoder, Sound, packets};
 use neoteletext_audio::ima::decode_block;
-use neoteletext_audio::port::{SoundFormat, SoundId, Start, VoiceSink};
+use neoteletext_audio::port::{Music, SoundFormat, SoundId, Start, VoiceSink};
 use neoteletext_audio::receiver::Receiver;
 use neoteletext_audio::record::{FLAG_PROGRESSIVE, MAX_LABEL};
 use neoteletext_audio::{Codec, IMA_BLOCK_SMALL, MIN_FADE_MS};
@@ -25,6 +25,8 @@ enum Call {
     Stop(u8, u16),
     Gain(u8, u8, u16),
     Concealed(SoundId, u16, u32),
+    StreamMusic(u8, SoundId, Option<Music>),
+    Heard(u8, Music, bool),
 }
 
 #[derive(Default)]
@@ -100,6 +102,12 @@ impl VoiceSink for Recorder {
     fn position(&self, _channel: u8) -> Option<u32> {
         self.position
     }
+    fn stream_music(&mut self, channel: u8, sound: SoundId, music: Option<Music>) {
+        self.calls.push(Call::StreamMusic(channel, sound, music));
+    }
+    fn music_heard(&mut self, channel: u8, music: Music, heard: bool) {
+        self.calls.push(Call::Heard(channel, music, heard));
+    }
 }
 
 /// A DATA record holding `blocks` of `sound` from `first`, framed. Every
@@ -129,6 +137,7 @@ fn play(channel: u8, sequence: u16, sound: &Sound, page: Option<u16>) -> Command
         flags: 0,
         duck: 0,
         page,
+        music: None,
     }
 }
 
@@ -145,6 +154,7 @@ fn stop(channel: u8, sequence: u16) -> Command {
         flags: 0,
         duck: 0,
         page: None,
+        music: None,
     }
 }
 
@@ -1386,6 +1396,744 @@ fn a_live_sound_encoded_in_batches_equals_the_sound_encoded_in_one_call() {
                 let error: i64 = samples.iter().zip(&out).map(|(&a, &b)| (i64::from(a) - i64::from(b)).abs()).sum();
                 assert!(error / i64::try_from(samples.len()).unwrap() < 600, "a mean error of {error}");
             }
+        }
+    }
+}
+
+/// Music (REQ-6925, REQ-6926, REQ-6927 item 3, REQ-6938 items 2 and 4;
+/// DEC-6924 as the owner ruled on 20 November 2026): a live sound armed for
+/// the channel or for a magazine, a page's two switches, and the rule that
+/// the most specific level is heard alone.
+#[cfg(feature = "pcm16")]
+mod music {
+    use neoteletext_audio::encode::page_music;
+    use neoteletext_audio::receiver::{ArmedMusic, Sounding};
+    use neoteletext_audio::record::{Control, Operation, PageMusic, Record, TYPE_CONTROL, TYPE_PAGE_MUSIC, parse};
+    use neoteletext_audio::{BASE_PROFILE_VERSION, MOST_PAGE_MUSIC_SETTINGS, PROFILE_VERSION};
+
+    use super::*;
+
+    /// The magazine's live sound, handle 4, and the channel's, handle 5.
+    const ID: SoundId = SoundId { handle: 4, generation: 1 };
+    const CHANNEL_ID: SoundId = SoundId { handle: 5, generation: 1 };
+    const MAGAZINE_1: Music = Music::Magazine(1);
+
+    fn channel_sound() -> Sound {
+        Sound::live(5, 1, Codec::Pcm16, 8_000, 100).unwrap()
+    }
+
+    /// A play of `sound` as music of level `music`.
+    fn music_play(channel: u8, sequence: u16, sound: &Sound, music: Music) -> Command {
+        Command { music: Some(music), ..play(channel, sequence, sound, None) }
+    }
+
+    /// A receiver on a connection that agreed music, with the live sound
+    /// announced, armed for magazine 1 on channel 0, and `open` open.
+    fn armed<'a>(arena: &'a mut [u8], sink: &mut Recorder, open: Option<u16>) -> (Receiver<'a, 8, 2>, Sound) {
+        let sound = live_sound();
+        let mut receiver = Receiver::<8, 2>::new(arena);
+        receiver.set_magazine_sound(true, sink);
+        receiver.open_page(open, sink);
+        receiver.push_record(&sound.object_record().unwrap(), sink);
+        receiver.push_record(&music_play(0, 1, &sound, MAGAZINE_1).record(), sink);
+        (receiver, sound)
+    }
+
+    /// The channel's music armed too, on channel 1, its blocks coming.
+    fn arm_channel(receiver: &mut Receiver<'_, 8, 2>, sink: &mut Recorder) -> Sound {
+        let sound = channel_sound();
+        receiver.push_record(&sound.object_record().unwrap(), sink);
+        receiver.push_record(&music_play(1, 1, &sound, Music::Channel).record(), sink);
+        push(receiver, &live_blocks(&sound, 700, 2), sink);
+        sound
+    }
+
+    /// The `PAGE_MUSIC` record of sub-page `sub` of `page`.
+    fn switches(page: u16, sub: u16, magazine_music: bool, channel_music: bool) -> Vec<u8> {
+        page_music(&PageMusic { page, sub, magazine_music, channel_music })
+    }
+
+    fn start_count(calls: &[Call]) -> usize {
+        calls.iter().filter(|call| matches!(call, Call::Start(..))).count()
+    }
+
+    /// The starts, stops and reports of what is heard among `calls`, the
+    /// samples left out.
+    fn moves(calls: &[Call]) -> Vec<Call> {
+        calls
+            .iter()
+            .filter(|call| matches!(call, Call::Start(..) | Call::Stop(..) | Call::Heard(..)))
+            .map(
+                |call| {
+                    if let Call::Start(channel, start) = call { Call::Start(*channel, *start) } else { call.clone() }
+                },
+            )
+            .collect()
+    }
+
+    /// A start of `sound` as `music`, as the receiver gives it for the
+    /// tests' plays.
+    fn started(channel: u8, sound: SoundId, music: Option<Music>) -> Call {
+        Call::Start(
+            channel,
+            Start {
+                sound,
+                gain: 80,
+                fade_ms: MIN_FADE_MS,
+                looped: false,
+                duck_percent: 100,
+                after_current: false,
+                music,
+            },
+        )
+    }
+
+    // REQ-6925 items 3, 4 and 6; REQ-6926 item 6: armed by the server's
+    // play, started when a page of the magazine is open, unbroken across
+    // 101, 150 and 199, faded within the ramp on 200, and started again at
+    // the stream's present block on returning.
+    #[test]
+    fn magazine_music_plays_across_its_magazines_pages_and_fades_on_leaving() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, None);
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        assert_eq!(sink.take(), NO_CALLS, "armed, and no page of the magazine is open");
+        assert_eq!(receiver.music(0), Some(ArmedMusic { music: MAGAZINE_1, heard: false }));
+        assert_eq!(receiver.sounding(), Sounding::Nothing);
+
+        receiver.open_page(Some(0x101), &mut sink);
+        let calls = sink.take();
+        // Heard, a stream labelled before its first sample, then the start.
+        assert_eq!(calls[0], Call::Heard(0, MAGAZINE_1, true));
+        assert_eq!(calls[1], Call::Stream(ID, 8_000));
+        assert_eq!(calls[2], Call::StreamMusic(0, ID, Some(MAGAZINE_1)));
+        assert!(matches!(calls[3], Call::StreamSamples(..)), "{calls:?}");
+        assert_eq!(calls.last(), Some(&started(0, ID, Some(MAGAZINE_1))));
+        assert_eq!(receiver.music(0), Some(ArmedMusic { music: MAGAZINE_1, heard: true }));
+        assert_eq!(receiver.sounding(), Sounding::Magazine(1));
+
+        // Across the magazine's pages nothing stops, starts or is labelled
+        // again, and the blocks go on in order.
+        for (page, block) in [(0x150, 12), (0x199, 13), (0x1FF, 14)] {
+            receiver.open_page(Some(page), &mut sink);
+            push(&mut receiver, &live_blocks(&sound, block, 1), &mut sink);
+            let calls = sink.take();
+            assert!(calls.iter().all(|call| matches!(call, Call::StreamSamples(..))), "{page:X}: {calls:?}");
+        }
+        assert_eq!(live_values(&sink, &sound), [11, 12, 13, 14]);
+
+        // Another magazine: faded out over the 5 ms ramp, and told.
+        receiver.open_page(Some(0x200), &mut sink);
+        assert_eq!(sink.take(), [Call::Stop(0, MIN_FADE_MS), Call::Heard(0, MAGAZINE_1, false)]);
+        assert_eq!(receiver.music(0), Some(ArmedMusic { music: MAGAZINE_1, heard: false }));
+        // No page at all is not the magazine either.
+        receiver.open_page(None, &mut sink);
+        assert_eq!(sink.take(), NO_CALLS);
+
+        // The stream goes on meanwhile; on returning the voice starts again
+        // on the same stream, which the sink joins at what is written now
+        // (`neoteletext-audio-mix`), and no block is given twice.
+        push(&mut receiver, &live_blocks(&sound, 15, 3), &mut sink);
+        sink.take();
+        receiver.open_page(Some(0x150), &mut sink);
+        assert_eq!(sink.take(), [Call::Heard(0, MAGAZINE_1, true), started(0, ID, Some(MAGAZINE_1))]);
+        push(&mut receiver, &live_blocks(&sound, 18, 1), &mut sink);
+        assert_eq!(live_values(&sink, &sound), [11, 12, 13, 14, 15, 16, 17, 18]);
+    }
+
+    // REQ-6925 item 3: after the magazine was left long enough for the
+    // sender to stop its blocks, returning starts at the block the stream
+    // has reached, never at the block where it stopped.
+    #[test]
+    fn returning_to_the_magazine_resumes_at_the_streams_present_block() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, Some(0x101));
+        push(&mut receiver, &live_blocks(&sound, 10, 3), &mut sink);
+        assert_eq!(live_values(&sink, &sound), [10, 11, 12]);
+        receiver.open_page(Some(0x200), &mut sink);
+        receiver.tick(neoteletext_audio::LIVE_STALL_MS + 1, &mut sink);
+        sink.take();
+        // Back on the magazine: the play is sent again, then blocks from
+        // where the stream is now.
+        receiver.open_page(Some(0x150), &mut sink);
+        receiver.push_record(&music_play(0, 2, &sound, MAGAZINE_1).record(), &mut sink);
+        assert_eq!(start_count(&sink.take()), 0, "no block has come yet");
+        push(&mut receiver, &live_blocks(&sound, 500, 2), &mut sink);
+        let calls = sink.take();
+        assert_eq!(start_count(&calls), 1, "{calls:?}");
+        // A new stream, labelled before its samples.
+        let stream = calls.iter().position(|call| *call == Call::Stream(ID, 8_000)).unwrap();
+        assert_eq!(calls[stream + 1], Call::StreamMusic(0, ID, Some(MAGAZINE_1)));
+        assert_eq!(live_values(&sink, &sound), [500, 501]);
+    }
+
+    // DEC-6924 as ruled on 20 November 2026, level 1: the channel's music is
+    // heard on every page of the channel, of any magazine, and not with no
+    // page open; it is labelled as the channel's.
+    #[test]
+    fn channel_music_plays_on_every_page_of_the_channel() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        receiver.set_magazine_sound(true, &mut sink);
+        let sound = arm_channel(&mut receiver, &mut sink);
+        assert_eq!(sink.take(), NO_CALLS, "no page of the channel is open");
+        receiver.open_page(Some(0x101), &mut sink);
+        let calls = sink.take();
+        assert_eq!(calls[0], Call::Heard(1, Music::Channel, true));
+        assert_eq!(calls[2], Call::StreamMusic(1, CHANNEL_ID, Some(Music::Channel)));
+        assert_eq!(calls.last(), Some(&started(1, CHANNEL_ID, Some(Music::Channel))));
+        assert_eq!(receiver.sounding(), Sounding::Channel);
+        for page in [0x199, 0x200, 0x8FF] {
+            receiver.open_page(Some(page), &mut sink);
+            push(&mut receiver, &live_blocks(&sound, 702, 1), &mut sink);
+            assert!(sink.take().iter().all(|call| matches!(call, Call::StreamSamples(..))), "{page:X}");
+        }
+        receiver.open_page(None, &mut sink);
+        assert_eq!(sink.take(), [Call::Stop(1, MIN_FADE_MS), Call::Heard(1, Music::Channel, false)]);
+        assert_eq!(receiver.sounding(), Sounding::Nothing);
+    }
+
+    // DEC-6924 as ruled on 20 November 2026, the precedence: where levels
+    // overlap the most specific is heard alone. A magazine's music replaces
+    // the channel's on that magazine's pages, and a page's sound replaces
+    // both; each outer level starts again when the inner one is left.
+    #[test]
+    fn the_most_specific_level_is_heard_alone() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, Some(0x200));
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        arm_channel(&mut receiver, &mut sink);
+        // On magazine 2 the channel's music alone.
+        assert_eq!(
+            moves(&sink.take()),
+            [Call::Heard(1, Music::Channel, true), started(1, CHANNEL_ID, Some(Music::Channel))]
+        );
+        assert_eq!(receiver.sounding(), Sounding::Channel);
+
+        // Into magazine 1: its music starts and the channel's fades.
+        receiver.open_page(Some(0x101), &mut sink);
+        assert_eq!(
+            moves(&sink.take()),
+            [
+                Call::Heard(0, MAGAZINE_1, true),
+                started(0, ID, Some(MAGAZINE_1)),
+                Call::Stop(1, MIN_FADE_MS),
+                Call::Heard(1, Music::Channel, false)
+            ]
+        );
+        assert_eq!(receiver.sounding(), Sounding::Magazine(1));
+        assert_eq!(receiver.music(1), Some(ArmedMusic { music: Music::Channel, heard: false }));
+
+        // A page's sound on page 150, stored and 50 samples long: it
+        // replaces the magazine's music, and the channel's stays silent.
+        let page_sound = Sound::new(1, 1, Codec::Pcm16, 8_000, 100, &tone(50)).unwrap();
+        let id = SoundId { handle: 1, generation: 1 };
+        receiver.tick(1_000, &mut sink);
+        push(&mut receiver, &live_blocks(&sound, 12, 1), &mut sink);
+        let mut records = vec![page_sound.object_record().unwrap()];
+        records.extend(page_sound.data_records());
+        records.push(play(2, 1, &page_sound, Some(0x150)).record());
+        for record in &records {
+            receiver.push_record(record, &mut sink);
+        }
+        sink.take();
+        receiver.open_page(Some(0x150), &mut sink);
+        let calls = moves(&sink.take());
+        assert_eq!(calls, [started(2, id, None), Call::Stop(0, MIN_FADE_MS), Call::Heard(0, MAGAZINE_1, false)]);
+        assert_eq!(receiver.sounding(), Sounding::Page);
+
+        // The page's sound is heard to its end, 6 ms on: the magazine's
+        // music starts again, and the receiver asked to be woken for it.
+        assert_eq!(receiver.next_tick_ms(), Some(1_006).min(receiver.next_tick_ms()));
+        receiver.tick(1_005, &mut sink);
+        assert_eq!(moves(&sink.take()), NO_CALLS, "still sounding");
+        receiver.tick(1_006, &mut sink);
+        assert_eq!(moves(&sink.take()), [Call::Heard(0, MAGAZINE_1, true), started(0, ID, Some(MAGAZINE_1))]);
+        assert_eq!(receiver.sounding(), Sounding::Magazine(1));
+
+        // Out of magazine 1: the channel's music again, at its live sound.
+        push(&mut receiver, &live_blocks(&channel_sound(), 702, 1), &mut sink);
+        sink.take();
+        receiver.open_page(Some(0x300), &mut sink);
+        assert_eq!(
+            moves(&sink.take()),
+            [
+                // Page 150 is left, and with it its sound's channel.
+                Call::Stop(2, MIN_FADE_MS),
+                Call::Stop(0, MIN_FADE_MS),
+                Call::Heard(0, MAGAZINE_1, false),
+                Call::Heard(1, Music::Channel, true),
+                started(1, CHANNEL_ID, Some(Music::Channel))
+            ]
+        );
+        assert_eq!(receiver.sounding(), Sounding::Channel);
+    }
+
+    // The precedence again: a page's sound that plays on (a live one) holds
+    // the music silent until the page is left or the sound is stopped.
+    #[test]
+    fn a_page_sound_that_plays_on_holds_the_music_until_it_stops() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, Some(0x101));
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        let page_sound = Sound::live(6, 1, Codec::Pcm16, 8_000, 100).unwrap();
+        receiver.push_record(&page_sound.object_record().unwrap(), &mut sink);
+        receiver.push_record(&play(2, 1, &page_sound, Some(0x101)).record(), &mut sink);
+        assert_eq!(receiver.sounding(), Sounding::Magazine(1), "the page's sound has no block yet");
+        push(&mut receiver, &live_blocks(&page_sound, 0, 2), &mut sink);
+        assert_eq!(receiver.sounding(), Sounding::Page);
+        assert_eq!(receiver.music(0), Some(ArmedMusic { music: MAGAZINE_1, heard: false }));
+        sink.take();
+        receiver.push_record(&stop(2, 2).record(), &mut sink);
+        let calls = moves(&sink.take());
+        assert!(matches!(calls[0], Call::Stop(2, _)), "{calls:?}");
+        assert_eq!(calls[1..], [Call::Heard(0, MAGAZINE_1, true), started(0, ID, Some(MAGAZINE_1))]);
+    }
+
+    // REQ-6925 item 2: a play of a stored sound as music is refused, of
+    // either level, whether the sound is known when the play comes or after.
+    #[test]
+    fn a_play_of_a_stored_sound_as_music_is_refused() {
+        let stored = Sound::new(1, 1, Codec::Pcm16, 8_000, 100, &tone(50)).unwrap();
+        for (sound_first, music) in
+            [(true, MAGAZINE_1), (false, MAGAZINE_1), (true, Music::Channel), (false, Music::Channel)]
+        {
+            let mut arena = vec![0; ARENA];
+            let mut sink = Recorder::new();
+            let mut receiver = Receiver::<8, 2>::new(&mut arena);
+            receiver.set_magazine_sound(true, &mut sink);
+            receiver.open_page(Some(0x101), &mut sink);
+            let mut records = vec![stored.object_record().unwrap()];
+            records.extend(stored.data_records());
+            let play = music_play(0, 1, &stored, music).record();
+            if sound_first {
+                records.push(play);
+            } else {
+                records.insert(0, play);
+            }
+            for record in &records {
+                receiver.push_record(record, &mut sink);
+            }
+            assert_eq!(sink.starts(), NO_STARTS);
+            assert_eq!(receiver.statistics().magazine_refused, 1);
+            assert_eq!(receiver.music(0), None, "disarmed");
+        }
+    }
+
+    // REQ-6925 item 5: with the user's page sounds off no music is heard,
+    // and turning them on while on the magazine starts it.
+    #[test]
+    fn page_sounds_off_keeps_the_music_silent() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let sound = live_sound();
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        receiver.set_magazine_sound(true, &mut sink);
+        receiver.set_page_sounds(false, &mut sink);
+        receiver.open_page(Some(0x101), &mut sink);
+        receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+        receiver.push_record(&music_play(0, 1, &sound, MAGAZINE_1).record(), &mut sink);
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        arm_channel(&mut receiver, &mut sink);
+        assert_eq!(sink.take(), NO_CALLS);
+        receiver.set_page_sounds(true, &mut sink);
+        assert_eq!(sink.starts(), [(0, ID)]);
+        assert_eq!(live_values(&sink, &sound), [11], "from the newest block");
+        sink.take();
+        receiver.set_page_sounds(false, &mut sink);
+        assert_eq!(sink.take(), [Call::Stop(0, MIN_FADE_MS), Call::Heard(0, MAGAZINE_1, false)]);
+    }
+
+    // REQ-6925 item 4: a stop of the channel disarms the music, and nothing
+    // starts it again.
+    #[test]
+    fn a_stop_disarms_music() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, Some(0x101));
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        assert_eq!(sink.starts().len(), 1);
+        sink.take();
+        receiver.push_record(&stop(0, 2).record(), &mut sink);
+        assert!(matches!(sink.take()[..], [Call::Stop(0, _), Call::Heard(0, MAGAZINE_1, false)]));
+        assert_eq!(receiver.music(0), None);
+        receiver.open_page(Some(0x200), &mut sink);
+        receiver.open_page(Some(0x101), &mut sink);
+        push(&mut receiver, &live_blocks(&sound, 12, 2), &mut sink);
+        assert_eq!(sink.starts(), NO_STARTS);
+    }
+
+    /// A CONTROL record's 14 bytes with page field `scope`, framed as
+    /// profile version `version`.
+    fn control_record(version: u8, operation: u8, scope: u16) -> Vec<u8> {
+        let mut body = vec![0, 0, 1, operation, 4, 0, 1, 80, 0, 0, 0, 0];
+        body.extend_from_slice(&scope.to_be_bytes());
+        neoteletext_audio::encode::frame_version(version, TYPE_CONTROL, &body)
+    }
+
+    // REQ-6925 items 1 and 7, DEC-6951: in a play of profile version 3,
+    // 0xFF00 is the channel's music and 0xFF01 to 0xFF08 magazines 1 to 8;
+    // 0xFF09 and beyond are refused; a record of version 2 refuses every
+    // one, as an older receiver does; a stop or a set gain names no level.
+    #[test]
+    fn the_music_scope_is_read_and_its_bounds_are_refused() {
+        let Ok(Record::Control(control)) = parse(&control_record(PROFILE_VERSION, 1, 0xFF00)) else { panic!() };
+        assert_eq!((control.music, control.page), (Some(Music::Channel), None));
+        for magazine in 1..=8_u8 {
+            let record = control_record(PROFILE_VERSION, 1, 0xFF00 + u16::from(magazine));
+            let Ok(Record::Control(control)) = parse(&record) else { panic!("magazine {magazine}") };
+            assert_eq!((control.music, control.page), (Some(Music::Magazine(magazine)), None));
+            assert_eq!(control.operation, Operation::Play);
+        }
+        for scope in [0xFF09, 0xFF10, 0xFEFF, 0xFFFE] {
+            assert!(parse(&control_record(PROFILE_VERSION, 1, scope)).is_err(), "{scope:04X}");
+        }
+        for scope in [0xFF00, 0xFF01] {
+            assert!(parse(&control_record(BASE_PROFILE_VERSION, 1, scope)).is_err(), "profile 2 has no music");
+            for operation in [2, 3] {
+                assert!(parse(&control_record(PROFILE_VERSION, operation, scope)).is_err(), "operation {operation}");
+            }
+        }
+        // What the encoder writes is what the reader reads, and only
+        // music's form carries version 3.
+        let sound = live_sound();
+        let written = music_play(2, 9, &sound, Music::Magazine(8)).record();
+        assert_eq!(written[0], PROFILE_VERSION);
+        assert_eq!(written[written.len() - 6..written.len() - 4], [0xFF, 0x08]);
+        let written = music_play(2, 9, &sound, Music::Channel).record();
+        assert_eq!(written[written.len() - 6..written.len() - 4], [0xFF, 0x00]);
+        assert!(music_play(2, 9, &sound, Music::Magazine(9)).record().is_empty(), "never written");
+        assert!(music_play(2, 9, &sound, Music::Magazine(0)).record().is_empty(), "never written");
+        assert_eq!(play(2, 9, &sound, Some(0x123)).record()[0], BASE_PROFILE_VERSION);
+        assert_eq!(sound.object_record().unwrap()[0], BASE_PROFILE_VERSION);
+        // A refused record counts and moves nothing.
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        receiver.set_magazine_sound(true, &mut sink);
+        receiver.push_record(&control_record(PROFILE_VERSION, 1, 0xFF09), &mut sink);
+        assert_eq!(receiver.statistics().records_refused, 1);
+        assert_eq!(receiver.music(0), None);
+    }
+
+    // REQ-6927 item 3, REQ-6938 item 2, DEC-6953 item 5: where the
+    // capability was not agreed, music of either level and a page's
+    // switches are refused and counted, start nothing and move no channel's
+    // sequence.
+    #[test]
+    fn music_is_refused_where_its_capability_was_not_agreed() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let sound = live_sound();
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        receiver.open_page(Some(0x101), &mut sink);
+        receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+        receiver.push_record(&music_play(0, 5, &sound, MAGAZINE_1).record(), &mut sink);
+        receiver.push_record(&music_play(0, 6, &sound, Music::Channel).record(), &mut sink);
+        receiver.push_record(&switches(0x101, 0, false, false), &mut sink);
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        assert_eq!(sink.take(), NO_CALLS);
+        assert_eq!(receiver.statistics().magazine_refused, 3);
+        assert_eq!(receiver.music(0), None);
+        // Sequences 5 and 6 were not taken: an older command of the channel
+        // is still accepted.
+        receiver.push_record(&play(0, 3, &sound, None).record(), &mut sink);
+        assert_eq!(sink.starts(), [(0, ID)]);
+        assert_eq!(receiver.statistics().stale_commands, 0);
+
+        // Agreed, then no longer: the music stops and is disarmed.
+        let mut arena = vec![0; ARENA];
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, Some(0x101));
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        sink.take();
+        receiver.set_magazine_sound(false, &mut sink);
+        assert_eq!(sink.take(), [Call::Stop(0, MIN_FADE_MS), Call::Heard(0, MAGAZINE_1, false)]);
+        assert_eq!(receiver.music(0), None);
+    }
+
+    // REQ-6938 item 2: a rule's command cannot start music of either level.
+    #[test]
+    fn a_rules_command_naming_music_is_refused() {
+        for (count, music) in [(1, MAGAZINE_1), (1, Music::Channel)] {
+            let mut arena = vec![0; ARENA];
+            let mut sink = Recorder::new();
+            let sound = live_sound();
+            let mut receiver = Receiver::<8, 2>::new(&mut arena);
+            receiver.set_magazine_sound(true, &mut sink);
+            receiver.open_page(Some(0x101), &mut sink);
+            receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+            push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+            let Ok(Record::Control(control)) = parse(&music_play(0, 1, &sound, music).record()) else { panic!() };
+            assert_eq!(control, Control { music: Some(music), ..control });
+            receiver.rule_command(&control, &mut sink);
+            assert_eq!(sink.take(), NO_CALLS);
+            assert_eq!(receiver.statistics().magazine_refused, count);
+            assert_eq!(receiver.music(0), None);
+        }
+    }
+
+    // REQ-6926 items 1, 2 and 5: a page with magazine music switched off
+    // fades it within the ramp, and a page with it on brings it back on the
+    // stream as it is now; with the channel's music armed too, the page's
+    // channel switch decides whether that is heard in its place.
+    #[test]
+    fn a_pages_two_switches_turn_each_level_off_and_on() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, Some(0x101));
+        receiver.push_record(&switches(0x102, 0, false, true), &mut sink);
+        receiver.push_record(&switches(0x103, 0, false, false), &mut sink);
+        receiver.push_record(&switches(0x104, 0, true, false), &mut sink);
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        arm_channel(&mut receiver, &mut sink);
+        assert_eq!(start_count(&sink.take()), 1, "the magazine's music, the most specific");
+
+        // Magazine music off, channel music on: the channel's takes over.
+        receiver.open_page(Some(0x102), &mut sink);
+        assert_eq!(
+            moves(&sink.take()),
+            [
+                Call::Stop(0, MIN_FADE_MS),
+                Call::Heard(0, MAGAZINE_1, false),
+                Call::Heard(1, Music::Channel, true),
+                started(1, CHANNEL_ID, Some(Music::Channel))
+            ]
+        );
+        // The magazine's stream goes on under the page.
+        push(&mut receiver, &live_blocks(&sound, 12, 2), &mut sink);
+        assert!(sink.take().iter().all(|call| matches!(call, Call::StreamSamples(..))));
+
+        // Both off: silence.
+        receiver.open_page(Some(0x103), &mut sink);
+        assert_eq!(moves(&sink.take()), [Call::Stop(1, MIN_FADE_MS), Call::Heard(1, Music::Channel, false)]);
+        assert_eq!(receiver.sounding(), Sounding::Nothing);
+
+        // Channel music off alone: the magazine's is heard, as on any page.
+        receiver.open_page(Some(0x104), &mut sink);
+        assert_eq!(moves(&sink.take()), [Call::Heard(0, MAGAZINE_1, true), started(0, ID, Some(MAGAZINE_1))]);
+
+        // The switches of the open page change under it.
+        receiver.push_record(&switches(0x104, 0, false, false), &mut sink);
+        assert_eq!(moves(&sink.take()), [Call::Stop(0, MIN_FADE_MS), Call::Heard(0, MAGAZINE_1, false)]);
+        receiver.push_record(&switches(0x104, 0, true, true), &mut sink);
+        assert_eq!(moves(&sink.take()), [Call::Heard(0, MAGAZINE_1, true), started(0, ID, Some(MAGAZINE_1))]);
+        push(&mut receiver, &live_blocks(&sound, 14, 1), &mut sink);
+        assert_eq!(live_values(&sink, &sound), [10, 11, 12, 13, 14], "every block once, in order");
+    }
+
+    // REQ-6926 item 3 (DEC-6599): two sub-pages of one page each apply
+    // their own switches, and nothing is inherited from another sub-page.
+    #[test]
+    fn two_sub_pages_of_one_page_each_apply_their_own_switches() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, None);
+        receiver.push_record(&switches(0x101, 0x0001, false, true), &mut sink);
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        receiver.open(Some(0x101), 0x0001, &mut sink);
+        assert_eq!(sink.take(), NO_CALLS, "switched off");
+        receiver.open(Some(0x101), 0x0002, &mut sink);
+        assert_eq!(start_count(&sink.take()), 1, "sub-code 0002 was sent no switch");
+        receiver.open(Some(0x101), 0x0003, &mut sink);
+        assert_eq!(sink.take(), NO_CALLS, "it plays on");
+        receiver.open(Some(0x101), 0x0001, &mut sink);
+        assert_eq!(sink.take(), [Call::Stop(0, MIN_FADE_MS), Call::Heard(0, MAGAZINE_1, false)]);
+        // Sub-code 0000 is another sub-page again.
+        receiver.open(Some(0x101), 0x0000, &mut sink);
+        assert_eq!(start_count(&sink.take()), 1);
+        // Another page with the same sub-code inherits nothing either.
+        receiver.open(Some(0x102), 0x0001, &mut sink);
+        assert_eq!(sink.take(), NO_CALLS, "it plays on");
+    }
+
+    // REQ-6926 item 2: a switch starts nothing where no music is armed, nor
+    // on a page of another magazine than the armed one.
+    #[test]
+    fn a_switch_starts_no_sound() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let sound = live_sound();
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        receiver.set_magazine_sound(true, &mut sink);
+        receiver.open_page(Some(0x101), &mut sink);
+        receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        for (magazine_music, channel_music) in
+            [(true, true), (false, true), (true, false), (false, false), (true, true)]
+        {
+            receiver.push_record(&switches(0x101, 0, magazine_music, channel_music), &mut sink);
+        }
+        assert_eq!(sink.take(), NO_CALLS);
+        receiver.push_record(&music_play(0, 1, &sound, Music::Magazine(2)).record(), &mut sink);
+        receiver.push_record(&switches(0x101, 0, true, true), &mut sink);
+        assert_eq!(sink.take(), NO_CALLS, "magazine 2's music on a page of magazine 1");
+    }
+
+    // REQ-6926 item 1, REQ-6938 item 4, DEC-6952 item 1: every field of the
+    // record is bounded, and a record outside a bound is refused whole.
+    #[test]
+    fn a_malformed_page_music_record_is_refused() {
+        let framed =
+            |version: u8, body: &[u8]| neoteletext_audio::encode::frame_version(version, TYPE_PAGE_MUSIC, body);
+        for (byte, magazine_music, channel_music) in
+            [(0, true, true), (1, false, true), (2, true, false), (3, false, false)]
+        {
+            let body = [0x01, 0x50, 0x00, 0x02, byte];
+            let music = PageMusic { page: 0x150, sub: 2, magazine_music, channel_music };
+            assert_eq!(parse(&framed(PROFILE_VERSION, &body)), Ok(Record::PageMusic(music)));
+            assert_eq!(page_music(&music), framed(PROFILE_VERSION, &body));
+        }
+        for (bad, why) in [
+            (&[0x01, 0x50, 0x00, 0x02, 4][..], "a switch that does not exist"),
+            (&[0x01, 0x50, 0x00, 0x02, 0xFF], "every bit"),
+            (&[0x00, 0x99, 0x00, 0x02, 0], "a page below 100"),
+            (&[0x09, 0x00, 0x00, 0x02, 0], "a page above 8FF"),
+            (&[0x01, 0x50, 0x3F, 0x7F, 0], "the sub-code that means any"),
+            (&[0x01, 0x50, 0x80, 0x00, 0], "a bit no sub-code has"),
+            (&[0x01, 0x50, 0x00, 0x02], "too short"),
+            (&[0x01, 0x50, 0x00, 0x02, 0, 0], "too long"),
+        ] {
+            assert!(parse(&framed(PROFILE_VERSION, bad)).is_err(), "{why}");
+        }
+        assert!(
+            parse(&framed(BASE_PROFILE_VERSION, &[0x01, 0x50, 0x00, 0x02, 1])).is_err(),
+            "profile 2 has no such record"
+        );
+        // Refused by the receiver, and counted.
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        receiver.set_magazine_sound(true, &mut sink);
+        receiver.push_record(&framed(PROFILE_VERSION, &[0x01, 0x50, 0x00, 0x02, 4]), &mut sink);
+        assert_eq!(receiver.statistics().records_refused, 1);
+    }
+
+    // DEC-6952 item 4, REQ-6938 item 4: the receiver keeps a bounded number
+    // of pages' switches; the oldest gives way, never the open page's.
+    #[test]
+    fn the_switches_kept_are_bounded_and_the_open_pages_are_never_dropped() {
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let (mut receiver, sound) = armed(&mut arena, &mut sink, Some(0x101));
+        push(&mut receiver, &live_blocks(&sound, 10, 2), &mut sink);
+        receiver.push_record(&switches(0x101, 0, false, true), &mut sink);
+        receiver.push_record(&switches(0x102, 0, false, true), &mut sink);
+        // Twice as many more as are kept.
+        for page in 0..u16::try_from(MOST_PAGE_MUSIC_SETTINGS * 2).unwrap() {
+            receiver.push_record(&switches(0x110 + page, 0, false, true), &mut sink);
+        }
+        sink.take();
+        // The open page's are still held: nothing started.
+        receiver.push_record(&switches(0x1FF, 0, false, true), &mut sink);
+        assert_eq!(sink.take(), NO_CALLS);
+        // Page 102's, the oldest but the open one's, gave way: it plays.
+        receiver.open_page(Some(0x102), &mut sink);
+        assert_eq!(start_count(&sink.take()), 1);
+        // The newest are held.
+        receiver.open_page(Some(0x1FF), &mut sink);
+        assert_eq!(sink.take(), [Call::Stop(0, MIN_FADE_MS), Call::Heard(0, MAGAZINE_1, false)]);
+    }
+
+    // REQ-6926 item 4, REQ-6938 item 2: whatever records, pages, switches
+    // and settings come, in any order, what the receiver reports holds: one
+    // level at most is heard, the most specific; music is heard only with
+    // the capability agreed, the user's setting on and a page open; and a
+    // magazine's music only on a page of that magazine.
+    #[test]
+    fn whatever_comes_the_most_specific_level_alone_is_heard() {
+        let sounds = [live_sound(), channel_sound(), Sound::new(1, 1, Codec::Pcm16, 8_000, 100, &tone(50)).unwrap()];
+        let mut arena = vec![0; ARENA];
+        let mut sink = Recorder::new();
+        let mut receiver = Receiver::<8, 2>::new(&mut arena);
+        for sound in &sounds {
+            receiver.push_record(&sound.object_record().unwrap(), &mut sink);
+        }
+        for record in sounds[2].data_records() {
+            receiver.push_record(&record, &mut sink);
+        }
+        // A linear congruential generator (Numerical Recipes' constants):
+        // the same steps every run.
+        let mut state: u32 = 20_261_120;
+        let mut next = |bound: u32| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 8) % bound
+        };
+        let (mut agreed, mut setting, mut open, mut now, mut sequence) = (false, true, None, 0_u64, 0_u16);
+        let mut blocks = [0_u16; 2];
+        for step in 0..20_000 {
+            sequence += 1;
+            let channel = u8::try_from(next(4)).unwrap();
+            let page = 0x100 + u16::try_from(next(2)).unwrap() * 0x100 + u16::try_from(next(3)).unwrap();
+            match next(12) {
+                0 => {
+                    agreed = next(4) != 0;
+                    receiver.set_magazine_sound(agreed, &mut sink);
+                }
+                1 => {
+                    setting = next(4) != 0;
+                    receiver.set_page_sounds(setting, &mut sink);
+                }
+                2 | 3 => {
+                    open = (next(5) != 0).then_some(page);
+                    receiver.open(open, u16::try_from(next(2)).unwrap(), &mut sink);
+                }
+                4 => {
+                    let magazine = u8::try_from(1 + next(2)).unwrap();
+                    receiver.push_record(
+                        &music_play(channel, sequence, &sounds[0], Music::Magazine(magazine)).record(),
+                        &mut sink,
+                    );
+                }
+                5 => {
+                    receiver
+                        .push_record(&music_play(channel, sequence, &sounds[1], Music::Channel).record(), &mut sink);
+                }
+                6 => receiver.push_record(&play(channel, sequence, &sounds[2], Some(page)).record(), &mut sink),
+                7 => receiver.push_record(&stop(channel, sequence).record(), &mut sink),
+                8 => {
+                    let sub = u16::try_from(next(2)).unwrap();
+                    receiver.push_record(&switches(page, sub, next(2) == 0, next(2) == 0), &mut sink);
+                }
+                9 | 10 => {
+                    let which = usize::try_from(next(2)).unwrap();
+                    push(&mut receiver, &live_blocks(&sounds[which], blocks[which], 1), &mut sink);
+                    blocks[which] += 1;
+                }
+                _ => {
+                    now += u64::from(next(40));
+                    receiver.tick(now, &mut sink);
+                }
+            }
+            let heard: Vec<Music> = (0..4)
+                .filter_map(|channel| receiver.music(channel))
+                .filter(|armed| armed.heard)
+                .map(|armed| armed.music)
+                .collect();
+            let sounding = receiver.sounding();
+            if !heard.is_empty() {
+                assert!(agreed && setting && open.is_some(), "step {step}: {heard:?} with the gate shut");
+                assert_ne!(sounding, Sounding::Page, "step {step}: music under a page's sound");
+            }
+            let magazines = heard.iter().filter(|music| matches!(music, Music::Magazine(_))).count();
+            assert!(magazines == 0 || magazines == heard.len(), "step {step}: both levels at once, {heard:?}");
+            for music in &heard {
+                if let Music::Magazine(magazine) = music {
+                    assert_eq!(open.map(|page| u8::try_from(page >> 8).unwrap()), Some(*magazine), "step {step}");
+                }
+            }
+            match sounding {
+                Sounding::Magazine(magazine) => assert!(heard.contains(&Music::Magazine(magazine)), "step {step}"),
+                Sounding::Channel => assert!(heard.contains(&Music::Channel) && magazines == 0, "step {step}"),
+                Sounding::Nothing => assert!(heard.is_empty(), "step {step}: {heard:?}"),
+                Sounding::Page => {}
+            }
+            sink.take();
+            sink.pcm.clear();
         }
     }
 }

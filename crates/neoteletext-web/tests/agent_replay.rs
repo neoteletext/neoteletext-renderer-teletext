@@ -843,11 +843,36 @@ fn a_stop_code_stops_and_a_retry_code_retries() {
 #[test]
 #[cfg(feature = "push")]
 fn a_handshake_refused_stops_and_a_passing_fault_retries() {
-    for named in [None, Some("neottx.6")] {
+    // Neither a version not spoken nor the whole list offered is a name.
+    for named in [None, Some("neottx.6"), Some("neottx.9"), Some("neottx.12"), Some("neottx.11, neottx.10")] {
         let mut harness = push_service("ws://tt.example/push");
         harness.replay().reply("tt.example:80", Reply::WebSocketNamed(named));
         let records = harness.open("http://tt.example/service.json");
-        assert!(has_event(&records, "PushStopped(WrongProtocol)"), "{records:?}");
+        assert!(has_event(&records, "PushStopped(WrongProtocol)"), "{named:?}: {records:?}");
+        assert!(!has_event(&records, "PushConnected"), "{named:?}: {records:?}");
+    }
+}
+
+/// REQ-6927 item 2, DEC-6953 item 1: a receiver offers every version it
+/// speaks, the newest first, and the name the channel answers with is the
+/// connection's version, reported before the connection is said to be open:
+/// 11 from a channel of version 11, and 10 from a channel of version 10,
+/// to which it still connects.
+#[test]
+#[cfg(feature = "push")]
+fn the_channels_subprotocol_names_the_connections_version() {
+    for (named, version) in [("neottx.11", 11), ("neottx.10", 10)] {
+        let mut harness = push_service("ws://tt.example/push");
+        harness.replay().reply("tt.example:80", Reply::WebSocketNamed(Some(named)));
+        let records = harness.open("http://tt.example/service.json");
+        let seen = events(&records);
+        let told = seen.iter().position(|event| event.starts_with(&format!("PushVersion({version})")));
+        let open = seen.iter().position(|event| event.starts_with("PushConnected"));
+        assert!(told.is_some() && told < open, "{named}: {records:?}");
+        let (_, request) =
+            harness.replay().sent.iter().find(|(_, bytes)| bytes.starts_with(b"GET /push")).unwrap().clone();
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.contains("Sec-WebSocket-Protocol: neottx.11, neottx.10\r\n"), "{request}");
     }
     for status in [400_u16, 403, 404, 426] {
         let mut harness = push_service("ws://tt.example/push");

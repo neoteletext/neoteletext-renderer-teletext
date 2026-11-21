@@ -50,9 +50,11 @@ struct Connection {
     upgraded: bool,
 }
 
-/// The header line that echoes the subprotocol `request` asked for, if any.
+/// The header line a channel answers the subprotocols `request` offered
+/// with, if any: the newest it speaks (DEC-6953 item 1).
 fn echoed(request: &[u8]) -> String {
     header_value(request, "Sec-WebSocket-Protocol")
+        .and_then(|offered| neoteletext_web::consts::push_subprotocol_for(offered.as_bytes()))
         .map(|name| format!("Sec-WebSocket-Protocol: {name}\r\n"))
         .unwrap_or_default()
 }

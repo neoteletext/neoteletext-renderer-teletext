@@ -23,7 +23,7 @@ pub fn hello(rows: &mut Vec<Row>) -> Result<(), String> {
         kind: "input",
         name: "hello_snapshot",
         value: hexadecimal(out.get(..length).ok_or("the writer overran its buffer")?),
-        meaning: "hello version=10 caps=62914560, select 100",
+        meaning: "hello version=11 caps=62914560, select 100",
     });
     Ok(())
 }
@@ -37,7 +37,7 @@ pub fn welcome(rows: &mut Vec<Row>) -> Result<(), String> {
         kind: "record",
         name: "welcome_snapshot",
         value: hexadecimal(&packet.bytes),
-        meaning: "welcome version=10 caps=62914560 record=0",
+        meaning: "welcome version=11 caps=62914560 record=0",
     });
     Ok(())
 }

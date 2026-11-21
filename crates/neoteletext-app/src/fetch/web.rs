@@ -16,7 +16,7 @@ use neoteletext_web::agent::{
     Config, Event, Failure, Input, InputMessage, Output, PageBytes, PushStop, Source as Came, Storage, UserAgent,
 };
 use neoteletext_web::channel::{broken_channel_rule, is_channel_address};
-use neoteletext_web::consts::{INVALID_PACKET_REPORT_SECONDS, PUSH_SUBPROTOCOL};
+use neoteletext_web::consts::{INVALID_PACKET_REPORT_SECONDS, PUSH_SUBPROTOCOL, PUSH_SUBPROTOCOL_OLDEST};
 use neoteletext_web::descriptor::Descriptor;
 use neoteletext_web::http::MediaType;
 use neoteletext_web::port::{ConnectionId, Pump};
@@ -205,7 +205,7 @@ fn stopped(stop: PushStop) -> String {
     match stop {
         PushStop::Closed(code) => format!("the channel closed the connection with stop code {code}"),
         PushStop::Refused(status) => format!("the server refused the connection with status {status}"),
-        PushStop::WrongProtocol => format!("the server does not speak {PUSH_SUBPROTOCOL}"),
+        PushStop::WrongProtocol => format!("the server does not speak {PUSH_SUBPROTOCOL} or {PUSH_SUBPROTOCOL_OLDEST}"),
     }
 }
 
@@ -277,6 +277,7 @@ fn forward(
             challenged.set(true);
             Ok(())
         }
+        Output::Event(Event::PushVersion(version)) => send(&Frame::Notice(Notice::PushVersion(version))),
         Output::Event(Event::PushConnected) => {
             push_state.set(Some(true));
             Ok(())

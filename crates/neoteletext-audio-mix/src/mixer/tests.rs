@@ -105,6 +105,29 @@ fn ducking_lowers_the_other_voices_by_table_19s_step() {
     assert!((2_400..=2_600).contains(&out[399]), "{}", out[399]);
 }
 
+// Verifies REQ-6925 item 3 and DEC-6924 item 2: a voice started again on
+// a live sound whose samples kept coming joins at what is written now, not
+// where it stopped, which is how music of an outer level resumes at its
+// live point.
+#[test]
+fn a_voice_started_again_on_a_live_sound_joins_at_its_present_samples() {
+    let mut mixer = Mixer::new(RATE);
+    mixer.stream((1, 1), RATE);
+    mixer.stream_samples((1, 1), &[1_000; 4000]);
+    mixer.start(0, start((1, 1), 100));
+    let out = render(&mut mixer, 400);
+    assert!((990..=1_000).contains(&out[399]), "{}", out[399]);
+    mixer.stop(0, 5);
+    render(&mut mixer, 100);
+    // While it is silent the sound goes on: half a second at another level.
+    mixer.stream_samples((1, 1), &[5_000; 4000]);
+    mixer.start(0, start((1, 1), 100));
+    let out = render(&mut mixer, 200);
+    // The first sample heard after the ramp is the present level, with none
+    // of the 1,000s left unplayed when it stopped.
+    assert!(out[100..].iter().all(|&sample| (4_900..=5_000).contains(&sample)), "{:?}", &out[100..110]);
+}
+
 // Verifies REQ-AUD-011.
 #[test]
 fn a_queued_sound_follows_the_current_one() {

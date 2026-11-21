@@ -13,6 +13,20 @@ pub struct SoundId {
     pub generation: u16,
 }
 
+/// A level of music (DEC-6924 as the owner ruled on 20 November 2026): a
+/// live sound armed for the whole channel or for one of its magazines.
+/// Page sounds are the third and most specific level and need no label,
+/// being every sound that is neither. Where levels overlap the most
+/// specific is heard alone: a page's sound in place of its magazine's
+/// music, and a magazine's music in place of the channel's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Music {
+    /// The channel's music: heard on every page of the channel.
+    Channel,
+    /// The music of this magazine, 1 to 8: heard on that magazine's pages.
+    Magazine(u8),
+}
+
 /// A sound's shape: what the sink needs to hold its samples.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SoundFormat {
@@ -40,6 +54,11 @@ pub struct Start {
     /// Wait for the channel's current sound to end instead of replacing it.
     /// A channel holds one such waiting sound; a newer one replaces it.
     pub after_current: bool,
+    /// The level of music this sound is (REQ-6925 item 6), or `None` for a
+    /// page's sound or a sound played once for the whole service. A host
+    /// that plays several views of one service, as a browser's tabs are,
+    /// tells a channel's and a magazine's music from the rest by it.
+    pub music: Option<Music>,
 }
 
 /// One IMA ADPCM block given undecoded to a sink that decodes IMA ADPCM
@@ -169,6 +188,27 @@ pub trait VoiceSink {
 
     /// Ramps the channel to a new gain.
     fn gain(&mut self, channel: u8, gain: u8, fade_ms: u16);
+
+    /// The stream of `sound` on audio channel `channel` is from here on
+    /// music of level `music`, or with `None` no music (REQ-6925 item 6):
+    /// every sample given for that stream through
+    /// [`VoiceSink::stream_samples`] or [`VoiceSink::ima_stream`] after
+    /// this call carries that label, until the stream ends or is labelled
+    /// again. It comes after [`VoiceSink::stream`] began the stream and
+    /// before the first sample it labels; a stream never labelled is no
+    /// music. The label says what the sender armed the sound for, not that
+    /// the receiver's view shows that magazine now: a host that plays
+    /// several views checks it against the view's own page. The provided
+    /// method ignores it, as a sink with one view may.
+    fn stream_music(&mut self, _channel: u8, _sound: SoundId, _music: Option<Music>) {}
+
+    /// Whether the music of level `music`, armed on audio channel
+    /// `channel`, is heard on the page now open (REQ-6926 item 6): `true`
+    /// when its voice starts, `false` when it stops for any reason, a more
+    /// specific level taking its place among them. It is told at each
+    /// change, so that a host knows which level sounds. The provided method
+    /// ignores it.
+    fn music_heard(&mut self, _channel: u8, _music: Music, _heard: bool) {}
 
     /// The `concealed` report (REQ-AUD-013): block `block` of a sound, of
     /// `samples` samples, was given as silence, or concealed by its decoder,

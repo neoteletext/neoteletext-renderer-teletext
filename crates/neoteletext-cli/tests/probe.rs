@@ -183,7 +183,8 @@ fn serve(channel: Channel, listener: &TcpListener) {
                 );
                 let _ = stream.shutdown(Shutdown::Write);
             } else if let (true, Some(key)) = (path.ends_with("/push"), key) {
-                assert_eq!(asked.as_deref(), Some(PUSH_SUBPROTOCOL));
+                // Every version spoken, the newest first (DEC-6953 item 1).
+                assert_eq!(asked.as_deref(), Some(neoteletext_web::consts::PUSH_SUBPROTOCOLS));
                 if matches!(channel, Channel::Refuses) {
                     let _ = write!(stream, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     return;

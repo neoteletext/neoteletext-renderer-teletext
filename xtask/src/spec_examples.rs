@@ -362,6 +362,7 @@ fn play() -> SoundCommand {
         flags: 0,
         duck: SOUND_DUCK,
         page: Some(SOUND_PAGE),
+        music: None,
     }
 }
 

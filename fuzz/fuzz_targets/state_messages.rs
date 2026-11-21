@@ -50,9 +50,17 @@ fuzz_target!(|data: &[u8]| {
             let Ok(identity) = ChannelIdentity::read(text) else { return };
             assert_eq!(identity.as_str(), text);
             let mut out = [0_u8; MAX_SIGNED_BYTES];
-            let length = signed_bytes(Algorithm::Ed25519, Lifetime::Visit, &[0; CHALLENGE_BYTES], &identity, &mut out)
-                .expect("a channel identity is signed");
-            assert_eq!(length, SIGNED_PREFIX_BYTES + text.len());
+            // Under each version spoken (DEC-6953 item 2), and no other.
+            let challenge = [0; CHALLENGE_BYTES];
+            for version in 0..=u32::from(choice) {
+                let signed =
+                    signed_bytes(version, Algorithm::Ed25519, Lifetime::Visit, &challenge, &identity, &mut out);
+                if neoteletext_input::speaks(version) {
+                    assert_eq!(signed.expect("a channel identity is signed"), SIGNED_PREFIX_BYTES + text.len());
+                } else {
+                    assert!(signed.is_err(), "version {version} is not spoken");
+                }
+            }
         }
     }
 });

@@ -58,15 +58,55 @@ pub const NAPLPS_CAP: u32 = 1 << 24;
 /// ([`crate::snapshot::welcome_agrees_snapshot`]), so a channel that does
 /// not know the bit, and so never agrees it, makes no viewer of it.
 pub const SNAPSHOT_CAP: u32 = 1 << 25;
+/// Capability: the receiver plays the channel's music and a magazine's and
+/// applies a page's two music switches (REQ-6927 item 1, DEC-6924 item 9):
+/// a channel that agrees it may send a CONTROL record naming a level of
+/// music, the blocks of that music's live sound and the `PAGE_MUSIC` record
+/// of a page's switches, and sends none of them on a connection whose
+/// WELCOME did not agree it. It is offered only under protocol version 11
+/// ([`caps_of`]), and never agreed with [`SNAPSHOT_CAP`]
+/// ([`agreeable`]).
+pub const MAGAZINE_SOUND_CAP: u32 = 1 << 26;
 /// What a snapshot receiver offers (REQ-6879 item 2): SNAPSHOT, SELECT and
 /// both picture languages; never CURSOR, TOUCH, RESUME or AGENT, so that
 /// HELLO carries no user agent text and nothing can be resumed.
 pub const SNAPSHOT_OFFER: u32 = SNAPSHOT_CAP | SELECT_CAP | REGIS_CAP | NAPLPS_CAP;
 /// Every capability defined.
-pub const ALL_CAPS: u32 =
-    CURSOR_CAP | AGENT | TOUCH_CAP | RESUME_CAP | SELECT_CAP | REGIS_CAP | NAPLPS_CAP | SNAPSHOT_CAP;
+pub const ALL_CAPS: u32 = CURSOR_CAP
+    | AGENT
+    | TOUCH_CAP
+    | RESUME_CAP
+    | SELECT_CAP
+    | REGIS_CAP
+    | NAPLPS_CAP
+    | SNAPSHOT_CAP
+    | MAGAZINE_SOUND_CAP;
+
+/// The capabilities protocol version `version` defines (DEC-6953 item 3):
+/// every one for [`VERSION`](crate::VERSION), and every one but
+/// [`MAGAZINE_SOUND_CAP`] for a version before 11, which never offers or
+/// agrees it.
+#[must_use]
+pub const fn caps_of(version: u32) -> u32 {
+    if version >= MAGAZINE_SOUND_VERSION { ALL_CAPS } else { ALL_CAPS & !MAGAZINE_SOUND_CAP }
+}
+
+/// The first protocol version with [`MAGAZINE_SOUND_CAP`] (REQ-6927
+/// item 2).
+pub const MAGAZINE_SOUND_VERSION: u32 = 11;
+const _: () = assert!(MAGAZINE_SOUND_VERSION <= crate::VERSION);
+
+/// Whether a WELCOME may agree `caps` together (REQ-6927 item 4): a
+/// snapshot connection draws one page and plays nothing, so
+/// [`SNAPSHOT_CAP`] and [`MAGAZINE_SOUND_CAP`] are never agreed together.
+#[must_use]
+pub const fn agreeable(caps: u32) -> bool {
+    caps & SNAPSHOT_CAP == 0 || caps & MAGAZINE_SOUND_CAP == 0
+}
 // A retired bit is never a capability.
 const _: () = assert!(ALL_CAPS & (RETIRED_MODE_BITS | RETIRED_ECHO_BIT | RETIRED_PAGE_BIT) == 0);
 // A snapshot receiver offers nothing that identifies or resumes it
 // (REQ-6879 item 2).
 const _: () = assert!(SNAPSHOT_OFFER & (CURSOR_CAP | TOUCH_CAP | RESUME_CAP | AGENT) == 0);
+// Nor magazine music, which it could never be agreed (REQ-6927 item 4).
+const _: () = assert!(SNAPSHOT_OFFER & MAGAZINE_SOUND_CAP == 0);

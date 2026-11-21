@@ -66,13 +66,9 @@ pub const SIGNED_PREFIX_BYTES: usize = SIGNED_DOMAIN.len() + 1 + 1 + 1 + 1 + CHA
 /// The most bytes a key ever signs (VS-203).
 pub const MAX_SIGNED_BYTES: usize = SIGNED_PREFIX_BYTES + MAX_CHANNEL_IDENTITY_BYTES;
 
-/// The protocol version the signed bytes name (VS-203 item 2): the push
-/// connection's, which HELLO and WELCOME agree, so that a proof made under
-/// one version is never accepted under another.
-pub const SIGNED_VERSION: u8 = {
-    assert!(neoteletext_input::VERSION <= u8::MAX as u32);
-    neoteletext_input::VERSION as u8
-};
+// The protocol version the signed bytes name (VS-203 item 2) is the push
+// connection's, which HELLO and WELCOME agree, and goes in one byte.
+const _: () = assert!(neoteletext_input::VERSION <= u8::MAX as u32);
 
 /// Why a channel identity or the bytes to sign were refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,6 +76,8 @@ pub enum StateError {
     /// The channel identity is shorter than [`MIN_CHANNEL_IDENTITY_BYTES`]
     /// or longer than [`MAX_CHANNEL_IDENTITY_BYTES`].
     IdentityLength,
+    /// The protocol version is not one spoken (`neoteletext_input::speaks`).
+    Version,
     /// The text is not a channel's folder in the canonical form of DOC-1863:
     /// the channel reader refuses it, it names a file, or reading it changes
     /// it (a capital letter in the host, a default port written, a scheme
@@ -203,7 +201,7 @@ fn write_decimal(writer: &mut Writer<'_>, value: u16) -> Result<(), Overflow> {
 }
 
 /// Writes exactly the bytes a proof signs (VS-203), and nothing else: the
-/// domain and a zero byte, [`SIGNED_VERSION`], the algorithm, the lifetime,
+/// domain and a zero byte, the protocol version `version`, the algorithm, the lifetime,
 /// the challenge, the channel identity's length in two bytes, big-endian,
 /// and the channel identity. Returns the length written into `out`, at most
 /// [`MAX_SIGNED_BYTES`].
@@ -213,10 +211,17 @@ fn write_decimal(writer: &mut Writer<'_>, value: u16) -> Result<(), Overflow> {
 /// the tab's own channel (VS-103); the server builds them for each address
 /// it serves and verifies strictly (VS-301).
 ///
+/// `version` is the protocol version of the push connection the proof is
+/// for (VS-203 item 2; DEC-6953 item 2): the one its WebSocket subprotocol
+/// named, which HELLO and WELCOME agree, so that a proof made under one
+/// version is never accepted under another.
+///
 /// # Errors
+/// [`StateError::Version`] when `version` is not one spoken;
 /// [`StateError::IdentityLength`], which a [`ChannelIdentity`] never
 /// causes.
 pub fn signed_bytes(
+    version: u32,
     algorithm: Algorithm,
     lifetime: Lifetime,
     challenge: &[u8; CHALLENGE_BYTES],
@@ -225,11 +230,13 @@ pub fn signed_bytes(
 ) -> Result<usize, StateError> {
     let channel_identity = channel_identity.as_str();
     let length = u16::try_from(channel_identity.len()).map_err(|_| StateError::IdentityLength)?;
+    let version =
+        u8::try_from(version).ok().filter(|_| neoteletext_input::speaks(version)).ok_or(StateError::Version)?;
     let mut writer = Writer::new(out);
     let written = (|| -> Result<(), Overflow> {
         writer.put(SIGNED_DOMAIN)?;
         writer.byte(DOMAIN_END)?;
-        writer.byte(SIGNED_VERSION)?;
+        writer.byte(version)?;
         writer.byte(algorithm.code())?;
         writer.byte(lifetime.code())?;
         writer.put(challenge)?;

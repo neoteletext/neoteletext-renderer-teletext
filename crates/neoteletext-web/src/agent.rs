@@ -253,6 +253,8 @@ struct PushConnection {
     phase: PushPhase,
     url: Option<Url>,
     key: HandshakeKey,
+    /// The input protocol version the open connection speaks (DEC-6953).
+    version: u32,
     head: HeadCollector,
     frames: FrameReader,
     delay_us: u64,
@@ -400,6 +402,7 @@ impl<'m, R: RandomSource> UserAgent<'m, R> {
                 phase: PushPhase::Idle,
                 url: None,
                 key: [0; crate::consts::WEBSOCKET_KEY_TEXT],
+                version: neoteletext_input::VERSION,
                 head: HeadCollector::default(),
                 frames: FrameReader::new(),
                 delay_us: PUSH_RETRY_FIRST_US,

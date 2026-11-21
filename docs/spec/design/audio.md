@@ -149,8 +149,8 @@ Every carriage delivers the same records. Integers are unsigned and big-endian, 
 
 | Offset | Bytes | Field |
 |---:|---:|---|
-| 0 | 1 | Profile version: `2` |
-| 1 | 1 | Record type: `1` OBJECT, `2` DATA, `3` CONTROL. Any other value: the record is discarded. |
+| 0 | 1 | Profile version: `2`, or `3` for a record only version 3 defines (§7.4): a CONTROL record that names a level of music, and PAGE_MUSIC. A sender writes the lowest version that defines the record, so a receiver of version 2 reads everything else of a newer sender (DEC-6951). |
+| 1 | 1 | Record type: `1` OBJECT, `2` DATA, `3` CONTROL, `34` PAGE_MUSIC (version 3 only). Any other value: the record is discarded. |
 | 2 | 2 | Body length L, at most 1 016 |
 | 4 | L | Body |
 | 4 + L | 4 | CRC-32 |
@@ -207,7 +207,7 @@ A repeated block is ignored. A block that differs from the stored one at the sam
 | 2 | Fade in milliseconds. Every change takes at least 5 ms (§10.2). |
 | 1 | Flags: bit 0 *progressive* (§8.2); bit 1 *loop*; bit 2 *after current* (§7.2); others 0 |
 | 1 | Duck: 0–6, the attenuations of EN 300 708 table 19, applied to the other channels (§10.3) |
-| 2 | Page: a page number in EN 300 706 form, `0x100` to `0x8FF`, binding the command to that page (§7.3); `0xFFFF` for the whole service |
+| 2 | Page: a page number in EN 300 706 form, `0x100` to `0x8FF`, binding the command to that page (§7.3); `0xFFFF` for the whole service; in a play of profile version 3, `0xFF00` for the channel's music and `0xFF01` to `0xFF08` for the music of magazine 1 to 8 (§7.4) |
 
 Fields an operation doesn't use are zero.
 
@@ -316,6 +316,37 @@ A play whose page field is not `0xFFFF` is **armed** for that page:
 Page sounds play only while the user's **page sounds** setting is on (open decision 4). A play for the whole service (`0xFFFF`) plays once, on acceptance.
 
 Receiving data, reconnecting, or refreshing a page never starts a sound by itself.
+
+### 7.4 Music: the channel's, a magazine's, a page's
+
+The requirements are REQ-6925 and REQ-6926 (DEC-6924, as the owner ruled on 20 November 2026); the record forms are DEC-6951 and DEC-6952, and the gate DEC-6953.
+
+There are three levels of sound, and where they overlap **the most specific is heard alone**:
+
+1. **The channel's music**: a play of profile version 3 whose page field is `0xFF00`. Heard on every page of the channel.
+2. **A magazine's music**: a play of profile version 3 whose page field is `0xFF00` plus the magazine's number, 1 to 8. Heard on that magazine's pages, in place of the channel's music.
+3. **A page's sounds**: the page-bound sounds of §7.3. Heard in place of both while one sounds.
+
+Music of either level must name a live sound; a play of a stored sound as music is refused.
+- It sounds while a page it belongs to is open, the user's page sounds setting is on, the page's switch for its level is on, and no more specific level sounds.
+- Moving between pages that let it sound does not stop, restart or fade it.
+- When a more specific level starts, it fades out over 5 ms as that level fades in. When the more specific level ends or is left, it starts again at its live sound's present block.
+- A stop of its audio channel disarms it, and so does any later command on that channel.
+- It is taken only on a connection that agreed the push protocol's capability bit 26; elsewhere the record is refused and counted. A page's rule table cannot start it.
+
+Each page and sub-page has **two switches**, magazine music and channel music, both on unless the channel says otherwise, keyed on page number and sub-code together. They travel in the PAGE_MUSIC record (type 34, profile version 3), sent with the sub-page:
+
+| Bytes | Field |
+|---:|---|
+| 2 | Page number, `0x100` to `0x8FF` |
+| 2 | Sub-code: a sub-code of EN 300 706, and not `0x3F7F` |
+| 1 | Switches: bit 0 set, magazine music is off on this page; bit 1 set, channel music is off. Any other bit: the record is discarded. |
+
+A switch gates its level and starts nothing. With magazine music off and channel music on, the channel's music is heard on that page. A receiver keeps the switches of eight pages that have one off, the oldest giving way and never the open page's.
+
+There is no duck setting, and music is not ducked under a page's sound: the page's sound replaces it.
+
+A sink is told the level of each stream and each start and whether each level's music is heard, and the receiver says which level sounds (`Receiver::sounding`), so that a host with several views of one service can play what the view in front shows.
 
 ---
 

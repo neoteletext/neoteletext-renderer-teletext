@@ -10,7 +10,7 @@
 //! [`RESEND_BYTES`] of unacknowledged messages.
 
 use crate::TOKEN_BYTES;
-use crate::caps::{AGENT, ALL_CAPS, RESUME_CAP};
+use crate::caps::{AGENT, ALL_CAPS, RESUME_CAP, caps_of};
 use crate::control::{Control, Resumption};
 use crate::event::{Event, InputError, Item, Resume, write};
 use crate::wire::WireError;
@@ -93,6 +93,9 @@ impl From<InputError> for SendError {
 pub struct SessionOf<const KEPT: usize> {
     state: State,
     offered: u32,
+    /// The protocol version of the connection (DEC-6953 item 2): what
+    /// HELLO names and WELCOME must.
+    version: u32,
     /// The input count sent so far, modulo 2¹⁶ as the cursor record carries
     /// it.
     count: u16,
@@ -165,6 +168,7 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         Self {
             state: State::Closed,
             offered,
+            version: VERSION,
             count: 0,
             sent: [UNSENT; REMEMBERED],
             sent_first: 0,
@@ -184,9 +188,38 @@ impl<const KEPT: usize> SessionOf<KEPT> {
 
     /// A new session's start: the count from HELLO, nothing kept.
     fn begin(&mut self) {
+        let version = self.version;
         *self = Self::new(self.offered);
+        self.version = version;
         self.count = AFTER_HELLO;
         self.kept_from = AFTER_HELLO;
+    }
+
+    /// The protocol version of the connection about to open (DEC-6953
+    /// items 1 and 2): the one the channel's WebSocket subprotocol named.
+    /// The next HELLO names it and offers only the capabilities that
+    /// version defines, and the WELCOME that answers must name it. A
+    /// session not told speaks [`VERSION`]. Returns whether `version` is
+    /// one this crate speaks ([`crate::speaks`]); another changes nothing.
+    pub const fn set_version(&mut self, version: u32) -> bool {
+        let spoken = crate::speaks(version);
+        if spoken {
+            self.version = version;
+        }
+        spoken
+    }
+
+    /// The protocol version the session's connection speaks
+    /// ([`SessionOf::set_version`]).
+    #[must_use]
+    pub const fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// The capabilities the session offers on its connection: those it was
+    /// made with that the connection's version defines.
+    const fn offering(&self) -> u32 {
+        self.offered & caps_of(self.version)
     }
 
     /// Where it is.
@@ -235,8 +268,8 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         self.state = State::Waiting(now_ms);
         self.asked = resume.is_some();
         self.resend_from = None;
-        let caps = if agent.is_some() { self.offered | AGENT } else { self.offered & !AGENT };
-        let mut length = write(&Item::Event(Event::Hello { version: VERSION, caps, agent }), out)?;
+        let caps = if agent.is_some() { self.offering() | AGENT } else { self.offering() & !AGENT };
+        let mut length = write(&Item::Event(Event::Hello { version: self.version, caps, agent }), out)?;
         if let Some(resume) = resume {
             let rest = out.get_mut(length..).ok_or(InputError::Wire(WireError::Full))?;
             length = length.saturating_add(write(&Item::Event(Event::Resume(resume)), rest)?);
@@ -285,7 +318,9 @@ impl<const KEPT: usize> SessionOf<KEPT> {
     /// Forgets the session whole, as when the viewer leaves the channel:
     /// the next connection is a new session.
     pub fn forget(&mut self) {
+        let version = self.version;
         *self = Self::new(self.offered);
+        self.version = version;
     }
 
     /// Takes the channel's WELCOME: its version, the capabilities both
@@ -300,11 +335,11 @@ impl<const KEPT: usize> SessionOf<KEPT> {
         if !matches!(self.state, State::Waiting(_)) {
             return Err(WelcomeError::Unasked);
         }
-        if version != VERSION {
+        if version != self.version {
             self.state = State::Refused;
             return Err(WelcomeError::Version(version));
         }
-        if caps & !self.offered != 0 || resume.is_some() != (caps & RESUME_CAP != 0) {
+        if caps & !self.offering() != 0 || resume.is_some() != (caps & RESUME_CAP != 0) {
             self.state = State::Refused;
             return Err(WelcomeError::Caps);
         }

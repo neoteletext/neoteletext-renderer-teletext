@@ -33,7 +33,7 @@ mod run {
     use neoteletext_input::control::{FRAGMENT_DATA, from_packet};
     use neoteletext_input::event::{Event, Item, Select, read_message};
     use neoteletext_input::session::{Session as InputSession, State};
-    use neoteletext_web::consts::{MAX_REDIRECTS, PUSH_SUBPROTOCOL};
+    use neoteletext_web::consts::MAX_REDIRECTS;
     use neoteletext_web::map::Place;
     use std::time::{Duration, Instant as Clock};
 
@@ -61,6 +61,9 @@ mod run {
         session: Session,
         source: Box<dyn Source>,
         input: InputSession,
+        /// The input protocol version the channel's connection speaks
+        /// (DEC-6953 item 1).
+        version: u32,
         start: Clock,
         /// The entry file was read: the channel's initial page.
         initial: Option<u16>,
@@ -103,7 +106,7 @@ mod run {
                 Notice::Input(open) if open != self.pushing => {
                     self.pushing = open;
                     if open {
-                        println!("handshake   accepted: {PUSH_SUBPROTOCOL}");
+                        println!("handshake   accepted: neottx.{}", self.version);
                         let mut out = [0_u8; neoteletext_input::MAX_MESSAGE];
                         let length = self
                             .input
@@ -119,6 +122,10 @@ mod run {
                     let place =
                         if sub == SubCode::ANY.value() { format!("{mpp:03X}") } else { format!("{mpp:03X}/{sub:04X}") };
                     self.moved = Some(place);
+                }
+                Notice::PushVersion(version) => {
+                    self.version = version;
+                    self.input.set_version(version);
                 }
                 Notice::PushStopped(why) => self.stopped = Some(why),
                 Notice::Message(text) => println!("said        {text}"),
@@ -236,6 +243,7 @@ mod run {
             session,
             source,
             input: InputSession::new(SELECT_CAP),
+            version: neoteletext_input::VERSION,
             start: Clock::now(),
             initial: None,
             denied: None,
@@ -254,7 +262,7 @@ mod run {
             if !probe.until(ENDING_WITHIN, welcomed)? || !probe.input.welcomed() {
                 return Err(fault("the channel did not answer HELLO with WELCOME"));
             }
-            println!("protocol    input protocol {}, WELCOME received", neoteletext_input::VERSION);
+            println!("protocol    input protocol {}, WELCOME received", probe.version);
         } else {
             println!("protocol    no push connection: a static channel, read by its files");
         }

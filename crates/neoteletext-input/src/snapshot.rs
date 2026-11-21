@@ -23,11 +23,25 @@ use crate::wire::WireError;
 /// sub-code; [`InputError::Wire`] with [`WireError::Full`] when `out` is too
 /// small.
 pub fn write_request(page: u16, sub: u16, out: &mut [u8]) -> Result<usize, InputError> {
+    write_request_of(VERSION, page, sub, out)
+}
+
+/// Writes the snapshot request as [`write_request`] does, with HELLO naming
+/// protocol version `version`: the one the channel's WebSocket subprotocol
+/// named for the connection (DEC-6953 item 2).
+///
+/// # Errors
+/// As [`write_request`]; and [`InputError::BadValue`] when `version` is not
+/// one this crate speaks ([`crate::speaks`]).
+pub fn write_request_of(version: u32, page: u16, sub: u16, out: &mut [u8]) -> Result<usize, InputError> {
+    if !crate::speaks(version) {
+        return Err(InputError::BadValue("snapshot version"));
+    }
     if !crate::is_page(page) {
         return Err(InputError::BadValue("snapshot page"));
     }
     let select = Select::new(page, sub).ok_or(InputError::BadValue("snapshot sub-code"))?;
-    let hello = Item::Event(Event::Hello { version: VERSION, caps: SNAPSHOT_OFFER, agent: None });
+    let hello = Item::Event(Event::Hello { version, caps: SNAPSHOT_OFFER, agent: None });
     let hello_length = write(&hello, out)?;
     let rest = out.get_mut(hello_length..).ok_or(InputError::Wire(WireError::Full))?;
     let select_length = write(&Item::Event(Event::Select(select, "")), rest)?;
