@@ -15,7 +15,7 @@ use super::{CommandRef, Fault, Node, Table, Target, TargetKind, Trigger, Value};
 use crate::animate;
 use crate::bounded::Bounded;
 use crate::command::{self, Command, Operand, TYPE_ANIMATE, TYPE_REPORT, TYPE_VARIABLE, field};
-use crate::limits::{MAX_GROUPS, MAX_TABLE_TARGETS, MAX_TABLE_VALUES, MAX_WATCHED};
+use crate::limits::{MAX_GROUPS, MAX_PAINT_WATCHED, MAX_TABLE_TARGETS, MAX_TABLE_VALUES, MAX_WATCHED};
 
 /// Interest mask bit 0: keys (RULE-52 item 1).
 pub const INTEREST_KEYS: u8 = 1;
@@ -72,6 +72,10 @@ impl WatchSlot {
     }
 }
 
+/// What a list of painted drawings not yet filled holds: no drawing has
+/// number 0 (DEC-7031 item 4).
+pub const NO_PAINTED: u16 = 0;
+
 /// What a table reads and names.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Index {
@@ -88,6 +92,13 @@ pub struct Index {
     /// The classes of input the table's triggers and key-state values
     /// need (RULE-52 item 1).
     pub interest: u8,
+    /// Each distinct drawing a `painted` trigger names, by a constant or
+    /// by a row's `p`, in the order first named: the drawings whose
+    /// finishing the receiver watches for (DEC-7031 item 4).
+    pub painted: Bounded<u16, MAX_PAINT_WATCHED>,
+    /// Whether a `painted` trigger names the page's whole picture
+    /// (DEC-7031 item 4).
+    pub painted_page: bool,
 }
 
 impl Index {
@@ -96,20 +107,29 @@ impl Index {
     /// # Errors
     /// [`Fault::Limit`] when the table reads more than `MAX_TABLE_VALUES`
     /// distinct values, names more than `MAX_TABLE_TARGETS` distinct
-    /// controls and objects, or meters more than `MAX_WATCHED` values.
+    /// controls and objects, meters more than `MAX_WATCHED` values, or
+    /// names more than `MAX_PAINT_WATCHED` distinct drawings in its
+    /// `painted` triggers.
     pub fn of(table: &Table) -> Result<Self, Fault> {
         let mut index = Self {
             values: Bounded::new(Value::NONE),
             targets: Bounded::new(Target::NONE),
             watch: Bounded::new(WatchSlot { channel: 0, kind: WATCH_LEVEL, part: 0 }),
             interest: 0,
+            painted: Bounded::new(NO_PAINTED),
+            painted_page: false,
         };
         let mut named = [false; MAX_GROUPS];
         for rule in table.rules.iter() {
             for trigger in rule.triggers.iter() {
                 index.interest |= trigger_interest(trigger);
-                if let Some(target) = trigger.target().filter(|target| !target.from_row) {
+                if let Some(target) = trigger.target().or(trigger.painted()).filter(|target| !target.from_row) {
                     index.name(Target { kind: target.kind, number: target.number })?;
+                }
+                if let Some(target) = trigger.painted() {
+                    for place in 0..rule.row_count() {
+                        index.paint(target.resolve(&table.row_of(rule, place)))?;
+                    }
                 }
             }
             for node in rule.condition.iter() {
@@ -196,6 +216,20 @@ impl Index {
         Ok(())
     }
 
+    /// Notes what one row of a `painted` trigger names (DEC-7031 item 4):
+    /// the page's whole picture, or a drawing held once however many
+    /// triggers and rows name it.
+    fn paint(&mut self, target: Option<Target>) -> Result<(), Fault> {
+        match target {
+            Some(Target { kind: TargetKind::Page, .. }) => self.painted_page = true,
+            Some(Target { kind: TargetKind::Object, number }) if !self.painted.contains(&number) => {
+                self.painted.push(number).map_err(|_| Fault::Limit("MAX_PAINT_WATCHED"))?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn name(&mut self, target: Target) -> Result<(), Fault> {
         if !target.is_thing() || self.target_slot(target).is_some() {
             return Ok(());
@@ -237,7 +271,10 @@ const fn trigger_interest(trigger: &Trigger) -> u8 {
         | Trigger::Becomes
         | Trigger::Every { .. }
         | Trigger::After { .. }
-        | Trigger::Cue { .. } => 0,
+        | Trigger::Cue { .. }
+        // DEC-7031 item 4: a painting's end is the receiver's own event,
+        // and asks for no input.
+        | Trigger::Painted { .. } => 0,
     }
 }
 

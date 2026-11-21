@@ -13,10 +13,14 @@ use crate::{control, wire};
 /// never deployed and is not kept (DEC-6522, DEC-6587, RULE-49). Version 11
 /// is version 10 with capability bit 26,
 /// [`MAGAZINE_SOUND_CAP`](crate::caps::MAGAZINE_SOUND_CAP), and what it
-/// gates (REQ-6927 items 1 and 2), and nothing else. It is the newest
-/// version spoken; [`OLDEST_VERSION`] is the oldest, and the WebSocket
-/// subprotocol the channel answers with says which of them a connection
-/// speaks (DEC-6953 item 1). Every other version is refused both ways.
+/// gates (REQ-6927 items 1 and 2), and with painting as a show: the PAINT
+/// record and the rule table's trigger 22, `painted`, which a receiver of
+/// version 10 would refuse a whole table for, so a channel sends neither
+/// on a connection of version 10 (DEC-7031, DEC-7074 items 1 and 2).
+/// Nothing else differs. It is the newest version spoken;
+/// [`OLDEST_VERSION`] is the oldest, and the WebSocket subprotocol the
+/// channel answers with says which of them a connection speaks (DEC-6953
+/// item 1). Every other version is refused both ways.
 pub const VERSION: u32 = 11;
 /// The oldest protocol version spoken (REQ-6927 item 2, DEC-6953 item 1):
 /// a receiver still connects to a channel of this version, and a channel

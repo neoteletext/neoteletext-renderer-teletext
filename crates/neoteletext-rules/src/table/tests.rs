@@ -10,6 +10,7 @@
 )]
 
 mod limits;
+mod painted;
 
 use std::boxed::Box;
 use std::vec::Vec;

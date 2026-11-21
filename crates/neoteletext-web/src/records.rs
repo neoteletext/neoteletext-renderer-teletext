@@ -6,8 +6,9 @@
 //! and those of the page rule table and animation (neoteletext-common's
 //! page-rules.md and animation.md): RULES (type 21), `RULES_QUERY` (22),
 //! ANIMATE (23), SPRITES (24), `NAPLPS_OBJECTS` (25), SHEET (26), FRAME
-//! (27), and the six commands `LOCAL_MIDI`, VARIABLE, TIMER, REPORT, RUN and
-//! SEQUENCE (28 to 33), in the audio profile's record frame
+//! (27), the six commands `LOCAL_MIDI`, VARIABLE, TIMER, REPORT, RUN and
+//! SEQUENCE (28 to 33), and PAINT (34; DEC-7031), in the audio profile's
+//! record frame
 //! (REQ-AUD-003) on data channel 12, packet 4/31, cut into as many
 //! fragments as a record needs (DOC-1952).
 //!
@@ -37,6 +38,7 @@ pub mod index;
 pub mod links;
 pub mod log;
 pub mod naplps_objects;
+pub mod paint;
 pub mod redirect;
 pub mod regis;
 pub mod regis_cursor;
@@ -49,8 +51,8 @@ pub mod subpages;
 pub use commands::{TYPE_LOCAL_MIDI, TYPE_REPORT, TYPE_RUN, TYPE_SEQUENCE, TYPE_TIMER, TYPE_VARIABLE, body_check};
 pub use neoteletext_audio::record::{
     TYPE_ANIMATE, TYPE_DENIED, TYPE_DRAWING_LINKS, TYPE_FRAME, TYPE_INDEX, TYPE_LINKS, TYPE_LOG, TYPE_NAPLPS,
-    TYPE_NAPLPS_OBJECTS, TYPE_REDIRECT, TYPE_REGIS, TYPE_REGIS_CURSOR, TYPE_RULES, TYPE_RULES_QUERY, TYPE_SHEET,
-    TYPE_SPRITES, TYPE_SUBPAGES,
+    TYPE_NAPLPS_OBJECTS, TYPE_PAINT, TYPE_REDIRECT, TYPE_REGIS, TYPE_REGIS_CURSOR, TYPE_RULES, TYPE_RULES_QUERY,
+    TYPE_SHEET, TYPE_SPRITES, TYPE_SUBPAGES,
 };
 
 // ANIM-1: the rule table's ticks and the core's are one clock's. The rule
@@ -218,6 +220,9 @@ pub enum ChannelRecord<'a> {
     Run(commands::CommandRecord<'a>),
     /// A start or a stop of a sequence (RULE-103).
     Sequence(commands::CommandRecord<'a>),
+    /// How one generation of a page's ReGIS or NAPLPS stream is painted
+    /// (DEC-7031 item 1).
+    Paint(paint::PaintRecord),
 }
 
 /// What one packet gave the reader.
@@ -292,7 +297,7 @@ impl RecordReader {
                     | state::TYPE_STATE_CHALLENGE
                     | state::TYPE_STATE_END
                     | state::TYPE_STATE_KEEP_OFFER
-                    | TYPE_RULES..=TYPE_SEQUENCE
+                    | TYPE_RULES..=TYPE_SEQUENCE | TYPE_PAINT
             ) {
                 return (Read::Nothing, 0);
             }
@@ -346,6 +351,7 @@ pub fn read_record(bytes: &[u8]) -> Result<ChannelRecord<'_>, RecordFault> {
         TYPE_REPORT => commands::read(kind, body).map(ChannelRecord::Report),
         TYPE_RUN => commands::read(kind, body).map(ChannelRecord::Run),
         TYPE_SEQUENCE => commands::read(kind, body).map(ChannelRecord::Sequence),
+        TYPE_PAINT => paint::read(body).map(ChannelRecord::Paint),
         _ => Err(RecordFault::BadValue("record type")),
     }
 }

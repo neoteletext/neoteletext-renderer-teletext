@@ -10,6 +10,7 @@
 
 mod commands;
 mod handling;
+mod painted;
 mod triggers;
 
 use std::boxed::Box;

@@ -182,7 +182,7 @@ fn a_rule_event_counts_one_and_what_is_no_input_counts_nothing() {
     }
 }
 
-// RULE-46, RULE-49 (REQ-6528): under protocol version 10 a receiver never
+// RULE-46, RULE-49 (REQ-6528): since protocol version 10 a receiver never
 // writes a viewer's input at the top level of the stream.
 #[test]
 fn a_viewers_input_is_never_sent_bare() {
@@ -278,7 +278,7 @@ fn key(action: Action, key: KeyCode) -> Item<'static> {
     Item::Event(Event::Key(Key { on: ON, lost: false, action, key, mods: 0, text: Some("a"), base: Some('q') }))
 }
 
-/// Sends `item` as a receiver under protocol version 10 does: a viewer's
+/// Sends `item` as a receiver since protocol version 10 does: a viewer's
 /// input as the session's capabilities carry it, inside a rule's
 /// `RULE_EVENT` (RULE-46), and anything else as it is. Gives the bytes of
 /// the input carried, or of the message for anything else, and `None`

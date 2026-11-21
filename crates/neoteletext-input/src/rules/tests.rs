@@ -169,7 +169,8 @@ fn a_rule_event_out_of_range_is_refused() {
     assert_eq!(read(&shorter), Err(InputError::BadValue("rule event")));
 }
 
-/// RULE-46, RULE-49 (REQ-6528): under protocol version 10 a viewer's input
+/// RULE-46, RULE-49 (REQ-6528): from protocol version 10 on (now 11,
+/// DEC-7031 item 7) a viewer's input
 /// at the top level of the stream is a protocol fault; inside a
 /// `RULE_EVENT` it is read; the session's own events stay at the top
 /// level.

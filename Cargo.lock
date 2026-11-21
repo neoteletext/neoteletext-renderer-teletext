@@ -838,12 +838,12 @@ dependencies = [
 [[package]]
 name = "naplps"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=21f439b52821a1d877d0cf40d150366c778e0092#21f439b52821a1d877d0cf40d150366c778e0092"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=9d5fdecef6496ce66b9d107340c563f4b4c7f17e#9d5fdecef6496ce66b9d107340c563f4b4c7f17e"
 
 [[package]]
 name = "naplps-fonts"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=21f439b52821a1d877d0cf40d150366c778e0092#21f439b52821a1d877d0cf40d150366c778e0092"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-naplps?rev=9d5fdecef6496ce66b9d107340c563f4b4c7f17e#9d5fdecef6496ce66b9d107340c563f4b4c7f17e"
 
 [[package]]
 name = "neoteletext-app"
@@ -1336,17 +1336,17 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "regis"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=717c337257a346df819584a5cd2b524ba7c16c83#717c337257a346df819584a5cd2b524ba7c16c83"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=72ae60b9af9a2e20d811ea2bdf651c3c272fc626#72ae60b9af9a2e20d811ea2bdf651c3c272fc626"
 
 [[package]]
 name = "regis-fonts"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=717c337257a346df819584a5cd2b524ba7c16c83#717c337257a346df819584a5cd2b524ba7c16c83"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=72ae60b9af9a2e20d811ea2bdf651c3c272fc626#72ae60b9af9a2e20d811ea2bdf651c3c272fc626"
 
 [[package]]
 name = "regis-minify"
 version = "0.1.0"
-source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=717c337257a346df819584a5cd2b524ba7c16c83#717c337257a346df819584a5cd2b524ba7c16c83"
+source = "git+file:///Users/andrewstuart/devel/neoteletext-renderer-regis?rev=72ae60b9af9a2e20d811ea2bdf651c3c272fc626#72ae60b9af9a2e20d811ea2bdf651c3c272fc626"
 dependencies = [
  "regis",
 ]

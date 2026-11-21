@@ -2,17 +2,21 @@
 //! any bytes decode to a table within every limit or are refused whole;
 //! what decodes encodes to the same bytes and decodes to the same table;
 //! and no accepted table has a ring of groups, a run over
-//! `MAX_RUN_COMMANDS` commands or a command RULE-119 forbids.
+//! `MAX_RUN_COMMANDS` commands or a command RULE-119 forbids. A `painted`
+//! trigger (code 22, DEC-7031 item 4) of an accepted table names the
+//! page's whole picture or one drawing for every row, and the table's
+//! index holds every drawing so named, at most `MAX_PAINT_WATCHED`.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use neoteletext_rules::command;
 use neoteletext_rules::limits::{
     MAX_COMMAND_BINDINGS, MAX_COMMAND_BYTES, MAX_CONDITION_NODES, MAX_GROUP_COMMANDS, MAX_GROUPS, MAX_GROUPS_BYTES,
-    MAX_KEYS_PER_TRIGGER, MAX_RECTS, MAX_ROWS, MAX_RULE_ROWS, MAX_RULES, MAX_RUN_COMMANDS, MAX_SEQUENCE_STEPS,
-    MAX_SEQUENCES, MAX_TABLE_BYTES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES, MAX_TRIGGERS_PER_RULE, MAX_WATCHED,
+    MAX_KEYS_PER_TRIGGER, MAX_PAINT_WATCHED, MAX_RECTS, MAX_ROWS, MAX_RULE_ROWS, MAX_RULES, MAX_RUN_COMMANDS,
+    MAX_SEQUENCE_STEPS, MAX_SEQUENCES, MAX_TABLE_BYTES, MAX_TABLE_TARGETS, MAX_TABLE_VALUES, MAX_TRIGGERS_PER_RULE,
+    MAX_WATCHED,
 };
-use neoteletext_rules::table::{Index, Table, check, check_condition, decode, encode};
+use neoteletext_rules::table::{Index, Table, Target, TargetKind, Trigger, check, check_condition, decode, encode};
 use neoteletext_web::records::body_check;
 
 /// The page the image is decoded for.
@@ -61,6 +65,25 @@ fuzz_target!(|data: &[u8]| {
     let index = Index::of(&table).expect("a decoded table is within the limits on what it reads");
     assert!(index.values.len() <= MAX_TABLE_VALUES && index.targets.len() <= MAX_TABLE_TARGETS);
     assert!(index.watch.len() <= MAX_WATCHED);
+    // DEC-7031 item 4: what each `painted` trigger names for each row is
+    // the page's whole picture or one drawing, and the index holds it.
+    assert!(index.painted.len() <= MAX_PAINT_WATCHED && !index.painted.contains(&0));
+    let mut painted = 0;
+    for rule in table.rules.iter() {
+        for target in rule.triggers.iter().filter_map(Trigger::painted) {
+            assert!(!target.from_row || (rule.rows.is_some() && target.kind == TargetKind::Object));
+            for place in 0..rule.row_count() {
+                let named = target.resolve(&table.row_of(rule, place)).expect("a row gives a number");
+                match named.kind {
+                    TargetKind::Page => assert!(named == Target::PAGE && index.painted_page),
+                    TargetKind::Object => assert!(named.number >= 1 && index.painted.contains(&named.number)),
+                    TargetKind::Control | TargetKind::Rect => panic!("a painted trigger names {named:?}"),
+                }
+                painted += 1;
+            }
+        }
+    }
+    assert!(painted > 0 || (index.painted.is_empty() && !index.painted_page), "nothing painted is named unasked");
     // The encoding is the one encoding of its table: the bytes back.
     let mut out = vec![0_u8; MAX_TABLE_BYTES];
     let length = encode(&table, body_check, &mut out).expect("what was decoded is encoded");

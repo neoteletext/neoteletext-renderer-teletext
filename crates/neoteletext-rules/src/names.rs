@@ -22,7 +22,7 @@ use crate::table::{
 };
 
 /// A trigger's `event` (RULE-35) and its code (RULE-9).
-pub const TRIGGERS: [(&str, u8); 17] = [
+pub const TRIGGERS: [(&str, u8); 18] = [
     ("key", trigger_code::KEY),
     ("key_up", trigger_code::KEY_UP),
     ("press", trigger_code::PRESS),
@@ -40,6 +40,8 @@ pub const TRIGGERS: [(&str, u8); 17] = [
     ("focus", trigger_code::FOCUS),
     ("blur", trigger_code::BLUR),
     ("cue", trigger_code::CUE),
+    // DEC-7031 item 4.
+    ("painted", trigger_code::PAINTED),
 ];
 
 /// A comparison's `op` (RULE-35) and its code (RULE-18).

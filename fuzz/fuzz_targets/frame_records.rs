@@ -4,7 +4,9 @@
 //! records, of things to hold and of ticks, a receiver never has more
 //! than `MAX_OPEN_FRAMES` frames open, never holds more than
 //! `MAX_FRAME_BYTES` for one, never keeps one open `MAX_FRAME_TICKS`, and
-//! never applies inside a frame what it was told to hold. Frames are
+//! never applies inside a frame what it was told to hold; a PAINT record
+//! (DEC-7031 item 1) for a page with a frame open is held with the rest,
+//! and applied as it arrives for a page with none. Frames are
 //! keyed on the page and its sub-code together, as the model is: a
 //! sub-page is exactly a page and shares nothing with its siblings
 //! (DEC-6599).
@@ -12,8 +14,11 @@
 
 use libfuzzer_sys::fuzz_target;
 use neoteletext_core::types::{PageAddress, SubCode};
+use neoteletext_web::consts::{MAX_DEFAULT_PAINT_RATE, MIN_LINE_SPEED};
 use neoteletext_web::consts::{MAX_FRAME_BYTES, MAX_FRAME_TICKS, MAX_OPEN_FRAMES};
 use neoteletext_web::records::frame::{BYTES, FrameChange, FrameEnd, OpenFrames, encode, read};
+use neoteletext_web::records::paint::{self, PaintRecord};
+use neoteletext_web::records::sheet::SheetKind;
 use neoteletext_web::records::{ChannelRecord, Read, RecordReader};
 use std::collections::BTreeMap;
 
@@ -39,7 +44,7 @@ fuzz_target!(|data: &[u8]| {
     let mut held: BTreeMap<(u16, SubCode), (usize, u32)> = BTreeMap::new();
     for step in data.as_chunks::<STEP_BYTES>().0 {
         let (kind, body) = (step[0], &step[1..]);
-        match kind % 4 {
+        match kind % 5 {
             0 => {
                 let Ok(record) = read(body) else { continue };
                 let mut reader = RecordReader::new();
@@ -84,9 +89,41 @@ fuzz_target!(|data: &[u8]| {
                     *ticks += 1;
                 }
             }
-            _ => {
+            3 => {
                 let Some((page, subcode)) = place(body) else { continue };
                 assert_eq!(frames.close(page, subcode), held.remove(&(page.mpp(), subcode)).is_some());
+            }
+            _ => {
+                // A PAINT record for the page (DEC-7031 item 1): it comes
+                // through the record reader as it was written, and a frame
+                // open for its page holds its bytes like any other record's.
+                let Some((page, subcode)) = place(body) else { continue };
+                let regis = body[1] & 1 == 0;
+                let record = PaintRecord {
+                    page,
+                    subcode,
+                    language: if regis { SheetKind::Regis } else { SheetKind::Naplps },
+                    generation: u16::from_be_bytes([body[4], body[5]]),
+                    line_speed: Some(MIN_LINE_SPEED + u32::from(body[2])),
+                    default_rate: regis.then_some(MAX_DEFAULT_PAINT_RATE - u16::from(body[6])),
+                };
+                let mut reader = RecordReader::new();
+                let mut back = false;
+                paint::encode(record, 0, 0, &mut |packet| {
+                    back = reader.push(&packet) == Read::Record(ChannelRecord::Paint(record));
+                })
+                .expect("a PAINT record within its ranges is written");
+                assert!(back, "what was written reads back as it was written");
+                let key = (page.mpp(), subcode);
+                match frames.hold(page, subcode, paint::BYTES) {
+                    None => assert!(!held.contains_key(&key), "applied inside a frame"),
+                    Some(None) => held.get_mut(&key).expect("held for a frame that is open").0 += paint::BYTES,
+                    Some(Some(end)) => {
+                        assert_eq!(end, FrameEnd::Full);
+                        let (before, _) = held.remove(&key).expect("a frame that was open");
+                        assert!(before + paint::BYTES > MAX_FRAME_BYTES);
+                    }
+                }
             }
         }
         assert!(frames.count() <= MAX_OPEN_FRAMES && frames.count() == held.len());

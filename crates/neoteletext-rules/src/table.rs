@@ -30,7 +30,7 @@ pub use encode::encode;
 pub use groups::{CommandRef, Framed, Groups};
 pub use index::{
     INTEREST_FOCUS, INTEREST_KEYS, INTEREST_MOVES, INTEREST_POINTER_BUTTONS, INTEREST_TEXT, INTEREST_WHEEL, Index,
-    WATCH_ENVELOPE_LEVEL, WATCH_ENVELOPE_STAGE, WATCH_LEVEL, WATCH_VOICES, WatchSlot,
+    NO_PAINTED, WATCH_ENVELOPE_LEVEL, WATCH_ENVELOPE_STAGE, WATCH_LEVEL, WATCH_VOICES, WatchSlot,
 };
 pub use value::{
     CLASS_BEND, CLASS_CONTROLLER, CLASS_ENVELOPE_LEVEL, CLASS_ENVELOPE_STAGE, CLASS_FIELD, CLASS_NOTE, CLASS_NOTES,
@@ -98,6 +98,8 @@ pub mod trigger_code {
     // withdrawn by DEC-6635 item 7 and never reused.
     /// `cue`.
     pub const CUE: u8 = 21;
+    /// `painted` (DEC-7031 item 4).
+    pub const PAINTED: u8 = 22;
 }
 
 /// Condition node codes (RULE-18).
@@ -508,6 +510,14 @@ pub enum Trigger {
         /// The cue, 0 to `MAX_CUE`, or 255 for any.
         number: u8,
     },
+    /// The painting of the page's whole picture, or of one ReGIS numbered
+    /// drawing, finishes (DEC-7031 item 4, REQ-7026).
+    Painted {
+        /// What was painted: the page's whole picture, or one object, 1 to
+        /// 65,535, by a constant or by a row's `p`. "Any", a control and a
+        /// rectangle are refused.
+        target: TriggerTarget,
+    },
 }
 
 impl Trigger {
@@ -532,6 +542,7 @@ impl Trigger {
             Self::Focus => trigger_code::FOCUS,
             Self::Blur => trigger_code::BLUR,
             Self::Cue { .. } => trigger_code::CUE,
+            Self::Painted { .. } => trigger_code::PAINTED,
         }
     }
 
@@ -549,6 +560,16 @@ impl Trigger {
         }
     }
 
+    /// What a `painted` trigger names (DEC-7031 item 4): the page's whole
+    /// picture or one drawing.
+    #[must_use]
+    pub const fn painted(&self) -> Option<TriggerTarget> {
+        match self {
+            Self::Painted { target } => Some(*target),
+            _ => None,
+        }
+    }
+
     /// The keys a key trigger names.
     #[must_use]
     pub const fn keys(&self) -> Option<&KeyMatch> {
@@ -559,12 +580,19 @@ impl Trigger {
     }
 
     /// Whether an input event can make the trigger occur: the rest are
-    /// driven by time or by a cue (DEC-6635 item 2).
+    /// driven by time, by a cue (DEC-6635 item 2) or by a painting's end
+    /// (DEC-7031 item 4).
     #[must_use]
     pub const fn is_input(&self) -> bool {
         !matches!(
             self,
-            Self::Open | Self::Close | Self::Becomes | Self::Every { .. } | Self::After { .. } | Self::Cue { .. }
+            Self::Open
+                | Self::Close
+                | Self::Becomes
+                | Self::Every { .. }
+                | Self::After { .. }
+                | Self::Cue { .. }
+                | Self::Painted { .. }
         )
     }
 }

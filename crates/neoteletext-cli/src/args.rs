@@ -343,8 +343,10 @@ pub(crate) enum Command {
         /// char|name|physical <key>`, `<tick> pointer <x> <y> <buttons>`,
         /// `<tick> level <audio channel> <0-255>`, `<tick> rectangle <n>
         /// <x> <y> <width> <height>` (an object's bounding rectangle),
-        /// `<tick> cue <audio channel> <n>` and `<tick> command <record
-        /// type> <hexadecimal body>` (a record the server sends directly).
+        /// `<tick> cue <audio channel> <n>`, `<tick> painted page` or
+        /// `<tick> painted object <n>` (a painting finished) and `<tick>
+        /// command <record type> <hexadecimal body>` (a record the server
+        /// sends directly).
         inputs: PathBuf,
         /// The page an image is the table of, e.g. 101 or 101/0001: the
         /// image holds neither its page nor its sub-code. A `rules`

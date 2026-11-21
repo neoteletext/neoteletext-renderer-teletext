@@ -110,7 +110,7 @@ pub const STATE_NONE: u8 = 0x49;
 pub const STATE_OFFER: u8 = 0x4A;
 
 /// `RULE_EVENT`'s type, an extension (RULE-46): a rule's `send` or `echo`,
-/// [`crate::rules::RuleEvent`]. Under protocol version 10 it is the only
+/// [`crate::rules::RuleEvent`]. Since protocol version 10 it is the only
 /// carrier of a viewer's input to a page.
 pub const RULE_EVENT: u8 = 0x4B;
 /// `PAGE_STATE`'s type, an extension (RULE-47): the answer to a state
@@ -467,7 +467,7 @@ pub enum Event<'a> {
     /// A key is now held for this channel: challenge me (VS-204, VS-111).
     StateOffer,
     /// A rule's `send` or `echo` (RULE-46): the one carrier of a viewer's
-    /// input to a page under protocol version 10.
+    /// input to a page since protocol version 10.
     RuleEvent(crate::rules::RuleEvent<'a>),
     /// A page's local state, in answer to a state query (RULE-47).
     PageState(crate::rules::PageStateEvent<'a>),
@@ -541,7 +541,7 @@ pub enum InputError {
     BadValue(&'static str),
     /// A message that ends inside an item, or is over [`MAX_MESSAGE`](crate::MAX_MESSAGE).
     Message,
-    /// A viewer's input at the top level of the stream (RULE-46): under
+    /// A viewer's input at the top level of the stream (RULE-46): since
     /// protocol version 10 it travels only inside a `RULE_EVENT`.
     Bare,
 }
@@ -565,7 +565,7 @@ fn check_text(text: &str) -> Result<(), InputError> {
 
 /// Whether `item` is a viewer's input to a page (RULE-46): KEY, MOUSE,
 /// WHEEL, PASTE, COMPOSE, TOUCH, `FOCUS_IN`, `FOCUS_OUT`, HOVER, PICK,
-/// `DRAWING_HOVER` or raw text. Under protocol version 10 such an item
+/// `DRAWING_HOVER` or raw text. Since protocol version 10 such an item
 /// appears only inside a `RULE_EVENT`: a server treats one at the top
 /// level of the stream as a protocol fault ([`read_message`] and
 /// [`StreamDecoder`] refuse it with [`InputError::Bare`]), and a receiver

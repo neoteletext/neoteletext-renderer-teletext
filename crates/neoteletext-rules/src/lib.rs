@@ -11,8 +11,9 @@
 //! - [`table`]: the decoded table in fixed arrays, [`table::decode`],
 //!   [`table::encode`] and [`table::check`] of the table's image (RULE-41
 //!   to RULE-45, RULE-70), what a table reads and names
-//!   ([`table::Index`]: the watch list of RULE-33 and the interest mask of
-//!   RULE-52), and [`table::default_send_all`] (RULE-53).
+//!   ([`table::Index`]: the watch list of RULE-33, the interest mask of
+//!   RULE-52 and the drawings its `painted` triggers name, DEC-7031), and
+//!   [`table::default_send_all`] (RULE-53).
 //! - [`command`]: the bodies of the records of types 28 to 33, which a
 //!   group holds and the server may send directly (RULE-21, RULE-22,
 //!   RULE-99, RULE-100, RULE-102, RULE-103), and the bindings of a
@@ -22,7 +23,9 @@
 //!   ANIM-14).
 //! - [`evaluator`]: the rule state, the arrival step of RULE-96 and the
 //!   tick, in the fixed order of RULE-5, with the [`evaluator::World`] it
-//!   reads and writes through.
+//!   reads and writes through. Beside input, cues and the server's records
+//!   it takes the end of a painting ([`evaluator::Event::Painted`]), which
+//!   fires the `painted` trigger, code 22 (DEC-7031 item 4).
 //! - [`state`]: the `PAGE_STATE` payload (RULE-47).
 //! - [`names`]: the words the program protocol writes each code as
 //!   (page-rules.md section 7), for the callers that read its JSON.

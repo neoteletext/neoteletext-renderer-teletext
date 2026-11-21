@@ -132,6 +132,13 @@ pub const TYPE_SEQUENCE: u8 = 33;
 /// read by this receiver. Only profile version 3 defines it, so it is
 /// written with [`write_version`] and refused in a record of version 2.
 pub const TYPE_PAGE_MUSIC: u8 = 34;
+/// Record type: how one generation of a page's ReGIS or NAPLPS stream is
+/// painted, its line speed and its default paint rate (DEC-7031 item 1),
+/// read by neoteletext-web's record reader; this receiver leaves it alone.
+/// It is the type after [`TYPE_PAGE_MUSIC`], which was decided first
+/// (DEC-7074 item 3).
+pub const TYPE_PAINT: u8 = 35;
+const _: () = assert!(TYPE_PAINT != TYPE_PAGE_MUSIC);
 
 /// Whether a record type belongs to the input profile, which shares this
 /// profile's carriage and is left alone by the audio receiver.
@@ -143,8 +150,9 @@ pub const fn is_input_type(kind: u8) -> bool {
 /// Whether a record type is one of the channel's records beside sound
 /// (DOC-1951): the input profile's, the index, LOG, links, sub-pages,
 /// redirect, denied, ReGIS, NAPLPS, the three of viewer state, the seven
-/// of the page rule table and animation, and the six commands. The audio
-/// receiver leaves every one alone, and counts none as refused.
+/// of the page rule table and animation, the six commands, and PAINT
+/// (DEC-7031 item 1). The audio receiver leaves every one alone, and
+/// counts none as refused.
 #[must_use]
 pub const fn is_channel_type(kind: u8) -> bool {
     is_input_type(kind)
@@ -171,6 +179,8 @@ pub const fn is_channel_type(kind: u8) -> bool {
         || kind == TYPE_FRAME
         // The six commands of the second form (RULE-114).
         || (kind >= TYPE_LOCAL_MIDI && kind <= TYPE_SEQUENCE)
+        // How a picture's stream is painted (DEC-7031 item 1).
+        || kind == TYPE_PAINT
 }
 
 /// OBJECT's fixed fields: handle, generation, id, codec, rate, block bytes,

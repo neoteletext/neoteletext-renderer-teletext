@@ -72,8 +72,8 @@ pub const MAX_START_TICKS: u32 = 216_000;
 /// The highest cue number (RULE-109).
 pub const MAX_CUE: u8 = 127;
 /// Events handled in one tick: input events, the server's records the
-/// evaluator carries out, cues and state queries together (a per-tick
-/// budget, RULE-5).
+/// evaluator carries out, cues, paintings finished (DEC-7031 item 4) and
+/// state queries together (a per-tick budget, RULE-5).
 pub const MAX_EVENTS_PER_TICK: usize = 16;
 /// Commands applied by the runs of the events handled in one tick (a
 /// per-tick budget, RULE-5): `MAX_EVENTS_PER_TICK × MAX_RUN_COMMANDS`,
@@ -95,6 +95,10 @@ pub const MAX_TABLE_VALUES: usize = 64;
 pub const MAX_TABLE_TARGETS: usize = 64;
 /// Distinct metered values a table reads (RULE-33).
 pub const MAX_WATCHED: usize = 32;
+/// Distinct drawings a table's `painted` triggers name, by a constant or
+/// by a row's `p` (DEC-7031 item 4): what the ReGIS renderer watches at
+/// once, asserted equal to its limit where both are linked.
+pub const MAX_PAINT_WATCHED: usize = 32;
 /// A table's image (RULE-41).
 pub const MAX_TABLE_BYTES: usize = 32_768;
 /// Image bytes in one RULES record (RULE-41): the record frame's largest
@@ -115,7 +119,7 @@ pub const TICKS_PER_SECOND: u32 = 60;
 
 /// The limits of RULE-57's table, each by its constant's name with its
 /// value, in the table's order (REQ-6608).
-pub const RULE_57: [(&str, u32); 42] = [
+pub const RULE_57: [(&str, u32); 43] = [
     ("MAX_GROUP_COMMANDS", MAX_GROUP_COMMANDS as u32),
     ("MAX_GROUPS", MAX_GROUPS as u32),
     ("MAX_GROUP_DEPTH", MAX_GROUP_DEPTH as u32),
@@ -152,6 +156,7 @@ pub const RULE_57: [(&str, u32); 42] = [
     ("MAX_TABLE_VALUES", MAX_TABLE_VALUES as u32),
     ("MAX_TABLE_TARGETS", MAX_TABLE_TARGETS as u32),
     ("MAX_WATCHED", MAX_WATCHED as u32),
+    ("MAX_PAINT_WATCHED", MAX_PAINT_WATCHED as u32),
     ("MAX_TABLE_BYTES", MAX_TABLE_BYTES as u32),
     ("MAX_TABLE_FRAGMENT", MAX_TABLE_FRAGMENT as u32),
     ("MAX_STATE_BYTES", MAX_STATE_BYTES as u32),
@@ -298,7 +303,7 @@ mod tests {
     /// table's, line by line.
     #[test]
     fn the_constants_are_rule_57s() {
-        let table: [(&str, u32); 43] = [
+        let table: [(&str, u32); 44] = [
             ("MAX_GROUP_COMMANDS", 32),
             ("MAX_GROUPS", 64),
             ("MAX_GROUP_DEPTH", 4),
@@ -335,6 +340,7 @@ mod tests {
             ("MAX_TABLE_VALUES", 64),
             ("MAX_TABLE_TARGETS", 64),
             ("MAX_WATCHED", 32),
+            ("MAX_PAINT_WATCHED", 32),
             ("MAX_TABLE_BYTES", 32_768),
             ("MAX_TABLE_FRAGMENT", 8172),
             ("MAX_STATE_BYTES", 1800),

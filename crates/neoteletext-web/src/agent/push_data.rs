@@ -207,7 +207,10 @@ impl<R: RandomSource> UserAgent<'_, R> {
             | ChannelRecord::Timer(_)
             | ChannelRecord::Report(_)
             | ChannelRecord::Run(_)
-            | ChannelRecord::Sequence(_) => {}
+            | ChannelRecord::Sequence(_)
+            // Nor how a picture's stream is painted, which the port's
+            // renderers pace by (DEC-7031 item 1).
+            | ChannelRecord::Paint(_) => {}
         }
         0
     }

@@ -227,8 +227,8 @@ fn a_group_holds_only_the_allowed_records() {
     assert_eq!(allowed.iter().filter(|command| is_sound(command.kind)).count(), 2);
     // OBJECT, DATA, CURSOR, INPUT_CONTROL, INDEX, LOG, LINKS, SUBPAGES,
     // REDIRECT, DENIED, REGIS, NAPLPS, the three of viewer state, RULES,
-    // RULES_QUERY, SHEET, FRAME, and types not defined.
-    for kind in [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 17, 18, 19, 20, 21, 22, 26, 27, 0, 8, 13, 34, 255] {
+    // RULES_QUERY, SHEET, FRAME, PAGE_MUSIC, PAINT, and types not defined.
+    for kind in [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 17, 18, 19, 20, 21, 22, 26, 27, 34, 35, 0, 8, 13, 36, 255] {
         let command = crate::testing::Built { kind, ..midi.clone() };
         assert_eq!(check_built(&command), Err(Fault::Command("record type a group may not hold")), "type {kind}");
     }

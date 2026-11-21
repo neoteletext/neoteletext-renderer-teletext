@@ -479,6 +479,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "paint_record"
+path = "fuzz_targets/paint_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "http3_reader"
 path = "fuzz_targets/http3_reader.rs"
 test = false

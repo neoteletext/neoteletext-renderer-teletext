@@ -1,6 +1,6 @@
 //! A page's rule table as `neottx view` and `neottx keyboard` hold it
 //! (neoteletext-common `docs/page-rules.md`, DEC-6522, DEC-6587,
-//! REQ-6523): under push protocol 10 a viewer's input reaches a channel
+//! REQ-6523): since push protocol 10 a viewer's input reaches a channel
 //! only inside a `RULE_EVENT` of a rule whose group reported it (RULE-46),
 //! so a receiver keeps the table of the page on screen, evaluates it once
 //! a tick (RULE-4, RULE-5) and sends what its groups' `REPORT` commands

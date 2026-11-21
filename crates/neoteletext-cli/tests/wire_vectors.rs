@@ -359,6 +359,7 @@ fn animation_record(vector: &Vector<'_>) {
             ChannelRecord::NaplpsObjects(_) => "naplps_objects",
             ChannelRecord::Sheet(_) => "sheet",
             ChannelRecord::Frame(_) => "frame",
+            ChannelRecord::Paint(_) => "paint",
             // Renderer parity PAR-2: the same bytes for a NAPLPS sub-page
             // as for a ReGIS one.
             ChannelRecord::DrawingLinks(_) => "drawing_links",

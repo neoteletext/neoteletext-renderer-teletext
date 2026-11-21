@@ -2,7 +2,8 @@
 //! the page rule table and animation added, at push protocol 10
 //! (page-rules.md RULE-85, animation.md ANIM-23), and those renderer parity
 //! added (renderer-parity.md PAR-44), and those of tab thumbnails'
-//! snapshot request (tab-thumbnails.md section 3), written from the engine's own
+//! snapshot request (tab-thumbnails.md section 3), and painting's PAINT
+//! record at push protocol 11 (DEC-7031), written from the engine's own
 //! encoders so that their bytes are never typed by hand. The rows are
 //! printed in the table's form, and a test holds that the copy of the table
 //! the engine keeps has exactly these rows of these kinds, and of the kinds
@@ -22,7 +23,7 @@ use neoteletext_rules::command::{Command, MAX_BODY_BYTES, Operand, StartMode, Va
 use neoteletext_rules::limits::{MAX_STATE_BYTES, MAX_TABLE_BYTES, NO_RULE};
 use neoteletext_rules::state::{PageState, SequenceState, TableState, TimerState};
 use neoteletext_rules::table::{SOUND_LEVEL, Table, Target, Value, default_send_all};
-use neoteletext_web::records::{animate, body_check, commands, frame, naplps_objects, rules, sheet, sprites};
+use neoteletext_web::records::{animate, body_check, commands, frame, naplps_objects, paint, rules, sheet, sprites};
 
 mod magazine;
 mod parity;
@@ -53,6 +54,11 @@ const FIRED_AT: u32 = 412;
 const STATE_AT: u32 = 9_120;
 /// The object the animation vectors move and place, an example value.
 const OBJECT: u16 = 10;
+/// The line speed of the PAINT vector, an example value: the 1,200 bits
+/// a second NAPLPS pictures arrived at (DEC-7023).
+const PAINT_LINE_SPEED: u32 = 1_200;
+/// The default paint rate of the PAINT vector, an example value.
+const PAINT_DEFAULT_RATE: u16 = 20;
 /// The NAPLPS object of its vector, an example value.
 const NAPLPS_OBJECT: u16 = 301;
 /// The label of the NAPLPS object of its vectors, an example value.
@@ -445,6 +451,23 @@ fn records(rows: &mut Vec<Row>) -> Result<(), String> {
             meaning,
         });
     }
+    // DEC-7031 item 1: the page's ReGIS stream of generation 1 fed as a
+    // line of 1,200 bits a second would deliver it, its numbered drawings
+    // with no rate of their own painted at rate 20.
+    let painting = paint::PaintRecord {
+        page,
+        subcode: sub,
+        language: sheet::SheetKind::Regis,
+        generation: 1,
+        line_speed: Some(PAINT_LINE_SPEED),
+        default_rate: Some(PAINT_DEFAULT_RATE),
+    };
+    rows.push(Row {
+        kind: "records",
+        name: "paint",
+        value: packets(|out| paint::encode(painting, SERVICE, RECORD_ID, out))?,
+        meaning: "page 101 sub 0001 ReGIS generation 1: line speed 1200 bits a second, default paint rate 20",
+    });
     Ok(())
 }
 

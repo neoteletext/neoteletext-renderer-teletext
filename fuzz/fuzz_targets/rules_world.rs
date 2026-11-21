@@ -154,6 +154,9 @@ pub enum Step {
     Metered([u8; 4]),
     /// A cue heard: its audio channel and its number.
     Cue(u8, u8),
+    /// A painting finished (DEC-7031 item 4): what was painted, which may
+    /// be a target no `painted` trigger can name.
+    Painted(Target),
     /// A command the server sent directly.
     Command(Command),
     /// A state query (RULE-47).
@@ -193,6 +196,7 @@ fn server_command(field: &dyn Fn(usize) -> u8) -> Command {
 
 /// Reads a script from the fuzzer's bytes: each step a byte that says
 /// which, and the bytes it needs. Events are numbered in order from 1.
+/// Step 14 is a painting finished (DEC-7031 item 4); 15 to 17 are ticks.
 pub fn script(bytes: &[u8]) -> Vec<Step> {
     let mut steps = Vec::new();
     let mut rest = bytes;
@@ -234,6 +238,19 @@ pub fn script(bytes: &[u8]) -> Vec<Step> {
             }
             13 => {
                 steps.push(Step::Command(server_command(&field)));
+                None
+            }
+            14 => {
+                // The page, a drawing of the few the worlds' pointers meet
+                // (0 among them, which names none), any drawing, or a
+                // control, which no painting is of.
+                let painted = match field(0) % 4 {
+                    0 => Target::PAGE,
+                    1 => Target::object(u16::from(field(1) % 8)),
+                    2 => Target::object(word(1)),
+                    _ => Target::control(u16::from(field(1) % 8)),
+                };
+                steps.push(Step::Painted(painted));
                 None
             }
             _ => {
@@ -285,6 +302,9 @@ pub fn give(evaluator: &mut Evaluator, world: &mut FuzzWorld<'_>, step: &Step) {
         Step::Metered(values) => evaluator.set_metered(values),
         Step::Cue(channel, number) => {
             evaluator.handle(Event::Cue { channel: *channel, number: *number }, world);
+        }
+        Step::Painted(target) => {
+            evaluator.handle(Event::Painted { target: *target }, world);
         }
         Step::Command(command) => {
             let mut body = [0_u8; command::MAX_BODY_BYTES];

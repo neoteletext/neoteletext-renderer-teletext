@@ -20,7 +20,7 @@
 //!   events of the input stream but no input.
 //! - [`rules`]: the page rule table's messages from the receiver
 //!   (DEC-6522, RULE-46 to RULE-48), `RULE_EVENT`, `PAGE_STATE` and
-//!   `RULES_FAULT`. Under protocol version 10 a viewer's input reaches a
+//!   `RULES_FAULT`. Since protocol version 10 a viewer's input reaches a
 //!   channel only inside a `RULE_EVENT`.
 //! - [`pace`]: the pointer's moves at 60 a second, one slot a contact
 //!   (REQ-RCH-031 to REQ-RCH-033); [`contacts`]: the numbers of a touch
