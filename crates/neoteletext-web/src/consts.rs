@@ -508,6 +508,42 @@ pub const MAX_OPEN_FRAMES: usize = 4;
 pub const MAX_SHEET_BYTES: usize = 65_536;
 
 // ---------------------------------------------------------------------------
+// Painting as a show (DEC-7031 item 1; REQ-7024, REQ-7025)
+// ---------------------------------------------------------------------------
+
+/// The slowest line speed a PAINT record states, in bits a second
+/// (DEC-7031 item 1): the 300 bits a second of the earliest videotex
+/// modems.
+pub const MIN_LINE_SPEED: u32 = 300;
+/// The fastest line speed a PAINT record states, in bits a second
+/// (DEC-7031 item 1): the fastest of the standard serial speeds.
+pub const MAX_LINE_SPEED: u32 = 115_200;
+/// The bits one byte takes on an asynchronous serial line (REQ-7024): the
+/// start bit, eight data bits and the stop bit.
+pub const LINE_BITS_PER_BYTE: u32 = 10;
+/// The ticks of the presentation clock in which a line of a given speed
+/// delivers as many bytes as its speed is bits a second (DEC-7031 item 1):
+/// a receiver paces a stream at `speed` bytes each `LINE_PACE_TICKS` ticks.
+pub const LINE_PACE_TICKS: u32 = LINE_BITS_PER_BYTE * PRESENTATION_TICKS_PER_SECOND;
+/// The greatest default paint rate a PAINT record states (DEC-7031 item
+/// 1): the greatest rate of a ReGIS numbered drawing's own `T` (DEC-6382
+/// item 1), in the same unit.
+pub const MAX_DEFAULT_PAINT_RATE: u16 = 32_767;
+
+/// The bytes a line of `speed` bits a second has delivered when it has run
+/// for `run_ticks` ticks of the presentation clock (REQ-7024), rounded
+/// down: what a receiver has fed its renderer of a paced stream by then.
+/// It stops at the greatest value rather than wrap.
+#[must_use]
+pub const fn line_bytes(run_ticks: u64, speed: u32) -> u64 {
+    // The pace's ticks are a product of two constants that are not 0.
+    match run_ticks.saturating_mul(speed as u64).checked_div(LINE_PACE_TICKS as u64) {
+        Some(bytes) => bytes,
+        None => 0,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The user agent's defaults (REQ-WEB-004, REQ-SEC-011, REQ-SEC-020)
 // ---------------------------------------------------------------------------
 
