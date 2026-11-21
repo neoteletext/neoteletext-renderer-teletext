@@ -97,7 +97,7 @@ pub fn write(kind: u8, body: &[u8], out: &mut [u8]) -> Option<usize> {
     write_version(BASE_PROFILE_VERSION, kind, body, out)
 }
 
-/// Writes a record as [`write`] does, naming profile version `version`:
+/// Writes a record as [`write()`] does, naming profile version `version`:
 /// [`PROFILE_VERSION`] for a record only that version defines (REQ-6925
 /// item 7). `None` too when `version` is one no receiver reads.
 /// It allocates nothing.
