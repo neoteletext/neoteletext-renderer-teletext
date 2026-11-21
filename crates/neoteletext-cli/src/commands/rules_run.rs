@@ -18,13 +18,17 @@
 //! <tick> level <audio channel> <0-255>
 //! <tick> rectangle <n> <x> <y> <width> <height>
 //! <tick> cue <audio channel> <n>
+//! <tick> painted page
+//! <tick> painted object <n>
 //! <tick> command <record type> <hexadecimal body>
 //! ```
 //!
 //! A `rectangle` gives object `n` its bounding rectangle in the picture's
 //! pixels (ANIM-13), which no renderer is here to report; a `move` the
 //! table then makes moves it with the object. A `cue` is one the sound
-//! helper reports heard (RULE-109), and a `command` a `VARIABLE`, `TIMER`,
+//! helper reports heard (RULE-109), a `painted` the end of the painting of
+//! the page's whole picture or of numbered drawing `n`, which a renderer
+//! reports (DEC-7031 item 4), and a `command` a `VARIABLE`, `TIMER`,
 //! `REPORT`, `RUN` or `SEQUENCE` record the server sends directly
 //! (RULE-114). Nothing here reads a clock: page tick `n` is the `n`th
 //! turn of the loop.
@@ -129,6 +133,9 @@ enum Given {
         channel: u8,
         number: u8,
     },
+    /// The painting of the page's picture or of one drawing finished
+    /// (DEC-7031 item 4).
+    Painted(Target),
     /// A record the server sends directly: its type, its body and the
     /// body's length.
     Command {
@@ -215,6 +222,17 @@ fn given(name: &str, words: &mut core::str::SplitAsciiWhitespace<'_>) -> Result<
             }
             Given::Cue { channel, number }
         }
+        "painted" => match words.next() {
+            Some("page") => Given::Painted(Target::PAGE),
+            Some("object") => {
+                let object: u16 = number(words, "the object")?;
+                if object == 0 {
+                    return Err("an object's number is 1 to 65,535".to_owned());
+                }
+                Given::Painted(Target::object(object))
+            }
+            _ => return Err("what is painted is the page or an object".to_owned()),
+        },
         "command" => {
             let kind: u8 = number(words, "the record type")?;
             let bytes = hexadecimal(words.next().ok_or("the command's body is missing")?.as_bytes())
@@ -564,6 +582,10 @@ fn evaluate(table: &Table, inputs: &[(u32, Given)], ticks: u32, picture: Picture
                 Given::Cue { channel, number } => {
                     // A cue over a full queue is dropped and counted.
                     let _ = evaluator.handle(Event::Cue { channel, number }, &mut run);
+                }
+                Given::Painted(target) => {
+                    // As a cue: over a full queue it is dropped and counted.
+                    let _ = evaluator.handle(Event::Painted { target }, &mut run);
                 }
                 Given::Command { kind, body, length } => {
                     // What the evaluator refuses or drops it counts.

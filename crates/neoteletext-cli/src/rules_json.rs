@@ -343,6 +343,15 @@ impl Names<'_> {
                 };
                 Trigger::Cue { channel, number }
             }
+            // DEC-7031 item 4: the page's whole picture or one numbered
+            // drawing, by a constant or by the row's `p`; never "any".
+            "painted" => {
+                let target = target(false)?;
+                if !matches!(target.kind, TargetKind::Page | TargetKind::Object) {
+                    return Err(format!("{path}.target: painted names the page or an object (invalid_rules)"));
+                }
+                Trigger::Painted { target }
+            }
             other => return Err(format!("{path}: no trigger is `{other}`")),
         })
     }
