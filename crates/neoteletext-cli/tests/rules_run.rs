@@ -396,3 +396,73 @@ fn a_by_row_key_set_of_any_is_refused() {
     let output = run_json("rules_run_json_any", &table(false), "");
     assert!(output.status.success(), "any alone: {}", String::from_utf8_lossy(&output.stderr));
 }
+
+/// A table of three rules, each reporting its firing: on the painting of
+/// the whole picture, of drawing 7, and of the drawing each row of
+/// `drawings` (20 and 22) gives.
+const PAINTED: &str = r#"{"type":"rules","connections":"all","page":"123","sub":"0001","table":{"rows":{"drawings":[20,22]},"groups":[{"name":"g","commands":[{"type":"report"}]}],"rules":[{"name":"picture","on":{"event":"painted","target":"page"},"run":"g"},{"name":"seven","on":{"event":"painted","target":{"object":7}},"run":"g"},{"name":"row","rows":"drawings","on":{"event":"painted","target":{"object":{"plus":0,"row":"p"}}},"run":"g"}]}}"#;
+
+/// DEC-7031 items 4 and 6 (REQ-7026): the `painted` trigger's three JSON
+/// forms, the page, a drawing and a drawing by the row's `p`, are read,
+/// and the `painted` input lines fire each at its tick, reported as
+/// firings with no target.
+#[test]
+fn the_painted_triggers_json_forms_and_input_lines_are_read() {
+    let inputs = "1 painted page\n2 painted object 7\n3 painted object 22\n3 painted object 21\n";
+    let output = run_json("rules_run_json_painted", PAINTED, inputs);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = "\
+# page 123/0001, 3 rules, 1 groups, 0 sequences
+# 1 report rule 0 row none tick 1 target page 0 fired
+# 2 report rule 1 row none tick 2 target page 0 fired
+# 3 report rule 2 row 1 tick 3 target page 0 fired
+# 5 ticks, 3 rules fired, 3 groups run, 3 commands applied, 0 skipped, 0 events dropped
+";
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+}
+
+/// DEC-7031 items 4 and 6: a `painted` trigger naming "any" drawing, a
+/// control, a rectangle, no target, or the row's `p` in a rule without
+/// rows is refused, as is a `painted` input line that names drawing 0,
+/// neither the page nor an object, or no number, or says more.
+#[test]
+fn a_faulty_painted_trigger_or_input_line_is_refused() {
+    let with_target = |target: &str, rows: &str| {
+        format!(
+            r#"{{"type":"rules","connections":"all","page":"123","sub":"0001","table":{{"rects":[{{"name":"pad","x":0,"y":0,"width":10,"height":10}}],"rows":{{"drawings":[20]}},"groups":[{{"name":"g","commands":[{{"type":"report"}}]}}],"rules":[{{"name":"r",{rows}"on":{{"event":"painted"{target}}},"run":"g"}}]}}}}"#
+        )
+    };
+    for (name, target, rows, why) in [
+        ("any", r#","target":{"object":"any"}"#, "", r#""any" where one target is named"#),
+        ("control", r#","target":{"control":1}"#, "", "painted names the page or an object (invalid_rules)"),
+        ("rectangle", r#","target":{"rect":"pad"}"#, "", "painted names the page or an object (invalid_rules)"),
+        ("none", "", "", "names a target"),
+        ("no_rows", r#","target":{"object":{"plus":0,"row":"p"}}"#, "", "a row parameter in a rule without rows"),
+        ("zero", r#","target":{"object":0}"#, "", "target is 1 to 65535"),
+    ] {
+        let output = run_json(&format!("rules_run_json_painted_{name}"), &with_target(target, rows), "");
+        assert!(!output.status.success(), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(why), "{name}: {stderr}");
+    }
+    let output = run_json(
+        "rules_run_json_painted_rows",
+        &with_target(r#","target":{"object":{"plus":1,"row":"p"}}"#, r#""rows":"drawings","#),
+        "",
+    );
+    assert!(output.status.success(), "the row form in a rule with rows: {}", String::from_utf8_lossy(&output.stderr));
+    for (inputs, part) in [
+        ("0 painted object 0", "line 1: an object's number is 1 to 65,535"),
+        ("0 painted object 65536", "the object is not a number in its range"),
+        ("0 painted object", "the object is missing"),
+        ("0 painted", "what is painted is the page or an object"),
+        ("0 painted drawing 3", "what is painted is the page or an object"),
+        ("0 painted page 3", "follows the input's last word"),
+        ("0 painted object 3 4", "follows the input's last word"),
+    ] {
+        let output = run_json("rules_run_json_painted_inputs", PAINTED, inputs);
+        assert_eq!(output.status.code(), Some(3), "{inputs:?}");
+        let message = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(message.contains(part), "{inputs:?}: {message}");
+    }
+}

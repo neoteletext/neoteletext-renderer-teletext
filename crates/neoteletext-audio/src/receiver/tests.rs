@@ -95,3 +95,17 @@ fn an_ima_adpcm_sound_plays_only_in_a_build_with_ima() {
         assert_eq!((sink.defined, sink.samples, sink.started, statistics.unsupported), (0, 0, 0, 1));
     }
 }
+
+/// DOC-1951, DEC-7031 item 1: the receiver leaves a PAINT record, type
+/// 34, to the channel's reader and counts it neither heard nor refused;
+/// a record of a type nobody has, 35, it counts refused.
+#[test]
+fn a_paint_record_is_left_alone_and_not_refused() {
+    let paint = [0x01, 0x01, 0x00, 0x01, 1, 0, 0x00, 0x01, 0x00, 0x00, 0x04, 0xB0, 0x00, 0x14];
+    assert_eq!(crate::record::TYPE_PAINT, 34);
+    let (sink, statistics) = hear(&[record(crate::record::TYPE_PAINT, &paint)]);
+    assert_eq!((sink.defined, sink.samples, sink.started), (0, 0, 0));
+    assert_eq!((statistics.records, statistics.records_refused), (0, 0));
+    let (_, statistics) = hear(&[record(35, &paint)]);
+    assert_eq!(statistics.records_refused, 1, "the instrument counts what it does not take");
+}

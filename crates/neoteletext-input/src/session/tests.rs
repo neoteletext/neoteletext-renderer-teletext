@@ -637,3 +637,23 @@ fn a_session_that_keeps_nothing_never_offers_resume() {
     let resume = Some(Resumption { token: TOKEN, taken: None });
     assert_eq!(session.welcome(VERSION, SELECT_CAP | RESUME_CAP, resume), Err(WelcomeError::Caps));
 }
+
+/// RULE-49, DEC-7031 item 7: the HELLO a receiver writes names this
+/// protocol's version, not 10's, whose receivers refuse a table with the
+/// `painted` trigger; and a WELCOME of 10, or of any version but this
+/// one, refuses the session.
+#[test]
+fn a_welcome_of_version_10_or_any_other_but_this_is_refused() {
+    let mut session = Session::new(SELECT_CAP);
+    assert_eq!(opening(&mut session, 0, None), [Event::Hello { version: VERSION, caps: SELECT_CAP, agent: None }]);
+    assert_ne!(VERSION, 10);
+    for version in (0..VERSION).chain([VERSION + 1, u32::MAX]) {
+        let mut session = Session::new(SELECT_CAP);
+        opening(&mut session, 0, None);
+        assert_eq!(session.welcome(version, SELECT_CAP, None), Err(WelcomeError::Version(version)));
+        assert_eq!(session.state(), State::Refused, "version {version}");
+    }
+    let mut session = Session::new(SELECT_CAP);
+    opening(&mut session, 0, None);
+    assert_eq!(session.welcome(VERSION, SELECT_CAP, None), Ok(Welcomed::New));
+}
